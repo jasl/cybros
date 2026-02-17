@@ -39,11 +39,11 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
       conversation.kick!
     end
 
-    leaf = conversation.leaf_nodes.first
-    assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
-    assert_equal DAG::Node::FINISHED, leaf.state
-    assert_equal "done", leaf.runnable.content
-  ensure
-    DAG.executor_registry = original_registry
-  end
+      leaf = conversation.leaf_nodes.first
+      assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
+      assert_equal DAG::Node::FINISHED, leaf.state
+      assert_equal "done", leaf.payload_output["content"]
+    ensure
+      DAG.executor_registry = original_registry
+    end
 end

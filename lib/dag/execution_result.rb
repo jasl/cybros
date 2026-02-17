@@ -1,9 +1,9 @@
 module DAG
   class ExecutionResult
-    attr_reader :state, :content, :metadata, :error, :reason
+    attr_reader :state, :content, :payload, :metadata, :error, :reason
 
-    def self.finished(content: nil, metadata: {})
-      new(state: DAG::Node::FINISHED, content: content, metadata: metadata)
+    def self.finished(content: nil, payload: nil, metadata: {})
+      new(state: DAG::Node::FINISHED, content: content, payload: payload, metadata: metadata)
     end
 
     def self.errored(error:, metadata: {})
@@ -22,9 +22,10 @@ module DAG
       new(state: DAG::Node::CANCELLED, reason: reason, metadata: metadata)
     end
 
-    def initialize(state:, content: nil, metadata: {}, error: nil, reason: nil)
+    def initialize(state:, content: nil, payload: nil, metadata: {}, error: nil, reason: nil)
       @state = state
       @content = content
+      @payload = payload
       @metadata = metadata
       @error = error
       @reason = reason

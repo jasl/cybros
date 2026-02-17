@@ -8,25 +8,19 @@ module DAG
       end
 
       def call
-        nodes = @conversation.dag_nodes.preload(:runnable)
-        edges = @conversation.dag_edges.includes(:from_node, :to_node)
-
-        unless @include_compressed
-          nodes = nodes.where(compressed_at: nil)
-          edges = edges.where(compressed_at: nil)
-        end
-
-        nodes = nodes.order(:id).to_a
-        edges = edges.order(:id).to_a
+        nodes = load_nodes
+        payloads = load_payloads(nodes)
+        edges = load_edges(nodes)
 
         lines = ["flowchart TD"]
 
         nodes.each do |node|
-          lines << %(#{node_mermaid_id(node)}["#{escape(label_for(node))}"])
+          payload = payloads[node.payload_id]
+          lines << %(#{node_mermaid_id(node.id)}["#{escape(label_for(node, payload))}"])
         end
 
         edges.each do |edge|
-          lines << %(#{node_mermaid_id(edge.from_node)} -->|#{escape(edge_label(edge))}| #{node_mermaid_id(edge.to_node)})
+          lines << %(#{node_mermaid_id(edge.from_node_id)} -->|#{escape(edge_label(edge))}| #{node_mermaid_id(edge.to_node_id)})
         end
 
         lines.join("\n")
@@ -34,23 +28,55 @@ module DAG
 
       private
 
-        def node_mermaid_id(node)
-          "N_#{node.id.to_s.delete("-")}"
+        def load_nodes
+          scope = @conversation.dag_nodes
+            .select(:id, :node_type, :state, :metadata, :payload_id, :compressed_at)
+
+          scope = scope.where(compressed_at: nil) unless @include_compressed
+          scope.order(:id).to_a
         end
 
-        def label_for(node)
-          snippet = node_snippet(node)
+        def load_payloads(nodes)
+          payload_ids = nodes.map(&:payload_id).compact.uniq
+
+          DAG::NodePayload.where(id: payload_ids)
+            .select(:id, :type, :input, :output_preview)
+            .index_by(&:id)
+        end
+
+        def load_edges(nodes)
+          node_ids = nodes.map(&:id).index_with(true)
+
+          scope = @conversation.dag_edges.select(:id, :from_node_id, :to_node_id, :edge_type, :metadata, :compressed_at)
+          scope = scope.where(compressed_at: nil) unless @include_compressed
+
+          scope.order(:id).to_a.select do |edge|
+            node_ids.key?(edge.from_node_id) && node_ids.key?(edge.to_node_id)
+          end
+        end
+
+        def node_mermaid_id(node_id)
+          "N_#{node_id.to_s.delete("-")}"
+        end
+
+        def label_for(node, payload)
+          snippet = node_snippet(node, payload)
           label = "#{node.node_type}:#{node.state}"
           label = "#{label} #{snippet}" if snippet.present?
           label.truncate(@max_label_chars)
         end
 
-        def node_snippet(node)
+        def node_snippet(node, payload)
+          input = payload&.input.is_a?(Hash) ? payload.input : {}
+          output_preview = payload&.output_preview.is_a?(Hash) ? payload.output_preview : {}
+
           case node.node_type
           when DAG::Node::TASK
-            node.metadata["task_name"] || node.metadata["name"] || node.metadata["kind"]
+            input["name"]
+          when DAG::Node::USER_MESSAGE
+            input["content"].to_s
           else
-            node.runnable.content.to_s
+            output_preview["content"].to_s
           end.to_s.gsub(/\s+/, " ").strip
         end
 

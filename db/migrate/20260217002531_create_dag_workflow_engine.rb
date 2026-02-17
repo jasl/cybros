@@ -4,7 +4,6 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.string :node_type, null: false
       t.string :state, null: false
       t.jsonb :metadata, null: false, default: {}
-      t.text :content
 
       t.references :retry_of, type: :uuid, foreign_key: { to_table: :dag_nodes }
 

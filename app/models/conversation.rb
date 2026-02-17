@@ -29,8 +29,12 @@ class Conversation < ApplicationRecord
     end
   end
 
-  def context_for(target_node_id)
-    DAG::ContextAssembly.new(conversation: self).call(target_node_id)
+  def context_for(target_node_id, mode: :preview)
+    DAG::ContextAssembly.new(conversation: self).call(target_node_id, mode: mode)
+  end
+
+  def context_for_full(target_node_id)
+    context_for(target_node_id, mode: :full)
   end
 
   def compress!(node_ids:, summary_content:, summary_metadata: {})
@@ -54,7 +58,20 @@ class Conversation < ApplicationRecord
   end
 
   def with_graph_lock(&block)
-    with_lock(&block)
+    raise ArgumentError, "block required" unless block_given?
+
+    lock_name = "#{DAG::AdvisoryLock::LOCK_PREFIX}:#{id}"
+    acquired = false
+    result = nil
+
+    Conversation.with_advisory_lock(lock_name) do
+      acquired = true
+      result = with_lock(&block)
+    end
+
+    raise "failed to acquire graph lock" unless acquired
+
+    result
   end
 
   def validate_leaf_invariant!
@@ -90,11 +107,12 @@ class Conversation < ApplicationRecord
 
   def leaf_nodes(include_compressed: false)
     nodes_scope = dag_nodes
-    edges_scope = dag_edges
+    edges_scope = dag_edges.where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
 
     unless include_compressed
       nodes_scope = nodes_scope.where(compressed_at: nil)
       edges_scope = edges_scope.where(compressed_at: nil)
+      edges_scope = edges_scope.where(to_node_id: nodes_scope.select(:id))
     end
 
     nodes_scope.where.not(id: edges_scope.select(:from_node_id))

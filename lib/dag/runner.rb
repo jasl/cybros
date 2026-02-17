@@ -16,24 +16,26 @@ module DAG
       conversation = node.conversation
       context = conversation.context_for(node.id)
 
-      result = DAG.executor_registry.execute(node: node, context: context)
-      conversation.with_graph_lock do
-        conversation.transaction do
-          apply_result(node, result)
-          conversation.validate_leaf_invariant!
-        end
-      end
-    rescue StandardError => error
-      if node
-        conversation = node.conversation
+        result = DAG.executor_registry.execute(node: node, context: context)
         conversation.with_graph_lock do
           conversation.transaction do
-            apply_result(node, DAG::ExecutionResult.errored(error: "#{error.class}: #{error.message}"))
+            apply_result(node, result)
+            DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
             conversation.validate_leaf_invariant!
           end
         end
-      end
-    ensure
+      rescue StandardError => error
+        if node
+          conversation = node.conversation
+          conversation.with_graph_lock do
+            conversation.transaction do
+              apply_result(node, DAG::ExecutionResult.errored(error: "#{error.class}: #{error.message}"))
+              DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
+              conversation.validate_leaf_invariant!
+            end
+          end
+        end
+      ensure
       if node
         DAG::TickConversationJob.perform_later(node.conversation_id)
       end
@@ -46,7 +48,7 @@ module DAG
         transitioned =
           case result.state
           when DAG::Node::FINISHED
-            node.mark_finished!(content: result.content, metadata: result.metadata)
+            node.mark_finished!(content: result.content, payload: result.payload, metadata: result.metadata)
           when DAG::Node::ERRORED
             node.mark_errored!(error: result.error || "errored", metadata: result.metadata)
           when DAG::Node::REJECTED

@@ -10,8 +10,7 @@ class DAG::TickConversationJobTest < ActiveJob::TestCase
     Event.delete_all
     DAG::Edge.delete_all
     DAG::Node.delete_all
-    DAG::Runnables::Task.delete_all
-    DAG::Runnables::Text.delete_all
+    DAG::NodePayload.delete_all
     Conversation.delete_all
   end
 
@@ -20,7 +19,7 @@ class DAG::TickConversationJobTest < ActiveJob::TestCase
     clear_performed_jobs
   end
 
-  test "tick claims runnable nodes and enqueues execute jobs" do
+  test "tick claims executable nodes and enqueues execute jobs" do
     conversation = Conversation.create!
     node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
 

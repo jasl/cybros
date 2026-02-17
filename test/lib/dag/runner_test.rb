@@ -35,4 +35,3 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     DAG.executor_registry = original_registry
   end
 end
-

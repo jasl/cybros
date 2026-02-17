@@ -24,8 +24,8 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :conversation, inverse_of: :dag_nodes
-    belongs_to :runnable,
-      polymorphic: true,
+    belongs_to :payload,
+      class_name: "DAG::NodePayload",
       autosave: true,
       dependent: :destroy,
       inverse_of: :dag_node
@@ -43,13 +43,14 @@ module DAG
       dependent: :destroy,
       inverse_of: :to_node
 
-    validates :node_type, inclusion: { in: NODE_TYPES }
-    validates :state, inclusion: { in: STATES }
-    validates :conversation_id, presence: true
+      validates :node_type, inclusion: { in: NODE_TYPES }
+      validates :state, inclusion: { in: STATES }
+      validates :conversation_id, presence: true
+      validate :payload_type_matches_node_type
 
-    scope :active, -> { where(compressed_at: nil) }
+      scope :active, -> { where(compressed_at: nil) }
 
-    before_validation :ensure_runnable
+    before_validation :ensure_payload
 
     def pending?
       state == PENDING
@@ -75,17 +76,23 @@ module DAG
       transition_to!(RUNNING, from_states: [PENDING], started_at: Time.current)
     end
 
-    def mark_finished!(content: nil, metadata: {})
-      updates = {
-        finished_at: Time.current,
-        metadata: self.metadata.merge(metadata),
-      }
+      def mark_finished!(content: nil, payload: nil, metadata: {})
+        updates = {
+          finished_at: Time.current,
+          metadata: self.metadata.merge(metadata),
+        }
 
-      transitioned = transition_to!(FINISHED, from_states: [RUNNING], **updates)
+        transitioned = transition_to!(FINISHED, from_states: [RUNNING], **updates)
 
-      if transitioned && !content.nil?
-        runnable.update!(content: content)
-      end
+        if transitioned
+          if payload.is_a?(Hash)
+            self.payload.merge_output!(payload)
+            self.payload.save!
+          elsif !content.nil?
+            self.payload.apply_finished_content!(content)
+            self.payload.save!
+          end
+        end
 
       transitioned
     end
@@ -128,71 +135,127 @@ module DAG
       )
     end
 
-    def retry!(branch_kind: "retry")
-      unless [ERRORED, REJECTED, SKIPPED, CANCELLED].include?(state)
-        raise ArgumentError, "can only retry errored, rejected, skipped, or cancelled nodes"
+      def retry!
+        new_node = nil
+
+        conversation.mutate! do |m|
+          new_node = m.retry_replace!(node: self)
+        end
+
+        new_node
       end
 
-      conversation.with_graph_lock do
-        conversation.transaction do
-          attempt = metadata.fetch("attempt", 1).to_i + 1
-          new_node = conversation.dag_nodes.create!(
+      def regenerate!
+        new_node = nil
+
+        conversation.mutate! do |m|
+          new_node = m.regenerate_replace!(node: self)
+        end
+
+        new_node
+      end
+
+      def edit!(new_input:)
+        new_node = nil
+
+        conversation.mutate! do |m|
+          new_node = m.edit_replace!(node: self, new_input: new_input)
+        end
+
+        new_node
+      end
+
+      def fork!(node_type:, state:, payload_input: {}, payload_output: {}, metadata: {})
+        new_node = nil
+
+        conversation.mutate! do |m|
+          new_node = m.fork_from!(
+            from_node: self,
             node_type: node_type,
-            state: PENDING,
-            metadata: metadata.merge("attempt" => attempt),
-            retry_of_id: id,
+            state: state,
+            payload_input: payload_input,
+            payload_output: payload_output,
+            metadata: metadata
           )
+        end
 
-          conversation.dag_edges.active.where(
-            to_node_id: id,
-            edge_type: [DAG::Edge::SEQUENCE, DAG::Edge::DEPENDENCY]
-          ).find_each do |edge|
-            conversation.dag_edges.create!(
-              from_node_id: edge.from_node_id,
-              to_node_id: new_node.id,
-              edge_type: edge.edge_type,
-              metadata: edge.metadata
-            )
-          end
+        new_node
+      end
 
-          conversation.dag_edges.create!(
-            from_node_id: id,
-            to_node_id: new_node.id,
-            edge_type: DAG::Edge::BRANCH,
-            metadata: { "branch_kinds" => [branch_kind] }
-          )
-
-          conversation.record_event!(
-            event_type: "node_retried",
-            subject: new_node,
-            particulars: { "retry_of_id" => id, "branch_kinds" => [branch_kind] }
-          )
-
-          new_node
+      def payload_input
+        if payload.input.is_a?(Hash)
+          payload.input
+        else
+          {}
         end
       end
-    end
 
-    def as_context_hash
-      {
-        "node_id" => id,
-        "node_type" => node_type,
-        "state" => state,
-        "content" => runnable.content,
-        "metadata" => metadata,
-      }
-    end
+      def payload_input=(hash)
+        ensure_payload
 
-    private
+        if hash.is_a?(Hash)
+          payload.input = hash.deep_stringify_keys
+        else
+          payload.input = {}
+        end
+      end
 
-      def ensure_runnable
-        return if runnable.present?
+      def payload_output
+        if payload.output.is_a?(Hash)
+          payload.output
+        else
+          {}
+        end
+      end
 
-        self.runnable =
-          if node_type == TASK
-            DAG::Runnables::Task.new
+      def payload_output=(hash)
+        ensure_payload
+
+        if hash.is_a?(Hash)
+          payload.output = hash.deep_stringify_keys
+        else
+          payload.output = {}
+        end
+      end
+
+      def payload_output_preview
+        if payload.output_preview.is_a?(Hash)
+          payload.output_preview
+        else
+          {}
+        end
+      end
+
+      private
+
+        def ensure_payload
+          return if payload.present?
+          return if node_type.blank?
+
+          self.payload = payload_class_for_node_type.new
+        end
+
+        def payload_type_matches_node_type
+          return if node_type.blank? || payload.blank?
+
+          expected_payload_class = payload_class_for_node_type
+          return if payload.is_a?(expected_payload_class)
+
+          errors.add(:payload, "must be a #{expected_payload_class.name} for node_type=#{node_type}")
+        end
+
+        def payload_class_for_node_type
+          case node_type
+          when USER_MESSAGE
+            DAG::NodePayloads::UserMessage
+          when AGENT_MESSAGE
+          DAG::NodePayloads::AgentMessage
+          when TASK
+          DAG::NodePayloads::ToolCall
+          when SUMMARY
+          DAG::NodePayloads::Summary
           else
-            DAG::Runnables::Text.new
+          DAG::NodePayload
           end
       end
 

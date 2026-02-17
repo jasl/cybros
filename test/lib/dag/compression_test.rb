@@ -4,18 +4,18 @@ class DAG::CompressionTest < ActiveSupport::TestCase
   test "compress! marks nodes and edges compressed and rewires boundary edges through a summary node" do
     conversation = Conversation.create!
 
-    a = conversation.dag_nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
-      state: DAG::Node::FINISHED,
-      runnable: DAG::Runnables::Text.new(content: "hi"),
-      metadata: {}
-    )
-    b = conversation.dag_nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
-      state: DAG::Node::FINISHED,
-      runnable: DAG::Runnables::Text.new(content: "hello"),
-      metadata: {}
-    )
+      a = conversation.dag_nodes.create!(
+        node_type: DAG::Node::USER_MESSAGE,
+        state: DAG::Node::FINISHED,
+        payload_input: { "content" => "hi" },
+        metadata: {}
+      )
+      b = conversation.dag_nodes.create!(
+        node_type: DAG::Node::AGENT_MESSAGE,
+        state: DAG::Node::FINISHED,
+        payload_output: { "content" => "hello" },
+        metadata: {}
+      )
     c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
     d = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 
@@ -23,15 +23,15 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     edge_bc = conversation.dag_edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
     edge_cd = conversation.dag_edges.create!(from_node_id: c.id, to_node_id: d.id, edge_type: DAG::Edge::SEQUENCE)
 
-    summary = conversation.compress!(
-      node_ids: [b.id, c.id],
-      summary_content: "summary",
-      summary_metadata: { "kind" => "test" }
-    )
+      summary = conversation.compress!(
+        node_ids: [b.id, c.id],
+        summary_content: "summary",
+        summary_metadata: { "kind" => "test" }
+      )
 
-    assert_equal DAG::Node::SUMMARY, summary.node_type
-    assert_equal DAG::Node::FINISHED, summary.state
-    assert_equal "summary", summary.runnable.content
+      assert_equal DAG::Node::SUMMARY, summary.node_type
+      assert_equal DAG::Node::FINISHED, summary.state
+      assert_equal "summary", summary.payload_output["content"]
 
     [b.reload, c.reload].each do |node|
       assert node.compressed_at.present?

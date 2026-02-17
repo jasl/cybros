@@ -6,7 +6,7 @@
 
 - **动态 DAG**：会话没有固定终点；节点会随着用户对话与 Agent 执行动态新增，但图在任意时刻都必须保持合法。
 - **可观测与可审计**：节点/边与事件记录用于可视化、监控、审计与回放。
-- **并发可调度**：基于拓扑依赖判定 runnable；多 worker 可并发 claim，避免重复执行。
+- **并发可调度**：基于 edge gating 判定可执行节点；多 worker 可并发 claim，避免重复执行。
 - **非破坏压缩**：压缩用于节约上下文，原始节点/边不删除，只标记为 `compressed_at`（审计保留）。
 
 ## PostgreSQL 约束
@@ -21,7 +21,7 @@
 - 模型：`app/models/conversation.rb`
 - 责任：
   - 图变更的事务边界（`mutate!`）
-  - 图级别锁（`with_graph_lock`：当前实现为行锁）
+  - 图级别锁（`with_graph_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickConversationJob`）
 
@@ -37,17 +37,25 @@
   - `compressed_at / compressed_by_id`：压缩标记
   - `started_at / finished_at`：执行时间戳
 
-#### Runnable 负载（替代 `dag_nodes.content` 列）
+#### NodePayload 扩展表（STI + JSONB）
 
-为控制 `dag_nodes` 行宽，节点内容/负载从 `dag_nodes` 拆出为 polymorphic：
+为控制 `dag_nodes` 行宽并统一存储“业务重字段”，节点负载从 `dag_nodes` 拆出到扩展表：
 
-- 关联：`DAG::Node belongs_to :runnable, polymorphic: true`
-- 实体：
-  - `DAG::Runnables::Text`（表：`dag_runnables_texts`，字段：`content:text`）
-  - `DAG::Runnables::Task`（表：`dag_runnables_tasks`，字段：`content:text`）
-- 读取批量节点时应使用 `preload(:runnable)` 避免 N+1（例如 Context/Mermaid 导出）。
+- 关联：`DAG::Node belongs_to :payload, class_name: "DAG::NodePayload"`
+- 表：`dag_node_payloads`
+  - `type`：Rails STI（按负载类型拆分）
+  - `input`：JSONB（输入侧：用户消息、tool call 参数等）
+  - `output`：JSONB（输出侧：LLM 回复、tool result 等，可能很大）
+  - `output_preview`：JSONB（输出预览：从 `output` 派生的小片段，用于 Context/Mermaid）
 
-> 约定：`task` 默认使用 `DAG::Runnables::Task`，其余类型默认使用 `DAG::Runnables::Text`。
+> 设计目标：调度器只依赖 `dag_nodes` 的引擎层字段；业务重字段统一落在 payload，并通过 preview 控制上下文体积。
+
+默认映射（`DAG::Node#ensure_payload`）：
+
+- `user_message` → `DAG::NodePayloads::UserMessage`
+- `agent_message` → `DAG::NodePayloads::AgentMessage`
+- `task` → `DAG::NodePayloads::ToolCall`
+- `summary` → `DAG::NodePayloads::Summary`
 
 #### 状态语义（skipped/cancelled 明确化）
 
@@ -89,7 +97,7 @@
 
 ### 2) 叶子不变量（Leaf invariant）
 
-定义 leaf：没有任何未压缩 outgoing edge 的节点（`Conversation#leaf_nodes`）。
+定义 leaf：没有任何未压缩 outgoing **blocking edge**（`sequence/dependency`）指向 active node 的节点（`Conversation#leaf_nodes`）。
 
 规则：每个 leaf 必须满足其一：
 
@@ -100,17 +108,21 @@
 
 ## 调度与执行
 
-### Scheduler：claim runnable
+### Scheduler：claim executable nodes
 
-- 入口：`DAG::Scheduler.claim_runnable_nodes`
+- 入口：`DAG::Scheduler.claim_executable_nodes`
 - 实现：`lib/dag/scheduler.rb`
-- runnable 判定：
+- 可执行（executable）判定：
   - `dag_nodes.state = pending`
   - `node_type in (task, agent_message)`
-  - 所有 incoming 的 `sequence/dependency` 父节点均 `state=finished`
+  - incoming 阻塞边满足 edge gating：
+    - `sequence`：父节点为 **terminal**（`finished/errored/rejected/skipped/cancelled`）即可 unblock
+    - `dependency`：父节点必须为 **finished** 才 unblock
 - 并发语义：
   - `SELECT ... FOR UPDATE SKIP LOCKED`
   - 原子更新为 `running` 并设置 `started_at`
+
+> 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 executable `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死。
 
 ### Runner：执行与落库
 
@@ -130,7 +142,7 @@
 
 - `DAG::TickConversationJob`
   - 对同一 conversation 做 tick 去重（advisory lock try-lock）
-  - claim runnable nodes → enqueue `DAG::ExecuteNodeJob`
+  - claim executable nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
   - finally 再 enqueue tick 以推进后继
@@ -148,14 +160,18 @@
 
 步骤：
 
-1. recursive CTE 收集祖先闭包（只走未压缩边）：
-   - 必选：`sequence/dependency`
-   - `branch`：仅包含 `branch_kinds` 含 `fork` 的 lineage（默认不纳入 retry lineage）
+1. recursive CTE 收集祖先闭包（只走未压缩的 **因果边**）：
+   - 仅包含：`sequence/dependency`
+   - `branch` 为纯 lineage，不参与 context
 2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
-4. 输出结构：`[{node_id, node_type, state, content, metadata}]`
+4. 输出结构（默认 preview）：`[{node_id, node_type, state, payload:{input,output_preview}, metadata}]`
+
+`context_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 
 > 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
+
+更完整的 DAG 行为规范见：`docs/dag_behavior_spec.md`。
 
 ## 子图压缩（Manual）
 
@@ -207,4 +223,4 @@ bin/rails runner script/bench/dag_engine.rb
 ## 当前已知限制（里程碑 1 范围内）
 
 - executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
-- branch lineage 的语义目前用于 context 与可视化；更复杂的分支合并/回放策略留到后续里程碑讨论
+- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf（更复杂的分支合并/回放策略留到后续里程碑讨论）

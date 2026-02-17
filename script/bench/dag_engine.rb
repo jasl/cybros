@@ -16,14 +16,20 @@ measure("linear_1k_create") do
   conversation = Conversation.create!(title: "bench-linear")
   previous = nil
 
-  1000.times do |i|
-    node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
-    node = conversation.dag_nodes.create!(
-      node_type: node_type,
-      state: DAG::Node::FINISHED,
-      runnable: DAG::Runnables::Text.new(content: "n#{i}"),
-      metadata: {}
-    )
+    1000.times do |i|
+      node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
+      payload_attributes =
+        if node_type == DAG::Node::USER_MESSAGE
+          { payload_input: { "content" => "n#{i}" } }
+        else
+          { payload_output: { "content" => "n#{i}" } }
+        end
+      node = conversation.dag_nodes.create!(
+        node_type: node_type,
+        state: DAG::Node::FINISHED,
+        **payload_attributes,
+        metadata: {}
+      )
 
     if previous
       conversation.dag_edges.create!(from_node_id: previous.id, to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
@@ -35,13 +41,14 @@ end
 
 measure("fanout_context_for") do
   conversation = Conversation.create!(title: "bench-fanout")
-  tasks = 50.times.map do |i|
-    conversation.dag_nodes.create!(
-      node_type: DAG::Node::TASK,
-      state: DAG::Node::FINISHED,
-      metadata: { "name" => "t#{i}" }
-    )
-  end
+    tasks = 50.times.map do |i|
+      conversation.dag_nodes.create!(
+        node_type: DAG::Node::TASK,
+        state: DAG::Node::FINISHED,
+        payload_input: { "name" => "t#{i}" },
+        metadata: {}
+      )
+    end
 
   join = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
   tasks.each do |task|
@@ -57,5 +64,5 @@ measure("scheduler_claim_100") do
     conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
   end
 
-  DAG::Scheduler.claim_runnable_nodes(conversation_id: conversation.id, limit: 100)
+  DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 100)
 end

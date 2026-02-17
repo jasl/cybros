@@ -20,49 +20,52 @@ module DAG
             raise ArgumentError, "cannot compress nodes that are already compressed"
           end
 
-          unless nodes.all?(&:finished?)
-            raise ArgumentError, "can only compress finished nodes"
-          end
+            unless nodes.all?(&:finished?)
+              raise ArgumentError, "can only compress finished nodes"
+            end
 
-          edges_scope = @conversation.dag_edges.active
-          incoming_edges = edges_scope.where(to_node_id: node_ids).where.not(from_node_id: node_ids).to_a
-          outgoing_edges = edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
-          internal_edges = edges_scope.where(from_node_id: node_ids, to_node_id: node_ids).to_a
+            edges_scope = @conversation.dag_edges.active
+            blocking_edges_scope = edges_scope.where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+            incoming_edges = edges_scope.where(to_node_id: node_ids).where.not(from_node_id: node_ids).to_a
+            outgoing_edges = edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
+            internal_edges = edges_scope.where(from_node_id: node_ids, to_node_id: node_ids).to_a
+            incoming_blocking_edges = blocking_edges_scope.where(to_node_id: node_ids).where.not(from_node_id: node_ids).to_a
+            outgoing_blocking_edges = blocking_edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
 
-          if outgoing_edges.empty?
-            raise ArgumentError, "summary node must not become a leaf"
-          end
+            if outgoing_blocking_edges.empty?
+              raise ArgumentError, "summary node must not become a leaf"
+            end
 
-          now = Time.current
-          summary_node = @conversation.dag_nodes.create!(
-            node_type: DAG::Node::SUMMARY,
-            state: DAG::Node::FINISHED,
-            runnable: DAG::Runnables::Text.new(content: summary_content),
-            metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
-            finished_at: now
-          )
+            now = Time.current
+            summary_node = @conversation.dag_nodes.create!(
+              node_type: DAG::Node::SUMMARY,
+              state: DAG::Node::FINISHED,
+              payload_output: { "content" => summary_content },
+              metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
+              finished_at: now
+            )
 
           node_scope.update_all(compressed_at: now, compressed_by_id: summary_node.id, updated_at: now)
 
           edges_to_compress = (incoming_edges + outgoing_edges + internal_edges).map(&:id)
           DAG::Edge.where(id: edges_to_compress).update_all(compressed_at: now, updated_at: now)
 
-          incoming_edges
-            .group_by { |edge| [edge.from_node_id, edge.edge_type] }
-            .each do |(from_node_id, edge_type), edges|
-              @conversation.dag_edges.create!(
-                from_node_id: from_node_id,
-                to_node_id: summary_node.id,
+            incoming_blocking_edges
+              .group_by { |edge| [edge.from_node_id, edge.edge_type] }
+              .each do |(from_node_id, edge_type), edges|
+                @conversation.dag_edges.create!(
+                  from_node_id: from_node_id,
+                  to_node_id: summary_node.id,
                 edge_type: edge_type,
                 metadata: merged_rewired_edge_metadata(edges)
               )
           end
 
-          outgoing_edges
-            .group_by { |edge| [edge.to_node_id, edge.edge_type] }
-            .each do |(to_node_id, edge_type), edges|
-              @conversation.dag_edges.create!(
-                from_node_id: summary_node.id,
+            outgoing_blocking_edges
+              .group_by { |edge| [edge.to_node_id, edge.edge_type] }
+              .each do |(to_node_id, edge_type), edges|
+                @conversation.dag_edges.create!(
+                  from_node_id: summary_node.id,
                 to_node_id: to_node_id,
                 edge_type: edge_type,
                 metadata: merged_rewired_edge_metadata(edges)

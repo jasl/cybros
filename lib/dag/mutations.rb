@@ -5,19 +5,29 @@ module DAG
       @executable_pending_nodes_created = false
     end
 
-    def create_node(node_type:, state:, content: nil, metadata: {})
-      runnable =
-        if node_type == DAG::Node::TASK
-          DAG::Runnables::Task.new(content: content)
+    def create_node(node_type:, state:, content: nil, metadata: {}, payload_input: {}, payload_output: {}, **attributes)
+      payload_input = normalize_hash(payload_input)
+      payload_output = normalize_hash(payload_output)
+
+      if !content.nil?
+        case node_type
+        when DAG::Node::USER_MESSAGE
+          payload_input["content"] = content
+        when DAG::Node::TASK
+          payload_output["result"] = content
         else
-          DAG::Runnables::Text.new(content: content)
+          payload_output["content"] = content
         end
+      end
 
       node = @conversation.dag_nodes.create!(
-        node_type: node_type,
-        state: state,
-        runnable: runnable,
-        metadata: metadata
+        {
+          node_type: node_type,
+          state: state,
+          metadata: metadata,
+          payload_input: payload_input,
+          payload_output: payload_output,
+        }.merge(attributes)
       )
 
       @conversation.record_event!(
@@ -54,8 +64,305 @@ module DAG
       edge
     end
 
+    def fork_from!(from_node:, node_type:, state:, payload_input: {}, payload_output: {}, metadata: {})
+      assert_node_belongs_to_conversation!(from_node)
+      raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
+      raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
+
+      node = create_node(
+        node_type: node_type,
+        state: state,
+        metadata: metadata,
+        payload_input: payload_input,
+        payload_output: payload_output
+      )
+
+      create_edge(from_node: from_node, to_node: node, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "fork" })
+      create_edge(
+        from_node: from_node,
+        to_node: node,
+        edge_type: DAG::Edge::BRANCH,
+        metadata: { "branch_kinds" => ["fork"] }
+      )
+
+      node
+    end
+
+    def retry_replace!(node:)
+      old = locked_active_node!(node)
+      now = Time.current
+
+      unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::CANCELLED].include?(old.state)
+        raise ArgumentError, "can only retry errored, rejected, or cancelled nodes"
+      end
+
+      descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
+      if @conversation.dag_nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
+        raise ArgumentError, "cannot retry when downstream nodes are not pending"
+      end
+
+      outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
+      if outgoing_blocking_edges.any?
+        child_states = @conversation.dag_nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
+        unless outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == DAG::Node::PENDING }
+          raise ArgumentError, "can only retry when all active blocking children are pending"
+        end
+      end
+
+      attempt = old.metadata.fetch("attempt", 1).to_i + 1
+      payload_input = old.payload.input_for_retry
+      retry_metadata =
+        old.metadata
+          .except("error", "reason", "blocked_by")
+          .merge("attempt" => attempt)
+
+      new_node = create_node(
+        node_type: old.node_type,
+        state: DAG::Node::PENDING,
+        metadata: retry_metadata,
+        retry_of_id: old.id,
+        payload_input: payload_input,
+      )
+
+      copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
+
+      outgoing_blocking_edges.each do |edge|
+        create_edge_by_id(
+          from_node_id: new_node.id,
+          to_node_id: edge.to_node_id,
+          edge_type: edge.edge_type,
+          metadata: edge.metadata
+        )
+      end
+
+      create_edge_by_id(
+        from_node_id: old.id,
+        to_node_id: new_node.id,
+        edge_type: DAG::Edge::BRANCH,
+        metadata: { "branch_kinds" => ["retry"] }
+      )
+
+      archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
+
+      @conversation.record_event!(
+        event_type: "node_replaced",
+        subject: new_node,
+        particulars: {
+          "kind" => "retry",
+          "old_id" => old.id,
+          "new_id" => new_node.id,
+          "archived_node_ids" => [old.id],
+          "archived_edge_ids" => archived_edge_ids,
+        }
+      )
+
+      new_node
+    end
+
+    def regenerate_replace!(node:)
+      old = locked_active_node!(node)
+      now = Time.current
+
+      unless old.node_type == DAG::Node::AGENT_MESSAGE && old.state == DAG::Node::FINISHED
+        raise ArgumentError, "can only regenerate finished agent_message nodes"
+      end
+
+      outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
+      if outgoing_blocking_edges.any?
+        raise ArgumentError, "can only regenerate leaf agent_message nodes"
+      end
+
+      new_node = create_node(
+        node_type: old.node_type,
+        state: DAG::Node::PENDING,
+        metadata: old.metadata,
+        payload_input: old.payload.input_for_retry,
+      )
+
+      copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
+
+      create_edge_by_id(
+        from_node_id: old.id,
+        to_node_id: new_node.id,
+        edge_type: DAG::Edge::BRANCH,
+        metadata: { "branch_kinds" => ["regenerate"] }
+      )
+
+      archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
+
+      @conversation.record_event!(
+        event_type: "node_replaced",
+        subject: new_node,
+        particulars: {
+          "kind" => "regenerate",
+          "old_id" => old.id,
+          "new_id" => new_node.id,
+          "archived_node_ids" => [old.id],
+          "archived_edge_ids" => archived_edge_ids,
+        }
+      )
+
+      new_node
+    end
+
+    def edit_replace!(node:, new_input:)
+      old = locked_active_node!(node)
+      now = Time.current
+
+      unless old.node_type == DAG::Node::USER_MESSAGE && old.state == DAG::Node::FINISHED
+        raise ArgumentError, "can only edit finished user_message nodes"
+      end
+
+      descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
+      if @conversation.dag_nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
+        raise ArgumentError, "cannot edit when downstream nodes are pending or running"
+      end
+
+      new_payload_input = old.payload.input_for_retry.deep_merge(normalize_hash(new_input))
+
+      new_node = create_node(
+        node_type: old.node_type,
+        state: DAG::Node::FINISHED,
+        metadata: old.metadata,
+        payload_input: new_payload_input,
+        finished_at: now
+      )
+
+      copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
+
+      create_edge_by_id(
+        from_node_id: old.id,
+        to_node_id: new_node.id,
+        edge_type: DAG::Edge::BRANCH,
+        metadata: { "branch_kinds" => ["edit"] }
+      )
+
+      nodes_to_archive = active_causal_descendant_ids_for(old.id)
+      archived_edge_ids =
+        archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: new_node.id, now: now)
+
+      @conversation.record_event!(
+        event_type: "node_replaced",
+        subject: new_node,
+        particulars: {
+          "kind" => "edit",
+          "old_id" => old.id,
+          "new_id" => new_node.id,
+          "archived_node_ids" => nodes_to_archive,
+          "archived_edge_ids" => archived_edge_ids,
+        }
+      )
+
+      new_node
+    end
+
     def executable_pending_nodes_created?
       @executable_pending_nodes_created
     end
+
+    private
+
+      def assert_node_belongs_to_conversation!(node)
+        return if node.conversation_id == @conversation.id
+
+        raise ArgumentError, "node must belong to the same conversation"
+      end
+
+      def locked_active_node!(node_or_id)
+        node_id = node_or_id.is_a?(DAG::Node) ? node_or_id.id : node_or_id
+        @conversation.dag_nodes.where(compressed_at: nil).lock.find(node_id)
+      end
+
+      def active_causal_descendant_ids_for(node_id)
+        DAG::Node.with_connection do |connection|
+          node_quoted = connection.quote(node_id)
+          conversation_quoted = connection.quote(@conversation.id)
+
+          sql = <<~SQL
+            WITH RECURSIVE descendants(node_id) AS (
+              SELECT #{node_quoted}::uuid
+              UNION
+              SELECT e.to_node_id
+              FROM dag_edges e
+              JOIN descendants d ON e.from_node_id = d.node_id
+              JOIN dag_nodes n ON n.id = e.to_node_id
+              WHERE e.conversation_id = #{conversation_quoted}
+                AND e.compressed_at IS NULL
+                AND e.edge_type IN ('sequence', 'dependency')
+                AND n.compressed_at IS NULL
+            )
+            SELECT DISTINCT node_id FROM descendants
+          SQL
+
+          connection.select_values(sql)
+        end
+      end
+
+      def active_outgoing_blocking_edges_from(node_id)
+        @conversation.dag_edges.active
+          .where(from_node_id: node_id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+          .where(to_node_id: @conversation.dag_nodes.active.select(:id))
+          .to_a
+      end
+
+      def copy_incoming_blocking_edges!(from_node_id:, to_node_id:)
+        @conversation.dag_edges.active
+          .where(to_node_id: from_node_id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+          .find_each do |edge|
+            create_edge_by_id(
+              from_node_id: edge.from_node_id,
+              to_node_id: to_node_id,
+              edge_type: edge.edge_type,
+              metadata: edge.metadata
+            )
+          end
+      end
+
+      def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
+        edge = @conversation.dag_edges.create!(
+          from_node_id: from_node_id,
+          to_node_id: to_node_id,
+          edge_type: edge_type,
+          metadata: metadata
+        )
+
+        @conversation.record_event!(
+          event_type: "edge_created",
+          subject: edge,
+          particulars: {
+            "edge_type" => edge.edge_type,
+            "from_node_id" => edge.from_node_id,
+            "to_node_id" => edge.to_node_id,
+          }
+        )
+
+        edge
+      end
+
+      def archive_nodes_and_incident_edges!(node_ids:, compressed_by_id:, now:)
+        node_ids = Array(node_ids).map(&:to_s).uniq
+
+        edge_ids = @conversation.dag_edges.active
+          .where("from_node_id IN (?) OR to_node_id IN (?)", node_ids, node_ids)
+          .pluck(:id)
+
+        @conversation.dag_nodes.where(id: node_ids).update_all(
+          compressed_at: now,
+          compressed_by_id: compressed_by_id,
+          updated_at: now
+        )
+
+        @conversation.dag_edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
+
+        edge_ids
+      end
+
+      def normalize_hash(hash)
+        if hash.is_a?(Hash)
+          hash.deep_stringify_keys
+        else
+          {}
+        end
+      end
   end
 end

@@ -27,7 +27,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
     )
   end
 
-  test "context_for returns a topological ordering for a join node" do
+    test "context_for returns a topological ordering for a join node" do
     conversation = Conversation.create!
 
     task_a = conversation.dag_nodes.create!(
@@ -58,51 +58,49 @@ class ConversationDAGTest < ActiveSupport::TestCase
 
     assert_operator ids.index(task_a.id), :<, ids.index(agent.id)
     assert_operator ids.index(task_b.id), :<, ids.index(agent.id)
-  end
+    end
 
-  test "context_for traverses fork branch edges but not retry branch edges" do
-    conversation = Conversation.create!
+    test "context_for ignores branch edges and relies on causal edges" do
+      conversation = Conversation.create!
 
-    root = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    forked = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    conversation.dag_edges.create!(
-      from_node_id: root.id,
-      to_node_id: forked.id,
-      edge_type: DAG::Edge::BRANCH,
-      metadata: { "branch_kinds" => ["fork"] }
-    )
+      root = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+      forked = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+      conversation.dag_edges.create!(
+        from_node_id: root.id,
+        to_node_id: forked.id,
+        edge_type: DAG::Edge::BRANCH,
+        metadata: { "branch_kinds" => ["fork"] }
+      )
 
-    context = conversation.context_for(forked.id)
-    ids = context.map { |node| node.fetch("node_id") }
+      context = conversation.context_for(forked.id)
+      ids = context.map { |node| node.fetch("node_id") }
 
-    assert_includes ids, root.id
-    assert_includes ids, forked.id
+      assert_includes ids, forked.id
+      refute_includes ids, root.id
 
-    retry_source = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    retried = retry_source.retry!
+      actual_fork = root.fork!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING)
+      fork_context = conversation.context_for(actual_fork.id)
+      fork_ids = fork_context.map { |node| node.fetch("node_id") }
 
-    retry_context = conversation.context_for(retried.id)
-    retry_ids = retry_context.map { |node| node.fetch("node_id") }
-
-    assert_includes retry_ids, retried.id
-    refute_includes retry_ids, retry_source.id
-  end
+      assert_includes fork_ids, root.id
+      assert_includes fork_ids, actual_fork.id
+    end
 
   test "context_for substitutes summary nodes for compressed subgraphs" do
     conversation = Conversation.create!
 
-    a = conversation.dag_nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
-      state: DAG::Node::FINISHED,
-      runnable: DAG::Runnables::Text.new(content: "hi"),
-      metadata: {}
-    )
-    b = conversation.dag_nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
-      state: DAG::Node::FINISHED,
-      runnable: DAG::Runnables::Text.new(content: "hello"),
-      metadata: {}
-    )
+      a = conversation.dag_nodes.create!(
+        node_type: DAG::Node::USER_MESSAGE,
+        state: DAG::Node::FINISHED,
+        payload_input: { "content" => "hi" },
+        metadata: {}
+      )
+      b = conversation.dag_nodes.create!(
+        node_type: DAG::Node::AGENT_MESSAGE,
+        state: DAG::Node::FINISHED,
+        payload_output: { "content" => "hello" },
+        metadata: {}
+      )
     c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
     d = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 
@@ -124,5 +122,19 @@ class ConversationDAGTest < ActiveSupport::TestCase
 
     assert_operator ids.index(a.id), :<, ids.index(summary.id)
     assert_operator ids.index(summary.id), :<, ids.index(d.id)
+  end
+
+  test "leaf_nodes ignores blocking edges that point to inactive nodes" do
+    conversation = Conversation.create!
+
+    a = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    b = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    conversation.dag_edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
+
+    refute_includes conversation.leaf_nodes.pluck(:id), a.id
+
+    b.update!(compressed_at: Time.current)
+
+    assert_includes conversation.leaf_nodes.pluck(:id), a.id
   end
 end
