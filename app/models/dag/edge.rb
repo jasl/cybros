@@ -54,11 +54,23 @@ module DAG
 
           sql = <<~SQL
             WITH RECURSIVE search(node_id) AS (
-              SELECT #{from_quoted}::uuid
+              SELECT dag_nodes.id
+              FROM dag_nodes
+              WHERE dag_nodes.id = #{from_quoted}::uuid
+                AND dag_nodes.graph_id = #{graph_quoted}
+                AND dag_nodes.compressed_at IS NULL
               UNION
               SELECT e.to_node_id
               FROM dag_edges e
               JOIN search s ON e.from_node_id = s.node_id
+              JOIN dag_nodes from_node
+                ON from_node.id = e.from_node_id
+               AND from_node.graph_id = e.graph_id
+               AND from_node.compressed_at IS NULL
+              JOIN dag_nodes to_node
+                ON to_node.id = e.to_node_id
+               AND to_node.graph_id = e.graph_id
+               AND to_node.compressed_at IS NULL
               WHERE e.graph_id = #{graph_quoted}
                 AND e.compressed_at IS NULL
             )

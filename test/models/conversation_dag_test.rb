@@ -136,6 +136,25 @@ class ConversationDAGTest < ActiveSupport::TestCase
     assert_operator ids.index(summary.id), :<, ids.index(d.id)
   end
 
+  test "context_for does not traverse through inactive nodes even if edges remain active" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    x = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    y = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    z = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+
+    graph.edges.create!(from_node_id: x.id, to_node_id: y.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: y.id, to_node_id: z.id, edge_type: DAG::Edge::SEQUENCE)
+
+    y.update!(compressed_at: Time.current)
+
+    context = conversation.context_for(z.id)
+    ids = context.map { |node| node.fetch("node_id") }
+
+    assert_equal [z.id], ids
+  end
+
   test "leaf_nodes ignores blocking edges that point to inactive nodes" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

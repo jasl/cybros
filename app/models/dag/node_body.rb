@@ -24,6 +24,10 @@ module DAG
       false
     end
 
+    def preview_max_chars
+      PREVIEW_MAX_CHARS
+    end
+
     def merge_input!(patch)
       patch = normalize_patch(patch)
       self.input = normalized_input.deep_merge(patch)
@@ -76,7 +80,7 @@ module DAG
       end
 
       def truncate_preview_string(string)
-        string.to_s.truncate(PREVIEW_MAX_CHARS)
+        string.to_s.truncate(preview_max_chars)
       end
 
       def normalize_jsonb_fields

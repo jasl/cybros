@@ -61,6 +61,10 @@ module DAG
       DAG::TickGraphJob.perform_later(id, limit: limit)
     end
 
+    def policy
+      @policy ||= DAG::GraphPolicies::Default.new
+    end
+
     def record_event!(event_type:, subject:, particulars: {})
       attachable.record_event!(event_type: event_type, subject: subject, particulars: particulars)
     end
@@ -99,24 +103,19 @@ module DAG
       created_nodes = false
 
       leaf_nodes.each do |leaf|
-        next if leaf.node_type == DAG::Node::AGENT_MESSAGE
-        next if leaf.pending? || leaf.running?
+        next if policy.leaf_valid?(leaf)
 
-        agent_message = nodes.create!(
-          node_type: DAG::Node::AGENT_MESSAGE,
-          state: DAG::Node::PENDING,
-          metadata: { "generated_by" => "leaf_invariant" }
-        )
+        repaired_node = nodes.create!(policy.leaf_repair_node_attributes(leaf))
         edges.create!(
-          from_node_id: leaf.id,
-          to_node_id: agent_message.id,
-          edge_type: DAG::Edge::SEQUENCE,
-          metadata: { "generated_by" => "leaf_invariant" }
+          policy.leaf_repair_edge_attributes(leaf, repaired_node).merge(
+            from_node_id: leaf.id,
+            to_node_id: repaired_node.id
+          )
         )
 
         record_event!(
           event_type: "leaf_invariant_repaired",
-          subject: agent_message,
+          subject: repaired_node,
           particulars: { "leaf_node_id" => leaf.id }
         )
 

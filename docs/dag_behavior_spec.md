@@ -95,7 +95,11 @@ Payload 的列级约定：
 
 #### 2.5.1 node_type ↔ body STI 的强一致性
 
-Active 视图内必须保持以下映射一致（不允许 drift）：
+Active 视图内必须保持一致（不允许 drift）：
+
+- `node.body` 的 STI 类型必须等于 `graph.policy.body_class_for_node_type(node.node_type)`
+
+里程碑 1（Default policy）映射为：
 
 - `user_message` → `Messages::UserMessage`
 - `agent_message` → `Messages::AgentMessage`
@@ -161,6 +165,7 @@ Active 视图内必须保持以下映射一致（不允许 drift）：
 `context_for(target_node_id)` 的祖先闭包定义为：
 
 - 从 target 开始，沿 **Active blocking edges**（`sequence/dependency`）向上递归收集所有祖先；
+  - 其中 “Active blocking edge” 的判定必须同时满足：edge active 且两端节点 active（防御性忽略 “active edge 指向 inactive node” 的脏数据）
 - **不沿 branch** 边遍历（branch 不属于因果图）。
 
 ### 4.2 排序（稳定拓扑序）
@@ -191,19 +196,24 @@ Active 视图内必须保持以下映射一致（不允许 drift）：
 - `mode=:preview`：只输出 `payload.input + payload.output_preview`
 - `mode=:full`：额外输出 `payload.output`（用于审计/调试/特殊 executor）
 
-### 4.4 output_preview 规则（统一、可验证）
+### 4.4 output_preview 规则（分型、可验证）
 
 `output_preview` 只用于 “小片段可读输出”，必须满足：
 
-- **上限固定**：字符串按固定上限截断（当前实现上限为 `200 chars`）
-- **非字符串**：先 JSON 序列化再截断
+- **上限固定**：字符串按 `body.preview_max_chars` 截断
+  - 默认上限：`200 chars`（`DAG::NodeBody`）
+  - `agent_message`（`Messages::AgentMessage`）：`2000 chars`
+- **ToolCall result**（`Messages::ToolCall`）：
+  - `payload.output_preview["result"]` 必须始终为 **String**
+  - 当 `payload.output["result"]` 为 Hash/Array 时，preview 必须是摘要字符串（不允许全量 JSON 序列化再截断）
+- 其它 body 类型：非字符串值可按 JSON 序列化后截断
 - 默认优先级（从 output 派生）：
   1) 有 `content` 则取 `content`
   2) 否则有 `result` 则取 `result`
   3) 否则若 output 只有一个 key，取该 key/value
   4) 否则取整段 JSON 的截断字符串
 
-允许 STI 子类覆写派生逻辑，但必须遵守上限与可读性目标。
+允许 STI 子类覆写派生逻辑（例如 ToolCall 的摘要化），但必须遵守上限与可读性目标。
 
 ---
 
@@ -218,12 +228,14 @@ Active 视图内必须保持以下映射一致（不允许 drift）：
 
 ### 5.2 不变量与修复
 
-规则：每个 leaf 必须满足其一：
+leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作”；`DAG::Graph` 负责锁/事务/写库/事件。
+
+里程碑 1（Default policy）规则：每个 leaf 必须满足其一：
 
 - `node_type == agent_message`
 - 或者 `state in {pending, running}`（允许执行中的中间态 leaf）
 
-修复策略：
+里程碑 1（Default policy）修复策略：
 
 - 若发现 leaf 为 terminal 且不是 `agent_message`，系统自动追加一个 `agent_message(pending)` 子节点，并用 `sequence` 连接。
 - 修复必须在图锁+事务内进行，并记录事件 `leaf_invariant_repaired`。

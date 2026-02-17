@@ -22,6 +22,7 @@
 - 责任：
   - 图变更的事务边界（`mutate!`）
   - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
+  - 语义策略（`policy`）：node_type↔body 映射、leaf invariant 的合法性/修复动作（`DAG::GraphPolicy` / `DAG::GraphPolicies::*`）
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
 
@@ -52,7 +53,13 @@
 
 > 设计目标：调度器只依赖 `dag_nodes` 的引擎层字段；业务重字段统一落在 body（Context 输出字段名仍为 `payload`），并通过 preview 控制上下文体积。
 
-默认映射（`DAG::Node#ensure_body`）：
+preview 策略（里程碑 1）：
+
+- 默认上限：`200 chars`（`DAG::NodeBody`）
+- `agent_message`（`Messages::AgentMessage`）上限更长：`2000 chars`
+- `task`（`Messages::ToolCall`）的 `output_preview["result"]` 对非字符串 result 使用摘要字符串（避免巨大 JSON 的 `to_json` 峰值）
+
+默认映射（`DAG::GraphPolicies::Default`）：
 
 - `user_message` → `Messages::UserMessage`
 - `agent_message` → `Messages::AgentMessage`
@@ -106,7 +113,7 @@
 - `node_type == agent_message`
 - 或者 `state in {pending, running}`（允许执行中的中间态）
 
-修复策略：若 mutation 后 leaf 为终态且不是 `agent_message`，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
+修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy` 决定；里程碑 1（Default policy）会在 mutation 后发现 leaf 为终态且不是 `agent_message` 时，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
 
 ## 调度与执行
 
@@ -164,6 +171,7 @@
 1. recursive CTE 收集祖先闭包（只走未压缩的 **因果边**）：
    - 仅包含：`sequence/dependency`
    - `branch` 为纯 lineage，不参与 context
+   - 防御性硬化：忽略 “active edge 指向 inactive node” 的端点（active endpoint filtering）
 2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
 4. 输出结构（默认 preview）：`[{node_id, node_type, state, payload:{input,output_preview}, metadata}]`

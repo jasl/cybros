@@ -209,31 +209,20 @@ module DAG
         return if body.present?
         return if node_type.blank?
 
-        self.body = body_class_for_node_type.new
+        self.body = graph_policy.body_class_for_node_type(node_type).new
       end
 
       def body_type_matches_node_type
         return if node_type.blank? || body.blank?
 
-        expected_body_class = body_class_for_node_type
+        expected_body_class = graph_policy.body_class_for_node_type(node_type)
         return if body.is_a?(expected_body_class)
 
         errors.add(:body, "must be a #{expected_body_class.name} for node_type=#{node_type}")
       end
 
-      def body_class_for_node_type
-        case node_type
-        when USER_MESSAGE
-          ::Messages::UserMessage
-        when AGENT_MESSAGE
-          ::Messages::AgentMessage
-        when TASK
-          ::Messages::ToolCall
-        when SUMMARY
-          ::Messages::Summary
-        else
-          DAG::NodeBody
-        end
+      def graph_policy
+        graph&.policy || DAG::GraphPolicies::Default.new
       end
 
       def transition_to!(to_state, from_states:, **attributes)

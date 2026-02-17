@@ -9,12 +9,13 @@ class DAG::NodeBodyTest < ActiveSupport::TestCase
     assert_operator payload.output_preview["result"].length, :<=, DAG::NodeBody::PREVIEW_MAX_CHARS
   end
 
-  test "tool_call output_preview serializes non-string results" do
+  test "tool_call output_preview summarizes non-string results" do
     payload = Messages::ToolCall.create!(output: { "result" => { "a" => "b" * 500 } })
 
     assert payload.output_preview["result"].is_a?(String)
     assert_operator payload.output_preview["result"].length, :<=, DAG::NodeBody::PREVIEW_MAX_CHARS
-    assert_includes payload.output_preview["result"], "\"a\""
+    assert_includes payload.output_preview["result"], "Hash(size=1"
+    assert_includes payload.output_preview["result"], "keys=a"
   end
 
   test "tool_call output_preview prefers result when output has multiple keys" do
