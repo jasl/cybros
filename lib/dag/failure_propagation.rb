@@ -1,11 +1,11 @@
 module DAG
   class FailurePropagation
-    def self.propagate!(conversation_id:)
-      new(conversation_id: conversation_id).propagate!
+    def self.propagate!(graph_id:)
+      new(graph_id: graph_id).propagate!
     end
 
-    def initialize(conversation_id:)
-      @conversation_id = conversation_id
+    def initialize(graph_id:)
+      @graph_id = graph_id
     end
 
     def propagate!
@@ -22,7 +22,7 @@ module DAG
         updated_ids = []
 
         DAG::Node.with_connection do |connection|
-          conversation_quoted = connection.quote(@conversation_id)
+          graph_quoted = connection.quote(@graph_id)
           now_quoted = connection.quote(now)
 
           sql = <<~SQL
@@ -38,14 +38,14 @@ module DAG
                      ) AS blocked_by
               FROM dag_nodes child
               JOIN dag_edges e
-                ON e.conversation_id = child.conversation_id
+                ON e.graph_id = child.graph_id
                AND e.to_node_id = child.id
                AND e.edge_type = 'dependency'
                AND e.compressed_at IS NULL
               JOIN dag_nodes parent
                 ON parent.id = e.from_node_id
                AND parent.compressed_at IS NULL
-              WHERE child.conversation_id = #{conversation_quoted}
+              WHERE child.graph_id = #{graph_quoted}
                 AND child.compressed_at IS NULL
                 AND child.state = 'pending'
                 AND child.node_type IN ('task', 'agent_message')

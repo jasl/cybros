@@ -1,8 +1,8 @@
 module DAG
   module Visualization
     class MermaidExporter
-      def initialize(conversation:, include_compressed:, max_label_chars:)
-        @conversation = conversation
+      def initialize(graph:, include_compressed:, max_label_chars:)
+        @graph = graph
         @include_compressed = include_compressed
         @max_label_chars = max_label_chars
       end
@@ -29,7 +29,7 @@ module DAG
       private
 
         def load_nodes
-          scope = @conversation.dag_nodes
+          scope = @graph.nodes
             .select(:id, :node_type, :state, :metadata, :payload_id, :compressed_at)
 
           scope = scope.where(compressed_at: nil) unless @include_compressed
@@ -47,7 +47,7 @@ module DAG
         def load_edges(nodes)
           node_ids = nodes.map(&:id).index_with(true)
 
-          scope = @conversation.dag_edges.select(:id, :from_node_id, :to_node_id, :edge_type, :metadata, :compressed_at)
+          scope = @graph.edges.select(:id, :from_node_id, :to_node_id, :edge_type, :metadata, :compressed_at)
           scope = scope.where(compressed_at: nil) unless @include_compressed
 
           scope.order(:id).to_a.select do |edge|

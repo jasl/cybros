@@ -1,7 +1,7 @@
 module DAG
   class Mutations
-    def initialize(conversation:)
-      @conversation = conversation
+    def initialize(graph:)
+      @graph = graph
       @executable_pending_nodes_created = false
     end
 
@@ -20,7 +20,7 @@ module DAG
         end
       end
 
-      node = @conversation.dag_nodes.create!(
+      node = @graph.nodes.create!(
         {
           node_type: node_type,
           state: state,
@@ -30,7 +30,7 @@ module DAG
         }.merge(attributes)
       )
 
-      @conversation.record_event!(
+      @graph.record_event!(
         event_type: "node_created",
         subject: node,
         particulars: { "node_type" => node.node_type, "state" => node.state }
@@ -44,14 +44,14 @@ module DAG
     end
 
     def create_edge(from_node:, to_node:, edge_type:, metadata: {})
-      edge = @conversation.dag_edges.create!(
+      edge = @graph.edges.create!(
         from_node_id: from_node.id,
         to_node_id: to_node.id,
         edge_type: edge_type,
         metadata: metadata
       )
 
-      @conversation.record_event!(
+      @graph.record_event!(
         event_type: "edge_created",
         subject: edge,
         particulars: {
@@ -65,7 +65,7 @@ module DAG
     end
 
     def fork_from!(from_node:, node_type:, state:, payload_input: {}, payload_output: {}, metadata: {})
-      assert_node_belongs_to_conversation!(from_node)
+      assert_node_belongs_to_graph!(from_node)
       raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
       raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
 
@@ -97,13 +97,13 @@ module DAG
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
-      if @conversation.dag_nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
+      if @graph.nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
         raise ArgumentError, "cannot retry when downstream nodes are not pending"
       end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-        child_states = @conversation.dag_nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
+        child_states = @graph.nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
         unless outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == DAG::Node::PENDING }
           raise ArgumentError, "can only retry when all active blocking children are pending"
         end
@@ -144,7 +144,7 @@ module DAG
 
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
-      @conversation.record_event!(
+      @graph.record_event!(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -190,7 +190,7 @@ module DAG
 
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
-      @conversation.record_event!(
+      @graph.record_event!(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -214,7 +214,7 @@ module DAG
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
-      if @conversation.dag_nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
+      if @graph.nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
         raise ArgumentError, "cannot edit when downstream nodes are pending or running"
       end
 
@@ -241,7 +241,7 @@ module DAG
       archived_edge_ids =
         archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: new_node.id, now: now)
 
-      @conversation.record_event!(
+      @graph.record_event!(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -262,21 +262,21 @@ module DAG
 
     private
 
-      def assert_node_belongs_to_conversation!(node)
-        return if node.conversation_id == @conversation.id
+      def assert_node_belongs_to_graph!(node)
+        return if node.graph_id == @graph.id
 
-        raise ArgumentError, "node must belong to the same conversation"
+        raise ArgumentError, "node must belong to the same graph"
       end
 
       def locked_active_node!(node_or_id)
         node_id = node_or_id.is_a?(DAG::Node) ? node_or_id.id : node_or_id
-        @conversation.dag_nodes.where(compressed_at: nil).lock.find(node_id)
+        @graph.nodes.where(compressed_at: nil).lock.find(node_id)
       end
 
       def active_causal_descendant_ids_for(node_id)
         DAG::Node.with_connection do |connection|
           node_quoted = connection.quote(node_id)
-          conversation_quoted = connection.quote(@conversation.id)
+          graph_quoted = connection.quote(@graph.id)
 
           sql = <<~SQL
             WITH RECURSIVE descendants(node_id) AS (
@@ -286,7 +286,7 @@ module DAG
               FROM dag_edges e
               JOIN descendants d ON e.from_node_id = d.node_id
               JOIN dag_nodes n ON n.id = e.to_node_id
-              WHERE e.conversation_id = #{conversation_quoted}
+              WHERE e.graph_id = #{graph_quoted}
                 AND e.compressed_at IS NULL
                 AND e.edge_type IN ('sequence', 'dependency')
                 AND n.compressed_at IS NULL
@@ -299,14 +299,14 @@ module DAG
       end
 
       def active_outgoing_blocking_edges_from(node_id)
-        @conversation.dag_edges.active
+        @graph.edges.active
           .where(from_node_id: node_id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
-          .where(to_node_id: @conversation.dag_nodes.active.select(:id))
+          .where(to_node_id: @graph.nodes.active.select(:id))
           .to_a
       end
 
       def copy_incoming_blocking_edges!(from_node_id:, to_node_id:)
-        @conversation.dag_edges.active
+        @graph.edges.active
           .where(to_node_id: from_node_id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
           .find_each do |edge|
             create_edge_by_id(
@@ -319,14 +319,14 @@ module DAG
       end
 
       def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
-        edge = @conversation.dag_edges.create!(
+        edge = @graph.edges.create!(
           from_node_id: from_node_id,
           to_node_id: to_node_id,
           edge_type: edge_type,
           metadata: metadata
         )
 
-        @conversation.record_event!(
+        @graph.record_event!(
           event_type: "edge_created",
           subject: edge,
           particulars: {
@@ -342,17 +342,17 @@ module DAG
       def archive_nodes_and_incident_edges!(node_ids:, compressed_by_id:, now:)
         node_ids = Array(node_ids).map(&:to_s).uniq
 
-        edge_ids = @conversation.dag_edges.active
+        edge_ids = @graph.edges.active
           .where("from_node_id IN (?) OR to_node_id IN (?)", node_ids, node_ids)
           .pluck(:id)
 
-        @conversation.dag_nodes.where(id: node_ids).update_all(
+        @graph.nodes.where(id: node_ids).update_all(
           compressed_at: now,
           compressed_by_id: compressed_by_id,
           updated_at: now
         )
 
-        @conversation.dag_edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
+        @graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
 
         edge_ids
       end

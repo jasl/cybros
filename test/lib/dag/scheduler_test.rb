@@ -9,50 +9,55 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     DAG::Edge.delete_all
     DAG::Node.delete_all
     DAG::NodePayload.delete_all
+    DAG::Graph.delete_all
     Conversation.delete_all
   end
 
   test "claim_executable_nodes claims pending executable nodes whose blocking parents are finished" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    child = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
-    claimed = DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 10)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 10)
     assert_equal [child.id], claimed.map(&:id)
     assert_equal DAG::Node::RUNNING, child.reload.state
   end
 
-    test "claim_executable_nodes does not claim nodes blocked by non-finished parents" do
-      conversation = Conversation.create!
+  test "claim_executable_nodes does not claim nodes blocked by non-finished parents" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-      parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-      child = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-      conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
-      claimed = DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 10)
-      assert_equal [], claimed
-      assert_equal DAG::Node::PENDING, child.reload.state
-    end
+    claimed = DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 10)
+    assert_equal [], claimed
+    assert_equal DAG::Node::PENDING, child.reload.state
+  end
 
-    test "claim_executable_nodes claims nodes blocked only by sequence edges whose parents are terminal" do
-      conversation = Conversation.create!
+  test "claim_executable_nodes claims nodes blocked only by sequence edges whose parents are terminal" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-      parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-      child = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-      conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::SEQUENCE)
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::SEQUENCE)
 
-      claimed = DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 10)
-      assert_equal [child.id], claimed.map(&:id)
-      assert_equal DAG::Node::RUNNING, child.reload.state
-    end
+    claimed = DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 10)
+    assert_equal [child.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, child.reload.state
+  end
 
   test "claim_executable_nodes skips locked rows" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    node_1 = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    node_2 = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node_1 = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node_2 = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
 
     first, second = [node_1, node_2].sort_by(&:id)
 
@@ -71,7 +76,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
 
     locked.pop
 
-    claimed = DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 1)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 1)
     assert_equal [second.id], claimed.map(&:id)
   ensure
     release << true

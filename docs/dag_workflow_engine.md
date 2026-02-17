@@ -16,14 +16,16 @@
 
 ## 领域模型与存储
 
-### 聚合根：`Conversation`
+### 聚合根：`DAG::Graph`
 
-- 模型：`app/models/conversation.rb`
+- 模型：`app/models/dag/graph.rb`
 - 责任：
   - 图变更的事务边界（`mutate!`）
-  - 图级别锁（`with_graph_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
+  - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
   - 叶子不变量自修复（`validate_leaf_invariant!`）
-  - 触发调度推进（`kick!` → `DAG::TickConversationJob`）
+  - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
+
+`DAG::Graph` 通过 `attachable`（polymorphic）关联业务对象（当前为 `Conversation`）。`Conversation` 负责事件记录（`record_event!`）并将 DAG 入口方法 delegate 给 `dag_graph`。
 
 ### 节点：`DAG::Node`
 
@@ -52,10 +54,10 @@
 
 默认映射（`DAG::Node#ensure_payload`）：
 
-- `user_message` → `DAG::NodePayloads::UserMessage`
-- `agent_message` → `DAG::NodePayloads::AgentMessage`
-- `task` → `DAG::NodePayloads::ToolCall`
-- `summary` → `DAG::NodePayloads::Summary`
+- `user_message` → `Messages::UserMessage`
+- `agent_message` → `Messages::AgentMessage`
+- `task` → `Messages::ToolCall`
+- `summary` → `Messages::Summary`
 
 #### 状态语义（skipped/cancelled 明确化）
 
@@ -91,20 +93,20 @@
 ### 1) 无环（Acyclic）
 
 - 边创建时检查是否引入环：
-  - 对 `Conversation` 行加锁（序列化并发建边）
+  - 对 `DAG::Graph` 行加锁（序列化并发建边）
   - 通过 recursive CTE 判断 `to_node` 是否可达 `from_node`
 - 实现在：`app/models/dag/edge.rb`
 
 ### 2) 叶子不变量（Leaf invariant）
 
-定义 leaf：没有任何未压缩 outgoing **blocking edge**（`sequence/dependency`）指向 active node 的节点（`Conversation#leaf_nodes`）。
+定义 leaf：没有任何未压缩 outgoing **blocking edge**（`sequence/dependency`）指向 active node 的节点（`DAG::Graph#leaf_nodes`）。
 
 规则：每个 leaf 必须满足其一：
 
 - `node_type == agent_message`
 - 或者 `state in {pending, running}`（允许执行中的中间态）
 
-修复策略：若 mutation 后 leaf 为终态且不是 `agent_message`，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `Conversation#validate_leaf_invariant!`）。
+修复策略：若 mutation 后 leaf 为终态且不是 `agent_message`，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
 
 ## 调度与执行
 
@@ -131,7 +133,7 @@
   - 非 `running` 节点直接 no-op
   - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
 - 执行流程：
-  1. 组装上下文 `conversation.context_for(node)`
+  1. 组装上下文 `graph.context_for(node)`
   2. `DAG.executor_registry.execute(node:, context:)`
   3. 按结果落库为终态并记录事件
   4. 执行后触发下一轮 tick
@@ -140,21 +142,20 @@
 
 ### Jobs：推进图执行（Solid Queue / ActiveJob）
 
-- `DAG::TickConversationJob`
-  - 对同一 conversation 做 tick 去重（advisory lock try-lock）
+- `DAG::TickGraphJob`
+  - 对同一 graph 做 tick 去重（advisory lock try-lock）
   - claim executable nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
   - finally 再 enqueue tick 以推进后继
 
 相关代码：
-- `app/jobs/dag/tick_conversation_job.rb`
+- `app/jobs/dag/tick_graph_job.rb`
 - `app/jobs/dag/execute_node_job.rb`
-- `lib/dag/advisory_lock.rb`
 
 ## 上下文组装（Context Assembly）
 
-入口：`Conversation#context_for(target_node_id)`
+入口：`DAG::Graph#context_for(target_node_id)`（`Conversation#context_for` delegate）
 
 实现：`lib/dag/context_assembly.rb`
 
@@ -175,13 +176,13 @@
 
 ## 子图压缩（Manual）
 
-入口：`Conversation#compress!`
+入口：`DAG::Graph#compress!`（`Conversation#compress!` delegate）
 
 实现：`lib/dag/compression.rb`
 
 约束（事务内校验）：
 
-- 所选节点必须同一 conversation、且均 `finished`
+- 所选节点必须同一 graph、且均 `finished`
 - 节点/相关边必须尚未压缩
 - summary **不得成为 leaf**（必须存在至少一条 outgoing 边到外部）
 
@@ -196,7 +197,7 @@
 
 ## 可视化（Mermaid）
 
-入口：`Conversation#to_mermaid`
+入口：`DAG::Graph#to_mermaid`（`Conversation#to_mermaid` delegate）
 
 实现：`lib/dag/visualization/mermaid_exporter.rb`
 

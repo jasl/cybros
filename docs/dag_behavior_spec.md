@@ -95,10 +95,10 @@ Payload 的列级约定：
 
 Active 视图内必须保持以下映射一致（不允许 drift）：
 
-- `user_message` → `DAG::NodePayloads::UserMessage`
-- `agent_message` → `DAG::NodePayloads::AgentMessage`
-- `task` → `DAG::NodePayloads::ToolCall`
-- `summary` → `DAG::NodePayloads::Summary`
+- `user_message` → `Messages::UserMessage`
+- `agent_message` → `Messages::AgentMessage`
+- `task` → `Messages::ToolCall`
+- `summary` → `Messages::Summary`
 
 #### 2.5.2 负载字段最小约定
 
@@ -267,7 +267,7 @@ Active 视图内必须保持以下映射一致（不允许 drift）：
 
 所有“改图”操作必须满足：
 
-- 在 `Conversation#mutate!` 内执行（图锁 + 事务边界 + leaf 修复 + kick）
+- 在 `DAG::Graph#mutate!` 内执行（图锁 + 事务边界 + leaf 修复 + kick）
 - 只操作 Active 图（目标节点必须 `compressed_at IS NULL`）
 - 任何归档（archive）必须同时归档 **nodes + incident edges**，保持 Active 图结构性要求（第 1.2）。
 - 必须记录 `events`（审计/回放）。

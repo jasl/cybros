@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_17_100334) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -53,21 +53,29 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_100334) do
 
   create_table "dag_edges", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "compressed_at"
-    t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
     t.string "edge_type", null: false
     t.uuid "from_node_id", null: false
+    t.uuid "graph_id", null: false
     t.jsonb "metadata", default: {}, null: false
     t.uuid "to_node_id", null: false
     t.datetime "updated_at", null: false
-    t.index ["conversation_id", "edge_type"], name: "index_dag_edges_active_type", where: "(compressed_at IS NULL)"
-    t.index ["conversation_id", "from_node_id", "to_node_id", "edge_type"], name: "index_dag_edges_uniqueness", unique: true
-    t.index ["conversation_id", "from_node_id"], name: "index_dag_edges_active_from", where: "(compressed_at IS NULL)"
-    t.index ["conversation_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
-    t.index ["conversation_id"], name: "index_dag_edges_on_conversation_id"
     t.index ["from_node_id"], name: "index_dag_edges_on_from_node_id"
+    t.index ["graph_id", "edge_type"], name: "index_dag_edges_active_type", where: "(compressed_at IS NULL)"
+    t.index ["graph_id", "from_node_id", "to_node_id", "edge_type"], name: "index_dag_edges_uniqueness", unique: true
+    t.index ["graph_id", "from_node_id"], name: "index_dag_edges_active_from", where: "(compressed_at IS NULL)"
+    t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
+    t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
+  end
+
+  create_table "dag_graphs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "attachable_id", null: false
+    t.string "attachable_type", null: false
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["attachable_type", "attachable_id"], name: "index_dag_graphs_on_attachable", unique: true
   end
 
   create_table "dag_node_payloads", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -82,9 +90,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_100334) do
   create_table "dag_nodes", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "compressed_at"
     t.uuid "compressed_by_id"
-    t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
     t.datetime "finished_at"
+    t.uuid "graph_id", null: false
     t.jsonb "metadata", default: {}, null: false
     t.string "node_type", null: false
     t.uuid "payload_id", null: false
@@ -93,11 +101,11 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_100334) do
     t.string "state", null: false
     t.datetime "updated_at", null: false
     t.index ["compressed_by_id"], name: "index_dag_nodes_on_compressed_by_id"
-    t.index ["conversation_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
-    t.index ["conversation_id", "created_at"], name: "index_dag_nodes_created_at"
-    t.index ["conversation_id", "retry_of_id"], name: "index_dag_nodes_retry_of"
-    t.index ["conversation_id", "state", "node_type"], name: "index_dag_nodes_lookup"
-    t.index ["conversation_id"], name: "index_dag_nodes_on_conversation_id"
+    t.index ["graph_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
+    t.index ["graph_id", "created_at"], name: "index_dag_nodes_created_at"
+    t.index ["graph_id", "retry_of_id"], name: "index_dag_nodes_retry_of"
+    t.index ["graph_id", "state", "node_type"], name: "index_dag_nodes_lookup"
+    t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["payload_id"], name: "index_dag_nodes_on_payload_id", unique: true
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
   end
@@ -117,10 +125,10 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_100334) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
-  add_foreign_key "dag_edges", "conversations"
+  add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: "from_node_id"
   add_foreign_key "dag_edges", "dag_nodes", column: "to_node_id"
-  add_foreign_key "dag_nodes", "conversations"
+  add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_nodes", "dag_node_payloads", column: "payload_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "compressed_by_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "retry_of_id"

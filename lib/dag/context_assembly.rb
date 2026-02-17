@@ -1,7 +1,7 @@
 module DAG
   class ContextAssembly
-    def initialize(conversation:)
-      @conversation = conversation
+    def initialize(graph:)
+      @graph = graph
     end
 
     def call(target_node_id, mode: :preview)
@@ -9,7 +9,7 @@ module DAG
       nodes = load_nodes(node_ids)
       payloads = load_payloads(nodes: nodes, mode: mode)
 
-      edges = @conversation.dag_edges.active.where(
+      edges = @graph.edges.active.where(
         edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,
         from_node_id: nodes.keys,
         to_node_id: nodes.keys
@@ -30,7 +30,7 @@ module DAG
       def ancestor_node_ids_for(target_node_id)
         DAG::Node.with_connection do |connection|
           target_quoted = connection.quote(target_node_id)
-          conversation_quoted = connection.quote(@conversation.id)
+          graph_quoted = connection.quote(@graph.id)
 
           sql = <<~SQL
             WITH RECURSIVE ancestors(node_id) AS (
@@ -39,7 +39,7 @@ module DAG
               SELECT e.from_node_id
               FROM dag_edges e
               JOIN ancestors a ON e.to_node_id = a.node_id
-              WHERE e.conversation_id = #{conversation_quoted}
+              WHERE e.graph_id = #{graph_quoted}
                 AND e.compressed_at IS NULL
                 AND e.edge_type IN ('sequence', 'dependency')
             )
@@ -51,7 +51,7 @@ module DAG
       end
 
       def load_nodes(node_ids)
-        @conversation.dag_nodes
+        @graph.nodes
           .where(id: node_ids, compressed_at: nil)
           .select(:id, :node_type, :state, :metadata, :payload_id)
           .index_by(&:id)

@@ -3,15 +3,16 @@ require "test_helper"
 class DAG::FailurePropagationTest < ActiveSupport::TestCase
   test "propagate! skips nodes blocked by failed dependencies and cascades" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    a = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    b = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    c = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    c = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 
-    e1 = conversation.dag_edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::DEPENDENCY)
-    e2 = conversation.dag_edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
+    e1 = graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::DEPENDENCY)
+    e2 = graph.edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
 
-    DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
+    DAG::FailurePropagation.propagate!(graph_id: graph.id)
 
     assert_equal DAG::Node::SKIPPED, b.reload.state
     assert_equal "blocked_by_failed_dependencies", b.metadata["reason"]
@@ -32,12 +33,13 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
 
   test "propagate! does not skip nodes whose dependency parents are pending" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    child = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    child = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
-    DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
+    DAG::FailurePropagation.propagate!(graph_id: graph.id)
 
     assert_equal DAG::Node::PENDING, child.reload.state
   end

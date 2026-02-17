@@ -3,8 +3,9 @@ require "test_helper"
 class ConversationContextTest < ActiveSupport::TestCase
   test "context_for returns preview payload by default and context_for_full includes full output" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    user = conversation.dag_nodes.create!(
+    user = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_input: { "content" => "hi" },
@@ -12,14 +13,14 @@ class ConversationContextTest < ActiveSupport::TestCase
     )
 
     long_content = "a" * (DAG::NodePayload::PREVIEW_MAX_CHARS + 50)
-    agent = conversation.dag_nodes.create!(
+    agent = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_output: { "content" => long_content },
       metadata: {}
     )
 
-    conversation.dag_edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
 
     preview = conversation.context_for(agent.id)
     agent_preview = preview.find { |node| node.fetch("node_id") == agent.id }

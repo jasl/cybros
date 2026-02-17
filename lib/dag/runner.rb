@@ -13,32 +13,26 @@ module DAG
       return if node.nil?
       return unless node.running?
 
-      conversation = node.conversation
-      context = conversation.context_for(node.id)
+      graph = node.graph
+      context = graph.context_for(node.id)
 
-        result = DAG.executor_registry.execute(node: node, context: context)
-        conversation.with_graph_lock do
-          conversation.transaction do
-            apply_result(node, result)
-            DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
-            conversation.validate_leaf_invariant!
-          end
-        end
-      rescue StandardError => error
-        if node
-          conversation = node.conversation
-          conversation.with_graph_lock do
-            conversation.transaction do
-              apply_result(node, DAG::ExecutionResult.errored(error: "#{error.class}: #{error.message}"))
-              DAG::FailurePropagation.propagate!(conversation_id: conversation.id)
-              conversation.validate_leaf_invariant!
-            end
-          end
-        end
-      ensure
-      if node
-        DAG::TickConversationJob.perform_later(node.conversation_id)
+      result = DAG.executor_registry.execute(node: node, context: context)
+      graph.with_graph_lock! do
+        apply_result(node, result)
+        DAG::FailurePropagation.propagate!(graph_id: graph.id)
+        graph.validate_leaf_invariant!
       end
+    rescue StandardError => error
+      if node
+        graph = node.graph
+        graph.with_graph_lock! do
+          apply_result(node, DAG::ExecutionResult.errored(error: "#{error.class}: #{error.message}"))
+          DAG::FailurePropagation.propagate!(graph_id: graph.id)
+          graph.validate_leaf_invariant!
+        end
+      end
+    ensure
+      DAG::TickGraphJob.perform_later(node.graph_id) if node
     end
 
     private
@@ -65,7 +59,7 @@ module DAG
           end
 
         if transitioned
-          node.conversation.record_event!(
+          node.graph.record_event!(
             event_type: "node_state_changed",
             subject: node,
             particulars: { "from" => from_state, "to" => node.state }

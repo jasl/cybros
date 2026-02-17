@@ -18,7 +18,8 @@ class DAG::RunnerTest < ActiveSupport::TestCase
 
   test "runner treats skipped execution results as errors for running nodes" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
 
     registry = DAG::ExecutorRegistry.new
     registry.register(DAG::Node::TASK, SkipExecutor.new)
@@ -30,7 +31,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::ERRORED, node.reload.state
     assert_includes node.metadata.fetch("error"), "skipped_for_running_node"
-    assert_enqueued_with(job: DAG::TickConversationJob, args: [conversation.id])
+    assert_enqueued_with(job: DAG::TickGraphJob, args: [graph.id])
   ensure
     DAG.executor_registry = original_registry
   end

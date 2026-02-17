@@ -2,9 +2,10 @@ module DAG
   class NodePayload < ApplicationRecord
     self.table_name = "dag_node_payloads"
 
-    has_one :dag_node,
-      class_name: "DAG::Node",
-      inverse_of: :payload
+    has_one :node,
+            class_name: "DAG::Node",
+            inverse_of: :payload,
+            foreign_key: :payload_id
 
     PREVIEW_MAX_CHARS = 200
 

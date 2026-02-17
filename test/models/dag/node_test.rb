@@ -3,36 +3,39 @@ require "test_helper"
 class DAG::NodeTest < ActiveSupport::TestCase
   test "creates the correct payload STI class for each node_type by default" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    user = conversation.dag_nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of DAG::NodePayloads::UserMessage, user.payload
+    user = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    assert_instance_of Messages::UserMessage, user.payload
 
-    agent = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of DAG::NodePayloads::AgentMessage, agent.payload
+    agent = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    assert_instance_of Messages::AgentMessage, agent.payload
 
-    task = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of DAG::NodePayloads::ToolCall, task.payload
+    task = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    assert_instance_of Messages::ToolCall, task.payload
 
-    summary = conversation.dag_nodes.create!(node_type: DAG::Node::SUMMARY, state: DAG::Node::FINISHED, metadata: {})
-    assert_instance_of DAG::NodePayloads::Summary, summary.payload
+    summary = graph.nodes.create!(node_type: DAG::Node::SUMMARY, state: DAG::Node::FINISHED, metadata: {})
+    assert_instance_of Messages::Summary, summary.payload
   end
 
   test "is invalid when payload STI does not match node_type" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    node = conversation.dag_nodes.new(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    node.payload = DAG::NodePayloads::AgentMessage.new
+    node = graph.nodes.new(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node.payload = Messages::AgentMessage.new
 
     assert_not node.valid?
-    assert_match(/DAG::NodePayloads::ToolCall/, node.errors[:payload].join)
+    assert_match(/Messages::ToolCall/, node.errors[:payload].join)
   end
 
   test "retry! rejects attempts when downstream nodes are not pending" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    original = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    downstream = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    conversation.dag_edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
+    original = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
     error = assert_raises(ArgumentError) { original.retry! }
     assert_match(/downstream nodes are not pending/, error.message)
@@ -40,10 +43,11 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "edit! rejects attempts when downstream nodes are pending or running" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    original = conversation.dag_nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, payload_input: { "content" => "hi" }, metadata: {})
-    downstream = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
-    conversation.dag_edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
+    original = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, payload_input: { "content" => "hi" }, metadata: {})
+    downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
     error = assert_raises(ArgumentError) { original.edit!(new_input: { "content" => "hi2" }) }
     assert_match(/downstream nodes are pending or running/, error.message)
@@ -51,15 +55,16 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "regenerate! rejects attempts when agent_message is not a leaf" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    original = conversation.dag_nodes.create!(
+    original = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_output: { "content" => "hello" },
       metadata: {}
     )
-    downstream = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    conversation.dag_edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
+    downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
     error = assert_raises(ArgumentError) { original.regenerate! }
     assert_match(/leaf agent_message/, error.message)
@@ -67,12 +72,13 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "retry! creates a replacement attempt, rewires outgoing blocking edges, and archives the old node" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    original = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    downstream = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: original.id, edge_type: DAG::Edge::DEPENDENCY)
-    original_to_downstream = conversation.dag_edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    original = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    downstream = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: original.id, edge_type: DAG::Edge::DEPENDENCY)
+    original_to_downstream = graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
     retried = original.retry!
 
@@ -82,13 +88,13 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert original.reload.compressed_at.present?
     assert_equal retried.id, original.compressed_by_id
 
-    assert conversation.dag_edges.active.exists?(
+    assert graph.edges.active.exists?(
       from_node_id: parent.id,
       to_node_id: retried.id,
       edge_type: DAG::Edge::DEPENDENCY
     )
 
-    assert conversation.dag_edges.active.exists?(
+    assert graph.edges.active.exists?(
       from_node_id: retried.id,
       to_node_id: downstream.id,
       edge_type: DAG::Edge::SEQUENCE
@@ -96,7 +102,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert original_to_downstream.reload.compressed_at.present?
 
-    branch_edge = conversation.dag_edges.find_by!(
+    branch_edge = graph.edges.find_by!(
       from_node_id: original.id,
       to_node_id: retried.id,
       edge_type: DAG::Edge::BRANCH
@@ -107,8 +113,9 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "retry! copies payload_input and clears output" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    original = conversation.dag_nodes.create!(
+    original = graph.nodes.create!(
       node_type: DAG::Node::TASK,
       state: DAG::Node::ERRORED,
       payload_input: { "name" => "t", "arguments" => { "a" => 1 } },
@@ -126,8 +133,9 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "retry! clears state-specific metadata fields (error/reason) but preserves custom metadata" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    original = conversation.dag_nodes.create!(
+    original = graph.nodes.create!(
       node_type: DAG::Node::TASK,
       state: DAG::Node::ERRORED,
       payload_input: { "name" => "t" },
@@ -144,20 +152,21 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "regenerate! replaces a finished agent_message leaf" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    user = conversation.dag_nodes.create!(
+    user = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_input: { "content" => "hi" },
       metadata: {}
     )
-    original = conversation.dag_nodes.create!(
+    original = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_output: { "content" => "hello" },
       metadata: {}
     )
-    edge = conversation.dag_edges.create!(
+    edge = graph.edges.create!(
       from_node_id: user.id,
       to_node_id: original.id,
       edge_type: DAG::Edge::SEQUENCE
@@ -171,7 +180,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert original.reload.compressed_at.present?
     assert_equal regenerated.id, original.compressed_by_id
 
-    assert conversation.dag_edges.active.exists?(
+    assert graph.edges.active.exists?(
       from_node_id: user.id,
       to_node_id: regenerated.id,
       edge_type: DAG::Edge::SEQUENCE
@@ -181,30 +190,31 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "edit! archives downstream causal subgraph and creates a new mainline user_message" do
     conversation = Conversation.create!
+    graph = conversation.dag_graph
 
-    a = conversation.dag_nodes.create!(
+    a = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_input: { "content" => "hi" },
       metadata: {}
     )
-    b = conversation.dag_nodes.create!(
+    b = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_output: { "content" => "hello" },
       metadata: {}
     )
-    c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    d = conversation.dag_nodes.create!(
+    c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    d = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       payload_output: { "content" => "bye" },
       metadata: {}
     )
 
-    conversation.dag_edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
-    conversation.dag_edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
-    conversation.dag_edges.create!(from_node_id: c.id, to_node_id: d.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
+    graph.edges.create!(from_node_id: c.id, to_node_id: d.id, edge_type: DAG::Edge::SEQUENCE)
 
     edited = a.edit!(new_input: { "content" => "hi2" })
 
@@ -216,14 +226,14 @@ class DAG::NodeTest < ActiveSupport::TestCase
       assert_equal edited.id, node.compressed_by_id
     end
 
-    leaves = conversation.leaf_nodes.to_a
+    leaves = graph.leaf_nodes.to_a
     assert_equal 1, leaves.length
 
     leaf = leaves.first
     assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
     assert_equal DAG::Node::PENDING, leaf.state
 
-    assert conversation.dag_edges.active.exists?(
+    assert graph.edges.active.exists?(
       from_node_id: edited.id,
       to_node_id: leaf.id,
       edge_type: DAG::Edge::SEQUENCE
@@ -232,7 +242,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "mark_cancelled! works from running" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    node = conversation.dag_graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
 
     assert node.mark_cancelled!(reason: "cancelled by user")
     assert_equal DAG::Node::CANCELLED, node.state
@@ -241,7 +251,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "mark_cancelled! does not transition from pending" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = conversation.dag_graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
 
     assert_not node.mark_cancelled!(reason: "cannot cancel before running")
     assert_equal DAG::Node::PENDING, node.reload.state
@@ -249,7 +259,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "mark_skipped! works from pending" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = conversation.dag_graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
 
     assert node.mark_skipped!(reason: "no longer needed")
     assert_equal DAG::Node::SKIPPED, node.state
@@ -258,7 +268,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
   test "mark_skipped! does not transition from running" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    node = conversation.dag_graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
 
     assert_not node.mark_skipped!(reason: "cannot skip after running")
     assert_equal DAG::Node::RUNNING, node.reload.state

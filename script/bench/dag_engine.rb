@@ -14,6 +14,7 @@ puts "Rails.env=#{Rails.env}"
 
 measure("linear_1k_create") do
   conversation = Conversation.create!(title: "bench-linear")
+  graph = conversation.dag_graph
   previous = nil
 
     1000.times do |i|
@@ -24,7 +25,7 @@ measure("linear_1k_create") do
         else
           { payload_output: { "content" => "n#{i}" } }
         end
-      node = conversation.dag_nodes.create!(
+      node = graph.nodes.create!(
         node_type: node_type,
         state: DAG::Node::FINISHED,
         **payload_attributes,
@@ -32,7 +33,7 @@ measure("linear_1k_create") do
       )
 
     if previous
-      conversation.dag_edges.create!(from_node_id: previous.id, to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
+      graph.edges.create!(from_node_id: previous.id, to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
     end
 
     previous = node
@@ -41,8 +42,9 @@ end
 
 measure("fanout_context_for") do
   conversation = Conversation.create!(title: "bench-fanout")
+  graph = conversation.dag_graph
     tasks = 50.times.map do |i|
-      conversation.dag_nodes.create!(
+      graph.nodes.create!(
         node_type: DAG::Node::TASK,
         state: DAG::Node::FINISHED,
         payload_input: { "name" => "t#{i}" },
@@ -50,9 +52,9 @@ measure("fanout_context_for") do
       )
     end
 
-  join = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+  join = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
   tasks.each do |task|
-    conversation.dag_edges.create!(from_node_id: task.id, to_node_id: join.id, edge_type: DAG::Edge::DEPENDENCY)
+    graph.edges.create!(from_node_id: task.id, to_node_id: join.id, edge_type: DAG::Edge::DEPENDENCY)
   end
 
   conversation.context_for(join.id)
@@ -60,9 +62,10 @@ end
 
 measure("scheduler_claim_100") do
   conversation = Conversation.create!(title: "bench-claim")
+  graph = conversation.dag_graph
   100.times do
-    conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
   end
 
-  DAG::Scheduler.claim_executable_nodes(conversation_id: conversation.id, limit: 100)
+  DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 100)
 end
