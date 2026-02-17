@@ -6,10 +6,17 @@ module DAG
     end
 
     def create_node(node_type:, state:, content: nil, metadata: {})
+      runnable =
+        if node_type == DAG::Node::TASK
+          DAG::Runnables::Task.new(content: content)
+        else
+          DAG::Runnables::Text.new(content: content)
+        end
+
       node = @conversation.dag_nodes.create!(
         node_type: node_type,
         state: state,
-        content: content,
+        runnable: runnable,
         metadata: metadata
       )
 

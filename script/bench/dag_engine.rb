@@ -17,10 +17,11 @@ measure("linear_1k_create") do
   previous = nil
 
   1000.times do |i|
+    node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
     node = conversation.dag_nodes.create!(
-      node_type: (i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE),
+      node_type: node_type,
       state: DAG::Node::FINISHED,
-      content: "n#{i}",
+      runnable: DAG::Runnables::Text.new(content: "n#{i}"),
       metadata: {}
     )
 

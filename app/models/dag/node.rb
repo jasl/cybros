@@ -173,21 +173,12 @@ module DAG
       end
     end
 
-    def content
-      runnable.content
-    end
-
-    def content=(value)
-      ensure_runnable
-      runnable.content = value
-    end
-
     def as_context_hash
       {
         "node_id" => id,
         "node_type" => node_type,
         "state" => state,
-        "content" => content,
+        "content" => runnable.content,
         "metadata" => metadata,
       }
     end

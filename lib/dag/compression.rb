@@ -37,7 +37,7 @@ module DAG
           summary_node = @conversation.dag_nodes.create!(
             node_type: DAG::Node::SUMMARY,
             state: DAG::Node::FINISHED,
-            content: summary_content,
+            runnable: DAG::Runnables::Text.new(content: summary_content),
             metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
             finished_at: now
           )

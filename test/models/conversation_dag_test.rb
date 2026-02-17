@@ -91,8 +91,18 @@ class ConversationDAGTest < ActiveSupport::TestCase
   test "context_for substitutes summary nodes for compressed subgraphs" do
     conversation = Conversation.create!
 
-    a = conversation.dag_nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "hi", metadata: {})
-    b = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::FINISHED, content: "hello", metadata: {})
+    a = conversation.dag_nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      runnable: DAG::Runnables::Text.new(content: "hi"),
+      metadata: {}
+    )
+    b = conversation.dag_nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      runnable: DAG::Runnables::Text.new(content: "hello"),
+      metadata: {}
+    )
     c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
     d = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 

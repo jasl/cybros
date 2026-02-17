@@ -50,7 +50,7 @@ module DAG
           when DAG::Node::TASK
             node.metadata["task_name"] || node.metadata["name"] || node.metadata["kind"]
           else
-            node.content.to_s
+            node.runnable.content.to_s
           end.to_s.gsub(/\s+/, " ").strip
         end
 

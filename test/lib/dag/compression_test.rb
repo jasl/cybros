@@ -4,8 +4,18 @@ class DAG::CompressionTest < ActiveSupport::TestCase
   test "compress! marks nodes and edges compressed and rewires boundary edges through a summary node" do
     conversation = Conversation.create!
 
-    a = conversation.dag_nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "hi", metadata: {})
-    b = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::FINISHED, content: "hello", metadata: {})
+    a = conversation.dag_nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      runnable: DAG::Runnables::Text.new(content: "hi"),
+      metadata: {}
+    )
+    b = conversation.dag_nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      runnable: DAG::Runnables::Text.new(content: "hello"),
+      metadata: {}
+    )
     c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
     d = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 
@@ -21,7 +31,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::SUMMARY, summary.node_type
     assert_equal DAG::Node::FINISHED, summary.state
-    assert_equal "summary", summary.content
+    assert_equal "summary", summary.runnable.content
 
     [b.reload, c.reload].each do |node|
       assert node.compressed_at.present?
