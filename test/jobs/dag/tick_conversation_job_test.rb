@@ -10,6 +10,8 @@ class DAG::TickConversationJobTest < ActiveJob::TestCase
     Event.delete_all
     DAG::Edge.delete_all
     DAG::Node.delete_all
+    DAG::Runnables::Task.delete_all
+    DAG::Runnables::Text.delete_all
     Conversation.delete_all
   end
 
