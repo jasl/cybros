@@ -56,12 +56,9 @@ module DAG
 
         def edge_label(edge)
           if edge.edge_type == DAG::Edge::BRANCH
-            branch_kind = edge.metadata["branch_kind"]
             branch_kinds = edge.metadata["branch_kinds"]
 
-            if branch_kind.present?
-              "branch:#{branch_kind}"
-            elsif branch_kinds.is_a?(Array) && branch_kinds.any?
+            if branch_kinds.is_a?(Array) && branch_kinds.any?
               "branch:#{branch_kinds.join(",")}"
             else
               "branch"

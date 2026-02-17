@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
-  test "exports branch edges with branch_kind and branch_kinds" do
+  test "exports branch edges with branch_kinds" do
     conversation = Conversation.create!
 
     root = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
@@ -12,7 +12,7 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
       from_node_id: root.id,
       to_node_id: forked.id,
       edge_type: DAG::Edge::BRANCH,
-      metadata: { "branch_kind" => "fork" }
+      metadata: { "branch_kinds" => ["fork"] }
     )
     conversation.dag_edges.create!(
       from_node_id: root.id,
@@ -28,4 +28,3 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
     assert_includes mermaid, "branch:fork,retry"
   end
 end
-

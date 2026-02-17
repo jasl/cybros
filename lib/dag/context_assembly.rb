@@ -41,8 +41,7 @@ module DAG
                   OR (
                     e.edge_type = 'branch'
                     AND (
-                      (e.metadata->>'branch_kind') = 'fork'
-                      OR COALESCE((e.metadata->'branch_kinds') ? 'fork', FALSE)
+                      COALESCE((e.metadata->'branch_kinds') ? 'fork', FALSE)
                     )
                   )
                 )

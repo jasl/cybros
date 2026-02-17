@@ -1,0 +1,210 @@
+# Cybros Core：DAG 工作流引擎设计（里程碑 1）
+
+本文件描述当前 Rails 项目中 “动态 DAG 会话/工作流引擎” 的核心设计与实现约定（仅覆盖里程碑 1 的 scope）。
+
+## 目标与原则
+
+- **动态 DAG**：会话没有固定终点；节点会随着用户对话与 Agent 执行动态新增，但图在任意时刻都必须保持合法。
+- **可观测与可审计**：节点/边与事件记录用于可视化、监控、审计与回放。
+- **并发可调度**：基于拓扑依赖判定 runnable；多 worker 可并发 claim，避免重复执行。
+- **非破坏压缩**：压缩用于节约上下文，原始节点/边不删除，只标记为 `compressed_at`（审计保留）。
+
+## PostgreSQL 约束
+
+- 依赖 PostgreSQL 18 提供的 `uuidv7()` 作为主键默认值（见 `db/schema.rb`）。
+- 所有核心表主键为 `uuid`，并用 `uuidv7()` 生成以获得更好的插入局部性与时间有序性。
+
+## 领域模型与存储
+
+### 聚合根：`Conversation`
+
+- 模型：`app/models/conversation.rb`
+- 责任：
+  - 图变更的事务边界（`mutate!`）
+  - 图级别锁（`with_graph_lock`：当前实现为行锁）
+  - 叶子不变量自修复（`validate_leaf_invariant!`）
+  - 触发调度推进（`kick!` → `DAG::TickConversationJob`）
+
+### 节点：`DAG::Node`
+
+- 模型：`app/models/dag/node.rb`
+- 表：`dag_nodes`
+- 关键字段：
+  - `node_type`：`user_message | agent_message | task | summary`
+  - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
+  - `metadata`：JSONB
+  - `retry_of_id`：重试 lineage
+  - `compressed_at / compressed_by_id`：压缩标记
+  - `started_at / finished_at`：执行时间戳
+
+#### Runnable 负载（替代 `dag_nodes.content` 列）
+
+为控制 `dag_nodes` 行宽，节点内容/负载从 `dag_nodes` 拆出为 polymorphic：
+
+- 关联：`DAG::Node belongs_to :runnable, polymorphic: true`
+- 实体：
+  - `DAG::Runnables::Text`（表：`dag_runnables_texts`，字段：`content:text`）
+  - `DAG::Runnables::Task`（表：`dag_runnables_tasks`，字段：`content:text`）
+- 读取批量节点时应使用 `preload(:runnable)` 避免 N+1（例如 Context/Mermaid 导出）。
+
+> 约定：`task` 默认使用 `DAG::Runnables::Task`，其余类型默认使用 `DAG::Runnables::Text`。
+
+#### 状态语义（skipped/cancelled 明确化）
+
+- `pending`：已创建但未执行
+- `running`：已被 claim，正在执行
+- `finished`：成功完成（依赖满足仅认 `finished`）
+- `errored`：执行失败
+- `rejected`：需要授权但被用户拒绝
+- `skipped`：**仅允许**从 `pending` 迁移，表示任务未开始且不再需要
+- `cancelled`：**仅允许**从 `running` 迁移，表示正在执行的任务被取消
+
+### 边：`DAG::Edge`
+
+- 模型：`app/models/dag/edge.rb`
+- 表：`dag_edges`
+- `edge_type`：
+  - `sequence`（阻塞性）
+  - `dependency`（阻塞性）
+  - `branch`（非阻塞 lineage）
+
+#### Branch metadata 约定
+
+`branch` 边使用 `metadata["branch_kinds"]`（数组）表达 lineage（例如 `["fork"]`、`["retry"]`）。在压缩边界去重合并时，`branch_kinds` 可能包含多个值（并集）。
+
+### 事件：`Event`
+
+- 模型：`app/models/event.rb`
+- 表：`events`
+- 作用：记录关键动作（创建节点/边、状态变化、压缩等），用于审计、监控与 UI 时间线。
+
+## 图不变量（Invariants）
+
+### 1) 无环（Acyclic）
+
+- 边创建时检查是否引入环：
+  - 对 `Conversation` 行加锁（序列化并发建边）
+  - 通过 recursive CTE 判断 `to_node` 是否可达 `from_node`
+- 实现在：`app/models/dag/edge.rb`
+
+### 2) 叶子不变量（Leaf invariant）
+
+定义 leaf：没有任何未压缩 outgoing edge 的节点（`Conversation#leaf_nodes`）。
+
+规则：每个 leaf 必须满足其一：
+
+- `node_type == agent_message`
+- 或者 `state in {pending, running}`（允许执行中的中间态）
+
+修复策略：若 mutation 后 leaf 为终态且不是 `agent_message`，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `Conversation#validate_leaf_invariant!`）。
+
+## 调度与执行
+
+### Scheduler：claim runnable
+
+- 入口：`DAG::Scheduler.claim_runnable_nodes`
+- 实现：`lib/dag/scheduler.rb`
+- runnable 判定：
+  - `dag_nodes.state = pending`
+  - `node_type in (task, agent_message)`
+  - 所有 incoming 的 `sequence/dependency` 父节点均 `state=finished`
+- 并发语义：
+  - `SELECT ... FOR UPDATE SKIP LOCKED`
+  - 原子更新为 `running` 并设置 `started_at`
+
+### Runner：执行与落库
+
+- 实现：`lib/dag/runner.rb`
+- 幂等：
+  - 非 `running` 节点直接 no-op
+  - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
+- 执行流程：
+  1. 组装上下文 `conversation.context_for(node)`
+  2. `DAG.executor_registry.execute(node:, context:)`
+  3. 按结果落库为终态并记录事件
+  4. 执行后触发下一轮 tick
+
+> 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。
+
+### Jobs：推进图执行（Solid Queue / ActiveJob）
+
+- `DAG::TickConversationJob`
+  - 对同一 conversation 做 tick 去重（advisory lock try-lock）
+  - claim runnable nodes → enqueue `DAG::ExecuteNodeJob`
+- `DAG::ExecuteNodeJob`
+  - 调用 Runner 执行单节点
+  - finally 再 enqueue tick 以推进后继
+
+相关代码：
+- `app/jobs/dag/tick_conversation_job.rb`
+- `app/jobs/dag/execute_node_job.rb`
+- `lib/dag/advisory_lock.rb`
+
+## 上下文组装（Context Assembly）
+
+入口：`Conversation#context_for(target_node_id)`
+
+实现：`lib/dag/context_assembly.rb`
+
+步骤：
+
+1. recursive CTE 收集祖先闭包（只走未压缩边）：
+   - 必选：`sequence/dependency`
+   - `branch`：仅包含 `branch_kinds` 含 `fork` 的 lineage（默认不纳入 retry lineage）
+2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
+3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
+4. 输出结构：`[{node_id, node_type, state, content, metadata}]`
+
+> 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
+
+## 子图压缩（Manual）
+
+入口：`Conversation#compress!`
+
+实现：`lib/dag/compression.rb`
+
+约束（事务内校验）：
+
+- 所选节点必须同一 conversation、且均 `finished`
+- 节点/相关边必须尚未压缩
+- summary **不得成为 leaf**（必须存在至少一条 outgoing 边到外部）
+
+操作：
+
+1. 创建 summary 节点（`node_type=summary,state=finished`），`metadata["replaces_node_ids"]`
+2. 标记 inside 节点 `compressed_at/compressed_by_id`；标记 inside 相关边 `compressed_at`
+3. 识别边界边并重连：
+   - outside → summary（复制 edge_type/metadata）
+   - summary → outside（复制 edge_type/metadata）
+4. **边界去重合并**：若多个边界边重连后会坍缩为同一条边（触发 `dag_edges` 唯一索引冲突），会合并为一条，并在 `metadata["replaces_edge_ids"]` 记录被合并的边集合。
+
+## 可视化（Mermaid）
+
+入口：`Conversation#to_mermaid`
+
+实现：`lib/dag/visualization/mermaid_exporter.rb`
+
+- 输出：`flowchart TD`
+- 节点 label：`{type}:{state} {snippet}`
+- `branch` 边 label：`branch:{branch_kinds.join(",")}`
+
+## Bench（非 CI gate）
+
+脚本：`script/bench/dag_engine.rb`
+
+目前覆盖：
+
+- 线性 1k 节点创建
+- fan-out + join 的 context_for
+- scheduler claim 100
+
+运行：
+
+```bash
+bin/rails runner script/bench/dag_engine.rb
+```
+
+## 当前已知限制（里程碑 1 范围内）
+
+- executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
+- branch lineage 的语义目前用于 context 与可视化；更复杂的分支合并/回放策略留到后续里程碑讨论

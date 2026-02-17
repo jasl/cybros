@@ -25,7 +25,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
       to_node_id: retried.id,
       edge_type: DAG::Edge::BRANCH
     )
-    assert_equal "retry", branch_edge.metadata["branch_kind"]
+    assert_equal ["retry"], branch_edge.metadata["branch_kinds"]
   end
 
   test "mark_cancelled! works from running" do

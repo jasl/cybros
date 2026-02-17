@@ -69,7 +69,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
       from_node_id: root.id,
       to_node_id: forked.id,
       edge_type: DAG::Edge::BRANCH,
-      metadata: { "branch_kind" => "fork" }
+      metadata: { "branch_kinds" => ["fork"] }
     )
 
     context = conversation.context_for(forked.id)

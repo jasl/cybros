@@ -92,10 +92,7 @@ module DAG
         replaces_edge_ids = edges.map(&:id).map(&:to_s).sort
 
         common = edges.first.metadata.dup
-        common.delete("replaces_edge_id")
         common.delete("replaces_edge_ids")
-        common.delete("replaces_edge_id_by_kind")
-        common.delete("replaces_edge_ids_by_kind")
 
         common.keys.each do |key|
           value = common.fetch(key)
@@ -103,14 +100,12 @@ module DAG
         end
 
         if edges.first.edge_type == DAG::Edge::BRANCH
-          kinds = edges.map { |edge| edge.metadata["branch_kind"] }.compact.uniq.sort
-          if kinds.length == 1
-            common["branch_kind"] = kinds.first
-            common.delete("branch_kinds")
-          elsif kinds.any?
-            common.delete("branch_kind")
-            common["branch_kinds"] = kinds
-          end
+          kinds = edges.flat_map do |edge|
+            edge.metadata["branch_kinds"] || []
+          end.compact.uniq.sort
+
+          common.delete("branch_kind")
+          common["branch_kinds"] = kinds if kinds.any?
         end
 
         common["replaces_edge_ids"] = replaces_edge_ids

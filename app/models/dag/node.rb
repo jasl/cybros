@@ -159,13 +159,13 @@ module DAG
             from_node_id: id,
             to_node_id: new_node.id,
             edge_type: DAG::Edge::BRANCH,
-            metadata: { "branch_kind" => branch_kind }
+            metadata: { "branch_kinds" => [branch_kind] }
           )
 
           conversation.record_event!(
             event_type: "node_retried",
             subject: new_node,
-            particulars: { "retry_of_id" => id, "branch_kind" => branch_kind }
+            particulars: { "retry_of_id" => id, "branch_kinds" => [branch_kind] }
           )
 
           new_node
