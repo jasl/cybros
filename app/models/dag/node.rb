@@ -24,8 +24,8 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
-    belongs_to :payload,
-               class_name: "DAG::NodePayload",
+    belongs_to :body,
+               class_name: "DAG::NodeBody",
                autosave: true,
                dependent: :destroy,
                inverse_of: :node
@@ -45,11 +45,11 @@ module DAG
 
     validates :node_type, inclusion: { in: NODE_TYPES }
     validates :state, inclusion: { in: STATES }
-    validate :payload_type_matches_node_type
+    validate :body_type_matches_node_type
 
     scope :active, -> { where(compressed_at: nil) }
 
-    before_validation :ensure_payload
+    before_validation :ensure_body
 
     def pending?
       state == PENDING
@@ -71,10 +71,6 @@ module DAG
       EXECUTABLE_NODE_TYPES.include?(node_type)
     end
 
-    def retriable?
-      node_type == TASK || node_type == AGENT_MESSAGE
-    end
-
     def mark_running!
       transition_to!(RUNNING, from_states: [PENDING], started_at: Time.current)
     end
@@ -89,11 +85,11 @@ module DAG
 
       if transitioned
         if payload.is_a?(Hash)
-          self.payload.merge_output!(payload)
-          self.payload.save!
+          body.merge_output!(payload)
+          body.save!
         elsif !content.nil?
-          self.payload.apply_finished_content!(content)
-          self.payload.save!
+          body.apply_finished_content!(content)
+          body.save!
         end
       end
 
@@ -168,7 +164,7 @@ module DAG
       new_node
     end
 
-    def fork!(node_type:, state:, payload_input: {}, payload_output: {}, metadata: {})
+    def fork!(node_type:, state:, body_input: {}, body_output: {}, metadata: {})
       new_node = nil
 
       graph.mutate! do |m|
@@ -176,8 +172,8 @@ module DAG
           from_node: self,
           node_type: node_type,
           state: state,
-          payload_input: payload_input,
-          payload_output: payload_output,
+          body_input: body_input,
+          body_output: body_output,
           metadata: metadata
         )
       end
@@ -185,47 +181,47 @@ module DAG
       new_node
     end
 
-    def payload_input
-      payload.input.is_a?(Hash) ? payload.input : {}
+    def body_input
+      body.input.is_a?(Hash) ? body.input : {}
     end
 
-    def payload_input=(hash)
-      ensure_payload
-      payload.input = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+    def body_input=(hash)
+      ensure_body
+      body.input = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
     end
 
-    def payload_output
-      payload.output.is_a?(Hash) ? payload.output : {}
+    def body_output
+      body.output.is_a?(Hash) ? body.output : {}
     end
 
-    def payload_output=(hash)
-      ensure_payload
-      payload.output = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+    def body_output=(hash)
+      ensure_body
+      body.output = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
     end
 
-    def payload_output_preview
-      payload.output_preview.is_a?(Hash) ? payload.output_preview : {}
+    def body_output_preview
+      body.output_preview.is_a?(Hash) ? body.output_preview : {}
     end
 
     private
 
-      def ensure_payload
-        return if payload.present?
+      def ensure_body
+        return if body.present?
         return if node_type.blank?
 
-        self.payload = payload_class_for_node_type.new
+        self.body = body_class_for_node_type.new
       end
 
-      def payload_type_matches_node_type
-        return if node_type.blank? || payload.blank?
+      def body_type_matches_node_type
+        return if node_type.blank? || body.blank?
 
-        expected_payload_class = payload_class_for_node_type
-        return if payload.is_a?(expected_payload_class)
+        expected_body_class = body_class_for_node_type
+        return if body.is_a?(expected_body_class)
 
-        errors.add(:payload, "must be a #{expected_payload_class.name} for node_type=#{node_type}")
+        errors.add(:body, "must be a #{expected_body_class.name} for node_type=#{node_type}")
       end
 
-      def payload_class_for_node_type
+      def body_class_for_node_type
         case node_type
         when USER_MESSAGE
           ::Messages::UserMessage
@@ -236,7 +232,7 @@ module DAG
         when SUMMARY
           ::Messages::Summary
         else
-          DAG::NodePayload
+          DAG::NodeBody
         end
       end
 

@@ -81,9 +81,11 @@
 - `task`
 - `agent_message`
 
-### 2.5 NodePayload（STI + JSONB I/O）
+### 2.5 NodeBody（STI + JSONB I/O）
 
-所有“业务重字段”放入 `dag_node_payloads`，通过 `dag_nodes.payload_id` 一对一关联。
+所有“业务重字段”放入 `dag_node_bodies`，通过 `dag_nodes.body_id` 一对一关联。
+
+> 说明：对外（Context 输出）仍使用字段名 `payload` 来表示该 I/O 对象；在存储层它由 `NodeBody` 承载，对应列为 `input/output/output_preview`。
 
 Payload 的列级约定：
 
@@ -91,7 +93,7 @@ Payload 的列级约定：
 - `output`：输出侧（LLM 回复、tool result 等，可能很大）
 - `output_preview`：输出预览（由 output 派生的小片段，默认用于 Context/Mermaid）
 
-#### 2.5.1 node_type ↔ payload STI 的强一致性
+#### 2.5.1 node_type ↔ body STI 的强一致性
 
 Active 视图内必须保持以下映射一致（不允许 drift）：
 
@@ -309,7 +311,7 @@ Active 版本确定规则：
 
 前置条件：
 
-- `old.node_type in {task, agent_message}`（仅可执行节点可 retry）
+- `old.body.retriable? == true`（当前：`task`/`agent_message`）
 - `old.state in {errored, rejected, cancelled}`
 - `old` 为 Active
 - old 的 **Active causal descendants（不含 old）必须全部为 pending**  
@@ -321,7 +323,7 @@ Active 版本确定规则：
   - `state = pending`
   - `retry_of_id = old.id`
   - `metadata["attempt"]` 自增（若缺省则从 1 起）
-  - `payload.input` 复制自 `old.payload.input_for_retry`
+- `payload.input` 复制自 `old.body.input_for_retry`
 - outgoing：
   - old 的 **outgoing blocking edges** 会被 new 接管（重新创建为 `new → child`）
   - old 的 incident edges 会被归档（从 Active 图移除）
@@ -332,15 +334,15 @@ Active 版本确定规则：
 
 前置条件：
 
-- `old.node_type == agent_message`
+- `old.body.regeneratable? == true`（当前：`agent_message`）
 - `old.state == finished`
-- `old` 为 **leaf agent_message**（无 outgoing blocking edges）
+- `old` 为 **leaf**（无 outgoing blocking edges）
 
 行为差异点：
 
 - new 节点：
   - `state = pending`
-  - `payload.input` 复制自 `old.payload.input_for_retry`
+- `payload.input` 复制自 `old.body.input_for_retry`
 - 不接管 outgoing（因为 leaf）
 - old 归档
 
@@ -350,7 +352,7 @@ Active 版本确定规则：
 
 前置条件（2A 稳定性）：
 
-- `old.node_type == user_message`
+- `old.body.editable? == true`（当前：`user_message`）
 - `old.state == finished`
 - old 的 Active causal descendants（不含 old）中 **不得存在 pending/running**
   - 允许存在已完成的下游（将被归档）
@@ -360,7 +362,7 @@ Active 版本确定规则：
 - new 节点：
   - `state = finished`（用户输入立即生效）
   - `finished_at = now`
-  - `payload.input = old.payload.input_for_retry deep_merge new_input`
+- `payload.input = old.body.input_for_retry deep_merge new_input`
 - 归档范围：
   - 归档 old **以及其 entire Active causal descendant closure**（包含 old 自身）
 - 不接管 outgoing（下游将由 leaf invariant 重新长出新的 `agent_message(pending)`）
@@ -390,5 +392,5 @@ Active 版本确定规则：
 ### 8.3 summary payload 约定
 
 - summary 的文本内容写入：
-  - `payload.output["content"] = summary_content`
+- `body.output["content"] = summary_content`
   - 同步 `output_preview`（截断规则同第 4.4）

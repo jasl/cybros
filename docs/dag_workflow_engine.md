@@ -39,20 +39,20 @@
   - `compressed_at / compressed_by_id`：压缩标记
   - `started_at / finished_at`：执行时间戳
 
-#### NodePayload 扩展表（STI + JSONB）
+#### NodeBody 扩展表（STI + JSONB）
 
 为控制 `dag_nodes` 行宽并统一存储“业务重字段”，节点负载从 `dag_nodes` 拆出到扩展表：
 
-- 关联：`DAG::Node belongs_to :payload, class_name: "DAG::NodePayload"`
-- 表：`dag_node_payloads`
+- 关联：`DAG::Node belongs_to :body, class_name: "DAG::NodeBody"`
+- 表：`dag_node_bodies`
   - `type`：Rails STI（按负载类型拆分）
   - `input`：JSONB（输入侧：用户消息、tool call 参数等）
   - `output`：JSONB（输出侧：LLM 回复、tool result 等，可能很大）
   - `output_preview`：JSONB（输出预览：从 `output` 派生的小片段，用于 Context/Mermaid）
 
-> 设计目标：调度器只依赖 `dag_nodes` 的引擎层字段；业务重字段统一落在 payload，并通过 preview 控制上下文体积。
+> 设计目标：调度器只依赖 `dag_nodes` 的引擎层字段；业务重字段统一落在 body（Context 输出字段名仍为 `payload`），并通过 preview 控制上下文体积。
 
-默认映射（`DAG::Node#ensure_payload`）：
+默认映射（`DAG::Node#ensure_body`）：
 
 - `user_message` → `Messages::UserMessage`
 - `agent_message` → `Messages::AgentMessage`

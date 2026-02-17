@@ -8,15 +8,15 @@ class ConversationContextTest < ActiveSupport::TestCase
     user = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_input: { "content" => "hi" },
+      body_input: { "content" => "hi" },
       metadata: {}
     )
 
-    long_content = "a" * (DAG::NodePayload::PREVIEW_MAX_CHARS + 50)
+    long_content = "a" * (DAG::NodeBody::PREVIEW_MAX_CHARS + 50)
     agent = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => long_content },
+      body_output: { "content" => long_content },
       metadata: {}
     )
 
@@ -26,7 +26,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     agent_preview = preview.find { |node| node.fetch("node_id") == agent.id }
 
     assert_equal({ "content" => "hi" }, preview.find { |node| node.fetch("node_id") == user.id }.dig("payload", "input"))
-    assert agent_preview.dig("payload", "output_preview", "content").length <= DAG::NodePayload::PREVIEW_MAX_CHARS
+    assert agent_preview.dig("payload", "output_preview", "content").length <= DAG::NodeBody::PREVIEW_MAX_CHARS
     assert_not agent_preview.fetch("payload").key?("output")
 
     full = conversation.context_for_full(agent.id)

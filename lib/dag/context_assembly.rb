@@ -7,7 +7,7 @@ module DAG
     def call(target_node_id, mode: :preview)
       node_ids = ancestor_node_ids_for(target_node_id)
       nodes = load_nodes(node_ids)
-      payloads = load_payloads(nodes: nodes, mode: mode)
+      bodies = load_bodies(nodes: nodes, mode: mode)
 
       edges = @graph.edges.active.where(
         edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,
@@ -20,8 +20,8 @@ module DAG
       ordered_ids = DAG::TopologicalSort.call(node_ids: nodes.keys, edges: edges)
       ordered_ids.map do |node_id|
         node = nodes.fetch(node_id)
-        payload = payloads[node.payload_id]
-        context_hash_for(node, payload, mode: mode)
+        body = bodies[node.body_id]
+        context_hash_for(node, body, mode: mode)
       end
     end
 
@@ -53,32 +53,32 @@ module DAG
       def load_nodes(node_ids)
         @graph.nodes
           .where(id: node_ids, compressed_at: nil)
-          .select(:id, :node_type, :state, :metadata, :payload_id)
+          .select(:id, :node_type, :state, :metadata, :body_id)
           .index_by(&:id)
       end
 
-      def load_payloads(nodes:, mode:)
-        payload_ids = nodes.values.map(&:payload_id).compact.uniq
+      def load_bodies(nodes:, mode:)
+        body_ids = nodes.values.map(&:body_id).compact.uniq
 
-        payload_scope = DAG::NodePayload.where(id: payload_ids)
-        payload_scope =
+        body_scope = DAG::NodeBody.where(id: body_ids)
+        body_scope =
           if mode.to_sym == :full
-            payload_scope.select(:id, :type, :input, :output, :output_preview)
+            body_scope.select(:id, :type, :input, :output, :output_preview)
           else
-            payload_scope.select(:id, :type, :input, :output_preview)
+            body_scope.select(:id, :type, :input, :output_preview)
           end
 
-        payload_scope.index_by(&:id)
+        body_scope.index_by(&:id)
       end
 
-      def context_hash_for(node, payload, mode:)
+      def context_hash_for(node, body, mode:)
         payload_hash = {
-          "input" => payload&.input.is_a?(Hash) ? payload.input : {},
-          "output_preview" => payload&.output_preview.is_a?(Hash) ? payload.output_preview : {},
+          "input" => body&.input.is_a?(Hash) ? body.input : {},
+          "output_preview" => body&.output_preview.is_a?(Hash) ? body.output_preview : {},
         }
 
         if mode.to_sym == :full
-          payload_hash["output"] = payload&.output.is_a?(Hash) ? payload.output : {}
+          payload_hash["output"] = body&.output.is_a?(Hash) ? body.output : {}
         end
 
         {

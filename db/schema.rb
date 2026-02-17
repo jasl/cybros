@@ -78,7 +78,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.index ["attachable_type", "attachable_id"], name: "index_dag_graphs_on_attachable", unique: true
   end
 
-  create_table "dag_node_payloads", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+  create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
     t.jsonb "input", default: {}, null: false
     t.jsonb "output", default: {}, null: false
@@ -88,6 +88,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   end
 
   create_table "dag_nodes", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "body_id", null: false
     t.datetime "compressed_at"
     t.uuid "compressed_by_id"
     t.datetime "created_at", null: false
@@ -95,18 +96,17 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.uuid "graph_id", null: false
     t.jsonb "metadata", default: {}, null: false
     t.string "node_type", null: false
-    t.uuid "payload_id", null: false
     t.uuid "retry_of_id"
     t.datetime "started_at"
     t.string "state", null: false
     t.datetime "updated_at", null: false
+    t.index ["body_id"], name: "index_dag_nodes_on_body_id", unique: true
     t.index ["compressed_by_id"], name: "index_dag_nodes_on_compressed_by_id"
     t.index ["graph_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
     t.index ["graph_id", "created_at"], name: "index_dag_nodes_created_at"
     t.index ["graph_id", "retry_of_id"], name: "index_dag_nodes_retry_of"
     t.index ["graph_id", "state", "node_type"], name: "index_dag_nodes_lookup"
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
-    t.index ["payload_id"], name: "index_dag_nodes_on_payload_id", unique: true
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
   end
 
@@ -129,7 +129,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   add_foreign_key "dag_edges", "dag_nodes", column: "from_node_id"
   add_foreign_key "dag_edges", "dag_nodes", column: "to_node_id"
   add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"
-  add_foreign_key "dag_nodes", "dag_node_payloads", column: "payload_id"
+  add_foreign_key "dag_nodes", "dag_node_bodies", column: "body_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "compressed_by_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "retry_of_id"
   add_foreign_key "events", "conversations"

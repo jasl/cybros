@@ -149,14 +149,14 @@ module DAG
             DELETE FROM dag_edges WHERE graph_id = #{graph_id_quoted}
           SQL
 
-          connection.delete(<<~SQL.squish, "purge_dag_nodes_and_payloads")
+          connection.delete(<<~SQL.squish, "purge_dag_nodes_and_bodies")
             WITH deleted_nodes AS (
               DELETE FROM dag_nodes WHERE graph_id = #{graph_id_quoted}
-              RETURNING payload_id
+              RETURNING body_id
             )
-            DELETE FROM dag_node_payloads
+            DELETE FROM dag_node_bodies
             USING deleted_nodes
-            WHERE dag_node_payloads.id = deleted_nodes.payload_id
+            WHERE dag_node_bodies.id = deleted_nodes.body_id
           SQL
         end
       end

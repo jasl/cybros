@@ -1,19 +1,19 @@
 require "test_helper"
 
-class DAG::NodePayloadTest < ActiveSupport::TestCase
+class DAG::NodeBodyTest < ActiveSupport::TestCase
   test "tool_call output_preview truncates long string results" do
-    long_result = "a" * (DAG::NodePayload::PREVIEW_MAX_CHARS + 50)
+    long_result = "a" * (DAG::NodeBody::PREVIEW_MAX_CHARS + 50)
     payload = Messages::ToolCall.create!(output: { "result" => long_result })
 
     assert payload.output_preview["result"].is_a?(String)
-    assert_operator payload.output_preview["result"].length, :<=, DAG::NodePayload::PREVIEW_MAX_CHARS
+    assert_operator payload.output_preview["result"].length, :<=, DAG::NodeBody::PREVIEW_MAX_CHARS
   end
 
   test "tool_call output_preview serializes non-string results" do
     payload = Messages::ToolCall.create!(output: { "result" => { "a" => "b" * 500 } })
 
     assert payload.output_preview["result"].is_a?(String)
-    assert_operator payload.output_preview["result"].length, :<=, DAG::NodePayload::PREVIEW_MAX_CHARS
+    assert_operator payload.output_preview["result"].length, :<=, DAG::NodeBody::PREVIEW_MAX_CHARS
     assert_includes payload.output_preview["result"], "\"a\""
   end
 

@@ -1,32 +1,32 @@
 require "test_helper"
 
 class DAG::NodeTest < ActiveSupport::TestCase
-  test "creates the correct payload STI class for each node_type by default" do
+  test "creates the correct body STI class for each node_type by default" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of Messages::UserMessage, user.payload
+    assert_instance_of Messages::UserMessage, user.body
 
     agent = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of Messages::AgentMessage, agent.payload
+    assert_instance_of Messages::AgentMessage, agent.body
 
     task = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of Messages::ToolCall, task.payload
+    assert_instance_of Messages::ToolCall, task.body
 
     summary = graph.nodes.create!(node_type: DAG::Node::SUMMARY, state: DAG::Node::FINISHED, metadata: {})
-    assert_instance_of Messages::Summary, summary.payload
+    assert_instance_of Messages::Summary, summary.body
   end
 
-  test "is invalid when payload STI does not match node_type" do
+  test "is invalid when body STI does not match node_type" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
     node = graph.nodes.new(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    node.payload = Messages::AgentMessage.new
+    node.body = Messages::AgentMessage.new
 
     assert_not node.valid?
-    assert_match(/Messages::ToolCall/, node.errors[:payload].join)
+    assert_match(/Messages::ToolCall/, node.errors[:body].join)
   end
 
   test "retry! rejects attempts when downstream nodes are not pending" do
@@ -48,7 +48,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     original = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::ERRORED,
-      payload_input: { "content" => "hi" },
+      body_input: { "content" => "hi" },
       metadata: {}
     )
 
@@ -60,7 +60,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    original = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, payload_input: { "content" => "hi" }, metadata: {})
+    original = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
     downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
@@ -75,7 +75,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     original = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => "hello" },
+      body_output: { "content" => "hello" },
       metadata: {}
     )
     downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
@@ -126,24 +126,24 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert branch_edge.compressed_at.present?
   end
 
-  test "retry! copies payload_input and clears output" do
+  test "retry! copies body_input and clears output" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(
       node_type: DAG::Node::TASK,
       state: DAG::Node::ERRORED,
-      payload_input: { "name" => "t", "arguments" => { "a" => 1 } },
-      payload_output: { "result" => "old" },
+      body_input: { "name" => "t", "arguments" => { "a" => 1 } },
+      body_output: { "result" => "old" },
       metadata: {}
     )
 
     retried = original.retry!
 
     assert_equal DAG::Node::PENDING, retried.state
-    assert_equal "t", retried.payload_input["name"]
-    assert_equal({ "a" => 1 }, retried.payload_input["arguments"])
-    assert_equal({}, retried.payload_output)
+    assert_equal "t", retried.body_input["name"]
+    assert_equal({ "a" => 1 }, retried.body_input["arguments"])
+    assert_equal({}, retried.body_output)
   end
 
   test "retry! clears state-specific metadata fields (error/reason) but preserves custom metadata" do
@@ -153,7 +153,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     original = graph.nodes.create!(
       node_type: DAG::Node::TASK,
       state: DAG::Node::ERRORED,
-      payload_input: { "name" => "t" },
+      body_input: { "name" => "t" },
       metadata: { "error" => "boom", "reason" => "nope", "attempt" => 3, "custom" => "x" }
     )
 
@@ -172,13 +172,13 @@ class DAG::NodeTest < ActiveSupport::TestCase
     user = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_input: { "content" => "hi" },
+      body_input: { "content" => "hi" },
       metadata: {}
     )
     original = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => "hello" },
+      body_output: { "content" => "hello" },
       metadata: {}
     )
     edge = graph.edges.create!(
@@ -210,20 +210,20 @@ class DAG::NodeTest < ActiveSupport::TestCase
     a = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_input: { "content" => "hi" },
+      body_input: { "content" => "hi" },
       metadata: {}
     )
     b = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => "hello" },
+      body_output: { "content" => "hello" },
       metadata: {}
     )
     c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
     d = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => "bye" },
+      body_output: { "content" => "bye" },
       metadata: {}
     )
 
@@ -234,7 +234,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     edited = a.edit!(new_input: { "content" => "hi2" })
 
     assert_equal DAG::Node::FINISHED, edited.state
-    assert_equal "hi2", edited.payload_input["content"]
+    assert_equal "hi2", edited.body_input["content"]
 
     [a, b, c, d].each do |node|
       assert node.reload.compressed_at.present?

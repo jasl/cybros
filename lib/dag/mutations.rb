@@ -5,18 +5,18 @@ module DAG
       @executable_pending_nodes_created = false
     end
 
-    def create_node(node_type:, state:, content: nil, metadata: {}, payload_input: {}, payload_output: {}, **attributes)
-      payload_input = normalize_hash(payload_input)
-      payload_output = normalize_hash(payload_output)
+    def create_node(node_type:, state:, content: nil, metadata: {}, body_input: {}, body_output: {}, **attributes)
+      body_input = normalize_hash(body_input)
+      body_output = normalize_hash(body_output)
 
       if !content.nil?
         case node_type
         when DAG::Node::USER_MESSAGE
-          payload_input["content"] = content
+          body_input["content"] = content
         when DAG::Node::TASK
-          payload_output["result"] = content
+          body_output["result"] = content
         else
-          payload_output["content"] = content
+          body_output["content"] = content
         end
       end
 
@@ -25,8 +25,8 @@ module DAG
           node_type: node_type,
           state: state,
           metadata: metadata,
-          payload_input: payload_input,
-          payload_output: payload_output,
+          body_input: body_input,
+          body_output: body_output,
         }.merge(attributes)
       )
 
@@ -64,7 +64,7 @@ module DAG
       edge
     end
 
-    def fork_from!(from_node:, node_type:, state:, payload_input: {}, payload_output: {}, metadata: {})
+    def fork_from!(from_node:, node_type:, state:, body_input: {}, body_output: {}, metadata: {})
       assert_node_belongs_to_graph!(from_node)
       raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
       raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
@@ -73,8 +73,8 @@ module DAG
         node_type: node_type,
         state: state,
         metadata: metadata,
-        payload_input: payload_input,
-        payload_output: payload_output
+        body_input: body_input,
+        body_output: body_output
       )
 
       create_edge(from_node: from_node, to_node: node, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "fork" })
@@ -92,7 +92,7 @@ module DAG
       old = locked_active_node!(node)
       now = Time.current
 
-      unless old.retriable?
+      unless old.body.retriable?
         raise ArgumentError, "can only retry retriable nodes (task, agent_message)"
       end
 
@@ -114,7 +114,7 @@ module DAG
       end
 
       attempt = old.metadata.fetch("attempt", 1).to_i + 1
-      payload_input = old.payload.input_for_retry
+      body_input = old.body.input_for_retry
       retry_metadata =
         old.metadata
           .except("error", "reason", "blocked_by")
@@ -125,7 +125,7 @@ module DAG
         state: DAG::Node::PENDING,
         metadata: retry_metadata,
         retry_of_id: old.id,
-        payload_input: payload_input,
+        body_input: body_input,
       )
 
       copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
@@ -167,8 +167,12 @@ module DAG
       old = locked_active_node!(node)
       now = Time.current
 
-      unless old.node_type == DAG::Node::AGENT_MESSAGE && old.state == DAG::Node::FINISHED
-        raise ArgumentError, "can only regenerate finished agent_message nodes"
+      unless old.body.regeneratable?
+        raise ArgumentError, "can only regenerate regeneratable nodes"
+      end
+
+      unless old.state == DAG::Node::FINISHED
+        raise ArgumentError, "can only regenerate finished nodes"
       end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
@@ -180,7 +184,7 @@ module DAG
         node_type: old.node_type,
         state: DAG::Node::PENDING,
         metadata: old.metadata,
-        payload_input: old.payload.input_for_retry,
+        body_input: old.body.input_for_retry,
       )
 
       copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
@@ -213,8 +217,12 @@ module DAG
       old = locked_active_node!(node)
       now = Time.current
 
-      unless old.node_type == DAG::Node::USER_MESSAGE && old.state == DAG::Node::FINISHED
-        raise ArgumentError, "can only edit finished user_message nodes"
+      unless old.body.editable?
+        raise ArgumentError, "can only edit editable nodes"
+      end
+
+      unless old.state == DAG::Node::FINISHED
+        raise ArgumentError, "can only edit finished nodes"
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
@@ -222,13 +230,13 @@ module DAG
         raise ArgumentError, "cannot edit when downstream nodes are pending or running"
       end
 
-      new_payload_input = old.payload.input_for_retry.deep_merge(normalize_hash(new_input))
+      new_body_input = old.body.input_for_retry.deep_merge(normalize_hash(new_input))
 
       new_node = create_node(
         node_type: old.node_type,
         state: DAG::Node::FINISHED,
         metadata: old.metadata,
-        payload_input: new_payload_input,
+        body_input: new_body_input,
         finished_at: now
       )
 

@@ -1,4 +1,4 @@
 module Messages
-  class Summary < ::DAG::NodePayload
+  class Summary < ::DAG::NodeBody
   end
 end

@@ -44,7 +44,7 @@ module DAG
         summary_node = @graph.nodes.create!(
           node_type: DAG::Node::SUMMARY,
           state: DAG::Node::FINISHED,
-          payload_output: { "content" => summary_content },
+          body_output: { "content" => summary_content },
           metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
           finished_at: now
         )

@@ -9,14 +9,14 @@ module DAG
 
       def call
         nodes = load_nodes
-        payloads = load_payloads(nodes)
+        bodies = load_bodies(nodes)
         edges = load_edges(nodes)
 
         lines = ["flowchart TD"]
 
         nodes.each do |node|
-          payload = payloads[node.payload_id]
-          lines << %(#{node_mermaid_id(node.id)}["#{escape(label_for(node, payload))}"])
+          body = bodies[node.body_id]
+          lines << %(#{node_mermaid_id(node.id)}["#{escape(label_for(node, body))}"])
         end
 
         edges.each do |edge|
@@ -30,16 +30,16 @@ module DAG
 
         def load_nodes
           scope = @graph.nodes
-            .select(:id, :node_type, :state, :metadata, :payload_id, :compressed_at)
+            .select(:id, :node_type, :state, :metadata, :body_id, :compressed_at)
 
           scope = scope.where(compressed_at: nil) unless @include_compressed
           scope.order(:id).to_a
         end
 
-        def load_payloads(nodes)
-          payload_ids = nodes.map(&:payload_id).compact.uniq
+        def load_bodies(nodes)
+          body_ids = nodes.map(&:body_id).compact.uniq
 
-          DAG::NodePayload.where(id: payload_ids)
+          DAG::NodeBody.where(id: body_ids)
             .select(:id, :type, :input, :output_preview)
             .index_by(&:id)
         end
@@ -59,16 +59,16 @@ module DAG
           "N_#{node_id.to_s.delete("-")}"
         end
 
-        def label_for(node, payload)
-          snippet = node_snippet(node, payload)
+        def label_for(node, body)
+          snippet = node_snippet(node, body)
           label = "#{node.node_type}:#{node.state}"
           label = "#{label} #{snippet}" if snippet.present?
           label.truncate(@max_label_chars)
         end
 
-        def node_snippet(node, payload)
-          input = payload&.input.is_a?(Hash) ? payload.input : {}
-          output_preview = payload&.output_preview.is_a?(Hash) ? payload.output_preview : {}
+        def node_snippet(node, body)
+          input = body&.input.is_a?(Hash) ? body.input : {}
+          output_preview = body&.output_preview.is_a?(Hash) ? body.output_preview : {}
 
           case node.node_type
           when DAG::Node::TASK

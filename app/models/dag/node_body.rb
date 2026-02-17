@@ -1,16 +1,28 @@
 module DAG
-  class NodePayload < ApplicationRecord
-    self.table_name = "dag_node_payloads"
+  class NodeBody < ApplicationRecord
+    self.table_name = "dag_node_bodies"
 
     has_one :node,
             class_name: "DAG::Node",
-            inverse_of: :payload,
-            foreign_key: :payload_id
+            inverse_of: :body,
+            foreign_key: :body_id
 
     PREVIEW_MAX_CHARS = 200
 
     before_validation :normalize_jsonb_fields
     before_validation :sync_output_preview
+
+    def retriable?
+      false
+    end
+
+    def editable?
+      false
+    end
+
+    def regeneratable?
+      false
+    end
 
     def merge_input!(patch)
       patch = normalize_patch(patch)

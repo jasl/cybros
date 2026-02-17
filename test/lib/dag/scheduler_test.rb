@@ -8,7 +8,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     Event.delete_all
     DAG::Edge.delete_all
     DAG::Node.delete_all
-    DAG::NodePayload.delete_all
+    DAG::NodeBody.delete_all
     DAG::Graph.delete_all
     Conversation.delete_all
   end

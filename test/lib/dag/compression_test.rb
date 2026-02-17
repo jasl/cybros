@@ -8,13 +8,13 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     a = graph.nodes.create!(
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_input: { "content" => "hi" },
+      body_input: { "content" => "hi" },
       metadata: {}
     )
     b = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
-      payload_output: { "content" => "hello" },
+      body_output: { "content" => "hello" },
       metadata: {}
     )
     c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
@@ -32,7 +32,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::SUMMARY, summary.node_type
     assert_equal DAG::Node::FINISHED, summary.state
-    assert_equal "summary", summary.payload_output["content"]
+    assert_equal "summary", summary.body_output["content"]
 
     [b.reload, c.reload].each do |node|
       assert node.compressed_at.present?

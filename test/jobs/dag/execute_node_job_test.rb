@@ -43,7 +43,7 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
     leaf = graph.leaf_nodes.first
     assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
     assert_equal DAG::Node::FINISHED, leaf.state
-    assert_equal "done", leaf.payload_output["content"]
+    assert_equal "done", leaf.body_output["content"]
   ensure
     DAG.executor_registry = original_registry
   end

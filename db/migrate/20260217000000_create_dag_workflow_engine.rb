@@ -6,7 +6,7 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.timestamps
     end
 
-    create_table :dag_node_payloads, id: :uuid, default: -> { "uuidv7()" } do |t|
+    create_table :dag_node_bodies, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.string :type, null: false
       t.jsonb :input, null: false, default: {}
       t.jsonb :output, null: false, default: {}
@@ -26,8 +26,8 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.string :state, null: false
       t.jsonb :metadata, null: false, default: {}
 
-      t.references :payload, type: :uuid, null: false,
-                   foreign_key: { to_table: :dag_node_payloads },
+      t.references :body, type: :uuid, null: false,
+                   foreign_key: { to_table: :dag_node_bodies },
                    index: { unique: true }
 
       t.references :retry_of, type: :uuid, foreign_key: { to_table: :dag_nodes }

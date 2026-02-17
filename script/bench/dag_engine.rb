@@ -17,20 +17,20 @@ measure("linear_1k_create") do
   graph = conversation.dag_graph
   previous = nil
 
-    1000.times do |i|
-      node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
-      payload_attributes =
-        if node_type == DAG::Node::USER_MESSAGE
-          { payload_input: { "content" => "n#{i}" } }
-        else
-          { payload_output: { "content" => "n#{i}" } }
-        end
-      node = graph.nodes.create!(
-        node_type: node_type,
-        state: DAG::Node::FINISHED,
-        **payload_attributes,
-        metadata: {}
-      )
+  1000.times do |i|
+    node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
+    body_attributes =
+      if node_type == DAG::Node::USER_MESSAGE
+        { body_input: { "content" => "n#{i}" } }
+      else
+        { body_output: { "content" => "n#{i}" } }
+      end
+    node = graph.nodes.create!(
+      node_type: node_type,
+      state: DAG::Node::FINISHED,
+      **body_attributes,
+      metadata: {}
+    )
 
     if previous
       graph.edges.create!(from_node_id: previous.id, to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
@@ -43,14 +43,14 @@ end
 measure("fanout_context_for") do
   conversation = Conversation.create!(title: "bench-fanout")
   graph = conversation.dag_graph
-    tasks = 50.times.map do |i|
-      graph.nodes.create!(
-        node_type: DAG::Node::TASK,
-        state: DAG::Node::FINISHED,
-        payload_input: { "name" => "t#{i}" },
-        metadata: {}
-      )
-    end
+  tasks = 50.times.map do |i|
+    graph.nodes.create!(
+      node_type: DAG::Node::TASK,
+      state: DAG::Node::FINISHED,
+      body_input: { "name" => "t#{i}" },
+      metadata: {}
+    )
+  end
 
   join = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
   tasks.each do |task|
