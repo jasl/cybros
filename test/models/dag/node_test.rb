@@ -28,12 +28,12 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal "retry", branch_edge.metadata["branch_kind"]
   end
 
-  test "mark_cancelled! works from pending" do
+  test "mark_cancelled! works from running" do
     conversation = Conversation.create!
-    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
 
-    assert node.mark_cancelled!(reason: "no longer needed")
+    assert node.mark_cancelled!(reason: "cancelled by user")
     assert_equal DAG::Node::CANCELLED, node.state
-    assert_equal "no longer needed", node.metadata["reason"]
+    assert_equal "cancelled by user", node.metadata["reason"]
   end
 end

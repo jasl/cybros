@@ -40,7 +40,7 @@ module DAG
         particulars: {
           "edge_type" => edge.edge_type,
           "from_node_id" => edge.from_node_id,
-          "to_node_id" => edge.to_node_id
+          "to_node_id" => edge.to_node_id,
         }
       )
 
@@ -52,4 +52,3 @@ module DAG
     end
   end
 end
-

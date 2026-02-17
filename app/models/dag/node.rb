@@ -1,7 +1,5 @@
 module DAG
   class Node < ApplicationRecord
-    include HasUuidV7Base36PrimaryKey
-
     self.table_name = "dag_nodes"
 
     USER_MESSAGE = "user_message"
@@ -21,6 +19,9 @@ module DAG
     STATES = [PENDING, RUNNING, FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
     TERMINAL_STATES = [FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
     EXECUTABLE_NODE_TYPES = [TASK, AGENT_MESSAGE].freeze
+
+    enum :node_type, NODE_TYPES.index_by(&:itself)
+    enum :state, STATES.index_by(&:itself)
 
     belongs_to :conversation, inverse_of: :dag_nodes
     belongs_to :retry_of, class_name: "DAG::Node", optional: true
@@ -70,7 +71,7 @@ module DAG
     def mark_finished!(content: nil, metadata: {})
       updates = {
         finished_at: Time.current,
-        metadata: self.metadata.merge(metadata)
+        metadata: self.metadata.merge(metadata),
       }
       updates[:content] = content unless content.nil?
 
@@ -166,11 +167,12 @@ module DAG
         "node_type" => node_type,
         "state" => state,
         "content" => content,
-        "metadata" => metadata
+        "metadata" => metadata,
       }
     end
 
     private
+
       def transition_to!(to_state, from_states:, **attributes)
         now = Time.current
         updates = attributes.merge(state: to_state, updated_at: now)

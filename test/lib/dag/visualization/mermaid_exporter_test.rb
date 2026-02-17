@@ -11,8 +11,8 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
     output = conversation.to_mermaid
 
     assert_includes output, "flowchart TD"
-    assert_includes output, "N_#{a.id}"
-    assert_includes output, "N_#{b.id}"
+    assert_includes output, "N_#{a.id.delete("-")}"
+    assert_includes output, "N_#{b.id.delete("-")}"
     assert_includes output, "|sequence|"
   end
 
@@ -24,8 +24,8 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
 
     output = conversation.to_mermaid
 
-    assert_includes output, "N_#{original.id}"
-    assert_includes output, "N_#{retried.id}"
+    assert_includes output, "N_#{original.id.delete("-")}"
+    assert_includes output, "N_#{retried.id.delete("-")}"
     assert_includes output, "branch:retry"
   end
 end

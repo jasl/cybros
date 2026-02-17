@@ -1,7 +1,5 @@
 module DAG
   class Edge < ApplicationRecord
-    include HasUuidV7Base36PrimaryKey
-
     self.table_name = "dag_edges"
 
     SEQUENCE = "sequence"
@@ -10,6 +8,8 @@ module DAG
 
     EDGE_TYPES = [SEQUENCE, DEPENDENCY, BRANCH].freeze
     BLOCKING_EDGE_TYPES = [SEQUENCE, DEPENDENCY].freeze
+
+    enum :edge_type, EDGE_TYPES.index_by(&:itself)
 
     belongs_to :conversation, inverse_of: :dag_edges
     belongs_to :from_node, class_name: "DAG::Node", inverse_of: :outgoing_edges
@@ -24,6 +24,7 @@ module DAG
     scope :active, -> { where(compressed_at: nil) }
 
     private
+
       def nodes_belong_to_same_conversation
         if from_node && from_node.conversation_id != conversation_id
           errors.add(:from_node_id, "must belong to the same conversation")
@@ -53,7 +54,7 @@ module DAG
 
           sql = <<~SQL
             WITH RECURSIVE search(node_id) AS (
-              SELECT #{from_quoted}::text
+              SELECT #{from_quoted}::uuid
               UNION
               SELECT e.to_node_id
               FROM dag_edges e
@@ -61,7 +62,7 @@ module DAG
               WHERE e.conversation_id = #{conversation_quoted}
                 AND e.compressed_at IS NULL
             )
-            SELECT 1 FROM search WHERE node_id = #{to_quoted}::text LIMIT 1
+            SELECT 1 FROM search WHERE node_id = #{to_quoted}::uuid LIMIT 1
           SQL
 
           connection.select_value(sql).present?

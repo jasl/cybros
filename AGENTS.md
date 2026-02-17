@@ -101,6 +101,8 @@ The central abstraction of Cybros is the **conversation DAG**. Each conversation
 - `finished` — Completed successfully
 - `errored` — Failed (retryable for agent nodes)
 - `rejected` — User declined to authorize the operation
+- `canceled` — User canceled the conversation
+- `skipped` — User skipped the node (e.g. the task is unneeded)
 
 #### Edge Types
 - `sequence` — Temporal ordering (A happens before B)

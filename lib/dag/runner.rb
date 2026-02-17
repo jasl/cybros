@@ -40,6 +40,7 @@ module DAG
     end
 
     private
+
       def apply_result(node, result)
         from_state = node.state
         transitioned =

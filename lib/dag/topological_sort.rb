@@ -53,6 +53,7 @@ module DAG
     end
 
     private
+
       def insert_sorted(array, value)
         index = array.bsearch_index { |existing| existing >= value } || array.length
         array.insert(index, value)

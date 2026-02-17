@@ -21,6 +21,7 @@ module DAG
     end
 
     private
+
       def ancestor_node_ids_for(target_node_id)
         DAG::Node.with_connection do |connection|
           target_quoted = connection.quote(target_node_id)
@@ -28,7 +29,7 @@ module DAG
 
           sql = <<~SQL
             WITH RECURSIVE ancestors(node_id) AS (
-              SELECT #{target_quoted}::text
+              SELECT #{target_quoted}::uuid
               UNION
               SELECT e.from_node_id
               FROM dag_edges e

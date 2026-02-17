@@ -33,8 +33,9 @@ module DAG
       end
 
       private
+
         def node_mermaid_id(node)
-          "N_#{node.id}"
+          "N_#{node.id.to_s.delete("-")}"
         end
 
         def label_for(node)

@@ -73,7 +73,7 @@ module DAG
               "replaces_node_ids" => node_ids,
               "incoming_edge_ids" => incoming_edges.map(&:id),
               "outgoing_edge_ids" => outgoing_edges.map(&:id),
-              "internal_edge_ids" => internal_edges.map(&:id)
+              "internal_edge_ids" => internal_edges.map(&:id),
             }
           )
 

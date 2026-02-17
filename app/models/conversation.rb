@@ -1,6 +1,4 @@
 class Conversation < ApplicationRecord
-  include HasUuidV7Base36PrimaryKey
-
   has_many :dag_nodes,
     class_name: "DAG::Node",
     inverse_of: :conversation,
@@ -102,7 +100,7 @@ class Conversation < ApplicationRecord
     nodes_scope.where.not(id: edges_scope.select(:from_node_id))
   end
 
-  def record_event!(event_type:, subject: nil, particulars: {})
+  def record_event!(event_type:, subject:, particulars: {})
     events.create!(event_type: event_type, subject: subject, particulars: particulars)
   end
 end
