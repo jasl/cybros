@@ -32,17 +32,58 @@ class DAG::CompressionTest < ActiveSupport::TestCase
       assert edge.compressed_at.present?
     end
 
-    assert conversation.dag_edges.active.exists?(
+    rewired_incoming = conversation.dag_edges.active.find_by!(
       from_node_id: a.id,
       to_node_id: summary.id,
       edge_type: DAG::Edge::SEQUENCE,
-      metadata: edge_ab.metadata.merge("replaces_edge_id" => edge_ab.id)
     )
-    assert conversation.dag_edges.active.exists?(
+    assert_equal [edge_ab.id], rewired_incoming.metadata.fetch("replaces_edge_ids")
+
+    rewired_outgoing = conversation.dag_edges.active.find_by!(
       from_node_id: summary.id,
       to_node_id: d.id,
       edge_type: DAG::Edge::SEQUENCE,
-      metadata: edge_cd.metadata.merge("replaces_edge_id" => edge_cd.id)
     )
+    assert_equal [edge_cd.id], rewired_outgoing.metadata.fetch("replaces_edge_ids")
+  end
+
+  test "compress! deduplicates boundary edges that would collapse into duplicates" do
+    conversation = Conversation.create!
+
+    outside_parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "outside_parent" })
+    inside_a = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "inside_a" })
+    inside_b = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "inside_b" })
+    outside_child = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+
+    in_1 = conversation.dag_edges.create!(from_node_id: outside_parent.id, to_node_id: inside_a.id, edge_type: DAG::Edge::DEPENDENCY)
+    in_2 = conversation.dag_edges.create!(from_node_id: outside_parent.id, to_node_id: inside_b.id, edge_type: DAG::Edge::DEPENDENCY)
+    out_1 = conversation.dag_edges.create!(from_node_id: inside_a.id, to_node_id: outside_child.id, edge_type: DAG::Edge::SEQUENCE)
+    out_2 = conversation.dag_edges.create!(from_node_id: inside_b.id, to_node_id: outside_child.id, edge_type: DAG::Edge::SEQUENCE)
+
+    summary = conversation.compress!(node_ids: [inside_a.id, inside_b.id], summary_content: "summary")
+
+    assert_equal 1, conversation.dag_edges.active.where(
+      from_node_id: outside_parent.id,
+      to_node_id: summary.id,
+      edge_type: DAG::Edge::DEPENDENCY
+    ).count
+    incoming = conversation.dag_edges.active.find_by!(
+      from_node_id: outside_parent.id,
+      to_node_id: summary.id,
+      edge_type: DAG::Edge::DEPENDENCY
+    )
+    assert_equal [in_1.id, in_2.id].sort, incoming.metadata.fetch("replaces_edge_ids").sort
+
+    assert_equal 1, conversation.dag_edges.active.where(
+      from_node_id: summary.id,
+      to_node_id: outside_child.id,
+      edge_type: DAG::Edge::SEQUENCE
+    ).count
+    outgoing = conversation.dag_edges.active.find_by!(
+      from_node_id: summary.id,
+      to_node_id: outside_child.id,
+      edge_type: DAG::Edge::SEQUENCE
+    )
+    assert_equal [out_1.id, out_2.id].sort, outgoing.metadata.fetch("replaces_edge_ids").sort
   end
 end

@@ -40,7 +40,10 @@ module DAG
                   e.edge_type IN ('sequence', 'dependency')
                   OR (
                     e.edge_type = 'branch'
-                    AND (e.metadata->>'branch_kind') = 'fork'
+                    AND (
+                      (e.metadata->>'branch_kind') = 'fork'
+                      OR COALESCE((e.metadata->'branch_kinds') ? 'fork', FALSE)
+                    )
                   )
                 )
             )

@@ -47,22 +47,26 @@ module DAG
           edges_to_compress = (incoming_edges + outgoing_edges + internal_edges).map(&:id)
           DAG::Edge.where(id: edges_to_compress).update_all(compressed_at: now, updated_at: now)
 
-          incoming_edges.each do |edge|
-            @conversation.dag_edges.create!(
-              from_node_id: edge.from_node_id,
-              to_node_id: summary_node.id,
-              edge_type: edge.edge_type,
-              metadata: edge.metadata.merge("replaces_edge_id" => edge.id)
-            )
+          incoming_edges
+            .group_by { |edge| [edge.from_node_id, edge.edge_type] }
+            .each do |(from_node_id, edge_type), edges|
+              @conversation.dag_edges.create!(
+                from_node_id: from_node_id,
+                to_node_id: summary_node.id,
+                edge_type: edge_type,
+                metadata: merged_rewired_edge_metadata(edges)
+              )
           end
 
-          outgoing_edges.each do |edge|
-            @conversation.dag_edges.create!(
-              from_node_id: summary_node.id,
-              to_node_id: edge.to_node_id,
-              edge_type: edge.edge_type,
-              metadata: edge.metadata.merge("replaces_edge_id" => edge.id)
-            )
+          outgoing_edges
+            .group_by { |edge| [edge.to_node_id, edge.edge_type] }
+            .each do |(to_node_id, edge_type), edges|
+              @conversation.dag_edges.create!(
+                from_node_id: summary_node.id,
+                to_node_id: to_node_id,
+                edge_type: edge_type,
+                metadata: merged_rewired_edge_metadata(edges)
+              )
           end
 
           @conversation.record_event!(
@@ -81,5 +85,36 @@ module DAG
         end
       end
     end
+
+    private
+
+      def merged_rewired_edge_metadata(edges)
+        replaces_edge_ids = edges.map(&:id).map(&:to_s).sort
+
+        common = edges.first.metadata.dup
+        common.delete("replaces_edge_id")
+        common.delete("replaces_edge_ids")
+        common.delete("replaces_edge_id_by_kind")
+        common.delete("replaces_edge_ids_by_kind")
+
+        common.keys.each do |key|
+          value = common.fetch(key)
+          common.delete(key) unless edges.all? { |edge| edge.metadata[key] == value }
+        end
+
+        if edges.first.edge_type == DAG::Edge::BRANCH
+          kinds = edges.map { |edge| edge.metadata["branch_kind"] }.compact.uniq.sort
+          if kinds.length == 1
+            common["branch_kind"] = kinds.first
+            common.delete("branch_kinds")
+          elsif kinds.any?
+            common.delete("branch_kind")
+            common["branch_kinds"] = kinds
+          end
+        end
+
+        common["replaces_edge_ids"] = replaces_edge_ids
+        common
+      end
   end
 end
