@@ -1,0 +1,55 @@
+module DAG
+  class Scheduler
+    def self.claim_runnable_nodes(conversation_id:, limit:)
+      new(conversation_id: conversation_id, limit: limit).claim_runnable_nodes
+    end
+
+    def initialize(conversation_id:, limit:)
+      @conversation_id = conversation_id
+      @limit = Integer(limit)
+    end
+
+    def claim_runnable_nodes
+      node_ids = []
+      now = Time.current
+      DAG::Node.with_connection do |connection|
+        DAG::Node.transaction do
+          conversation_quoted = connection.quote(@conversation_id)
+
+          sql = <<~SQL
+            SELECT dag_nodes.id
+            FROM dag_nodes
+            WHERE dag_nodes.conversation_id = #{conversation_quoted}
+              AND dag_nodes.state = 'pending'
+              AND dag_nodes.node_type IN ('task', 'agent_message')
+              AND dag_nodes.compressed_at IS NULL
+              AND NOT EXISTS (
+                SELECT 1
+                FROM dag_edges
+                JOIN dag_nodes AS parents ON parents.id = dag_edges.from_node_id
+                WHERE dag_edges.conversation_id = dag_nodes.conversation_id
+                  AND dag_edges.to_node_id = dag_nodes.id
+                  AND dag_edges.edge_type IN ('sequence', 'dependency')
+                  AND dag_edges.compressed_at IS NULL
+                  AND parents.compressed_at IS NULL
+                  AND parents.state <> 'finished'
+              )
+            ORDER BY dag_nodes.id
+            FOR UPDATE SKIP LOCKED
+            LIMIT #{@limit}
+          SQL
+
+          node_ids = connection.select_values(sql)
+          if node_ids.any?
+            DAG::Node.where(id: node_ids, state: DAG::Node::PENDING)
+              .update_all(state: DAG::Node::RUNNING, started_at: now, updated_at: now)
+
+            node_ids = DAG::Node.where(id: node_ids, state: DAG::Node::RUNNING).order(:id).pluck(:id)
+          end
+        end
+      end
+
+      DAG::Node.where(id: node_ids).order(:id).to_a
+    end
+  end
+end

@@ -56,7 +56,7 @@ bin/kamal deploy             # Deploy (requires 1Password CLI for secrets)
 
 - **Backend**: Ruby 4.0.1, Rails 8.2.0.alpha (from main branch)
 - **Frontend**: Stimulus + Turbo (Hotwire), Tailwind CSS 4 + DaisyUI 5
-- **Database**: PostgreSQL with pgvector extension (via `neighbor` gem)
+- **Database**: PostgreSQL 18 with pgvector extension (via `neighbor` gem)
 - **Assets**: Propshaft, cssbundling-rails, jsbundling-rails, Bun
 - **Background Jobs**: Solid Queue (database-backed, no Redis)
 - **Caching**: Solid Cache (database-backed)

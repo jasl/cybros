@@ -3,7 +3,7 @@ inherit_gem: { rubocop-rails-omakase: rubocop.yml }
 
 AllCops:
   Exclude:
-    - resources/**/*
+    - references/**/*
 
 # Note: RuboCop's server mode is a CLI feature, not a config section. If you
 # need deterministic lint in constrained/sandboxed environments, prefer running
