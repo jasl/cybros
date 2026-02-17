@@ -104,7 +104,6 @@ module DAG
             edge.metadata["branch_kinds"] || []
           end.compact.uniq.sort
 
-          common.delete("branch_kind")
           common["branch_kinds"] = kinds if kinds.any?
         end
 
