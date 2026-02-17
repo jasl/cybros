@@ -24,6 +24,11 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :conversation, inverse_of: :dag_nodes
+    belongs_to :runnable,
+      polymorphic: true,
+      autosave: true,
+      dependent: :destroy,
+      inverse_of: :dag_node
     belongs_to :retry_of, class_name: "DAG::Node", optional: true
     belongs_to :compressed_by, class_name: "DAG::Node", optional: true
 
@@ -43,6 +48,8 @@ module DAG
     validates :conversation_id, presence: true
 
     scope :active, -> { where(compressed_at: nil) }
+
+    before_validation :ensure_runnable
 
     def pending?
       state == PENDING
@@ -73,9 +80,14 @@ module DAG
         finished_at: Time.current,
         metadata: self.metadata.merge(metadata),
       }
-      updates[:content] = content unless content.nil?
 
-      transition_to!(FINISHED, from_states: [RUNNING], **updates)
+      transitioned = transition_to!(FINISHED, from_states: [RUNNING], **updates)
+
+      if transitioned && !content.nil?
+        runnable.update!(content: content)
+      end
+
+      transitioned
     end
 
     def mark_errored!(error:, metadata: {})
@@ -128,7 +140,7 @@ module DAG
             node_type: node_type,
             state: PENDING,
             metadata: metadata.merge("attempt" => attempt),
-            retry_of_id: id
+            retry_of_id: id,
           )
 
           conversation.dag_edges.active.where(
@@ -161,6 +173,18 @@ module DAG
       end
     end
 
+    def content
+      return runnable.content if runnable&.respond_to?(:content)
+      return self[:content] if has_attribute?(:content)
+
+      nil
+    end
+
+    def content=(value)
+      ensure_runnable
+      runnable.content = value
+    end
+
     def as_context_hash
       {
         "node_id" => id,
@@ -172,6 +196,17 @@ module DAG
     end
 
     private
+
+      def ensure_runnable
+        return if runnable.present?
+
+        self.runnable =
+          if node_type == TASK
+            DAG::Runnables::Task.new
+          else
+            DAG::Runnables::Text.new
+          end
+      end
 
       def transition_to!(to_state, from_states:, **attributes)
         now = Time.current

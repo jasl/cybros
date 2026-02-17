@@ -34,6 +34,8 @@ gem "geared_pagination"
 # Push notifications
 gem "web-push"
 
+gem "with_advisory_lock"
+
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
 gem "tzinfo-data", platforms: %i[ windows jruby ]
 

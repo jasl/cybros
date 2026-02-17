@@ -6,7 +6,7 @@ module DAG
 
     def call(target_node_id)
       node_ids = ancestor_node_ids_for(target_node_id)
-      nodes = @conversation.dag_nodes.where(id: node_ids, compressed_at: nil).index_by(&:id)
+      nodes = @conversation.dag_nodes.where(id: node_ids, compressed_at: nil).preload(:runnable).index_by(&:id)
 
       edges = @conversation.dag_edges.active.where(
         edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,

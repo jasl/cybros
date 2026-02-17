@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_17_011000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -73,13 +73,14 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   create_table "dag_nodes", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "compressed_at"
     t.uuid "compressed_by_id"
-    t.text "content"
     t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
     t.datetime "finished_at"
     t.jsonb "metadata", default: {}, null: false
     t.string "node_type", null: false
     t.uuid "retry_of_id"
+    t.uuid "runnable_id", null: false
+    t.string "runnable_type", null: false
     t.datetime "started_at"
     t.string "state", null: false
     t.datetime "updated_at", null: false
@@ -90,6 +91,19 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.index ["conversation_id", "state", "node_type"], name: "index_dag_nodes_lookup"
     t.index ["conversation_id"], name: "index_dag_nodes_on_conversation_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
+    t.index ["runnable_type", "runnable_id"], name: "index_dag_nodes_on_runnable_unique", unique: true
+  end
+
+  create_table "dag_runnables_tasks", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.text "content"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "dag_runnables_texts", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.text "content"
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
   end
 
   create_table "events", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|

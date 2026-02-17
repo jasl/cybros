@@ -8,7 +8,7 @@ module DAG
       end
 
       def call
-        nodes = @conversation.dag_nodes
+        nodes = @conversation.dag_nodes.preload(:runnable)
         edges = @conversation.dag_edges.includes(:from_node, :to_node)
 
         unless @include_compressed
