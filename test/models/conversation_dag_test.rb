@@ -87,4 +87,32 @@ class ConversationDAGTest < ActiveSupport::TestCase
     assert_includes retry_ids, retried.id
     refute_includes retry_ids, retry_source.id
   end
+
+  test "context_for substitutes summary nodes for compressed subgraphs" do
+    conversation = Conversation.create!
+
+    a = conversation.dag_nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "hi", metadata: {})
+    b = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::FINISHED, content: "hello", metadata: {})
+    c = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
+    d = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+
+    conversation.dag_edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
+    conversation.dag_edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
+    conversation.dag_edges.create!(from_node_id: c.id, to_node_id: d.id, edge_type: DAG::Edge::SEQUENCE)
+
+    summary = conversation.compress!(node_ids: [b.id, c.id], summary_content: "summary")
+
+    context = conversation.context_for(d.id)
+    ids = context.map { |node| node.fetch("node_id") }
+
+    assert_includes ids, a.id
+    assert_includes ids, summary.id
+    assert_includes ids, d.id
+
+    refute_includes ids, b.id
+    refute_includes ids, c.id
+
+    assert_operator ids.index(a.id), :<, ids.index(summary.id)
+    assert_operator ids.index(summary.id), :<, ids.index(d.id)
+  end
 end

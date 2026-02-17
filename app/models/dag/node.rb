@@ -112,7 +112,7 @@ module DAG
       reason_metadata = reason ? { "reason" => reason.to_s } : {}
       transition_to!(
         SKIPPED,
-        from_states: [PENDING, RUNNING],
+        from_states: [PENDING],
         finished_at: Time.current,
         metadata: self.metadata.merge(metadata).merge(reason_metadata)
       )
@@ -122,7 +122,7 @@ module DAG
       reason_metadata = reason ? { "reason" => reason.to_s } : {}
       transition_to!(
         CANCELLED,
-        from_states: [PENDING, RUNNING],
+        from_states: [RUNNING],
         finished_at: Time.current,
         metadata: self.metadata.merge(metadata).merge(reason_metadata)
       )
@@ -174,10 +174,7 @@ module DAG
     end
 
     def content
-      return runnable.content if runnable&.respond_to?(:content)
-      return self[:content] if has_attribute?(:content)
-
-      nil
+      runnable.content
     end
 
     def content=(value)

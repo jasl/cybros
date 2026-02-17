@@ -23,6 +23,18 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     assert_equal DAG::Node::RUNNING, child.reload.state
   end
 
+  test "claim_runnable_nodes does not claim nodes blocked by non-finished parents" do
+    conversation = Conversation.create!
+
+    parent = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    child = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    conversation.dag_edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    claimed = DAG::Scheduler.claim_runnable_nodes(conversation_id: conversation.id, limit: 10)
+    assert_equal [], claimed
+    assert_equal DAG::Node::PENDING, child.reload.state
+  end
+
   test "claim_runnable_nodes skips locked rows" do
     conversation = Conversation.create!
 

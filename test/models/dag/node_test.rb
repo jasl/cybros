@@ -36,4 +36,29 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal DAG::Node::CANCELLED, node.state
     assert_equal "cancelled by user", node.metadata["reason"]
   end
+
+  test "mark_cancelled! does not transition from pending" do
+    conversation = Conversation.create!
+    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+
+    assert_not node.mark_cancelled!(reason: "cannot cancel before running")
+    assert_equal DAG::Node::PENDING, node.reload.state
+  end
+
+  test "mark_skipped! works from pending" do
+    conversation = Conversation.create!
+    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+
+    assert node.mark_skipped!(reason: "no longer needed")
+    assert_equal DAG::Node::SKIPPED, node.state
+    assert_equal "no longer needed", node.metadata["reason"]
+  end
+
+  test "mark_skipped! does not transition from running" do
+    conversation = Conversation.create!
+    node = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+
+    assert_not node.mark_skipped!(reason: "cannot skip after running")
+    assert_equal DAG::Node::RUNNING, node.reload.state
+  end
 end

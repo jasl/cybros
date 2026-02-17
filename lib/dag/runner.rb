@@ -52,7 +52,10 @@ module DAG
           when DAG::Node::REJECTED
             node.mark_rejected!(reason: result.reason || "rejected", metadata: result.metadata)
           when DAG::Node::SKIPPED
-            node.mark_skipped!(reason: result.reason, metadata: result.metadata)
+            node.mark_errored!(
+              error: "invalid_execution_result_state=skipped_for_running_node",
+              metadata: result.metadata.merge("reason" => result.reason)
+            )
           when DAG::Node::CANCELLED
             node.mark_cancelled!(reason: result.reason, metadata: result.metadata)
           else

@@ -1,27 +1,17 @@
-require "digest"
-
 module DAG
   module AdvisoryLock
-    def self.with_try_lock(key)
-      key_1, key_2 = keys_for(key)
-      ActiveRecord::Base.with_connection do |connection|
-        obtained = connection.select_value("SELECT pg_try_advisory_lock(#{key_1}, #{key_2})")
-        if obtained
-          begin
-            yield
-            true
-          ensure
-            connection.select_value("SELECT pg_advisory_unlock(#{key_1}, #{key_2})")
-          end
-        else
-          false
-        end
-      end
-    end
+    LOCK_PREFIX = "dag:advisory".freeze
 
-    def self.keys_for(key)
-      digest = Digest::SHA256.digest(key.to_s)
-      digest.unpack("l>l>")
+    def self.with_try_lock(key, timeout_seconds: 0)
+      lock_name = "#{LOCK_PREFIX}:#{key}"
+      acquired = false
+
+      Conversation.with_advisory_lock(lock_name, timeout_seconds: timeout_seconds) do
+        acquired = true
+        yield
+      end
+
+      acquired
     end
   end
 end

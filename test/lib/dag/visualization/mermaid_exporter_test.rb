@@ -1,31 +1,31 @@
 require "test_helper"
 
 class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
-  test "to_mermaid exports nodes and edges" do
+  test "exports branch edges with branch_kind and branch_kinds" do
     conversation = Conversation.create!
 
-    a = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "a" })
-    b = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "b" })
-    conversation.dag_edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
+    root = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    forked = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    merged = conversation.dag_nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
 
-    output = conversation.to_mermaid
+    conversation.dag_edges.create!(
+      from_node_id: root.id,
+      to_node_id: forked.id,
+      edge_type: DAG::Edge::BRANCH,
+      metadata: { "branch_kind" => "fork" }
+    )
+    conversation.dag_edges.create!(
+      from_node_id: root.id,
+      to_node_id: merged.id,
+      edge_type: DAG::Edge::BRANCH,
+      metadata: { "branch_kinds" => ["fork", "retry"] }
+    )
 
-    assert_includes output, "flowchart TD"
-    assert_includes output, "N_#{a.id.delete("-")}"
-    assert_includes output, "N_#{b.id.delete("-")}"
-    assert_includes output, "|sequence|"
-  end
+    mermaid = conversation.to_mermaid
 
-  test "to_mermaid labels retry branch edges" do
-    conversation = Conversation.create!
-
-    original = conversation.dag_nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    retried = original.retry!
-
-    output = conversation.to_mermaid
-
-    assert_includes output, "N_#{original.id.delete("-")}"
-    assert_includes output, "N_#{retried.id.delete("-")}"
-    assert_includes output, "branch:retry"
+    assert_includes mermaid, "flowchart TD"
+    assert_includes mermaid, "branch:fork"
+    assert_includes mermaid, "branch:fork,retry"
   end
 end
+
