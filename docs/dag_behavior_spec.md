@@ -309,6 +309,7 @@ Active 版本确定规则：
 
 前置条件：
 
+- `old.node_type in {task, agent_message}`（仅可执行节点可 retry）
 - `old.state in {errored, rejected, cancelled}`
 - `old` 为 Active
 - old 的 **Active causal descendants（不含 old）必须全部为 pending**  

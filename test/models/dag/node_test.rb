@@ -41,6 +41,21 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/downstream nodes are not pending/, error.message)
   end
 
+  test "retry! rejects non-retriable node types" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    original = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::ERRORED,
+      payload_input: { "content" => "hi" },
+      metadata: {}
+    )
+
+    error = assert_raises(ArgumentError) { original.retry! }
+    assert_match(/retriable/, error.message)
+  end
+
   test "edit! rejects attempts when downstream nodes are pending or running" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

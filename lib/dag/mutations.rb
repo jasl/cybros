@@ -92,6 +92,10 @@ module DAG
       old = locked_active_node!(node)
       now = Time.current
 
+      unless old.retriable?
+        raise ArgumentError, "can only retry retriable nodes (task, agent_message)"
+      end
+
       unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::CANCELLED].include?(old.state)
         raise ArgumentError, "can only retry errored, rejected, or cancelled nodes"
       end

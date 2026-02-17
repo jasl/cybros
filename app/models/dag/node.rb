@@ -71,6 +71,10 @@ module DAG
       EXECUTABLE_NODE_TYPES.include?(node_type)
     end
 
+    def retriable?
+      node_type == TASK || node_type == AGENT_MESSAGE
+    end
+
     def mark_running!
       transition_to!(RUNNING, from_states: [PENDING], started_at: Time.current)
     end

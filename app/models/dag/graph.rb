@@ -145,11 +145,11 @@ module DAG
         self.class.with_connection do |connection|
           graph_id_quoted = connection.quote(id)
 
-          connection.exec_delete(<<~SQL.squish, "purge_dag_edges", [])
+          connection.delete(<<~SQL.squish, "purge_dag_edges")
             DELETE FROM dag_edges WHERE graph_id = #{graph_id_quoted}
           SQL
 
-          connection.exec_delete(<<~SQL.squish, "purge_dag_nodes_and_payloads", [])
+          connection.delete(<<~SQL.squish, "purge_dag_nodes_and_payloads")
             WITH deleted_nodes AS (
               DELETE FROM dag_nodes WHERE graph_id = #{graph_id_quoted}
               RETURNING payload_id
