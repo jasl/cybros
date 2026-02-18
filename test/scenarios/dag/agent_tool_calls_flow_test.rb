@@ -29,21 +29,21 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
 
       graph.mutate!(turn_id: node.turn_id) do |m|
         hash_task = m.create_node(
-          node_type: DAG::Node::TASK,
+          node_type: Messages::Task.node_type_key,
           state: DAG::Node::PENDING,
           idempotency_key: "hash_task",
           body_input: { "name" => "hash_task" },
           metadata: {}
         )
         array_task = m.create_node(
-          node_type: DAG::Node::TASK,
+          node_type: Messages::Task.node_type_key,
           state: DAG::Node::PENDING,
           idempotency_key: "array_task",
           body_input: { "name" => "array_task" },
           metadata: {}
         )
         final = m.create_node(
-          node_type: DAG::Node::AGENT_MESSAGE,
+          node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING,
           idempotency_key: "final_answer",
           metadata: { "phase" => "final" }
@@ -92,14 +92,14 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
     planner = nil
 
     graph.mutate!(turn_id: turn_id) do |m|
-      user = m.create_node(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "Write code", metadata: {})
-      planner = m.create_node(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: { "phase" => "plan" })
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Write code", metadata: {})
+      planner = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "phase" => "plan" })
       m.create_edge(from_node: user, to_node: planner, edge_type: DAG::Edge::SEQUENCE)
     end
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::TASK, ToolCallExecutor.new)
-    registry.register(DAG::Node::AGENT_MESSAGE, PlanningAndFinalAgentExecutor.new)
+    registry.register(Messages::Task.node_type_key, ToolCallExecutor.new)
+    registry.register(Messages::AgentMessage.node_type_key, PlanningAndFinalAgentExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -109,10 +109,10 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
       assert_equal [planner.id], claimed.map(&:id)
       DAG::Runner.run_node!(planner.id)
 
-      tasks = graph.nodes.active.where(node_type: DAG::Node::TASK).order(:id).to_a
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
       assert_equal 2, tasks.length
 
-      final = graph.nodes.active.find_by!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: { "phase" => "final" })
+      final = graph.nodes.active.find_by!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "phase" => "final" })
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal tasks.map(&:id), claimed.map(&:id)
@@ -159,14 +159,14 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
     turn_id = "0194f3c0-0000-7000-8000-00000000c011"
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_id,
       body_input: { "content" => "Do the thing" },
       metadata: {}
     )
-    task = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, turn_id: turn_id, metadata: { "error" => "boom" })
-    character = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, turn_id: turn_id, metadata: { "actor" => "npc" })
+    task = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, turn_id: turn_id, metadata: { "error" => "boom" })
+    character = graph.nodes.create!(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::PENDING, turn_id: turn_id, metadata: { "actor" => "npc" })
 
     graph.edges.create!(from_node_id: user.id, to_node_id: task.id, edge_type: DAG::Edge::SEQUENCE)
     graph.edges.create!(from_node_id: task.id, to_node_id: character.id, edge_type: DAG::Edge::DEPENDENCY)
@@ -178,7 +178,7 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
     assert_equal "blocked_by_failed_dependencies", character.metadata["reason"]
 
     transcript = graph.transcript_for(character.id)
-    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::CHARACTER_MESSAGE], transcript.map { |node| node.fetch("node_type") }
+    assert_equal [Messages::UserMessage.node_type_key, Messages::CharacterMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
 
     preview = transcript.last.dig("payload", "output_preview", "content").to_s
     assert_includes preview, "Skipped:"

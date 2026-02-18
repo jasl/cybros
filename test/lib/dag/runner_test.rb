@@ -49,10 +49,10 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   test "runner treats skipped execution results as errors for running nodes" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::TASK, SkipExecutor.new)
+    registry.register(Messages::Task.node_type_key, SkipExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -69,10 +69,10 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   test "runner writes usage and output_stats for finished nodes" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::RUNNING, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::AGENT_MESSAGE, UsageExecutor.new)
+    registry.register(Messages::AgentMessage.node_type_key, UsageExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -94,10 +94,10 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   test "runner executes character_message nodes and writes usage/output_stats" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::RUNNING, metadata: { "actor" => "npc" })
+    node = graph.nodes.create!(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::RUNNING, metadata: { "actor" => "npc" })
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::CHARACTER_MESSAGE, UsageExecutor.new)
+    registry.register(Messages::CharacterMessage.node_type_key, UsageExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -118,10 +118,10 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   test "output_stats includes array result shape for tool calls" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::TASK, ToolCallArrayResultExecutor.new)
+    registry.register(Messages::Task.node_type_key, ToolCallArrayResultExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -140,12 +140,12 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    node = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: parent.id, to_node_id: node.id, edge_type: DAG::Edge::DEPENDENCY)
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::AGENT_MESSAGE, UsageExecutor.new)
+    registry.register(Messages::AgentMessage.node_type_key, UsageExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry

@@ -11,7 +11,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
 
     graph.mutate!(turn_id: turn_id) do |m|
       node_1 = m.create_node(
-        node_type: DAG::Node::TASK,
+        node_type: Messages::Task.node_type_key,
         state: DAG::Node::PENDING,
         idempotency_key: "k1",
         body_input: { "name" => "t1" },
@@ -19,7 +19,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
       )
 
       node_2 = m.create_node(
-        node_type: DAG::Node::TASK,
+        node_type: Messages::Task.node_type_key,
         state: DAG::Node::PENDING,
         idempotency_key: "k1",
         body_input: { "name" => "t1" },
@@ -39,7 +39,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
 
     graph.mutate!(turn_id: turn_id) do |m|
       m.create_node(
-        node_type: DAG::Node::TASK,
+        node_type: Messages::Task.node_type_key,
         state: DAG::Node::PENDING,
         idempotency_key: "k1",
         body_input: { "name" => "t1" },
@@ -50,7 +50,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
     assert_raises(ArgumentError) do
       graph.mutate!(turn_id: turn_id) do |m|
         m.create_node(
-          node_type: DAG::Node::TASK,
+          node_type: Messages::Task.node_type_key,
           state: DAG::Node::PENDING,
           idempotency_key: "k1",
           body_input: { "name" => "DIFFERENT" },
@@ -67,8 +67,8 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000002"
 
-    a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {}, turn_id: turn_id)
-    b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {}, turn_id: turn_id)
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {}, turn_id: turn_id)
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {}, turn_id: turn_id)
 
     edge_1 = nil
     edge_2 = nil

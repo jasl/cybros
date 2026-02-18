@@ -6,19 +6,19 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
     )
     b = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
       metadata: {}
     )
-    c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
-    d = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    c = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: { "name" => "task" })
+    d = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     edge_ab = graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
     edge_bc = graph.edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::DEPENDENCY)
@@ -30,7 +30,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
       summary_metadata: { "kind" => "test" }
     )
 
-    assert_equal DAG::Node::SUMMARY, summary.node_type
+    assert_equal Messages::Summary.node_type_key, summary.node_type
     assert_equal DAG::Node::FINISHED, summary.state
     assert_equal "summary", summary.body_output["content"]
 
@@ -62,10 +62,10 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    outside_parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "outside_parent" })
-    inside_a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "inside_a" })
-    inside_b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: { "name" => "inside_b" })
-    outside_child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    outside_parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: { "name" => "outside_parent" })
+    inside_a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: { "name" => "inside_a" })
+    inside_b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: { "name" => "inside_b" })
+    outside_child = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     in_1 = graph.edges.create!(from_node_id: outside_parent.id, to_node_id: inside_a.id, edge_type: DAG::Edge::DEPENDENCY)
     in_2 = graph.edges.create!(from_node_id: outside_parent.id, to_node_id: inside_b.id, edge_type: DAG::Edge::DEPENDENCY)

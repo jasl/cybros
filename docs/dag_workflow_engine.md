@@ -83,6 +83,18 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
   - `summary` → `Messages::Summary`
 - 若 graph.attachable 不提供 `dag_node_body_namespace`：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）
 
+#### NodeBody semantic hooks（Milestone 1）
+
+为避免 DAG 核心对 `node_type` 做集中 hardcode，里程碑 1 引入一组 **NodeBody 语义 hooks**（class-level），由各 body STI 类型声明自身语义；引擎按需扫描 `dag_node_body_namespace` 下的 `< DAG::NodeBody` 子类并计算策略集合：
+
+- `node_type_key`：默认 `name.demodulize.underscore`（约定 `node_type` ↔ body 类名一对一）
+- `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
+- `turn_anchor?`：默认 `false`（用于 `transcript_recent_turns` 的 “turn anchor” SQL 预筛选；内置 `user_message` 为 true）
+- `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选；内置 `user/agent/character` 为 true）
+- `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定；内置 `agent_message/character_message` 为 true）
+- `default_leaf_repair?`：默认 `false`（用于 leaf repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true；内置 `agent_message` 为 true、`character_message` 显式为 false）
+- `mermaid_snippet(node:)`：用于 Mermaid label 片段；默认读取 `output_preview["content"]`，各 body 可覆盖（如 system/developer/user 从 `input["content"]`，task 从 `input["name"]`）
+
 #### 状态语义（skipped/cancelled 明确化）
 
 - `pending`：已创建但未执行

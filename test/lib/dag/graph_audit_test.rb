@@ -5,8 +5,8 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
     edge = graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
 
     b.update_columns(compressed_at: Time.current, compressed_by_id: a.id, updated_at: Time.current)
@@ -22,7 +22,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
     patch = DAG::NodeVisibilityPatch.create!(graph: graph, node: node, context_excluded_at: Time.current)
 
     node.update_columns(compressed_at: Time.current, compressed_by_id: node.id, updated_at: Time.current)
@@ -38,13 +38,13 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     issues = DAG::GraphAudit.scan(graph: graph)
     assert issues.any? { |i| i["type"] == DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION }
 
     DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION])
-    assert graph.nodes.active.exists?(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING)
+    assert graph.nodes.active.exists?(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
   end
 
   test "repair! reclaims stale running nodes" do
@@ -52,7 +52,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::RUNNING,
       lease_expires_at: 1.minute.ago,
       metadata: {}

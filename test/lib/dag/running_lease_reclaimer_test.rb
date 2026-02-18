@@ -6,7 +6,7 @@ class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::RUNNING,
       lease_expires_at: 1.minute.ago,
       metadata: {}

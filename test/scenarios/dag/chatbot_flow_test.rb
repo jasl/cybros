@@ -31,20 +31,20 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
     user = nil
 
     graph.mutate!(turn_id: turn_id) do |m|
-      system = m.create_node(node_type: DAG::Node::SYSTEM_MESSAGE, state: DAG::Node::FINISHED, content: "You are helpful", metadata: {})
-      developer = m.create_node(node_type: DAG::Node::DEVELOPER_MESSAGE, state: DAG::Node::FINISHED, content: "Answer in Chinese", metadata: {})
-      user = m.create_node(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      system = m.create_node(node_type: Messages::SystemMessage.node_type_key, state: DAG::Node::FINISHED, content: "You are helpful", metadata: {})
+      developer = m.create_node(node_type: Messages::DeveloperMessage.node_type_key, state: DAG::Node::FINISHED, content: "Answer in Chinese", metadata: {})
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
 
       m.create_edge(from_node: system, to_node: developer, edge_type: DAG::Edge::SEQUENCE)
       m.create_edge(from_node: developer, to_node: user, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    repaired = graph.nodes.active.where(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING).to_a
+    repaired = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).to_a
     assert_equal 1, repaired.length
     agent = repaired.first
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::AGENT_MESSAGE, FixedContentExecutor.new("你好"))
+    registry.register(Messages::AgentMessage.node_type_key, FixedContentExecutor.new("你好"))
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -60,7 +60,7 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
       assert_equal [system.id, developer.id, user.id, agent.id], context_ids
 
       transcript = conversation.transcript_for(agent.id)
-      assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE], transcript.map { |node| node.fetch("node_type") }
+      assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
       assert_equal "你好", transcript.last.dig("payload", "output_preview", "content")
 
       assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::LEAF_INVARIANT_REPAIRED, subject: agent)

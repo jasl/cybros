@@ -2,14 +2,6 @@ module DAG
   class Node < ApplicationRecord
     self.table_name = "dag_nodes"
 
-    SYSTEM_MESSAGE = "system_message"
-    DEVELOPER_MESSAGE = "developer_message"
-    USER_MESSAGE = "user_message"
-    AGENT_MESSAGE = "agent_message"
-    CHARACTER_MESSAGE = "character_message"
-    TASK = "task"
-    SUMMARY = "summary"
-
     PENDING = "pending"
     RUNNING = "running"
     FINISHED = "finished"

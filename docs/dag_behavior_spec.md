@@ -174,6 +174,26 @@ Active 视图内必须保持一致（不允许 drift）：
 - `summary`：
   - `payload.output["content"]`：String（必须）
 
+#### 2.5.3 NodeBody semantic hooks（规范性要求）
+
+里程碑 1 引入一组 **NodeBody 语义 hooks**（class-level），用于把 “哪些类型算 turn anchor / transcript 候选 / leaf terminal / 默认 leaf repair / content 写入落点 / mermaid snippet” 从 DAG 核心分支判断中抽离出来：
+
+- `node_type_key`：默认 `name.demodulize.underscore`
+- `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
+- `turn_anchor?`：默认 `false`（用于 `transcript_recent_turns` 的 turn SQL 预筛选）
+- `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选）
+- `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定）
+- `default_leaf_repair?`：默认 `false`（用于 leaf invariant repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true）
+- `mermaid_snippet(node:)`：用于 Mermaid label 片段（默认从 `output_preview["content"]` 提取；各 body 可覆盖）
+
+引擎行为（normative）：
+
+- 对 conversation graphs（attachable 提供 `dag_node_body_namespace`）：
+  - 引擎会扫描该 namespace 下所有 `< DAG::NodeBody` 的子类，基于 hooks 计算 turn anchor / transcript candidates / leaf terminal types / default leaf repair type。
+  - 这意味着：扩展新 node_type 时，除了提供 `node_type ↔ body` 的约定映射外，还应在对应 body 上声明必要的 hooks（而不是修改 DAG 核心）。
+- 对 generic graphs（无 `dag_node_body_namespace`）：
+  - 不要求上述 hooks 完整存在；默认行为应尽量保守且不引入自动修复副作用。
+
 ### 2.6 节点观测字段（usage/output_stats）
 
 为支持成本统计与压缩策略输入，里程碑 1 约定引擎将以下观测信息写入 `dag_nodes.metadata`（而不是 NodeBody）：
@@ -235,7 +255,7 @@ Active 视图内必须保持一致（不允许 drift）：
 - 同一轮产生的所有节点共享相同 `turn_id`。
 - `retry/regenerate/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
 - `fork` 开启新轮次：fork 出来的 `new_node.turn_id` 由 DB default 生成（不继承父节点 turn_id）
-- leaf invariant repair 创建的 `agent_message(pending)` 必须继承 leaf 的 `turn_id`（引擎层强制）
+- leaf invariant repair 创建的默认 leaf repair 消息节点（里程碑 1 默认 `agent_message(pending)`）必须继承 leaf 的 `turn_id`（引擎层强制）
 
 推荐用法：
 
@@ -460,12 +480,12 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 
 里程碑 1（Default policy）规则：每个 leaf 必须满足其一：
 
-- `node_type in {agent_message, character_message}`
+- `leaf_terminal? == true`（由 NodeBody hooks 决定；里程碑 1 内置为 `agent_message/character_message`）
 - 或者 `state in {pending, running}`（允许执行中的中间态 leaf）
 
 里程碑 1（Default policy）修复策略：
 
-- 若发现 leaf 为 terminal 且不是 `agent_message/character_message`，系统自动追加一个 `agent_message(pending)` 子节点，并用 `sequence` 连接。
+- 若发现 leaf 为 terminal 且 `leaf_terminal? == false`，系统自动追加 “默认 leaf repair” 子节点（由 NodeBody hooks 中唯一 `default_leaf_repair? == true` 的 body 决定；里程碑 1 默认 `agent_message(pending)`），并用 `sequence` 连接。
 - 修复必须在图锁+事务内进行，并记录事件 `leaf_invariant_repaired`。
 - 修复必须在图锁+事务内进行（可观测可通过 hooks 投影，见第 9 节）。
 
@@ -485,7 +505,7 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 对任意 Active 节点 `child`：
 
 - `child.state == pending`
-- `child.node_type in {task, agent_message, character_message}`
+- 由于 “pending/running 必须可执行” 不变量，`child` 必须是可执行节点（`NodeBody.executable? == true`）
 - 存在任一 incoming `dependency` Active edge，使得其 parent 满足：
   - parent 为 terminal 且 `parent.state != finished`
 
@@ -606,7 +626,7 @@ Active 版本确定规则：
 - `payload.input = old.body.input_for_retry deep_merge new_input`
 - 归档范围：
   - 归档 old **以及其 entire Active causal descendant closure**（包含 old 自身）
-- 不接管 outgoing（下游将由 leaf invariant 重新长出新的 `agent_message(pending)`）
+- 不接管 outgoing（下游将由 leaf invariant 重新长出新的默认 leaf repair 节点；里程碑 1 为 `agent_message(pending)`）
 
 ### 7.7 多版本（swipe）表达
 

@@ -13,6 +13,30 @@ module DAG
     before_validation :sync_output_preview
 
     class << self
+      def node_type_key
+        name&.demodulize&.underscore
+      end
+
+      def created_content_destination
+        [:output, "content"]
+      end
+
+      def turn_anchor?
+        false
+      end
+
+      def transcript_candidate?
+        false
+      end
+
+      def leaf_terminal?
+        false
+      end
+
+      def default_leaf_repair?
+        false
+      end
+
       def executable?
         false
       end
@@ -40,6 +64,12 @@ module DAG
 
     def executable?
       self.class.executable?
+    end
+
+    def mermaid_snippet(node:)
+      _ = node
+      output_preview = self.output_preview.is_a?(Hash) ? self.output_preview : {}
+      output_preview["content"].to_s
     end
 
     def preview_max_chars

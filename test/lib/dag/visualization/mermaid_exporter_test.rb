@@ -6,13 +6,13 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     system = graph.nodes.create!(
-      node_type: DAG::Node::SYSTEM_MESSAGE,
+      node_type: Messages::SystemMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "system: be helpful" },
       metadata: {}
     )
     developer = graph.nodes.create!(
-      node_type: DAG::Node::DEVELOPER_MESSAGE,
+      node_type: Messages::DeveloperMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "developer: answer in Chinese" },
       metadata: {}
@@ -30,9 +30,9 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    root = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    forked = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
-    merged = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    root = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    forked = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+    merged = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     graph.edges.create!(
       from_node_id: root.id,

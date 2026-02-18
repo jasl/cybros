@@ -27,11 +27,11 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
   test "execute job runs the node and advances until the leaf is an agent_message" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: { "name" => "t" })
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: { "name" => "t" })
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::TASK, FakeTaskExecutor.new)
-    registry.register(DAG::Node::AGENT_MESSAGE, FakeAgentMessageExecutor.new)
+    registry.register(Messages::Task.node_type_key, FakeTaskExecutor.new)
+    registry.register(Messages::AgentMessage.node_type_key, FakeAgentMessageExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -41,7 +41,7 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
     end
 
     leaf = graph.leaf_nodes.first
-    assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
+    assert_equal Messages::AgentMessage.node_type_key, leaf.node_type
     assert_equal DAG::Node::FINISHED, leaf.state
     assert_equal "done", leaf.body_output["content"]
   ensure

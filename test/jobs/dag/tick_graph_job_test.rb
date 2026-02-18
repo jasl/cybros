@@ -23,7 +23,7 @@ class DAG::TickGraphJobTest < ActiveJob::TestCase
   test "tick claims executable nodes and enqueues execute jobs" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     DAG::TickGraphJob.perform_now(graph.id, limit: 10)
 
@@ -34,7 +34,7 @@ class DAG::TickGraphJobTest < ActiveJob::TestCase
   test "tick is a no-op when the advisory lock is already held" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     locked = Queue.new
     release = Queue.new

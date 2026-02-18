@@ -5,13 +5,13 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    leaf = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    leaf = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     created = graph.with_graph_lock! { graph.validate_leaf_invariant! }
     assert created
 
     repaired = graph.nodes.find_by!(metadata: { "generated_by" => "leaf_invariant" })
-    assert_equal DAG::Node::AGENT_MESSAGE, repaired.node_type
+    assert_equal Messages::AgentMessage.node_type_key, repaired.node_type
     assert_equal DAG::Node::PENDING, repaired.state
 
     assert graph.edges.exists?(
@@ -45,7 +45,7 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
@@ -57,7 +57,7 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
       metadata: {}
     )
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
       metadata: {}
@@ -67,7 +67,8 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: custom.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE, metadata: {})
 
     transcript = graph.transcript_for(agent.id)
-    assert_equal [DAG::Node::USER_MESSAGE, "custom_transcript_message", DAG::Node::AGENT_MESSAGE], transcript.map { |node| node["node_type"] }
+    assert_equal [Messages::UserMessage.node_type_key, "custom_transcript_message", Messages::AgentMessage.node_type_key],
+                 transcript.map { |node| node["node_type"] }
   ensure
     Messages.send(:remove_const, :CustomTranscriptMessage) if Messages.const_defined?(:CustomTranscriptMessage, false)
   end
@@ -76,8 +77,8 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    child = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
     graph.define_singleton_method(:claim_lease_seconds_for) { |_node| 5.seconds }

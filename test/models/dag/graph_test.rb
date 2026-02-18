@@ -8,7 +8,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
     assert_equal DAG::GraphHooks::NOOP, graph.hooks
     assert_equal graph, graph.policy
 
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    node = graph.nodes.create!(node_type: "task", state: DAG::Node::FINISHED, metadata: {})
     assert node.body.is_a?(DAG::NodeBodies::Generic)
   end
 
@@ -16,9 +16,9 @@ class DAG::GraphTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, turn_id: a.turn_id, metadata: {})
-    c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, turn_id: a.turn_id, metadata: {})
+    c = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     assert_equal [a.id, b.id].sort, graph.active_nodes_for_turn(a.turn_id).pluck(:id).sort
     refute_includes graph.active_nodes_for_turn(a.turn_id).pluck(:id), c.id
@@ -36,7 +36,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     assert_raises(ArgumentError) do
       graph.emit_event(event_type: "unknown_event_type", subject: node)
@@ -47,8 +47,8 @@ class DAG::GraphTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    a = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
-    b = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::FINISHED, body_output: { "content" => "hello" }, metadata: {})
+    a = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, body_output: { "content" => "hello" }, metadata: {})
     edge = graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
 
     body_ids = [a.body_id, b.body_id]

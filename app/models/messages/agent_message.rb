@@ -1,6 +1,18 @@
 module Messages
   class AgentMessage < ::DAG::NodeBody
     class << self
+      def transcript_candidate?
+        true
+      end
+
+      def leaf_terminal?
+        true
+      end
+
+      def default_leaf_repair?
+        true
+      end
+
       def executable?
         true
       end

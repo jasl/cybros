@@ -6,7 +6,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
@@ -15,7 +15,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     assert_equal 2000, Messages::AgentMessage.new.preview_max_chars
     long_content = "a" * (Messages::AgentMessage.new.preview_max_chars + 50)
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "content" => long_content },
       metadata: {}
@@ -43,25 +43,25 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
     )
     agent1 = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: {},
       metadata: {}
     )
     task = graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "result" => "ok" },
       metadata: {}
     )
     agent2 = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
       metadata: {}
     )
@@ -85,7 +85,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
       metadata: {}
@@ -103,13 +103,13 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
     )
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
       metadata: {}
     )
@@ -128,25 +128,25 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
       metadata: {}
     )
     agent1 = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: {},
       metadata: {}
     )
     task = graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "result" => "ok" },
       metadata: {}
     )
     agent2 = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
       metadata: {}
     )
@@ -167,7 +167,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
       metadata: {}
@@ -184,7 +184,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       body_output: {},
       metadata: { "transcript_visible" => true, "transcript_preview" => "(structured)" }

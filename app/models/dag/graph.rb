@@ -87,7 +87,10 @@ module DAG
       limit_turns = Integer(limit_turns)
       return [] if limit_turns <= 0
 
-      turn_scope = nodes.active.where(node_type: DAG::Node::USER_MESSAGE)
+      turn_anchor_types = turn_anchor_node_types
+      return [] if turn_anchor_types.empty?
+
+      turn_scope = nodes.active.where(node_type: turn_anchor_types)
       turn_scope = turn_scope.where(deleted_at: nil) unless include_deleted
 
       turn_ids =
@@ -100,10 +103,13 @@ module DAG
 
       return [] if turn_ids.empty?
 
+      candidate_types = transcript_candidate_node_types
+      return [] if candidate_types.empty?
+
       node_scope =
         nodes.active.where(
           turn_id: turn_ids,
-          node_type: [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE]
+          node_type: candidate_types
         )
       node_scope = node_scope.where(deleted_at: nil) unless include_deleted
 
@@ -265,7 +271,7 @@ module DAG
     def leaf_valid?(node)
       return true unless attachable&.respond_to?(:dag_node_body_namespace)
 
-      if node.node_type.in?([DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE])
+      if leaf_terminal_node_types.include?(node.node_type.to_s)
         true
       else
         node.pending? || node.running?
@@ -273,8 +279,9 @@ module DAG
     end
 
     def leaf_repair_node_attributes(_leaf)
+      node_type = default_leaf_repair_node_type
       {
-        node_type: DAG::Node::AGENT_MESSAGE,
+        node_type: node_type,
         state: DAG::Node::PENDING,
         metadata: { "generated_by" => "leaf_invariant" },
       }
@@ -428,6 +435,70 @@ module DAG
         body_class_for_node_type(node_type)
       rescue KeyError, ArgumentError
         nil
+      end
+
+      def node_body_namespace
+        return nil unless attachable&.respond_to?(:dag_node_body_namespace)
+
+        namespace = attachable.dag_node_body_namespace
+        return nil unless namespace.is_a?(Module)
+
+        namespace
+      end
+
+      def node_body_classes
+        namespace = node_body_namespace
+        return [] if namespace.nil?
+
+        key = attachable_cache_key
+        if defined?(@node_body_classes_cache_key) && @node_body_classes_cache_key == key
+          return @node_body_classes
+        end
+
+        @node_body_classes_cache_key = key
+
+        @node_body_classes =
+          namespace.constants(false).filter_map do |constant_name|
+            constant = namespace.const_get(constant_name)
+            next unless constant.is_a?(Class)
+            next unless constant < DAG::NodeBody
+
+            constant
+          rescue NameError
+            nil
+          end
+      end
+
+      def node_type_keys_for_hook(hook_name)
+        node_body_classes
+          .select { |body_class| body_class.public_send(hook_name) }
+          .filter_map(&:node_type_key)
+          .compact
+          .uniq
+      end
+
+      def turn_anchor_node_types
+        node_type_keys_for_hook(:turn_anchor?)
+      end
+
+      def transcript_candidate_node_types
+        node_type_keys_for_hook(:transcript_candidate?)
+      end
+
+      def leaf_terminal_node_types
+        node_type_keys_for_hook(:leaf_terminal?)
+      end
+
+      def default_leaf_repair_node_type
+        bodies = node_body_classes.select(&:default_leaf_repair?)
+        if bodies.length != 1
+          raise "expected exactly 1 NodeBody with default_leaf_repair?==true, got #{bodies.map(&:name).inspect}"
+        end
+
+        node_type_key = bodies.first.node_type_key.to_s
+        raise "default leaf repair NodeBody has blank node_type_key" if node_type_key.blank?
+
+        node_type_key
       end
 
       def attachable_cache_key

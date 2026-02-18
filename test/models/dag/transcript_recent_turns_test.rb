@@ -9,14 +9,14 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     turn_2 = "0194f3c0-0000-7000-8000-000000000101"
 
     graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_1,
       body_input: { "content" => "u1" },
       metadata: {}
     )
     graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_1,
       body_input: { "name" => "t1" },
@@ -24,7 +24,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       metadata: {}
     )
     graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_1,
       body_output: { "content" => "a1" },
@@ -32,21 +32,21 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
 
     user_2 = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
       body_input: { "content" => "u2" },
       metadata: {}
     )
     agent_2 = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
       body_output: { "content" => "a2" },
       metadata: {}
     )
     character_2 = graph.nodes.create!(
-      node_type: DAG::Node::CHARACTER_MESSAGE,
+      node_type: Messages::CharacterMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
       body_output: { "content" => "c2" },
@@ -55,19 +55,67 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
 
     recent = graph.transcript_recent_turns(limit_turns: 1)
     assert_equal [user_2.id, agent_2.id, character_2.id], recent.map { |n| n["node_id"] }
-    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE],
+    assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key],
                  recent.map { |n| n["node_type"] }
 
     all_recent = graph.transcript_recent_turns(limit_turns: 2)
     assert_equal 5, all_recent.length
     assert_equal [turn_1, turn_1, turn_2, turn_2, turn_2], all_recent.map { |n| n["turn_id"] }
     assert_equal [
-      DAG::Node::USER_MESSAGE,
-      DAG::Node::AGENT_MESSAGE,
-      DAG::Node::USER_MESSAGE,
-      DAG::Node::AGENT_MESSAGE,
-      DAG::Node::CHARACTER_MESSAGE,
+      Messages::UserMessage.node_type_key,
+      Messages::AgentMessage.node_type_key,
+      Messages::UserMessage.node_type_key,
+      Messages::AgentMessage.node_type_key,
+      Messages::CharacterMessage.node_type_key,
     ], all_recent.map { |n| n["node_type"] }
+  end
+
+  test "transcript_recent_turns uses NodeBody transcript_candidate? hooks for SQL prefiltering" do
+    Messages.const_set(
+      :CustomRecentMessage,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def transcript_candidate?
+            true
+          end
+
+          def transcript_include?(_context_node_hash)
+            true
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-000000000150"
+
+    user = graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      turn_id: turn_id,
+      body_input: { "content" => "u" },
+      metadata: {}
+    )
+    custom = graph.nodes.create!(
+      node_type: "custom_recent_message",
+      state: DAG::Node::FINISHED,
+      turn_id: turn_id,
+      body_output: { "content" => "x" },
+      metadata: {}
+    )
+    agent = graph.nodes.create!(
+      node_type: Messages::AgentMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      turn_id: turn_id,
+      body_output: { "content" => "a" },
+      metadata: {}
+    )
+
+    recent = graph.transcript_recent_turns(limit_turns: 1)
+    assert_equal [user.id, custom.id, agent.id], recent.map { |n| n["node_id"] }
+  ensure
+    Messages.send(:remove_const, :CustomRecentMessage) if Messages.const_defined?(:CustomRecentMessage, false)
   end
 
   test "transcript_recent_turns uses transcript_visible and transcript_preview overrides" do
@@ -76,7 +124,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     turn_id = "0194f3c0-0000-7000-8000-000000000200"
 
     graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_id,
       body_input: { "content" => "u" },
@@ -84,7 +132,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
 
     agent = graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_id,
       body_output: {},
@@ -92,7 +140,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
 
     transcript = graph.transcript_recent_turns(limit_turns: 1)
-    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE], transcript.map { |n| n["node_type"] }
+    assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |n| n["node_type"] }
     agent_hash = transcript.find { |n| n["node_id"] == agent.id }
     assert_equal "(structured)", agent_hash.dig("payload", "output_preview", "content")
   end
@@ -105,14 +153,14 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     turn_2 = "0194f3c0-0000-7000-8000-000000000301"
 
     graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_1,
       body_input: { "content" => "u1" },
       metadata: {}
     )
     graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_1,
       body_output: { "content" => "a1" },
@@ -120,7 +168,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
 
     deleted_user = graph.nodes.create!(
-      node_type: DAG::Node::USER_MESSAGE,
+      node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
       body_input: { "content" => "u2" },
@@ -128,7 +176,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       metadata: {}
     )
     graph.nodes.create!(
-      node_type: DAG::Node::AGENT_MESSAGE,
+      node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
       body_output: { "content" => "a2" },

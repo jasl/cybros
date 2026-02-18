@@ -20,13 +20,27 @@ module DAG
       body_output = normalize_hash(body_output)
 
       if !content.nil?
-        case node_type
-        when DAG::Node::USER_MESSAGE, DAG::Node::SYSTEM_MESSAGE, DAG::Node::DEVELOPER_MESSAGE
-          body_input["content"] = content
-        when DAG::Node::TASK
-          body_output["result"] = content
+        body_class = @graph.policy.body_class_for_node_type(node_type)
+        destination = body_class.created_content_destination
+        unless destination.is_a?(Array) && destination.length == 2
+          raise ArgumentError,
+                "invalid created_content_destination=#{destination.inspect} " \
+                "for body_class=#{body_class.name}"
+        end
+
+        channel, key = destination
+        channel = channel.to_sym
+        key = key.to_s
+
+        case channel
+        when :input
+          body_input[key] = content
+        when :output
+          body_output[key] = content
         else
-          body_output["content"] = content
+          raise ArgumentError,
+                "invalid created_content_destination=#{destination.inspect} " \
+                "for body_class=#{body_class.name}"
         end
       end
 

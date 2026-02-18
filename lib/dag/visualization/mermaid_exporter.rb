@@ -67,17 +67,9 @@ module DAG
         end
 
         def node_snippet(node, body)
-          input = body&.input.is_a?(Hash) ? body.input : {}
-          output_preview = body&.output_preview.is_a?(Hash) ? body.output_preview : {}
+          return "" if body.nil?
 
-          case node.node_type
-          when DAG::Node::TASK
-            input["name"]
-          when DAG::Node::USER_MESSAGE, DAG::Node::SYSTEM_MESSAGE, DAG::Node::DEVELOPER_MESSAGE
-            input["content"].to_s
-          else
-            output_preview["content"].to_s
-          end.to_s.gsub(/\s+/, " ").strip
+          body.mermaid_snippet(node: node).to_s.gsub(/\s+/, " ").strip
         end
 
         def edge_label(edge)

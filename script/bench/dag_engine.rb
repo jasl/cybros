@@ -18,9 +18,9 @@ measure("linear_1k_create") do
   previous = nil
 
   1000.times do |i|
-    node_type = i.even? ? DAG::Node::USER_MESSAGE : DAG::Node::AGENT_MESSAGE
+    node_type = i.even? ? Messages::UserMessage.node_type_key : Messages::AgentMessage.node_type_key
     body_attributes =
-      if node_type == DAG::Node::USER_MESSAGE
+      if node_type == Messages::UserMessage.node_type_key
         { body_input: { "content" => "n#{i}" } }
       else
         { body_output: { "content" => "n#{i}" } }
@@ -45,14 +45,14 @@ measure("fanout_context_for") do
   graph = conversation.dag_graph
   tasks = 50.times.map do |i|
     graph.nodes.create!(
-      node_type: DAG::Node::TASK,
+      node_type: Messages::Task.node_type_key,
       state: DAG::Node::FINISHED,
       body_input: { "name" => "t#{i}" },
       metadata: {}
     )
   end
 
-  join = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+  join = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
   tasks.each do |task|
     graph.edges.create!(from_node_id: task.id, to_node_id: join.id, edge_type: DAG::Edge::DEPENDENCY)
   end
@@ -64,7 +64,7 @@ measure("scheduler_claim_100") do
   conversation = Conversation.create!(title: "bench-claim")
   graph = conversation.dag_graph
   100.times do
-    graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
   end
 
   DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 100, claimed_by: "bench")

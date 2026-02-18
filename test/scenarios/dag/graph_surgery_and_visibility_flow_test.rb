@@ -34,12 +34,12 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
     agent_2 = nil
 
     graph.mutate!(turn_id: turn_id) do |m|
-      system = m.create_node(node_type: DAG::Node::SYSTEM_MESSAGE, state: DAG::Node::FINISHED, content: "sys", metadata: {})
-      developer = m.create_node(node_type: DAG::Node::DEVELOPER_MESSAGE, state: DAG::Node::FINISHED, content: "dev", metadata: {})
-      user = m.create_node(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "u1", metadata: {})
-      agent_1 = m.create_node(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::FINISHED, metadata: { "transcript_visible" => true })
-      task = m.create_node(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, body_input: { "name" => "t" }, metadata: {})
-      agent_2 = m.create_node(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+      system = m.create_node(node_type: Messages::SystemMessage.node_type_key, state: DAG::Node::FINISHED, content: "sys", metadata: {})
+      developer = m.create_node(node_type: Messages::DeveloperMessage.node_type_key, state: DAG::Node::FINISHED, content: "dev", metadata: {})
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "u1", metadata: {})
+      agent_1 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, metadata: { "transcript_visible" => true })
+      task = m.create_node(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, body_input: { "name" => "t" }, metadata: {})
+      agent_2 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
       m.create_edge(from_node: system, to_node: developer, edge_type: DAG::Edge::SEQUENCE)
       m.create_edge(from_node: developer, to_node: user, edge_type: DAG::Edge::SEQUENCE)
@@ -83,8 +83,8 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
     refute_includes context_ids, task.id
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::AGENT_MESSAGE, FixedExecutor.new({ "content" => "a2" }))
-    registry.register(DAG::Node::TASK, FixedExecutor.new({ "result" => "ok" }))
+    registry.register(Messages::AgentMessage.node_type_key, FixedExecutor.new({ "content" => "a2" }))
+    registry.register(Messages::Task.node_type_key, FixedExecutor.new({ "result" => "ok" }))
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -102,12 +102,12 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
     assert_equal "u2", edited_user.body_input["content"]
 
     leaf = graph.leaf_nodes.sole
-    assert_equal DAG::Node::AGENT_MESSAGE, leaf.node_type
+    assert_equal Messages::AgentMessage.node_type_key, leaf.node_type
     assert_equal DAG::Node::PENDING, leaf.state
 
-    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
-    original = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
-    downstream = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: { "actor" => "npc" })
+    parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    original = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
+    downstream = graph.nodes.create!(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "actor" => "npc" })
     graph.edges.create!(from_node_id: parent.id, to_node_id: original.id, edge_type: DAG::Edge::DEPENDENCY)
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 

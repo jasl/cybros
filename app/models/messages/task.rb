@@ -1,9 +1,19 @@
 module Messages
   class Task < ::DAG::NodeBody
     class << self
+      def created_content_destination
+        [:output, "result"]
+      end
+
       def executable?
         true
       end
+    end
+
+    def mermaid_snippet(node:)
+      _ = node
+      input = self.input.is_a?(Hash) ? self.input : {}
+      input["name"].to_s
     end
 
     def retriable?

@@ -37,16 +37,16 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
     bob = nil
 
     graph.mutate!(turn_id: turn_id) do |m|
-      user = m.create_node(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, content: "Start", metadata: {})
-      alice = m.create_node(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: { "actor" => "alice" })
-      bob = m.create_node(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: { "actor" => "bob" })
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Start", metadata: {})
+      alice = m.create_node(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "actor" => "alice" })
+      bob = m.create_node(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "actor" => "bob" })
 
       m.create_edge(from_node: user, to_node: alice, edge_type: DAG::Edge::SEQUENCE)
       m.create_edge(from_node: user, to_node: bob, edge_type: DAG::Edge::SEQUENCE)
     end
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(DAG::Node::CHARACTER_MESSAGE, CharacterExecutor.new)
+    registry.register(Messages::CharacterMessage.node_type_key, CharacterExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -60,10 +60,10 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
 
       transcript = graph.transcript_recent_turns(limit_turns: 1)
       transcript_types = transcript.map { |node| node.fetch("node_type") }
-      assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::CHARACTER_MESSAGE, DAG::Node::CHARACTER_MESSAGE], transcript_types
+      assert_equal [Messages::UserMessage.node_type_key, Messages::CharacterMessage.node_type_key, Messages::CharacterMessage.node_type_key], transcript_types
 
       regenerated = alice.reload.regenerate!
-      assert_equal DAG::Node::CHARACTER_MESSAGE, regenerated.node_type
+      assert_equal Messages::CharacterMessage.node_type_key, regenerated.node_type
       assert_equal DAG::Node::PENDING, regenerated.state
       assert_equal alice.turn_id, regenerated.turn_id
 
