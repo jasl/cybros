@@ -117,7 +117,7 @@ module DAG
       body_input = old.body.input_for_retry
       retry_metadata =
         old.metadata
-          .except("error", "reason", "blocked_by")
+          .except("error", "reason", "blocked_by", "usage", "output_stats")
           .merge("attempt" => attempt)
 
       new_node = create_node(
@@ -183,7 +183,7 @@ module DAG
       new_node = create_node(
         node_type: old.node_type,
         state: DAG::Node::PENDING,
-        metadata: old.metadata,
+        metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats"),
         body_input: old.body.input_for_retry,
       )
 
@@ -235,7 +235,7 @@ module DAG
       new_node = create_node(
         node_type: old.node_type,
         state: DAG::Node::FINISHED,
-        metadata: old.metadata,
+        metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats"),
         body_input: new_body_input,
         finished_at: now
       )

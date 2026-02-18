@@ -39,23 +39,28 @@ module DAG
 
       def apply_result(node, result)
         from_state = node.state
+        metadata = normalize_hook_metadata(result.metadata)
+        if result.usage.is_a?(Hash) && result.usage.present?
+          metadata["usage"] = result.usage.deep_stringify_keys
+        end
+
         transitioned =
           case result.state
           when DAG::Node::FINISHED
-            node.mark_finished!(content: result.content, payload: result.payload, metadata: result.metadata)
+            node.mark_finished!(content: result.content, payload: result.payload, metadata: metadata)
           when DAG::Node::ERRORED
-            node.mark_errored!(error: result.error || "errored", metadata: result.metadata)
+            node.mark_errored!(error: result.error || "errored", metadata: metadata)
           when DAG::Node::REJECTED
-            node.mark_rejected!(reason: result.reason || "rejected", metadata: result.metadata)
+            node.mark_rejected!(reason: result.reason || "rejected", metadata: metadata)
           when DAG::Node::SKIPPED
             node.mark_errored!(
               error: "invalid_execution_result_state=skipped_for_running_node",
-              metadata: result.metadata.merge("reason" => result.reason)
+              metadata: metadata.merge("reason" => result.reason)
             )
           when DAG::Node::CANCELLED
-            node.mark_cancelled!(reason: result.reason, metadata: result.metadata)
+            node.mark_cancelled!(reason: result.reason, metadata: metadata)
           else
-            node.mark_errored!(error: "unknown_execution_result_state=#{result.state}")
+            node.mark_errored!(error: "unknown_execution_result_state=#{result.state}", metadata: metadata)
           end
 
         if transitioned
@@ -64,6 +69,14 @@ module DAG
             subject: node,
             particulars: { "from" => from_state, "to" => node.state }
           )
+        end
+      end
+
+      def normalize_hook_metadata(metadata)
+        if metadata.is_a?(Hash)
+          metadata.deep_stringify_keys
+        else
+          {}
         end
       end
   end

@@ -159,6 +159,9 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
   1. 组装上下文 `graph.context_for(node)`
   2. `DAG.executor_registry.execute(node:, context:)`
   3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
+     - 观测信息：
+       - `dag_nodes.metadata["usage"]`：executor 回传的 tokens/cost usage（一次执行/一次调用）
+       - `dag_nodes.metadata["output_stats"]`：输出体积/结构统计（含 `pg_column_size` 的 DB 侧字节大小；仅 finished 写入）
   4. 执行后触发下一轮 tick
 
 > 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。

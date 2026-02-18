@@ -127,6 +127,39 @@ Active 视图内必须保持一致（不允许 drift）：
 - `summary`：
   - `payload.output["content"]`：String（必须）
 
+### 2.6 节点观测字段（usage/output_stats）
+
+为支持成本统计与压缩策略输入，里程碑 1 约定引擎将以下观测信息写入 `dag_nodes.metadata`（而不是 NodeBody）：
+
+#### 2.6.1 `metadata["usage"]`（tokens/cost 等）
+
+- `metadata["usage"]` 表示 **一次执行/一次调用** 的资源消耗（attempt-specific）。
+- 写入来源：executor 返回的 `ExecutionResult.usage`（以及/或 result.metadata 内的同类信息），由 Runner 统一写入。
+- 内容结构不做强约束（provider/model/cost/prompt_tokens/...），但 key 必须为 string。
+
+#### 2.6.2 `metadata["output_stats"]`（输出体积与结构统计）
+
+`metadata["output_stats"]` 用于补齐 tokens 不足以解释的维度（例如 ToolCall JSON 很大但 tokens 不高）：
+
+- `body_output_bytes`：`pg_column_size(dag_node_bodies.output)`（DB 侧真实存储字节）
+- `body_output_preview_bytes`：`pg_column_size(dag_node_bodies.output_preview)`
+- `output_top_level_keys`：`payload.output` 的顶层 key 数
+- 当 `payload.output["result"]` 存在时：
+  - `result_type`：`string|hash|array|number|boolean|null|other`
+  - `result_key_count`（仅 hash）
+  - `result_array_len`（仅 array）
+
+写入时机：
+
+- 仅在节点进入 `finished` 且 output 已落库后写入（attempt-specific）。
+
+#### 2.6.3 attempt-specific（禁止继承）
+
+`retry/regenerate/edit` 生成的新节点必须 **不继承** 旧节点的：
+
+- `metadata["usage"]`
+- `metadata["output_stats"]`
+
 ---
 
 ## 3) Edges（正交语义：Causal vs Lineage）

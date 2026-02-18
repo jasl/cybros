@@ -79,6 +79,14 @@ module DAG
       deleted_at.present?
     end
 
+    def usage
+      metadata.is_a?(Hash) ? metadata["usage"] : nil
+    end
+
+    def output_stats
+      metadata.is_a?(Hash) ? metadata["output_stats"] : nil
+    end
+
     def exclude_from_context!(at: Time.current)
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
@@ -163,6 +171,12 @@ module DAG
           body.apply_finished_content!(content)
           body.save!
         end
+
+        stats = compute_output_stats
+        update_columns(
+          metadata: self.metadata.merge("output_stats" => stats),
+          updated_at: Time.current
+        )
       end
 
       transitioned
@@ -402,6 +416,49 @@ module DAG
           .where(from_node_id: id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
           .where(to_node_id: graph.nodes.active.select(:id))
           .to_a
+      end
+
+      def compute_output_stats
+        output_bytes, output_preview_bytes =
+          DAG::NodeBody.where(id: body_id).pick(
+            Arel.sql("pg_column_size(output)"),
+            Arel.sql("pg_column_size(output_preview)")
+          )
+
+        output_hash = body.output.is_a?(Hash) ? body.output : {}
+        stats = {
+          "body_output_bytes" => output_bytes.to_i,
+          "body_output_preview_bytes" => output_preview_bytes.to_i,
+          "output_top_level_keys" => output_hash.size,
+        }
+
+        return stats unless output_hash.key?("result")
+
+        result = output_hash["result"]
+        stats["result_type"] = json_type_for_stats(result)
+        stats["result_key_count"] = result.size if result.is_a?(Hash)
+        stats["result_array_len"] = result.length if result.is_a?(Array)
+
+        stats
+      end
+
+      def json_type_for_stats(value)
+        case value
+        when String
+          "string"
+        when Hash
+          "hash"
+        when Array
+          "array"
+        when Numeric
+          "number"
+        when TrueClass, FalseClass
+          "boolean"
+        when NilClass
+          "null"
+        else
+          "other"
+        end
       end
 
       def request_visibility_patch!(context_excluded_at:, deleted_at:)

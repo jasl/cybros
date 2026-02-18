@@ -251,13 +251,22 @@ class DAG::NodeTest < ActiveSupport::TestCase
       node_type: DAG::Node::TASK,
       state: DAG::Node::ERRORED,
       body_input: { "name" => "t" },
-      metadata: { "error" => "boom", "reason" => "nope", "attempt" => 3, "custom" => "x" }
+      metadata: {
+        "error" => "boom",
+        "reason" => "nope",
+        "attempt" => 3,
+        "custom" => "x",
+        "usage" => { "total_tokens" => 123 },
+        "output_stats" => { "body_output_bytes" => 99 },
+      }
     )
 
     retried = original.retry!
 
     assert_nil retried.metadata["error"]
     assert_nil retried.metadata["reason"]
+    assert_nil retried.metadata["usage"]
+    assert_nil retried.metadata["output_stats"]
     assert_equal "x", retried.metadata["custom"]
     assert_equal 4, retried.metadata["attempt"]
   end
@@ -276,7 +285,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
-      metadata: {}
+      metadata: { "usage" => { "total_tokens" => 10 }, "output_stats" => { "body_output_bytes" => 1 } }
     )
     edge = graph.edges.create!(
       from_node_id: user.id,
@@ -288,6 +297,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::PENDING, regenerated.state
     assert_equal DAG::Node::AGENT_MESSAGE, regenerated.node_type
+    assert_nil regenerated.metadata["usage"]
+    assert_nil regenerated.metadata["output_stats"]
 
     assert original.reload.compressed_at.present?
     assert_equal regenerated.id, original.compressed_by_id
@@ -308,7 +319,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
-      metadata: {}
+      metadata: { "usage" => { "total_tokens" => 1 }, "output_stats" => { "body_output_bytes" => 2 } }
     )
     b = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
@@ -332,6 +343,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::FINISHED, edited.state
     assert_equal "hi2", edited.body_input["content"]
+    assert_nil edited.metadata["usage"]
+    assert_nil edited.metadata["output_stats"]
 
     [a, b, c, d].each do |node|
       assert node.reload.compressed_at.present?
