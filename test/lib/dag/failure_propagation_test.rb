@@ -34,6 +34,21 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
     assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: c)
   end
 
+  test "propagate! skips pending character_message nodes blocked by failed dependencies" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    character = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: { "actor" => "npc" })
+
+    graph.edges.create!(from_node_id: parent.id, to_node_id: character.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    DAG::FailurePropagation.propagate!(graph: graph)
+
+    assert_equal DAG::Node::SKIPPED, character.reload.state
+    assert_equal "blocked_by_failed_dependencies", character.metadata["reason"]
+  end
+
   test "propagate! does not skip nodes whose dependency parents are pending" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

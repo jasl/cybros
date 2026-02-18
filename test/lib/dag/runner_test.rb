@@ -91,6 +91,30 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     DAG.executor_registry = original_registry
   end
 
+  test "runner executes character_message nodes and writes usage/output_stats" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::RUNNING, metadata: { "actor" => "npc" })
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(DAG::Node::CHARACTER_MESSAGE, UsageExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    DAG::Runner.run_node!(node.id)
+
+    node.reload
+    assert_equal DAG::Node::FINISHED, node.state
+    assert node.started_at.present?
+    assert node.heartbeat_at.present?
+    assert node.lease_expires_at.present?
+    assert_equal 3, node.metadata.dig("usage", "total_tokens")
+    assert_kind_of Integer, node.metadata.dig("output_stats", "body_output_bytes")
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
   test "output_stats includes array result shape for tool calls" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

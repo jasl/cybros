@@ -5,14 +5,23 @@ class DAG::NodeTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    user = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    system = graph.nodes.create!(node_type: DAG::Node::SYSTEM_MESSAGE, state: DAG::Node::FINISHED, metadata: {})
+    assert_instance_of Messages::SystemMessage, system.body
+
+    developer = graph.nodes.create!(node_type: DAG::Node::DEVELOPER_MESSAGE, state: DAG::Node::FINISHED, metadata: {})
+    assert_instance_of Messages::DeveloperMessage, developer.body
+
+    user = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, metadata: {})
     assert_instance_of Messages::UserMessage, user.body
 
     agent = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
     assert_instance_of Messages::AgentMessage, agent.body
 
+    character = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    assert_instance_of Messages::CharacterMessage, character.body
+
     task = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
-    assert_instance_of Messages::ToolCall, task.body
+    assert_instance_of Messages::Task, task.body
 
     summary = graph.nodes.create!(node_type: DAG::Node::SUMMARY, state: DAG::Node::FINISHED, metadata: {})
     assert_instance_of Messages::Summary, summary.body
@@ -26,7 +35,31 @@ class DAG::NodeTest < ActiveSupport::TestCase
     node.body = Messages::AgentMessage.new
 
     assert_not node.valid?
-    assert_match(/Messages::ToolCall/, node.errors[:body].join)
+    assert_match(/Messages::Task/, node.errors[:body].join)
+  end
+
+  test "is invalid when node_type is unknown for the graph policy" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.new(node_type: "bogus", state: DAG::Node::PENDING, metadata: {})
+    assert_not node.valid?
+    assert_includes node.errors[:node_type], "is unknown"
+
+    error = assert_raises(ActiveRecord::RecordInvalid) do
+      node.save!
+    end
+    assert_match(/Node type is unknown/, error.message)
+  end
+
+  test "is invalid when a non-executable node is pending" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.new(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+
+    assert_not node.valid?
+    assert_includes node.errors[:state], "can only be pending/running for executable nodes"
   end
 
   test "exclude_from_context! and soft_delete! reject non-terminal nodes" do
@@ -122,7 +155,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_not user.can_edit?
 
     assert user.can_fork?
-    pending = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    pending = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
     assert_not pending.can_fork?
   end
 

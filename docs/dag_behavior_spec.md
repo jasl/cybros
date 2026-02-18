@@ -54,10 +54,19 @@
 
 ### 2.1 节点类型（`dag_nodes.node_type`）
 
+- `system_message`：系统提示/全局规则（不可执行；默认进入 context；默认不进入 transcript）
+- `developer_message`：开发者提示/产品约束（不可执行；默认进入 context；默认不进入 transcript）
 - `user_message`：用户输入
-- `agent_message`：LLM/Agent 输出
+- `agent_message`：LLM/Agent 输出（可执行）
+- `character_message`：角色发言（可执行；与 `agent_message` 同级，用于多角色/群聊）
 - `task`：可执行动作（tool/MCP/skill 等）
 - `summary`：子图压缩后的替代节点
+
+类型约束（规范性要求）：
+
+- 引擎**不**在 DB 层对 `dag_nodes.node_type` 做 check constraint（允许业务扩展）。
+- 对 conversation graphs：`attachable.dag_node_body_namespace` 必须返回一个 NodeBody 命名空间（Module），引擎按约定将 `node_type` 映射到 `#{namespace}::#{node_type.camelize}`，且该常量必须 `< DAG::NodeBody`；未知/未定义类型默认失败，避免拼写错误/脏数据导致 Scheduler/Context/Leaf/FailurePropagation 产生不可解释行为。
+- 对无 `dag_node_body_namespace` 的 graphs：引擎统一使用 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）。
 
 ### 2.2 节点状态（`dag_nodes.state`）
 
@@ -109,10 +118,13 @@
 
 ### 2.4 可执行节点（Executable）
 
-仅以下 node_type 会被 Scheduler claim 并由 Runner 执行：
+可执行性由 NodeBody class hook `executable?` 决定（默认 false；例如 `Messages::AgentMessage/CharacterMessage/Task` 为 true）。
 
-- `task`
-- `agent_message`
+新不变量（规范性要求）：
+
+- 只有 `NodeBody.executable? == true` 的节点才允许处于 `pending` 或 `running`。
+
+因此 Scheduler/FailurePropagation 可以只按 `state` 与拓扑关系工作，不再需要维护 `node_type IN (...)` 的可执行列表。
 
 ### 2.5 NodeBody（STI + JSONB I/O）
 
@@ -134,21 +146,28 @@ Active 视图内必须保持一致（不允许 drift）：
 
 映射由 `graph.policy` 决定，通常由 attachable 注入。里程碑 1 的示例：
 
-- `Conversation`（`Messages::GraphPolicy`）映射为：
+- `Conversation`（`dag_node_body_namespace => Messages`）映射为：
+  - `system_message` → `Messages::SystemMessage`
+  - `developer_message` → `Messages::DeveloperMessage`
   - `user_message` → `Messages::UserMessage`
   - `agent_message` → `Messages::AgentMessage`
-  - `task` → `Messages::ToolCall`
+  - `character_message` → `Messages::CharacterMessage`
+  - `task` → `Messages::Task`
   - `summary` → `Messages::Summary`
-- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）。
+- 若 graph.attachable 不提供 `dag_node_body_namespace`：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）。
 
 #### 2.5.2 负载字段最小约定
 
 - `user_message`：
   - `payload.input["content"]`：String（必须）
   - `payload.output`：通常为空
+- `system_message` / `developer_message`：
+  - `payload.input["content"]`：String（必须）
 - `agent_message`：
   - `payload.output["content"]`：String（常用）
-- `task`（ToolCall）：
+- `character_message`：
+  - `payload.output["content"]`：String（常用）
+- `task`（Task）：
   - `payload.input["name"]`：String（建议）
   - `payload.input["arguments"]`：JSON（建议）
   - `payload.output["result"]`：JSON/String（常用）
@@ -167,7 +186,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 #### 2.6.2 `metadata["output_stats"]`（输出体积与结构统计）
 
-`metadata["output_stats"]` 用于补齐 tokens 不足以解释的维度（例如 ToolCall JSON 很大但 tokens 不高）：
+`metadata["output_stats"]` 用于补齐 tokens 不足以解释的维度（例如 task JSON 很大但 tokens 不高）：
 
 - `body_output_bytes`：`pg_column_size(dag_node_bodies.output)`（DB 侧真实存储字节）
 - `body_output_preview_bytes`：`pg_column_size(dag_node_bodies.output_preview)`
@@ -304,7 +323,7 @@ Active 视图内必须保持一致（不允许 drift）：
 {
   "node_id": "...",
   "turn_id": "...",
-  "node_type": "user_message|agent_message|task|summary",
+  "node_type": "user_message|system_message|developer_message|agent_message|character_message|task|summary",
   "state": "pending|running|finished|errored|rejected|skipped|cancelled",
   "payload": {
     "input": { },
@@ -324,8 +343,8 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - **上限固定**：字符串按 `body.preview_max_chars` 截断
   - 默认上限：`200 chars`（`DAG::NodeBody`）
-  - `agent_message`（`Messages::AgentMessage`）：`2000 chars`
-- **ToolCall result**（`Messages::ToolCall`）：
+  - `agent_message/character_message`（`Messages::AgentMessage` 家族）：`2000 chars`
+- **Task result**（`Messages::Task`）：
   - `payload.output_preview["result"]` 必须始终为 **String**
   - 当 `payload.output["result"]` 为 Hash/Array 时，preview 必须是摘要字符串（不允许全量 JSON 序列化再截断）
 - 其它 body 类型：非字符串值可按 JSON 序列化后截断
@@ -335,7 +354,7 @@ Active 视图内必须保持一致（不允许 drift）：
   3) 否则若 output 只有一个 key，取该 key/value
   4) 否则取整段 JSON 的截断字符串
 
-允许 STI 子类覆写派生逻辑（例如 ToolCall 的摘要化），但必须遵守上限与可读性目标。
+允许 STI 子类覆写派生逻辑（例如 Task 的摘要化），但必须遵守上限与可读性目标。
 
 ### 4.5 Context 可见性标记（exclude/delete，非结构性）
 
@@ -401,17 +420,24 @@ defer queue 的存储与应用规则（normative）：
 
 - transcript 不受 `context_excluded_at` 影响（exclude 是 context-only 语义）
 - transcript 默认不包含：
+  - `system_message` / `developer_message`（默认不暴露 prompt）
   - `task` / `summary`
-  - “无可读 content 的中间 `agent_message`”（例如只用于 tool planning 或 tool_calls 的节点）
-- 对 `agent_message`，除 “可读 content” 外，允许通过 metadata 显式进入 transcript：
-  - `metadata["transcript_visible"] == true`：强制进入 transcript
-  - `metadata["transcript_preview"]`（可选 String）：当 `payload.output_preview["content"]` 为空时，作为 transcript 展示文本（view 层注入，不写回 body）
+  - “无可读 content 的中间 `agent_message/character_message`”（例如只用于 tool planning 或 tool_calls 的节点）
+- 对 `agent_message/character_message`，除 “可读 content” 外：
+  - `pending/running` 必须允许进入 transcript（用于 UI 占位/typing indicator）
+  - 允许通过 metadata 显式进入 transcript：
+    - `metadata["transcript_visible"] == true`：强制进入 transcript
+    - `metadata["transcript_preview"]`（可选 String）：当 `payload.output_preview["content"]` 为空时，作为 transcript 展示文本（view 层注入，不写回 body）
+  - 终态可见性强化：当节点进入终态且 `metadata["reason"]` 或 `metadata["error"]` 存在时，即使没有可读 content 也必须进入 transcript（典型场景：FailurePropagation 导致下游消息被 `skipped`）
 - soft-delete（`deleted_at`）默认从 transcript 中排除（除非 `include_deleted:true`）
 - 若 target 节点已 soft-delete 且未显式 `include_deleted:true`，则 transcript 返回空数组
 
 实现要求：
 
 - transcript 的过滤与可选的 preview 覆写应由 `graph.policy.transcript_include?` / `graph.policy.transcript_preview_override` 提供（里程碑 1 默认策略必须实现上述规则；attachable 可覆写以满足不同产品语义）。
+- preview 覆写必须满足：
+  - 当 `payload.output_preview["content"]` 为空时，优先使用 `metadata["transcript_preview"]`（若存在）
+  - 否则对 `errored/rejected/cancelled/skipped` 生成安全预览文本（基于 `metadata["error"]/["reason"]`，截断），避免 UI 空白或泄漏敏感信息
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
 
@@ -434,12 +460,12 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 
 里程碑 1（Default policy）规则：每个 leaf 必须满足其一：
 
-- `node_type == agent_message`
+- `node_type in {agent_message, character_message}`
 - 或者 `state in {pending, running}`（允许执行中的中间态 leaf）
 
 里程碑 1（Default policy）修复策略：
 
-- 若发现 leaf 为 terminal 且不是 `agent_message`，系统自动追加一个 `agent_message(pending)` 子节点，并用 `sequence` 连接。
+- 若发现 leaf 为 terminal 且不是 `agent_message/character_message`，系统自动追加一个 `agent_message(pending)` 子节点，并用 `sequence` 连接。
 - 修复必须在图锁+事务内进行，并记录事件 `leaf_invariant_repaired`。
 - 修复必须在图锁+事务内进行（可观测可通过 hooks 投影，见第 9 节）。
 
@@ -459,7 +485,7 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 对任意 Active 节点 `child`：
 
 - `child.state == pending`
-- `child.node_type in {task, agent_message}`
+- `child.node_type in {task, agent_message, character_message}`
 - 存在任一 incoming `dependency` Active edge，使得其 parent 满足：
   - parent 为 terminal 且 `parent.state != finished`
 
@@ -526,7 +552,7 @@ Active 版本确定规则：
 
 前置条件：
 
-- `old.body.retriable? == true`（当前：`task`/`agent_message`）
+- `old.body.retriable? == true`（当前：`task`/`agent_message`/`character_message`）
 - `old.state in {errored, rejected, cancelled}`
 - `old` 为 Active
 - old 的 **Active causal descendants（不含 old）必须全部为 pending**  
@@ -545,11 +571,11 @@ Active 版本确定规则：
 
 ### 7.5 regenerate（LLM 回复重新生成：leaf 版本替换）
 
-目的：对已完成的 agent_message 重新生成（swipe 多版本）。
+目的：对已完成的 `agent_message/character_message` 重新生成（swipe 多版本）。
 
 前置条件：
 
-- `old.body.regeneratable? == true`（当前：`agent_message`）
+- `old.body.regeneratable? == true`（当前：`agent_message`/`character_message`）
 - `old.state == finished`
 - `old` 为 **leaf**（无 outgoing blocking edges）
 
@@ -563,11 +589,11 @@ Active 版本确定规则：
 
 ### 7.6 edit（用户编辑历史输入：归档下游并重生）
 
-目的：用户编辑过去的 user_message 内容，旧下游全部失效，需归档并重新生成新下游。
+目的：编辑过去的 `user_message/system_message/developer_message` 内容，旧下游全部失效，需归档并重新生成新下游。
 
 前置条件（2A 稳定性）：
 
-- `old.body.editable? == true`（当前：`user_message`）
+- `old.body.editable? == true`（当前：`user_message`/`system_message`/`developer_message`）
 - `old.state == finished`
 - old 的 Active causal descendants（不含 old）中 **不得存在 pending/running**
   - 允许存在已完成的下游（将被归档）

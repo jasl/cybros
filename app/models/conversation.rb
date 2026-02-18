@@ -14,8 +14,8 @@ class Conversation < ApplicationRecord
     build_dag_graph if new_record? && dag_graph.nil?
   end
 
-  def dag_graph_policy
-    @dag_graph_policy ||= Messages::GraphPolicy.new
+  def dag_node_body_namespace
+    Messages
   end
 
   def dag_graph_hooks

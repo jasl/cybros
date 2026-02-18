@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
-  test "transcript_recent_turns returns user/agent nodes for recent turns without tasks" do
+  test "transcript_recent_turns returns user/agent/character nodes for recent turns without tasks" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -45,16 +45,29 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       body_output: { "content" => "a2" },
       metadata: {}
     )
+    character_2 = graph.nodes.create!(
+      node_type: DAG::Node::CHARACTER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      turn_id: turn_2,
+      body_output: { "content" => "c2" },
+      metadata: { "actor" => "npc" }
+    )
 
     recent = graph.transcript_recent_turns(limit_turns: 1)
-    assert_equal [user_2.id, agent_2.id], recent.map { |n| n["node_id"] }
-    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE], recent.map { |n| n["node_type"] }
+    assert_equal [user_2.id, agent_2.id, character_2.id], recent.map { |n| n["node_id"] }
+    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE],
+                 recent.map { |n| n["node_type"] }
 
     all_recent = graph.transcript_recent_turns(limit_turns: 2)
-    assert_equal 4, all_recent.length
-    assert_equal [turn_1, turn_1, turn_2, turn_2], all_recent.map { |n| n["turn_id"] }
-    assert_equal [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE, DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE],
-                 all_recent.map { |n| n["node_type"] }
+    assert_equal 5, all_recent.length
+    assert_equal [turn_1, turn_1, turn_2, turn_2, turn_2], all_recent.map { |n| n["turn_id"] }
+    assert_equal [
+      DAG::Node::USER_MESSAGE,
+      DAG::Node::AGENT_MESSAGE,
+      DAG::Node::USER_MESSAGE,
+      DAG::Node::AGENT_MESSAGE,
+      DAG::Node::CHARACTER_MESSAGE,
+    ], all_recent.map { |n| n["node_type"] }
   end
 
   test "transcript_recent_turns uses transcript_visible and transcript_preview overrides" do

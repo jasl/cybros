@@ -58,7 +58,6 @@ module DAG
               WHERE child.graph_id = #{graph_quoted}
                 AND child.compressed_at IS NULL
                 AND child.state = 'pending'
-                AND child.node_type IN ('task', 'agent_message')
                 AND parent.state IN ('errored', 'rejected', 'skipped', 'cancelled')
               GROUP BY child.id
             )

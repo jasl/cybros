@@ -2,8 +2,11 @@ module DAG
   class Node < ApplicationRecord
     self.table_name = "dag_nodes"
 
+    SYSTEM_MESSAGE = "system_message"
+    DEVELOPER_MESSAGE = "developer_message"
     USER_MESSAGE = "user_message"
     AGENT_MESSAGE = "agent_message"
+    CHARACTER_MESSAGE = "character_message"
     TASK = "task"
     SUMMARY = "summary"
 
@@ -15,12 +18,9 @@ module DAG
     SKIPPED = "skipped"
     CANCELLED = "cancelled"
 
-    NODE_TYPES = [USER_MESSAGE, AGENT_MESSAGE, TASK, SUMMARY].freeze
     STATES = [PENDING, RUNNING, FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
     TERMINAL_STATES = [FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
-    EXECUTABLE_NODE_TYPES = [TASK, AGENT_MESSAGE].freeze
 
-    enum :node_type, NODE_TYPES.index_by(&:itself)
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
@@ -43,9 +43,10 @@ module DAG
              dependent: :destroy,
              inverse_of: :to_node
 
-    validates :node_type, inclusion: { in: NODE_TYPES }
+    validates :node_type, presence: true
     validates :state, inclusion: { in: STATES }
     validate :body_type_matches_node_type
+    validate :pending_or_running_requires_executable_body
 
     scope :active, -> { where(compressed_at: nil) }
 
@@ -68,7 +69,7 @@ module DAG
     end
 
     def executable?
-      EXECUTABLE_NODE_TYPES.include?(node_type)
+      body&.executable? == true
     end
 
     def context_excluded?
@@ -381,28 +382,50 @@ module DAG
         return if node_type.blank?
         return if graph.blank?
 
-        self.body = graph_policy.body_class_for_node_type(node_type).new
-        apply_pending_body_io!
+        begin
+          self.body = graph.policy.body_class_for_node_type(node_type).new
+          apply_pending_body_io!
+        rescue KeyError, ArgumentError
+          errors.add(:node_type, "is unknown")
+        end
       end
 
       def body_type_matches_node_type
         return if node_type.blank? || body.blank?
+        return if graph.blank?
 
-        expected_body_class = graph_policy.body_class_for_node_type(node_type)
+        expected_body_class =
+          begin
+            graph.policy.body_class_for_node_type(node_type)
+          rescue KeyError, ArgumentError
+            errors.add(:node_type, "is unknown")
+            return
+          end
         return if body.is_a?(expected_body_class)
 
         errors.add(:body, "must be a #{expected_body_class.name} for node_type=#{node_type}")
       end
 
       def graph_policy
-        graph&.policy || DAG::GraphPolicies::Default.new
+        graph&.policy
+      end
+
+      def pending_or_running_requires_executable_body
+        return unless state.in?([PENDING, RUNNING])
+        return if body&.executable?
+
+        errors.add(:state, "can only be pending/running for executable nodes")
       end
 
       def visibility_mutation_allowed_now?
+        return false if graph_policy.nil?
+
         graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
       end
 
       def assert_visibility_mutation_allowed!
+        raise ArgumentError, "graph policy missing" if graph_policy.nil?
+
         reason = graph_policy.visibility_mutation_error(node: self, graph: graph)
         return if reason.nil?
 

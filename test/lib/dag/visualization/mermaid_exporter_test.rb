@@ -1,6 +1,31 @@
 require "test_helper"
 
 class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
+  test "exports system and developer message snippets from input content" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    system = graph.nodes.create!(
+      node_type: DAG::Node::SYSTEM_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "system: be helpful" },
+      metadata: {}
+    )
+    developer = graph.nodes.create!(
+      node_type: DAG::Node::DEVELOPER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "developer: answer in Chinese" },
+      metadata: {}
+    )
+
+    graph.edges.create!(from_node_id: system.id, to_node_id: developer.id, edge_type: DAG::Edge::SEQUENCE)
+
+    mermaid = conversation.to_mermaid
+
+    assert_includes mermaid, "system: be helpful"
+    assert_includes mermaid, "developer: answer in Chinese"
+  end
+
   test "exports branch edges with branch_kinds" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

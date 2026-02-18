@@ -6,14 +6,15 @@ class DAG::GraphTest < ActiveSupport::TestCase
 
     assert_nil graph.attachable
     assert_equal DAG::GraphHooks::NOOP, graph.hooks
-    assert graph.policy.is_a?(DAG::GraphPolicies::Default)
+    assert_equal graph, graph.policy
 
-    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
     assert node.body.is_a?(DAG::NodeBodies::Generic)
   end
 
   test "turn helpers scope to active nodes and compute stability" do
-    graph = DAG::Graph.create!
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
     b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, turn_id: a.turn_id, metadata: {})

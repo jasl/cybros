@@ -21,7 +21,7 @@ module DAG
 
       if !content.nil?
         case node_type
-        when DAG::Node::USER_MESSAGE
+        when DAG::Node::USER_MESSAGE, DAG::Node::SYSTEM_MESSAGE, DAG::Node::DEVELOPER_MESSAGE
           body_input["content"] = content
         when DAG::Node::TASK
           body_output["result"] = content
@@ -172,7 +172,7 @@ module DAG
       now = Time.current
 
       unless old.body.retriable?
-        raise ArgumentError, "can only retry retriable nodes (task, agent_message)"
+        raise ArgumentError, "can only retry retriable nodes (task, agent_message, character_message)"
       end
 
       unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::CANCELLED].include?(old.state)
@@ -257,7 +257,7 @@ module DAG
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-        raise ArgumentError, "can only regenerate leaf agent_message nodes"
+        raise ArgumentError, "can only regenerate leaf agent_message/character_message nodes"
       end
 
       new_node = create_node(

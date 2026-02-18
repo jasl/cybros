@@ -73,7 +73,7 @@ module DAG
           case node.node_type
           when DAG::Node::TASK
             input["name"]
-          when DAG::Node::USER_MESSAGE
+          when DAG::Node::USER_MESSAGE, DAG::Node::SYSTEM_MESSAGE, DAG::Node::DEVELOPER_MESSAGE
             input["content"].to_s
           else
             output_preview["content"].to_s

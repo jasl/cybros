@@ -12,6 +12,20 @@ module DAG
     before_validation :normalize_jsonb_fields
     before_validation :sync_output_preview
 
+    class << self
+      def executable?
+        false
+      end
+
+      def transcript_include?(_context_node_hash)
+        false
+      end
+
+      def transcript_preview_override(_context_node_hash)
+        nil
+      end
+    end
+
     def retriable?
       false
     end
@@ -22,6 +36,10 @@ module DAG
 
     def regeneratable?
       false
+    end
+
+    def executable?
+      self.class.executable?
     end
 
     def preview_max_chars

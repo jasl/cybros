@@ -100,7 +100,11 @@ module DAG
 
       return [] if turn_ids.empty?
 
-      node_scope = nodes.active.where(turn_id: turn_ids, node_type: [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE])
+      node_scope =
+        nodes.active.where(
+          turn_id: turn_ids,
+          node_type: [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE]
+        )
       node_scope = node_scope.where(deleted_at: nil) unless include_deleted
 
       node_records =
@@ -237,19 +241,85 @@ module DAG
     end
 
     def policy
-      key = attachable_cache_key
-      if defined?(@policy_cache_key) && @policy_cache_key == key
-        return @policy
+      self
+    end
+
+    def body_class_for_node_type(node_type)
+      node_type = node_type.to_s
+
+      if attachable&.respond_to?(:dag_node_body_namespace)
+        namespace = attachable.dag_node_body_namespace
+        raise KeyError, "dag_node_body_namespace must be a Module" unless namespace.is_a?(Module)
+
+        class_name = "#{namespace.name}::#{node_type.camelize}"
+        body_class = class_name.safe_constantize
+        raise KeyError, "unknown node_type=#{node_type}" if body_class.nil?
+        raise KeyError, "node_type=#{node_type} maps to non-NodeBody #{body_class.name}" unless body_class < DAG::NodeBody
+
+        body_class
+      else
+        DAG::NodeBodies::Generic
       end
+    end
 
-      @policy_cache_key = key
+    def leaf_valid?(node)
+      return true unless attachable&.respond_to?(:dag_node_body_namespace)
 
-      @policy =
-        if attachable&.respond_to?(:dag_graph_policy)
-          attachable.dag_graph_policy || DAG::GraphPolicies::Default.new
-        else
-          DAG::GraphPolicies::Default.new
-        end
+      if node.node_type.in?([DAG::Node::AGENT_MESSAGE, DAG::Node::CHARACTER_MESSAGE])
+        true
+      else
+        node.pending? || node.running?
+      end
+    end
+
+    def leaf_repair_node_attributes(_leaf)
+      {
+        node_type: DAG::Node::AGENT_MESSAGE,
+        state: DAG::Node::PENDING,
+        metadata: { "generated_by" => "leaf_invariant" },
+      }
+    end
+
+    def leaf_repair_edge_attributes(_leaf, _repaired_node)
+      {
+        edge_type: DAG::Edge::SEQUENCE,
+        metadata: { "generated_by" => "leaf_invariant" },
+      }
+    end
+
+    def transcript_include?(context_node_hash)
+      body_class = body_class_for_context_node_hash(context_node_hash)
+      return false if body_class.nil?
+
+      body_class.transcript_include?(context_node_hash)
+    end
+
+    def transcript_preview_override(context_node_hash)
+      body_class = body_class_for_context_node_hash(context_node_hash)
+      return nil if body_class.nil?
+
+      body_class.transcript_preview_override(context_node_hash)
+    end
+
+    def visibility_mutation_allowed?(node:, graph:)
+      visibility_mutation_error(node: node, graph: graph).nil?
+    end
+
+    def visibility_mutation_error(node:, graph:)
+      return "can only change visibility for terminal nodes" unless node.terminal?
+      return "cannot change visibility while graph has running nodes" if graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
+
+      nil
+    end
+
+    def claim_lease_seconds_for(node)
+      _ = node
+      30.minutes
+    end
+
+    def execution_lease_seconds_for(node)
+      _ = node
+      2.hours
     end
 
     def emit_event(event_type:, particulars: {}, subject: nil, subject_type: nil, subject_id: nil)
@@ -352,6 +422,14 @@ module DAG
 
     private
 
+      def body_class_for_context_node_hash(context_node_hash)
+        node_type = context_node_hash["node_type"].to_s
+
+        body_class_for_node_type(node_type)
+      rescue KeyError, ArgumentError
+        nil
+      end
+
       def attachable_cache_key
         [attachable_type, attachable_id]
       end
@@ -397,8 +475,6 @@ module DAG
 
       def apply_transcript_preview_overrides!(transcript)
         transcript.each do |context_node|
-          next unless context_node["node_type"] == DAG::Node::AGENT_MESSAGE
-
           payload = context_node["payload"].is_a?(Hash) ? context_node["payload"] : {}
           output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
           next if output_preview["content"].to_s.present?

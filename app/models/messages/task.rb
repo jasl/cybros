@@ -1,5 +1,11 @@
 module Messages
-  class ToolCall < ::DAG::NodeBody
+  class Task < ::DAG::NodeBody
+    class << self
+      def executable?
+        true
+      end
+    end
+
     def retriable?
       true
     end

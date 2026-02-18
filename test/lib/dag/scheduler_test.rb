@@ -34,6 +34,19 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     assert_equal({ "from" => "pending", "to" => "running" }, event.particulars)
   end
 
+  test "claim_executable_nodes claims pending character_message nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    child = graph.nodes.create!(node_type: DAG::Node::CHARACTER_MESSAGE, state: DAG::Node::PENDING, metadata: { "actor" => "npc" })
+    graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+    assert_equal [child.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, child.reload.state
+  end
+
   test "claim_executable_nodes does not claim nodes blocked by non-finished parents" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

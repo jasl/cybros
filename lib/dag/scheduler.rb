@@ -26,7 +26,6 @@ module DAG
             FROM dag_nodes
             WHERE dag_nodes.graph_id = #{graph_quoted}
               AND dag_nodes.state = 'pending'
-              AND dag_nodes.node_type IN ('task', 'agent_message')
               AND dag_nodes.compressed_at IS NULL
               AND NOT EXISTS (
                 SELECT 1

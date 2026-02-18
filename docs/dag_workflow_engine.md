@@ -13,6 +13,7 @@
 
 - 依赖 PostgreSQL 18 提供的 `uuidv7()` 作为主键默认值（见 `db/schema.rb`）。
 - 所有核心表主键为 `uuid`，并用 `uuidv7()` 生成以获得更好的插入局部性与时间有序性。
+- `dag_nodes.node_type` 不做 DB 枚举约束（允许业务扩展）；对 conversation graphs，严格性由 `attachable.dag_node_body_namespace` + 约定映射（`node_type.camelize` constantize）保证，未知类型默认失败。
 - 可靠性例外：对引擎关键枚举字段在 DB 层增加 check constraint（避免脏数据渗透引擎）：
   - `dag_nodes.state`：仅允许固定状态集合
   - `dag_edges.edge_type`：仅允许固定边类型集合
@@ -25,13 +26,13 @@
 - 责任：
   - 图变更的事务边界（`mutate!(turn_id: nil)`：可选 turn_id 传播）
   - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
-  - 语义策略（`policy`）：node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等（`DAG::GraphPolicy` / `DAG::GraphPolicies::*`）
+  - 语义策略（`policy`）：由 `DAG::Graph` 自身实现（`graph.policy == graph`），包含 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
 
 `DAG::Graph` 通过 `attachable`（polymorphic）关联业务对象（当前为 `Conversation`）。业务对象可选提供：
 
-- `dag_graph_policy`：返回 `DAG::GraphPolicy`（用于 node_type↔body 映射、leaf 修复规则、transcript 规则、可见性 gating、lease 时长等）
+- `dag_node_body_namespace`：返回 NodeBody 命名空间（Module，例如 `Messages`），用于按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`
 - `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
 
 ### 节点：`DAG::Node`
@@ -39,7 +40,7 @@
 - 模型：`app/models/dag/node.rb`
 - 表：`dag_nodes`
 - 关键字段：
-  - `node_type`：`user_message | agent_message | task | summary`
+  - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
   - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
   - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享）
   - `metadata`：JSONB
@@ -67,17 +68,20 @@
 preview 策略（里程碑 1）：
 
 - 默认上限：`200 chars`（`DAG::NodeBody`）
-- `agent_message`（`Messages::AgentMessage`）上限更长：`2000 chars`
-- `task`（`Messages::ToolCall`）的 `output_preview["result"]` 对非字符串 result 使用摘要字符串（避免巨大 JSON 的 `to_json` 峰值）
+- `agent_message/character_message`（`Messages::AgentMessage` 家族）上限更长：`2000 chars`
+- `task`（`Messages::Task`）的 `output_preview["result"]` 对非字符串 result 使用摘要字符串（避免巨大 JSON 的 `to_json` 峰值）
 
-node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_policy` 可注入）：
+conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `attachable.dag_node_body_namespace` 提供命名空间）：
 
-- `Conversation`（`Messages::GraphPolicy`）：
+- `Conversation`（`dag_node_body_namespace => Messages`）：
+  - `system_message` → `Messages::SystemMessage`
+  - `developer_message` → `Messages::DeveloperMessage`
   - `user_message` → `Messages::UserMessage`
   - `agent_message` → `Messages::AgentMessage`
-  - `task` → `Messages::ToolCall`
+  - `character_message` → `Messages::CharacterMessage`
+  - `task` → `Messages::Task`
   - `summary` → `Messages::Summary`
-- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）
+- 若 graph.attachable 不提供 `dag_node_body_namespace`：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）
 
 #### 状态语义（skipped/cancelled 明确化）
 
@@ -129,10 +133,10 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 规则：每个 leaf 必须满足其一：
 
-- `node_type == agent_message`
+- `node_type in {agent_message, character_message}`
 - 或者 `state in {pending, running}`（允许执行中的中间态）
 
-修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy` 决定；里程碑 1（Default policy）会在 mutation 后发现 leaf 为终态且不是 `agent_message` 时，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
+修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy`（即 graph 自身）提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 `agent_message/character_message` 时，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。对不提供 `dag_node_body_namespace` 的 generic graphs，leaf invariant 判定视为成立（不做自动修复）。
 
 ## 调度与执行
 
@@ -142,7 +146,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 - 实现：`lib/dag/scheduler.rb`
 - 可执行（executable）判定：
   - `dag_nodes.state = pending`
-  - `node_type in (task, agent_message)`
+  - 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/running`（因此 Scheduler 无需再维护 `node_type IN (...)` 的可执行列表）
   - incoming 阻塞边满足 edge gating：
     - `sequence`：父节点为 **terminal**（`finished/errored/rejected/skipped/cancelled`）即可 unblock
     - `dependency`：父节点必须为 **finished** 才 unblock
@@ -152,7 +156,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 > claim lease 时长由 `graph.policy.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
 
-> 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 executable `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死。
+> 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
 
 > 可观测（hooks）：Scheduler claim 会尝试 emit `node_state_changed`（`pending → running`）。
 
@@ -184,7 +188,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 - `DAG::TickGraphJob`
   - 对同一 graph 做 tick 去重（advisory lock try-lock）
   - 在图锁内执行顺序：`FailurePropagation` → `graph.apply_visibility_patches_if_idle!` → Scheduler claim
-  - claim executable nodes → enqueue `DAG::ExecuteNodeJob`
+  - claim pending nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
   - 会把自身 `job_id` 透传给 Runner（写入 `metadata["worker"]["execute_job_id"]`）
@@ -239,15 +243,16 @@ Context 可见性（视图层）：
 为支持产品侧 “取最近 X 条对话记录” 等需求，`DAG::Graph` 提供 transcript 投影：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
-  - 按 `turn_id` 聚合，只查询最近 N 轮的 `user_message/agent_message`
+  - 按 `turn_id` 聚合：以 `user_message` 作为 turn anchor（只查询最近 N 轮的 user_message），再返回这些轮次内的 `user_message/agent_message/character_message`
   - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）
 - `graph.transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)`
-  - 默认只保留 `user_message` 与可读的 `agent_message`
-  - 默认不包含 `task/summary`，不暴露 tool chain 细节
+  - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
+  - 默认不包含 `system_message/developer_message/task/summary`，不暴露 prompt 与 tool chain 细节
   - `context_excluded_at` 不影响 transcript（exclude 是 context-only）
-  - `agent_message` 可通过 metadata 显式进入 transcript：
+  - `agent_message/character_message` 可通过 metadata 显式进入 transcript：
     - `metadata["transcript_visible"] == true`
     - `metadata["transcript_preview"]`（可选 String，作为展示文本）
+  - 终态可见性强化：当 `agent_message/character_message` 进入终态且 `metadata["reason"]` 或 `metadata["error"]` 存在时，即使没有 content 也应进入 transcript，并以安全预览文本展示（避免 “依赖失败导致下游 skipped 而 UI 空白”）
   - 决策权：transcript 的过滤/预览覆写由 `graph.policy.transcript_include?` / `graph.policy.transcript_preview_override` 提供（默认策略与行为规范一致；attachable 可覆写）
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
