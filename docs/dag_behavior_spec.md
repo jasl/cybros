@@ -181,12 +181,29 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - 仅在节点进入 `finished` 且 output 已落库后写入（attempt-specific）。
 
-#### 2.6.3 attempt-specific（禁止继承）
+#### 2.6.3 `metadata["timing"]` / `metadata["worker"]`（排障与时序观测）
+
+为支持 “队列延迟/执行耗时/工作进程排障” 等需求，里程碑 1 约定 Runner 在节点执行过程中写入：
+
+- `metadata["timing"]["queue_latency_ms"]`：Integer
+  - 定义：`(started_at - claimed_at) * 1000`
+  - 仅当 `claimed_at` 与 `started_at` 均存在时写入
+- `metadata["timing"]["run_duration_ms"]`：Integer
+  - 定义：`(finished_at - started_at) * 1000`
+  - 仅当 `started_at` 与 `finished_at` 均存在时写入
+- `metadata["worker"]["execute_job_id"]`：String（可选）
+  - 由 `ExecuteNodeJob` 透传给 Runner，用于定位具体 job 实例（排障/审计）
+
+> 说明：这些字段均为 attempt-specific 观测字段，不应通过 lineage 继承到新的 attempt/version。
+
+#### 2.6.4 attempt-specific（禁止继承）
 
 `retry/regenerate/edit` 生成的新节点必须 **不继承** 旧节点的：
 
 - `metadata["usage"]`
 - `metadata["output_stats"]`
+- `metadata["timing"]`
+- `metadata["worker"]`
 
 ### 2.7 `turn_id`（对话轮次 / 执行 span）
 

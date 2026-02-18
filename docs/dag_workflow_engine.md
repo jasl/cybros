@@ -167,6 +167,8 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
      - 观测信息：
        - `dag_nodes.metadata["usage"]`：executor 回传的 tokens/cost usage（一次执行/一次调用）
        - `dag_nodes.metadata["output_stats"]`：输出体积/结构统计（含 `pg_column_size` 的 DB 侧字节大小；仅 finished 写入）
+       - `dag_nodes.metadata["timing"]`：队列延迟与执行耗时（`queue_latency_ms` / `run_duration_ms`）
+       - `dag_nodes.metadata["worker"]["execute_job_id"]`：执行 job_id（可选，用于排障/审计）
   4. 执行后触发下一轮 tick
 
 > execution lease 时长由 `graph.policy.execution_lease_seconds_for(node)` 决定；里程碑 1 默认值为 `2.hours`。
@@ -183,6 +185,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
   - claim executable nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
+  - 会把自身 `job_id` 透传给 Runner（写入 `metadata["worker"]["execute_job_id"]`）
   - finally 再 enqueue tick 以推进后继
 
 相关代码：

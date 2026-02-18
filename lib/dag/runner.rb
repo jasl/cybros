@@ -1,11 +1,12 @@
 module DAG
   class Runner
-    def self.run_node!(node_id)
-      new(node_id: node_id).run_node!
+    def self.run_node!(node_id, execute_job_id: nil)
+      new(node_id: node_id, execute_job_id: execute_job_id).run_node!
     end
 
-    def initialize(node_id:)
+    def initialize(node_id:, execute_job_id: nil)
       @node_id = node_id
+      @execute_job_id = execute_job_id
     end
 
     def run_node!
@@ -58,6 +59,8 @@ module DAG
         return false unless affected_rows == 1
 
         node.reload
+
+        record_execution_start_metadata!(node, now: now)
         true
       end
 
@@ -93,6 +96,8 @@ module DAG
             subject: node,
             particulars: { "from" => from_state, "to" => node.state }
           )
+
+          record_execution_finished_metadata!(node)
         end
       end
 
@@ -102,6 +107,53 @@ module DAG
         else
           {}
         end
+      end
+
+      def record_execution_start_metadata!(node, now:)
+        timing_patch = {}
+
+        if node.claimed_at.present? && node.started_at.present?
+          timing_patch["queue_latency_ms"] = ((node.started_at - node.claimed_at) * 1000).to_i
+        end
+
+        worker_patch = {}
+        if @execute_job_id.present?
+          worker_patch["execute_job_id"] = @execute_job_id.to_s
+        end
+
+        return if timing_patch.empty? && worker_patch.empty?
+
+        metadata = node.metadata.is_a?(Hash) ? node.metadata.deep_stringify_keys : {}
+
+        if timing_patch.any?
+          timing = metadata["timing"].is_a?(Hash) ? metadata["timing"] : {}
+          metadata["timing"] = timing.merge(timing_patch)
+        end
+
+        if worker_patch.any?
+          worker = metadata["worker"].is_a?(Hash) ? metadata["worker"] : {}
+          metadata["worker"] = worker.merge(worker_patch)
+        end
+
+        node.update_columns(metadata: metadata, updated_at: now)
+      end
+
+      def record_execution_finished_metadata!(node)
+        return unless node.started_at.present? && node.finished_at.present?
+
+        timing_patch = {
+          "run_duration_ms" => ((node.finished_at - node.started_at) * 1000).to_i,
+        }
+
+        if node.claimed_at.present?
+          timing_patch["queue_latency_ms"] ||= ((node.started_at - node.claimed_at) * 1000).to_i
+        end
+
+        metadata = node.metadata.is_a?(Hash) ? node.metadata.deep_stringify_keys : {}
+        timing = metadata["timing"].is_a?(Hash) ? metadata["timing"] : {}
+        metadata["timing"] = timing.merge(timing_patch)
+
+        node.update_columns(metadata: metadata, updated_at: Time.current)
       end
   end
 end

@@ -86,6 +86,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     assert node.lease_expires_at.present?
     assert_equal 3, node.metadata.dig("usage", "total_tokens")
     assert_kind_of Integer, node.metadata.dig("output_stats", "body_output_bytes")
+    assert_kind_of Integer, node.metadata.dig("timing", "run_duration_ms")
   ensure
     DAG.executor_registry = original_registry
   end
@@ -107,6 +108,34 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     assert_equal DAG::Node::FINISHED, node.state
     assert_equal "array", node.metadata.dig("output_stats", "result_type")
     assert_equal 3, node.metadata.dig("output_stats", "result_array_len")
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
+  test "runner records queue latency and execute_job_id when node is claimed" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    parent = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    node = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: parent.id, to_node_id: node.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(DAG::Node::AGENT_MESSAGE, UsageExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test").first
+    assert_equal node.id, claimed.id
+
+    DAG::Runner.run_node!(node.id, execute_job_id: "job-123")
+
+    node.reload
+    assert_equal DAG::Node::FINISHED, node.state
+    assert_kind_of Integer, node.metadata.dig("timing", "queue_latency_ms")
+    assert_kind_of Integer, node.metadata.dig("timing", "run_duration_ms")
+    assert_equal "job-123", node.metadata.dig("worker", "execute_job_id")
   ensure
     DAG.executor_registry = original_registry
   end

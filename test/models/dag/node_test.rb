@@ -259,6 +259,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
         "custom" => "x",
         "usage" => { "total_tokens" => 123 },
         "output_stats" => { "body_output_bytes" => 99 },
+        "timing" => { "run_duration_ms" => 1 },
+        "worker" => { "execute_job_id" => "j1" },
       }
     )
 
@@ -268,6 +270,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_nil retried.metadata["reason"]
     assert_nil retried.metadata["usage"]
     assert_nil retried.metadata["output_stats"]
+    assert_nil retried.metadata["timing"]
+    assert_nil retried.metadata["worker"]
     assert_equal "x", retried.metadata["custom"]
     assert_equal 4, retried.metadata["attempt"]
   end
@@ -286,7 +290,12 @@ class DAG::NodeTest < ActiveSupport::TestCase
       node_type: DAG::Node::AGENT_MESSAGE,
       state: DAG::Node::FINISHED,
       body_output: { "content" => "hello" },
-      metadata: { "usage" => { "total_tokens" => 10 }, "output_stats" => { "body_output_bytes" => 1 } }
+      metadata: {
+        "usage" => { "total_tokens" => 10 },
+        "output_stats" => { "body_output_bytes" => 1 },
+        "timing" => { "run_duration_ms" => 1 },
+        "worker" => { "execute_job_id" => "j1" },
+      }
     )
     edge = graph.edges.create!(
       from_node_id: user.id,
@@ -301,6 +310,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal original.turn_id, regenerated.turn_id
     assert_nil regenerated.metadata["usage"]
     assert_nil regenerated.metadata["output_stats"]
+    assert_nil regenerated.metadata["timing"]
+    assert_nil regenerated.metadata["worker"]
 
     assert original.reload.compressed_at.present?
     assert_equal regenerated.id, original.compressed_by_id
@@ -321,7 +332,12 @@ class DAG::NodeTest < ActiveSupport::TestCase
       node_type: DAG::Node::USER_MESSAGE,
       state: DAG::Node::FINISHED,
       body_input: { "content" => "hi" },
-      metadata: { "usage" => { "total_tokens" => 1 }, "output_stats" => { "body_output_bytes" => 2 } }
+      metadata: {
+        "usage" => { "total_tokens" => 1 },
+        "output_stats" => { "body_output_bytes" => 2 },
+        "timing" => { "run_duration_ms" => 1 },
+        "worker" => { "execute_job_id" => "j1" },
+      }
     )
     b = graph.nodes.create!(
       node_type: DAG::Node::AGENT_MESSAGE,
@@ -348,6 +364,8 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal "hi2", edited.body_input["content"]
     assert_nil edited.metadata["usage"]
     assert_nil edited.metadata["output_stats"]
+    assert_nil edited.metadata["timing"]
+    assert_nil edited.metadata["worker"]
 
     [a, b, c, d].each do |node|
       assert node.reload.compressed_at.present?
