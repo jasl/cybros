@@ -40,8 +40,14 @@
 
 - `dag_edges (graph_id, from_node_id)` / `(graph_id, to_node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
 - `dag_node_visibility_patches (graph_id, node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
+- `dag_nodes (graph_id, retry_of_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图 retry lineage 引用）。
+- `dag_nodes (graph_id, compressed_by_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图压缩归档引用）。
 
 这意味着：即使绕过模型校验（例如 `save!(validate: false)`），DB 也会拒绝插入跨 graph 的 edge/patch。
+
+另外，里程碑 1 约定压缩字段必须满足稳定一致性约束（DB check constraint）：
+
+- `compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 归档不一致）。
 
 ### 1.3 include_compressed（约定）
 
@@ -712,10 +718,15 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 覆盖的 issue 类型（里程碑 1）：
 
 - `misconfigured_graph`：图配置错误（例如 `dag_node_body_namespace` 缺失/非法、NodeBody hooks 互相冲突等；修复：无自动修复，仅用于诊断）
+- `cycle_detected`：Active 图存在环（修复：无自动修复，仅用于诊断）
+- `toposort_failed`：Active 图拓扑排序异常（非环导致的失败；修复：无自动修复，仅用于诊断）
 - `active_edge_to_inactive_node`：active edge 指向 inactive node（修复：压缩该 edge）
 - `stale_visibility_patch`：patch 指向 inactive node（修复：删除 patch）
 - `leaf_invariant_violation`：Active 图 leaf 不合法（修复：调用 `validate_leaf_invariant!`）
 - `stale_running_node`：running lease 过期（修复：running→errored，见 2.3.1）
+- `unknown_node_type`：Active node 的 `node_type` 无法映射到 NodeBody class（修复：无自动修复，仅用于诊断）
+- `node_type_maps_to_non_node_body`：`node_type` 映射到了非 NodeBody 的常量（修复：无自动修复，仅用于诊断）
+- `node_body_drift`：`node_type` 约定映射与存储的 NodeBody STI `type` 不一致（修复：无自动修复，仅用于诊断）
 
 `misconfigured_graph` 的 `details.problems[].code`（里程碑 1）：
 

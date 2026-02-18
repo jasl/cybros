@@ -17,6 +17,12 @@
 - 可靠性例外：对引擎关键枚举字段在 DB 层增加 check constraint（避免脏数据渗透引擎）：
   - `dag_nodes.state`：仅允许固定状态集合
   - `dag_edges.edge_type`：仅允许固定边类型集合
+- 为降低跨图引用导致的脏数据故障面，里程碑 1 在 DB 层引入 **graph-scoped foreign keys**（composite FK）：
+  - `dag_edges (graph_id, from_node_id/to_node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
+  - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
+- 压缩字段一致性（DB check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
 
 ## 领域模型与存储
 

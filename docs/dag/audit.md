@@ -19,6 +19,7 @@
 - 类型系统松绑：移除 `DAG::Node` 对 node_type 的硬编码 enum/允许列表，并把“可执行/转写/安全预览”等语义下沉到 NodeBody；对 conversation graphs，未知 node_type 通过 `dag_node_body_namespace` 的约定映射默认严格失败。
 - 进一步下沉类型语义：引入 NodeBody semantic hooks（turn anchor / transcript candidates / leaf terminal / 默认 leaf repair / content 落点 / mermaid snippet），并删除 `DAG::Node` 的 node_type 常量，使 DAG 核心几乎不需要显式分支判断 node_type。
 - Audit 能力补强：`DAG::GraphAudit` 新增 `misconfigured_graph`，用于提前暴露 `dag_node_body_namespace` 与 NodeBody hooks 的结构性配置错误（无自动修复，仅诊断）。
+- 结构正确性进一步加固：DB 层补齐 graph-scoped 自引用外键（`retry_of_id` / `compressed_by_id`）与压缩字段一致性约束；GraphAudit 新增 cycle/toposort 与 node_type↔NodeBody drift/unknown 检查（均无自动修复，仅诊断）。
 - 覆盖率链路修复：修复 Rails 并行测试下 SimpleCov 汇总为 0% 的问题，并设置整体覆盖率门槛 `minimum_coverage = 85`。
 - 新增场景级测试集，作为未来正式接入时的示例与回归保障；每个场景都以 `DAG::GraphAudit.scan(graph: graph)` 断言图不变量成立。
 
@@ -37,9 +38,19 @@
 - `dag_edges.edge_type`：仅允许固定边类型集合。
 - `dag_nodes.node_type`：不做 DB 枚举约束（允许业务扩展）；对 conversation graphs，严格性由 `attachable.dag_node_body_namespace` + 约定映射（`node_type.camelize` constantize）保证。
 
+同时，为降低跨图引用导致的脏数据故障面、把明显结构错误挡在 DB 层：
+
+- graph-scoped foreign keys（composite FK）：
+  - `dag_edges (graph_id, from_node_id/to_node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
+  - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
+- 压缩字段一致性（check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
+
 ### 2.3 Acyclic（无环）
 
 - 新建 edge 必须在图锁内用 recursive CTE 防止引入环。
+- GraphAudit 额外提供 active 图 cycle 检测（用于捕获绕过写入期校验的脏边）。
 
 ### 2.4 Leaf invariant（只看 Active causal）
 
