@@ -42,6 +42,7 @@
 - `dag_node_visibility_patches (graph_id, node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
 - `dag_nodes (graph_id, retry_of_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图 retry lineage 引用）。
 - `dag_nodes (graph_id, compressed_by_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图压缩归档引用）。
+- `dag_nodes (graph_id, lane_id)` 必须外键引用 `dag_lanes (graph_id, id)`（composite FK；禁止跨图 lane 引用）。
 
 这意味着：即使绕过模型校验（例如 `save!(validate: false)`），DB 也会拒绝插入跨 graph 的 edge/patch。
 
@@ -249,7 +250,30 @@ Active 视图内必须保持一致（不允许 drift）：
 - `metadata["timing"]`
 - `metadata["worker"]`
 
-### 2.7 `turn_id`（对话轮次 / 执行 span）
+### 2.7 `lane_id`（分区 / Thread-like Lane）
+
+里程碑 1 引入 Lane 分区模型，用于把一张 DAG 图中的分支子图“染色/索引”为若干个分区（Thread-like）。规范性要求：
+
+- `dag_nodes.lane_id` **必须存在**（一个 node 只能属于一个 lane）。
+- 每个 `DAG::Graph` 必须存在且仅存在一个 `main` lane（主线）。
+- `fork` 必须创建一个新的 `branch` lane，并把 fork 创建的第一条新 node 作为该 lane 的 `root_node`。
+- `archived_at` 非空表示 lane 已归档。归档后的 lane **禁止开启新 turn**（但允许同一 turn 的收尾）：
+  - 若要创建的 node 的 `turn_id` 在该 lane 内不存在任何 Active 节点：视为新 turn，必须失败
+  - 若该 `turn_id` 在该 lane 内已存在 Active 节点：视为同 turn 延续，允许创建（用于 executor/tool 链补节点、leaf repair 等）
+
+引擎默认 lane 选择（`Mutations#create_node`，normative）：
+
+- 若显式传入 `lane_id`：使用该 lane（但必须与本次 `turn_id` 已存在节点的 lane 一致，否则必须 raise）。
+- 否则若存在有效的 `turn_id`：必须继承该 turn 内既有 active 节点的 `lane_id`（用于保证 executor 在同一轮内创建的 task/tool 节点不会落错 lane）。
+- 否则：默认落在 `graph.main_lane`。
+
+其它引擎行为（normative）：
+
+- leaf invariant repair 创建的默认 leaf repair 节点必须继承 leaf 的 `lane_id`。
+- Compression 不允许跨 lane 压缩；summary 节点必须继承被压缩子图的 `lane_id`。
+- Context/Transcript 输出必须携带 `lane_id`（用于 UI 染色与对话树展示）。
+
+### 2.8 `turn_id`（对话轮次 / 执行 span）
 
 为支持 “圈定本轮产生的子图集合” 与未来的强 gating 校验（例如 squash/rewire），里程碑 1 引入：
 
@@ -258,6 +282,7 @@ Active 视图内必须保持一致（不允许 drift）：
 核心语义（normative）：
 
 - 同一轮产生的所有节点共享相同 `turn_id`。
+- 同一 graph 内，对任意 `turn_id`（只看 Active）：该 turn 的所有节点必须属于同一个 lane（`lane_id` 不可跨 lane）。
 - `retry/regenerate/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
 - `fork` 开启新轮次：fork 出来的 `new_node.turn_id` 由 DB default 生成（不继承父节点 turn_id）
 - leaf invariant repair 创建的默认 leaf repair 消息节点（里程碑 1 默认 `agent_message(pending)`）必须继承 leaf 的 `turn_id`（引擎层强制）
@@ -268,7 +293,7 @@ Active 视图内必须保持一致（不允许 drift）：
   - `graph.mutate!(turn_id: node.turn_id) { |m| ... }`
   - 这样 `m.create_node` 会默认继承该 `turn_id`（除非显式传 `turn_id: nil` 强制开新轮次）。
 
-### 2.8 `idempotency_key`（去重键，graph+turn 作用域）
+### 2.9 `idempotency_key`（去重键，graph+turn 作用域）
 
 为避免同一轮次内重复创建相同节点（尤其是 tool call / 下游任务），里程碑 1 引入可选字段：
 
@@ -348,6 +373,7 @@ Active 视图内必须保持一致（不允许 drift）：
 {
   "node_id": "...",
   "turn_id": "...",
+  "lane_id": "...",
   "node_type": "user_message|system_message|developer_message|agent_message|character_message|task|summary",
   "state": "pending|running|finished|errored|rejected|skipped|cancelled",
   "payload": {
@@ -551,9 +577,14 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 
 行为：
 
-1) 创建 `new_node`（按入参 node_type/state/payload）
-2) 创建 causal `sequence`: `from_node → new_node`
-3) 创建 lineage `branch`: `from_node → new_node`，`metadata["branch_kinds"] = ["fork"]`
+1) 创建新的 `branch` lane（分区）：
+   - `role = "branch"`
+   - `parent_lane_id = from_node.lane_id`
+   - `forked_from_node_id = from_node.id`
+2) 创建 `new_node`（按入参 node_type/state/payload），并显式写入 `lane_id = new_lane.id`
+3) 创建 causal `sequence`: `from_node → new_node`
+4) 创建 lineage `branch`: `from_node → new_node`，`metadata["branch_kinds"] = ["fork"]`
+5) 写回 `new_lane.root_node_id = new_node.id`
 
 ### 7.3 replace（版本替换：retry/regenerate/edit 的共同骨架）
 
@@ -641,6 +672,51 @@ Active 版本确定规则：
   - 以 `node_replaced` hooks 的投影（若接入）或 Inactive `branch` 边回溯版本关系；
   - 以 `created_at` 或 `id(uuidv7)` 排序呈现版本序列。
 
+### 7.8 merge（分支合并回目标 lane：创建 join 节点）
+
+目的：把若干 source lanes 的当前 head “汇总/合并” 回目标 lane（通常为 main），引擎通过在 target lane 创建 join 节点表达“汇总点”。
+
+> 重要：merge **不**隐式归档 source lanes。产品若希望 “merge 后结束分支”，应显式调用 `archive_lane!`（见第 7.9 节）。
+
+前置条件（normative）：
+
+- `target_lane.archived_at IS NULL`
+- 所有 source lanes 均满足：
+  - lane 可以已归档（允许 archived source）
+  - `lane.id != target_lane.id`
+  - 与 target 属于同一 graph
+  - `lane.role != main`（main lane 不允许作为 source 合并进其它 lane）
+- `target_from_node.lane_id == target_lane.id`
+- 对每个 source：`source_from_node.lane_id == source_lane.id`
+
+行为（normative）：
+
+1) 在 `target_lane` 创建一个新的 join 节点 `join_node`：
+   - `state = pending`
+   - `lane_id = target_lane.id`
+   - `turn_id` 由 DB default 生成（不开启/不继承任何既有 turn）
+   - `node_type` 由入参决定（产品示例：`agent_message`）
+2) 创建 causal `sequence`: `target_from_node → join_node`（`metadata["generated_by"]="merge"`）
+3) 对每个 source 创建 causal `dependency`: `source_from_node → join_node`
+   - `metadata["generated_by"]="merge"`
+   - `metadata["source_lane_id"]=source_lane.id`
+
+### 7.9 archive_lane（归档 lane：禁止新 turn，可选取消在途执行）
+
+目的：把某个 lane 标记为“对话结束/只允许收尾”。归档后禁止开启新 turn；同 turn 的在途执行（executor/tool 链）可继续补节点并跑完（默认策略）。
+
+API（引擎层示例）：`Mutations#archive_lane!(lane:, mode: :finish|:cancel, at: now, reason: "lane_archived")`
+
+行为（normative）：
+
+- 写入 `lane.archived_at = at`。
+- `mode = :finish`（默认）：仅归档，不修改节点状态；归档后仍允许同 turn 收尾（见第 2.7 节）。
+- `mode = :cancel`：
+  - 将该 lane 内 Active 的 `running → cancelled`（写 `finished_at`，metadata 合并 `reason`）
+  - 将该 lane 内 Active 的 `pending → skipped`（写 `finished_at`，metadata 合并 `reason`）
+  - 对每个被变更节点 emit `node_state_changed`（`from`/`to`）
+- leaf repair 在 archived lane 中 **不得**创建新的 pending work；修复节点应为 terminal（建议 `agent_message(finished)` 并写入 `finished_at`），以避免归档后重新生成待执行节点。
+
 ---
 
 ## 8) Compression（summary）
@@ -653,6 +729,7 @@ Active 版本确定规则：
 ### 8.2 约束（必须）
 
 - 被压缩的节点必须全部 `finished` 且为 Active
+- 被压缩的节点必须全部属于同一个 lane（禁止跨 lane 压缩；summary 必须继承该 `lane_id`）
 - summary 节点 **不得成为 leaf**（必须存在至少一条 outgoing blocking edge 指向外部 Active node）
 
 ### 8.3 summary payload 约定

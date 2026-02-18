@@ -65,6 +65,21 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
     end
   end
 
+  test "dag_nodes.lane_id is constrained to the same graph at the database layer" do
+    conversation_a = Conversation.create!
+    graph_a = conversation_a.dag_graph
+
+    conversation_b = Conversation.create!
+    graph_b = conversation_b.dag_graph
+
+    lane_a = graph_a.main_lane
+    node_b = graph_b.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      node_b.update_column(:lane_id, lane_a.id)
+    end
+  end
+
   test "dag_nodes.compressed_by_id is constrained to the same graph at the database layer" do
     conversation_a = Conversation.create!
     graph_a = conversation_a.dag_graph

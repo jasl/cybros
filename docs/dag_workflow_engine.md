@@ -22,6 +22,7 @@
   - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
   - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
   - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
+  - `dag_nodes (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Lane 分区一致性；禁止跨图 lane 引用）
 - 压缩字段一致性（DB check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
 
 ## 领域模型与存储
@@ -41,6 +42,25 @@
 - `dag_node_body_namespace`：返回 NodeBody 命名空间（Module，例如 `Messages`），用于按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`
 - `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
 
+### 分区：`DAG::Lane`
+
+- 模型：`app/models/dag/lane.rb`
+- 表：`dag_lanes`
+- 目的：为同一张图中的所有分支提供“分区/染色”能力（Thread-like，但为避免与线程概念冲突命名为 Lane）。
+- 关键规则：
+  - **一个 node 只能属于一个 lane**（`dag_nodes.lane_id NOT NULL`）。
+  - 每个 graph 自动拥有且仅拥有一个 `main` lane（用于主线对话）。
+  - `branch` lane 通过 fork 创建：在创建分支的同时创建 lane，并记录分支锚点与子图根节点。
+  - lane 可归档（`archived_at`）：归档后**禁止开启新 turn**（新回合的新节点），但允许同一 turn 的在途执行/工具链继续补节点并跑完（用于“归档但允许收尾”的产品语义）。
+- 结构/索引字段（引擎层）：
+  - `role`：`main|branch`
+  - `parent_lane_id`：lane 树结构（用于 UI 展示对话树；不影响因果语义）
+  - `forked_from_node_id`：该 branch 从哪个 node fork 出来（分支锚点）
+  - `root_node_id`：fork 创建的第一条新 node（子图头）
+  - `merged_into_lane_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source lane 时，用于记录“归档并合并进哪个 lane”）
+  - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Topic`）
+  - `metadata`：JSONB 扩展点
+
 ### 节点：`DAG::Node`
 
 - 模型：`app/models/dag/node.rb`
@@ -49,6 +69,7 @@
   - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
   - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
   - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享）
+  - `lane_id`：Lane 分区（用于 UI 染色、分支索引、只读门禁）
   - `metadata`：JSONB
   - `retry_of_id`：重试 lineage
   - `compressed_at / compressed_by_id`：压缩标记
@@ -230,8 +251,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
    - 防御性硬化：忽略 “active edge 指向 inactive node” 的端点（active endpoint filtering）
 2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
-4. 输出结构（默认 preview）：`[{node_id, node_type, state, payload:{input,output_preview}, metadata}]`
-   - 每个节点额外包含：`turn_id`（用于按轮次分组与强 gating 输入）
+4. 输出结构（默认 preview）：`[{node_id, turn_id, lane_id, node_type, state, payload:{input,output_preview}, metadata}]`
 
 `context_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 
@@ -326,4 +346,4 @@ bin/rails runner script/bench/dag_engine.rb
 ## 当前已知限制（里程碑 1 范围内）
 
 - executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
-- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf（更复杂的分支合并/回放策略留到后续里程碑讨论）
+- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf。分支合并通过在 target lane 创建 `dependency/sequence` join 节点表达；是否归档 source lanes 属于产品选择（见 `DAG::Mutations#merge_lanes!`、`DAG::Mutations#archive_lane!` 与场景测试）。

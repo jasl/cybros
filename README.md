@@ -1,24 +1,43 @@
-# README
+# Cybros
 
-This README would normally document whatever steps are necessary to get the
-application up and running.
+Cybros is an experimental AI Agent platform that models conversations as dynamic Directed Acyclic Graphs (DAGs).
 
-Things you may want to cover:
+## Quick Start
 
-* Ruby version
+```bash
+bin/setup
+bin/dev
+```
 
-* System dependencies
+Open http://localhost:3000
 
-* Configuration
+## Testing
 
-* Database creation
+```bash
+bin/rails test
+bin/ci
+```
 
-* Database initialization
+## DAG Engine Notes
 
-* How to run the test suite
+- Core DAG models live under `app/models/dag/*`.
+- Branch partitioning is modeled via `DAG::Lane`:
+  - Each node belongs to exactly one lane (`dag_nodes.lane_id`).
+  - `fork` creates a new `branch` lane + the first root node for that lane.
+  - `merge` creates a pending join `agent_message` node in the target lane (source lanes are not auto-archived).
 
-* Services (job queues, cache servers, search engines, etc.)
+Design/spec docs:
 
-* Deployment instructions
+- `docs/dag_workflow_engine.md`
+- `docs/dag_behavior_spec.md`
 
-* ...
+## Multi-DB + Jobs (Solid Queue)
+
+Development uses Solid Queue (`config/environments/development.rb`), backed by the `queue` database.
+
+If you see errors like `relation "solid_queue_jobs" does not exist`, install/migrate Solid Queue:
+
+```bash
+bin/rails solid_queue:install
+bin/rails db:migrate:queue
+```

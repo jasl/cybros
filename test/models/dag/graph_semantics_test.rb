@@ -13,6 +13,7 @@ class DAG::GraphSemanticsTest < ActiveSupport::TestCase
     repaired = graph.nodes.find_by!(metadata: { "generated_by" => "leaf_invariant" })
     assert_equal Messages::AgentMessage.node_type_key, repaired.node_type
     assert_equal DAG::Node::PENDING, repaired.state
+    assert_equal leaf.lane_id, repaired.lane_id
 
     assert graph.edges.exists?(
       from_node_id: leaf.id,

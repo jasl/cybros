@@ -40,10 +40,16 @@ module DAG
           raise ArgumentError, "summary node must not become a leaf"
         end
 
+        lane_ids = nodes.map(&:lane_id).uniq
+        if lane_ids.length != 1
+          raise ArgumentError, "cannot compress nodes across multiple lanes"
+        end
+
         now = Time.current
         summary_node = @graph.nodes.create!(
           node_type: "summary",
           state: DAG::Node::FINISHED,
+          lane_id: lane_ids.first,
           body_output: { "content" => summary_content },
           metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
           finished_at: now

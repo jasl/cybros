@@ -46,6 +46,28 @@ module DAG
 
       effective_turn_id = attributes.key?(:turn_id) ? attributes.delete(:turn_id) : @turn_id
 
+      if attributes.key?(:lane)
+        lane = attributes.delete(:lane)
+        attributes[:lane_id] = lane.is_a?(DAG::Lane) ? lane.id : lane
+      end
+
+      lane_id = attributes[:lane_id]
+      turn_lane_id =
+        if effective_turn_id.present?
+          @graph.nodes.active.where(turn_id: effective_turn_id).pick(:lane_id)
+        else
+          nil
+        end
+
+      if lane_id.present?
+        if turn_lane_id.present? && turn_lane_id.to_s != lane_id.to_s
+          raise ArgumentError, "lane_id conflicts with existing nodes for turn"
+        end
+      else
+        lane_id = turn_lane_id || @graph.main_lane.id
+        attributes[:lane_id] = lane_id
+      end
+
       if idempotency_key.present?
         raise ArgumentError, "idempotency_key requires turn_id" if effective_turn_id.blank?
 
@@ -63,6 +85,10 @@ module DAG
             expected_body_input: body_input,
             expected_body_output: body_output
           )
+
+          if existing.lane_id.to_s != lane_id.to_s
+            raise ArgumentError, "idempotency_key collision with mismatched lane"
+          end
 
           if existing.executable? && existing.pending?
             @executable_pending_nodes_created = true
@@ -92,11 +118,15 @@ module DAG
               @graph.nodes.create!(node_attributes)
             end
           rescue ActiveRecord::RecordNotUnique
-            @graph.nodes.active.find_by!(
+            node = @graph.nodes.active.find_by!(
               turn_id: effective_turn_id,
               node_type: node_type,
               idempotency_key: idempotency_key
             )
+            if node.lane_id.to_s != lane_id.to_s
+              raise ArgumentError, "idempotency_key collision with mismatched lane"
+            end
+            node
           end
         else
           @graph.nodes.create!(node_attributes)
@@ -156,16 +186,26 @@ module DAG
       edge
     end
 
-    def fork_from!(from_node:, node_type:, state:, body_input: {}, body_output: {}, metadata: {})
+    def fork_from!(from_node:, node_type:, state:, content: nil, body_input: {}, body_output: {}, metadata: {})
       assert_node_belongs_to_graph!(from_node)
       raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
       raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
 
+      lane =
+        @graph.lanes.create!(
+          role: DAG::Lane::BRANCH,
+          parent_lane_id: from_node.lane_id,
+          forked_from_node_id: from_node.id,
+          metadata: {}
+        )
+
       node = create_node(
         node_type: node_type,
         state: state,
+        content: content,
         metadata: metadata,
         turn_id: nil,
+        lane_id: lane.id,
         body_input: body_input,
         body_output: body_output
       )
@@ -178,7 +218,143 @@ module DAG
         metadata: { "branch_kinds" => ["fork"] }
       )
 
+      lane.update!(root_node_id: node.id)
+      node.lane = lane
+
       node
+    end
+
+    def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {})
+      assert_lane_belongs_to_graph!(target_lane)
+      assert_node_belongs_to_graph!(target_from_node)
+
+      raise ArgumentError, "cannot merge into archived lane" if target_lane.archived_at.present?
+      raise ArgumentError, "target_from_node must belong to target_lane" if target_from_node.lane_id != target_lane.id
+
+      sources = Array(source_lanes_and_nodes)
+      raise ArgumentError, "source_lanes_and_nodes must not be empty" if sources.empty?
+
+      source_lane_ids = []
+      sources.each do |entry|
+        lane = entry.fetch(:lane)
+        from_node = entry.fetch(:from_node)
+
+        assert_lane_belongs_to_graph!(lane)
+        assert_node_belongs_to_graph!(from_node)
+
+        raise ArgumentError, "main lane cannot be merged into another lane" if lane.role == DAG::Lane::MAIN
+        raise ArgumentError, "cannot merge a lane into itself" if lane.id == target_lane.id
+        raise ArgumentError, "source from_node must belong to lane" if from_node.lane_id != lane.id
+
+        source_lane_ids << lane.id
+      end
+
+      merge_metadata = normalize_hash(metadata)
+      merge_metadata["source_lane_ids"] = source_lane_ids.map(&:to_s).uniq.sort
+
+      node =
+        create_node(
+          node_type: node_type,
+          state: DAG::Node::PENDING,
+          metadata: merge_metadata,
+          turn_id: nil,
+          lane_id: target_lane.id
+        )
+
+      create_edge(
+        from_node: target_from_node,
+        to_node: node,
+        edge_type: DAG::Edge::SEQUENCE,
+        metadata: { "generated_by" => "merge" }
+      )
+
+      sources.each do |entry|
+        lane = entry.fetch(:lane)
+        from_node = entry.fetch(:from_node)
+
+        create_edge(
+          from_node: from_node,
+          to_node: node,
+          edge_type: DAG::Edge::DEPENDENCY,
+          metadata: { "generated_by" => "merge", "source_lane_id" => lane.id }
+        )
+      end
+
+      node
+    end
+
+    def archive_lane!(lane:, mode: :finish, at: Time.current, reason: "lane_archived")
+      assert_lane_belongs_to_graph!(lane)
+
+      mode = mode.to_sym
+      unless mode.in?([:finish, :cancel])
+        raise ArgumentError, "mode must be :finish or :cancel"
+      end
+
+      at = Time.current if at.nil?
+      reason = reason.to_s.presence || "lane_archived"
+
+      lane.update!(archived_at: at)
+      return lane if mode == :finish
+
+      running_ids = []
+      pending_ids = []
+
+      DAG::Node.with_connection do |connection|
+        graph_quoted = connection.quote(@graph.id)
+        lane_quoted = connection.quote(lane.id)
+        now_quoted = connection.quote(at)
+        reason_quoted = connection.quote(reason)
+
+        sql_running = <<~SQL
+          UPDATE dag_nodes
+             SET state = 'cancelled',
+                 finished_at = #{now_quoted},
+                 metadata = dag_nodes.metadata || jsonb_build_object('reason', #{reason_quoted}),
+                 updated_at = #{now_quoted}
+           WHERE dag_nodes.graph_id = #{graph_quoted}
+             AND dag_nodes.compressed_at IS NULL
+             AND dag_nodes.lane_id = #{lane_quoted}
+             AND dag_nodes.state = 'running'
+          RETURNING dag_nodes.id
+        SQL
+
+        sql_pending = <<~SQL
+          UPDATE dag_nodes
+             SET state = 'skipped',
+                 finished_at = #{now_quoted},
+                 metadata = dag_nodes.metadata || jsonb_build_object('reason', #{reason_quoted}),
+                 updated_at = #{now_quoted}
+           WHERE dag_nodes.graph_id = #{graph_quoted}
+             AND dag_nodes.compressed_at IS NULL
+             AND dag_nodes.lane_id = #{lane_quoted}
+             AND dag_nodes.state = 'pending'
+          RETURNING dag_nodes.id
+        SQL
+
+        running_ids = connection.select_values(sql_running)
+        pending_ids = connection.select_values(sql_pending)
+      end
+
+      running_ids.each do |node_id|
+        @graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+          subject_type: "DAG::Node",
+          subject_id: node_id,
+          particulars: { "from" => "running", "to" => "cancelled" }
+        )
+      end
+
+      pending_ids.each do |node_id|
+        @graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+          subject_type: "DAG::Node",
+          subject_id: node_id,
+          particulars: { "from" => "pending", "to" => "skipped" }
+        )
+      end
+
+      lane
     end
 
     def retry_replace!(node:)
@@ -219,6 +395,7 @@ module DAG
         metadata: retry_metadata,
         retry_of_id: old.id,
         turn_id: old.turn_id,
+        lane_id: old.lane_id,
         body_input: body_input,
       )
 
@@ -279,6 +456,7 @@ module DAG
         state: DAG::Node::PENDING,
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker"),
         turn_id: old.turn_id,
+        lane_id: old.lane_id,
         body_input: old.body.input_for_retry,
       )
 
@@ -332,6 +510,7 @@ module DAG
         state: DAG::Node::FINISHED,
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker"),
         turn_id: old.turn_id,
+        lane_id: old.lane_id,
         body_input: new_body_input,
         finished_at: now
       )
@@ -374,6 +553,12 @@ module DAG
         return if node.graph_id == @graph.id
 
         raise ArgumentError, "node must belong to the same graph"
+      end
+
+      def assert_lane_belongs_to_graph!(lane)
+        return if lane.graph_id == @graph.id
+
+        raise ArgumentError, "lane must belong to the same graph"
       end
 
       def locked_active_node!(node_or_id)

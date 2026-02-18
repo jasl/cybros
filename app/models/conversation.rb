@@ -9,6 +9,7 @@ class Conversation < ApplicationRecord
            to: :dag_graph, allow_nil: false
 
   has_many :events, dependent: :destroy
+  has_many :topics, dependent: :destroy
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil?
@@ -20,5 +21,67 @@ class Conversation < ApplicationRecord
 
   def dag_graph_hooks
     @dag_graph_hooks ||= Messages::GraphHooks.new(conversation: self)
+  end
+
+  def ensure_main_topic
+    topic = topics.find_by(role: Topic::MAIN)
+    if topic.nil?
+      begin
+        topic = topics.create!(role: Topic::MAIN, title: title, metadata: {})
+      rescue ActiveRecord::RecordNotUnique
+        topic = topics.find_by!(role: Topic::MAIN)
+      end
+    end
+
+    lane = dag_graph.main_lane
+    if lane.attachable.nil?
+      lane.update!(attachable: topic)
+    elsif lane.attachable != topic
+      raise ArgumentError, "main lane is already attached to a different model"
+    end
+
+    topic
+  end
+
+  def fork_topic_from(from_node:, title:, user_content:)
+    topic = topics.create!(role: Topic::BRANCH, title: title, metadata: {})
+
+    root_node = nil
+    dag_graph.mutate! do |m|
+      root_node = m.fork_from!(
+        from_node: from_node,
+        node_type: Messages::UserMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        content: user_content,
+        metadata: {}
+      )
+    end
+
+    root_node.lane.update!(attachable: topic)
+    topic
+  end
+
+  def merge_topic_into_main(source_topic:, main_topic: ensure_main_topic, metadata: {})
+    source_lane = source_topic.dag_lane
+    raise ArgumentError, "source_topic is missing dag_lane" if source_lane.nil?
+
+    main_lane = main_topic.dag_lane
+    raise ArgumentError, "main_topic is missing dag_lane" if main_lane.nil?
+
+    main_head = dag_graph.leaf_nodes.where(lane_id: main_lane.id).sole
+    source_head = dag_graph.leaf_nodes.where(lane_id: source_lane.id).sole
+
+    merge_node = nil
+    dag_graph.mutate! do |m|
+      merge_node = m.merge_lanes!(
+        target_lane: main_lane,
+        target_from_node: main_head,
+        source_lanes_and_nodes: [{ lane: source_lane, from_node: source_head }],
+        node_type: Messages::AgentMessage.node_type_key,
+        metadata: metadata
+      )
+    end
+
+    merge_node
   end
 end

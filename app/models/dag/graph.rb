@@ -6,6 +6,9 @@ module DAG
 
     belongs_to :attachable, polymorphic: true, optional: true
 
+    has_many :lanes,
+             class_name: "DAG::Lane",
+             inverse_of: :graph
     has_many :nodes,
              class_name: "DAG::Node",
              inverse_of: :graph
@@ -13,6 +16,7 @@ module DAG
              class_name: "DAG::Edge",
              inverse_of: :graph
 
+    after_create :ensure_main_lane
     before_destroy :purge_graph_records
 
     def mutate!(turn_id: nil)
@@ -30,6 +34,17 @@ module DAG
 
       if executable_pending_nodes_created
         kick!
+      end
+    end
+
+    def main_lane
+      lane = lanes.find_by(role: DAG::Lane::MAIN)
+      return lane if lane
+
+      begin
+        lanes.create!(role: DAG::Lane::MAIN, metadata: {})
+      rescue ActiveRecord::RecordNotUnique
+        lanes.find_by!(role: DAG::Lane::MAIN)
       end
     end
 
@@ -115,7 +130,7 @@ module DAG
 
       node_records =
         node_scope
-          .select(:id, :turn_id, :node_type, :state, :metadata, :body_id)
+          .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
           .order(:id)
           .to_a
 
@@ -274,13 +289,32 @@ module DAG
       end
     end
 
-    def leaf_repair_node_attributes(_leaf)
+    def leaf_repair_node_attributes(leaf)
       node_type = default_leaf_repair_node_type
-      {
-        node_type: node_type,
-        state: DAG::Node::PENDING,
-        metadata: { "generated_by" => "leaf_invariant" },
-      }
+      lane_archived = leaf.lane&.archived?
+
+      metadata = { "generated_by" => "leaf_invariant" }
+
+      if lane_archived
+        now = Time.current
+        metadata["reason"] = "lane_archived"
+        metadata["transcript_preview"] = "Archived"
+
+        {
+          node_type: node_type,
+          state: DAG::Node::FINISHED,
+          lane_id: leaf.lane_id,
+          finished_at: now,
+          metadata: metadata,
+        }
+      else
+        {
+          node_type: node_type,
+          state: DAG::Node::PENDING,
+          lane_id: leaf.lane_id,
+          metadata: metadata,
+        }
+      end
     end
 
     def leaf_repair_edge_attributes(_leaf, _repaired_node)
@@ -529,6 +563,7 @@ module DAG
         {
           "node_id" => node.id,
           "turn_id" => node.turn_id,
+          "lane_id" => node.lane_id,
           "node_type" => node.node_type,
           "state" => node.state,
           "payload" => payload_hash,
@@ -584,7 +619,15 @@ module DAG
             USING deleted_nodes
             WHERE dag_node_bodies.id = deleted_nodes.body_id
           SQL
+
+          connection.delete(<<~SQL.squish, "purge_dag_lanes")
+            DELETE FROM dag_lanes WHERE graph_id = #{graph_id_quoted}
+          SQL
         end
+      end
+
+      def ensure_main_lane
+        main_lane
       end
   end
 end

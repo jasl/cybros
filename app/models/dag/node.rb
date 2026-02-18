@@ -16,6 +16,7 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
+    belongs_to :lane, class_name: "DAG::Lane", inverse_of: :nodes
     belongs_to :body,
                class_name: "DAG::NodeBody",
                autosave: true,
@@ -39,9 +40,12 @@ module DAG
     validates :state, inclusion: { in: STATES }
     validate :body_type_matches_node_type
     validate :pending_or_running_requires_executable_body
+    validate :turn_lane_must_be_consistent
+    validate :lane_must_be_writable, on: :create
 
     scope :active, -> { where(compressed_at: nil) }
 
+    before_validation :ensure_lane
     before_validation :ensure_body
 
     def terminal?
@@ -357,6 +361,22 @@ module DAG
 
       KEEP = :keep
 
+      def ensure_lane
+        return if lane_id.present?
+        return if graph.blank?
+
+        if turn_id.present?
+          existing_lane_id =
+            graph.nodes.active.where(turn_id: turn_id).pick(:lane_id)
+          if existing_lane_id.present?
+            self.lane_id = existing_lane_id
+            return
+          end
+        end
+
+        self.lane_id = graph.main_lane.id
+      end
+
       def ensure_body
         return if body.present?
         return if node_type.blank?
@@ -391,6 +411,33 @@ module DAG
         return if body&.executable?
 
         errors.add(:state, "can only be pending/running for executable nodes")
+      end
+
+      def turn_lane_must_be_consistent
+        return if graph.blank?
+        return if turn_id.blank?
+        return if lane_id.blank?
+
+        mismatch =
+          graph.nodes.active
+            .where(turn_id: turn_id)
+            .where.not(id: id)
+            .where.not(lane_id: lane_id)
+            .exists?
+        return unless mismatch
+
+        errors.add(:lane_id, "must match existing nodes for this turn")
+      end
+
+      def lane_must_be_writable
+        return if lane.blank?
+        return if lane.archived_at.blank?
+
+        if turn_id.present? && lane.nodes.active.where(turn_id: turn_id).exists?
+          return
+        end
+
+        errors.add(:lane, "is archived")
       end
 
       def visibility_mutation_allowed_now?

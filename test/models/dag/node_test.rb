@@ -228,6 +228,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     retried = original.retry!
 
     assert_equal DAG::Node::PENDING, retried.state
+    assert_equal original.lane_id, retried.lane_id
     assert_equal original.id, retried.retry_of_id
     assert_equal original.turn_id, retried.turn_id
     assert_equal 2, retried.metadata["attempt"]
@@ -272,6 +273,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     retried = original.retry!
 
     assert_equal DAG::Node::PENDING, retried.state
+    assert_equal original.lane_id, retried.lane_id
     assert_equal "t", retried.body_input["name"]
     assert_equal({ "a" => 1 }, retried.body_input["arguments"])
     assert_equal({}, retried.body_output)
@@ -299,6 +301,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     retried = original.retry!
 
+    assert_equal original.lane_id, retried.lane_id
     assert_nil retried.metadata["error"]
     assert_nil retried.metadata["reason"]
     assert_nil retried.metadata["usage"]
@@ -340,6 +343,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::PENDING, regenerated.state
     assert_equal Messages::AgentMessage.node_type_key, regenerated.node_type
+    assert_equal original.lane_id, regenerated.lane_id
     assert_equal original.turn_id, regenerated.turn_id
     assert_nil regenerated.metadata["usage"]
     assert_nil regenerated.metadata["output_stats"]
@@ -393,6 +397,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     edited = a.edit!(new_input: { "content" => "hi2" })
 
     assert_equal DAG::Node::FINISHED, edited.state
+    assert_equal a.lane_id, edited.lane_id
     assert_equal a.turn_id, edited.turn_id
     assert_equal "hi2", edited.body_input["content"]
     assert_nil edited.metadata["usage"]
@@ -451,5 +456,34 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_not node.mark_skipped!(reason: "cannot skip after running")
     assert_equal DAG::Node::RUNNING, node.reload.state
+  end
+
+  test "turn_id cannot span multiple lanes within a graph" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    main_lane = graph.main_lane
+
+    branch_lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    turn_id = "0194f3c0-0000-7000-8000-00000000f001"
+
+    graph.nodes.create!(
+      node_type: Messages::Task.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: branch_lane.id,
+      turn_id: turn_id,
+      metadata: {}
+    )
+
+    error =
+      assert_raises(ActiveRecord::RecordInvalid) do
+        graph.nodes.create!(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: main_lane.id,
+          turn_id: turn_id,
+          metadata: {}
+        )
+      end
+    assert_match(/must match existing nodes for this turn/, error.message)
   end
 end
