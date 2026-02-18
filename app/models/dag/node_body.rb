@@ -14,7 +14,7 @@ module DAG
 
     class << self
       def node_type_key
-        name&.demodulize&.underscore
+        name.demodulize.underscore
       end
 
       def created_content_destination
