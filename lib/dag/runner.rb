@@ -1,7 +1,5 @@
 module DAG
   class Runner
-    EXECUTION_LEASE_SECONDS = 2.hours
-
     def self.run_node!(node_id)
       new(node_id: node_id).run_node!
     end
@@ -46,7 +44,8 @@ module DAG
       def refresh_running_lease!(node)
         now = Time.current
         started_at = node.started_at || now
-        lease_expires_at = now + EXECUTION_LEASE_SECONDS
+        lease_seconds = node.graph.policy.execution_lease_seconds_for(node)
+        lease_expires_at = now + lease_seconds
 
         affected_rows =
           DAG::Node.where(id: node.id, state: DAG::Node::RUNNING, compressed_at: nil).update_all(

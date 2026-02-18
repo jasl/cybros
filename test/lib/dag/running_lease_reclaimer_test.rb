@@ -26,4 +26,3 @@ class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
     )
   end
 end
-

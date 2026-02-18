@@ -82,4 +82,3 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
     assert_equal 1, graph.edges.count
   end
 end
-

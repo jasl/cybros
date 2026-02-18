@@ -375,15 +375,14 @@ module DAG
       end
 
       def visibility_mutation_allowed_now?
-        terminal? && graph.nodes.active.where(state: RUNNING).none?
+        graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
       end
 
       def assert_visibility_mutation_allowed!
-        raise ArgumentError, "can only change visibility for terminal nodes" unless terminal?
+        reason = graph_policy.visibility_mutation_error(node: self, graph: graph)
+        return if reason.nil?
 
-        if graph.nodes.active.where(state: RUNNING).exists?
-          raise ArgumentError, "cannot change visibility while graph has running nodes"
-        end
+        raise ArgumentError, reason
       end
 
       def active_causal_descendant_ids
@@ -465,9 +464,7 @@ module DAG
         outcome = nil
 
         graph.with_graph_lock! do
-          graph_idle = !graph.nodes.active.where(state: RUNNING).exists?
-
-          if graph_idle && terminal?
+          if graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
             patch = DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).lock.first
 
             base_context_excluded_at = patch ? patch.context_excluded_at : self.context_excluded_at

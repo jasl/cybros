@@ -62,39 +62,10 @@ module DAG
         mode: mode,
         include_excluded: true,
         include_deleted: include_deleted
-      ).select do |context_node|
-        node_type = context_node["node_type"]
+      )
 
-        case node_type
-        when DAG::Node::USER_MESSAGE
-          true
-        when DAG::Node::AGENT_MESSAGE
-          state = context_node["state"].to_s
-          preview_content = context_node.dig("payload", "output_preview", "content").to_s
-          metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
-          transcript_visible = metadata["transcript_visible"] == true
-
-          state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present? || transcript_visible
-        else
-          false
-        end
-      end
-
-      transcript.each do |context_node|
-        next unless context_node["node_type"] == DAG::Node::AGENT_MESSAGE
-
-        payload = context_node["payload"].is_a?(Hash) ? context_node["payload"] : {}
-        output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
-        next if output_preview["content"].to_s.present?
-
-        metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
-        transcript_preview = metadata["transcript_preview"]
-        next unless transcript_preview.is_a?(String) && transcript_preview.present?
-
-        output_preview["content"] = transcript_preview.truncate(2000)
-        payload["output_preview"] = output_preview
-        context_node["payload"] = payload
-      end
+      transcript = filter_transcript_nodes(transcript)
+      apply_transcript_preview_overrides!(transcript)
 
       if limit
         transcript = transcript.last(Integer(limit))
@@ -179,8 +150,6 @@ module DAG
     end
 
     def apply_visibility_patches_if_idle!
-      return 0 if nodes.active.where(state: DAG::Node::RUNNING).exists?
-
       applied = 0
       now = Time.current
 
@@ -192,7 +161,7 @@ module DAG
           next
         end
 
-        next unless node.terminal?
+        next unless policy.visibility_mutation_allowed?(node: node, graph: self)
 
         node.update_columns(
           context_excluded_at: patch.context_excluded_at,
@@ -391,23 +360,7 @@ module DAG
       end
 
       def filter_transcript_nodes(context_nodes)
-        context_nodes.select do |context_node|
-          node_type = context_node["node_type"]
-
-          case node_type
-          when DAG::Node::USER_MESSAGE
-            true
-          when DAG::Node::AGENT_MESSAGE
-            state = context_node["state"].to_s
-            preview_content = context_node.dig("payload", "output_preview", "content").to_s
-            metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
-            transcript_visible = metadata["transcript_visible"] == true
-
-            state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present? || transcript_visible
-          else
-            false
-          end
-        end
+        context_nodes.select { |context_node| policy.transcript_include?(context_node) }
       end
 
       def apply_transcript_preview_overrides!(transcript)
@@ -418,11 +371,10 @@ module DAG
           output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
           next if output_preview["content"].to_s.present?
 
-          metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
-          transcript_preview = metadata["transcript_preview"]
-          next unless transcript_preview.is_a?(String) && transcript_preview.present?
+          override = policy.transcript_preview_override(context_node)
+          next unless override.is_a?(String) && override.present?
 
-          output_preview["content"] = transcript_preview.truncate(2000)
+          output_preview["content"] = override
           payload["output_preview"] = output_preview
           context_node["payload"] = payload
         end

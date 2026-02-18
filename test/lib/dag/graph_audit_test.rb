@@ -66,4 +66,3 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     assert_equal "running_lease_expired", node.metadata.fetch("error")
   end
 end
-

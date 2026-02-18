@@ -129,4 +129,3 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     assert_includes recent_with_deleted.map { |n| n["node_id"] }, deleted_user.id
   end
 end
-

@@ -98,6 +98,9 @@
 
 - Scheduler claim 时会写入 `lease_expires_at`（短租约，claim lease）。
 - Runner 开始执行时会刷新 `heartbeat_at` 并延长 `lease_expires_at`（执行租约）。
+- 租约时长由 `graph.policy` 决定：
+  - claim lease：`graph.policy.claim_lease_seconds_for(...)`（里程碑 1 默认 `30.minutes`）
+  - execution lease：`graph.policy.execution_lease_seconds_for(node)`（里程碑 1 默认 `2.hours`）
 - 若节点仍处于 `running` 且 `lease_expires_at < now`，引擎必须将其回收为：
   - `running → errored`
   - `metadata["error"] = "running_lease_expired"`
@@ -338,7 +341,8 @@ Active 视图内必须保持一致（不允许 drift）：
 
 实现要求：
 
-- 应由引擎提供的 API（例如 `DAG::Node#exclude_from_context!/soft_delete!`）在图锁内强制执行该 gating
+- gating 的决策权由 `graph.policy.visibility_mutation_error(node:, graph:)` 统一提供（返回 String reason 或 nil）。
+- 引擎提供的 strict API（例如 `DAG::Node#exclude_from_context!/soft_delete!`）必须在图锁内强制执行该 gating，并在不允许时 raise 该 reason（便于 UI 与调试）。
 - 数据库层面必须以 check constraint 固化 “terminal-only” 的约束（running/pending 无法被标记为 excluded/deleted）
 
 #### 4.5.0.1 Defer queue（request_* API，运行中申请，idle 时生效）
@@ -387,6 +391,10 @@ defer queue 的存储与应用规则（normative）：
   - `metadata["transcript_preview"]`（可选 String）：当 `payload.output_preview["content"]` 为空时，作为 transcript 展示文本（view 层注入，不写回 body）
 - soft-delete（`deleted_at`）默认从 transcript 中排除（除非 `include_deleted:true`）
 - 若 target 节点已 soft-delete 且未显式 `include_deleted:true`，则 transcript 返回空数组
+
+实现要求：
+
+- transcript 的过滤与可选的 preview 覆写应由 `graph.policy.transcript_include?` / `graph.policy.transcript_preview_override` 提供（里程碑 1 默认策略必须实现上述规则；attachable 可覆写以满足不同产品语义）。
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
 
