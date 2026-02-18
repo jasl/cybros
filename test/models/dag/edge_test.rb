@@ -17,6 +17,20 @@ class DAG::EdgeTest < ActiveSupport::TestCase
     assert_includes edge.errors.full_messages.join("\n"), "cycle"
   end
 
+  test "rejects active edges that point to inactive nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    from_node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+    to_node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+
+    to_node.update!(compressed_at: Time.current)
+
+    edge = graph.edges.build(from_node_id: from_node.id, to_node_id: to_node.id, edge_type: DAG::Edge::SEQUENCE)
+    assert_not edge.valid?
+    assert_includes edge.errors.full_messages.join("\n"), "active node"
+  end
+
   test "cycle detection ignores paths through inactive nodes" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

@@ -1,11 +1,12 @@
 module DAG
   class Scheduler
-    def self.claim_executable_nodes(graph_id:, limit:)
-      new(graph_id: graph_id, limit: limit).claim_executable_nodes
+    def self.claim_executable_nodes(graph:, limit:)
+      new(graph: graph, limit: limit).claim_executable_nodes
     end
 
-    def initialize(graph_id:, limit:)
-      @graph_id = graph_id
+    def initialize(graph:, limit:)
+      @graph = graph
+      @graph_id = graph.id
       @limit = Integer(limit)
     end
 
@@ -27,7 +28,9 @@ module DAG
               AND NOT EXISTS (
                 SELECT 1
                 FROM dag_edges
-                JOIN dag_nodes AS parents ON parents.id = dag_edges.from_node_id
+                JOIN dag_nodes AS parents
+                  ON parents.id = dag_edges.from_node_id
+                 AND parents.graph_id = dag_edges.graph_id
                 WHERE dag_edges.graph_id = dag_nodes.graph_id
                   AND dag_edges.to_node_id = dag_nodes.id
                   AND dag_edges.edge_type IN ('sequence', 'dependency')
@@ -57,6 +60,15 @@ module DAG
             node_ids = DAG::Node.where(id: node_ids, state: DAG::Node::RUNNING).order(:id).pluck(:id)
           end
         end
+      end
+
+      node_ids.each do |node_id|
+        @graph.emit_event(
+          event_type: "node_state_changed",
+          subject_type: "DAG::Node",
+          subject_id: node_id,
+          particulars: { "from" => "pending", "to" => "running" }
+        )
       end
 
       DAG::Node.where(id: node_ids).order(:id).to_a

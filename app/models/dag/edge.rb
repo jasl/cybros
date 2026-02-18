@@ -19,6 +19,7 @@ module DAG
     validates :graph_id, :from_node_id, :to_node_id, presence: true
 
     validate :nodes_belong_to_same_graph
+    validate :active_endpoints_must_be_active_nodes
     validate :must_not_introduce_cycle, on: :create
 
     scope :active, -> { where(compressed_at: nil) }
@@ -32,6 +33,19 @@ module DAG
 
         if to_node && to_node.graph_id != graph_id
           errors.add(:to_node_id, "must belong to the same graph")
+        end
+      end
+
+      def active_endpoints_must_be_active_nodes
+        return if errors.any?
+        return if compressed_at.present?
+
+        if from_node&.compressed_at.present?
+          errors.add(:from_node_id, "must be an active node")
+        end
+
+        if to_node&.compressed_at.present?
+          errors.add(:to_node_id, "must be an active node")
         end
       end
 

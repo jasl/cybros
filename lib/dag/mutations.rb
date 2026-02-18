@@ -30,7 +30,7 @@ module DAG
         }.merge(attributes)
       )
 
-      @graph.record_event!(
+      @graph.emit_event(
         event_type: "node_created",
         subject: node,
         particulars: { "node_type" => node.node_type, "state" => node.state }
@@ -51,7 +51,7 @@ module DAG
         metadata: metadata
       )
 
-      @graph.record_event!(
+      @graph.emit_event(
         event_type: "edge_created",
         subject: edge,
         particulars: {
@@ -148,7 +148,7 @@ module DAG
 
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
-      @graph.record_event!(
+      @graph.emit_event(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -198,7 +198,7 @@ module DAG
 
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
-      @graph.record_event!(
+      @graph.emit_event(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -253,7 +253,7 @@ module DAG
       archived_edge_ids =
         archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: new_node.id, now: now)
 
-      @graph.record_event!(
+      @graph.emit_event(
         event_type: "node_replaced",
         subject: new_node,
         particulars: {
@@ -338,7 +338,7 @@ module DAG
           metadata: metadata
         )
 
-        @graph.record_event!(
+        @graph.emit_event(
           event_type: "edge_created",
           subject: edge,
           particulars: {

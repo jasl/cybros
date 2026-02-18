@@ -67,5 +67,5 @@ measure("scheduler_claim_100") do
     graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
   end
 
-  DAG::Scheduler.claim_executable_nodes(graph_id: graph.id, limit: 100)
+  DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 100)
 end

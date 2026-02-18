@@ -61,12 +61,46 @@ module DAG
       DAG::TickGraphJob.perform_later(id, limit: limit)
     end
 
-    def policy
-      @policy ||= DAG::GraphPolicies::Default.new
+    def hooks
+      @hooks ||=
+        if attachable.respond_to?(:dag_graph_hooks)
+          attachable.dag_graph_hooks || DAG::GraphHooks::Noop.new
+        else
+          DAG::GraphHooks::Noop.new
+        end
     end
 
-    def record_event!(event_type:, subject:, particulars: {})
-      attachable.record_event!(event_type: event_type, subject: subject, particulars: particulars)
+    def policy
+      @policy ||=
+        if attachable.respond_to?(:dag_graph_policy)
+          attachable.dag_graph_policy || DAG::GraphPolicies::Default.new
+        else
+          DAG::GraphPolicies::Default.new
+        end
+    end
+
+    def emit_event(event_type:, particulars: {}, subject: nil, subject_type: nil, subject_id: nil)
+      if subject
+        subject_type = subject.class.name
+        subject_id = subject.id
+      end
+
+      raise ArgumentError, "subject_type required" if subject_type.blank?
+      raise ArgumentError, "subject_id required" if subject_id.blank?
+
+      hooks.record_event(
+        graph: self,
+        event_type: event_type,
+        subject_type: subject_type,
+        subject_id: subject_id,
+        particulars: particulars
+      )
+    rescue StandardError => error
+      Rails.logger.error(
+        "[DAG] graph_hooks_error graph_id=#{id} event_type=#{event_type} " \
+        "subject_type=#{subject_type} subject_id=#{subject_id} error=#{error.class}: #{error.message}"
+      )
+      nil
     end
 
     def advisory_lock_name
@@ -113,7 +147,7 @@ module DAG
           )
         )
 
-        record_event!(
+        emit_event(
           event_type: "leaf_invariant_repaired",
           subject: repaired_node,
           particulars: { "leaf_node_id" => leaf.id }

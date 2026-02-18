@@ -29,6 +29,11 @@
 - **Active edge 的端点必须都是 Active node**。  
   换句话说，归档（archive）任何节点时，必须同时归档所有 incident edges（无论 edge_type）。
 
+实现要求：
+
+- **写入期校验**：禁止创建 active edge 指向 inactive node（例如 model validation）。
+- **查询层防御**：Context/Leaf/Scheduler/FailurePropagation 必须做 active endpoint filtering，将“active edge 指向 inactive node”的脏数据视为不存在。
+
 ### 1.3 include_compressed（约定）
 
 - **默认行为**：只在 Active 图上工作（Context、Scheduler、Leaf、可视化默认）。
@@ -99,12 +104,14 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - `node.body` 的 STI 类型必须等于 `graph.policy.body_class_for_node_type(node.node_type)`
 
-里程碑 1（Default policy）映射为：
+映射由 `graph.policy` 决定，通常由 attachable 注入。里程碑 1 的示例：
 
-- `user_message` → `Messages::UserMessage`
-- `agent_message` → `Messages::AgentMessage`
-- `task` → `Messages::ToolCall`
-- `summary` → `Messages::Summary`
+- `Conversation`（`Messages::GraphPolicy`）映射为：
+  - `user_message` → `Messages::UserMessage`
+  - `agent_message` → `Messages::AgentMessage`
+  - `task` → `Messages::ToolCall`
+  - `summary` → `Messages::Summary`
+- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBody`（通用 body，不依赖任何业务命名空间）。
 
 #### 2.5.2 负载字段最小约定
 
@@ -239,6 +246,7 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 
 - 若发现 leaf 为 terminal 且不是 `agent_message`，系统自动追加一个 `agent_message(pending)` 子节点，并用 `sequence` 连接。
 - 修复必须在图锁+事务内进行，并记录事件 `leaf_invariant_repaired`。
+- 修复必须在图锁+事务内进行（可观测可通过 hooks 投影，见第 9 节）。
 
 ---
 
@@ -284,7 +292,7 @@ leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作�
 - 在 `DAG::Graph#mutate!` 内执行（图锁 + 事务边界 + leaf 修复 + kick）
 - 只操作 Active 图（目标节点必须 `compressed_at IS NULL`）
 - 任何归档（archive）必须同时归档 **nodes + incident edges**，保持 Active 图结构性要求（第 1.2）。
-- 必须记录 `events`（审计/回放）。
+- 可观测/审计可通过 hooks 投影实现（见第 9 节；不影响引擎正确性）。
 
 ### 7.2 fork（新增分支，不改写旧图）
 
@@ -311,7 +319,7 @@ replace 的共同语义：在 Active 图中以 `new_node` 替换 `old_node`，�
 2) 复制 old 的 **incoming blocking edges** 到 new（from 不变，to=new）
 3) 创建 lineage `branch`：`old → new`，`branch_kinds=["retry|regenerate|edit"]`
 4) 归档 old（以及需要归档的下游子图/边界，见各操作定义）
-5) 记录事件 `node_replaced`（kind、old_id/new_id、归档范围）
+5) 可通过 hooks 投影 `node_replaced`（kind、old_id/new_id、归档范围；见第 9 节）
 
 Active 版本确定规则：
 
@@ -384,7 +392,7 @@ Active 版本确定规则：
 - regenerate/edit/retry 都通过 replace 产生多版本。
 - 历史版本表现为 Inactive nodes/edges；Active 图永远只有一个“当前版本”。
 - UI 若要提供 swipe/版本浏览，应：
-  - 以 `events.event_type=node_replaced` 的链条或 Inactive `branch` 边回溯版本关系；
+  - 以 `node_replaced` hooks 的投影（若接入）或 Inactive `branch` 边回溯版本关系；
   - 以 `created_at` 或 `id(uuidv7)` 排序呈现版本序列。
 
 ---
@@ -406,3 +414,32 @@ Active 版本确定规则：
 - summary 的文本内容写入：
 - `body.output["content"] = summary_content`
   - 同步 `output_preview`（截断规则同第 4.4）
+
+---
+
+## 9) Hooks（非规范：可观测/副作用投影）
+
+Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events` 表、metrics、审计日志）。**Hooks 不参与引擎正确性**：
+
+- hooks 的实现是可选的（默认 no-op）。
+- hooks 任何异常会被吞掉并记录日志，不能阻塞图推进。
+
+接口约定：
+
+- attachable 可以实现 `dag_graph_hooks` 返回一个 hooks 对象（否则使用 no-op）。
+- hooks 的统一入口为：`hooks.record_event(graph:, event_type:, subject_type:, subject_id:, particulars: {})`
+
+约定的 `event_type`（里程碑 1）：
+
+- `node_created`：创建 node
+- `edge_created`：创建 edge
+- `node_replaced`：replace（retry/regenerate/edit）产生新版本
+- `subgraph_compressed`：压缩子图产生 summary
+- `leaf_invariant_repaired`：leaf 修复追加节点
+- `node_state_changed`：节点状态迁移
+
+`node_state_changed` 的触发点（里程碑 1）：
+
+- Scheduler claim：`pending → running`
+- Runner apply_result：`running → finished/errored/rejected/cancelled`
+- FailurePropagation：`pending → skipped`

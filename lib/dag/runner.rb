@@ -19,7 +19,7 @@ module DAG
       result = DAG.executor_registry.execute(node: node, context: context)
       graph.with_graph_lock! do
         apply_result(node, result)
-        DAG::FailurePropagation.propagate!(graph_id: graph.id)
+        DAG::FailurePropagation.propagate!(graph: graph)
         graph.validate_leaf_invariant!
       end
     rescue StandardError => error
@@ -27,7 +27,7 @@ module DAG
         graph = node.graph
         graph.with_graph_lock! do
           apply_result(node, DAG::ExecutionResult.errored(error: "#{error.class}: #{error.message}"))
-          DAG::FailurePropagation.propagate!(graph_id: graph.id)
+          DAG::FailurePropagation.propagate!(graph: graph)
           graph.validate_leaf_invariant!
         end
       end
@@ -59,7 +59,7 @@ module DAG
           end
 
         if transitioned
-          node.graph.record_event!(
+          node.graph.emit_event(
             event_type: "node_state_changed",
             subject: node,
             particulars: { "from" => from_state, "to" => node.state }

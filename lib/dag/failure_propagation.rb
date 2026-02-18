@@ -1,16 +1,25 @@
 module DAG
   class FailurePropagation
-    def self.propagate!(graph_id:)
-      new(graph_id: graph_id).propagate!
+    def self.propagate!(graph:)
+      new(graph: graph).propagate!
     end
 
-    def initialize(graph_id:)
-      @graph_id = graph_id
+    def initialize(graph:)
+      @graph = graph
+      @graph_id = graph.id
     end
 
     def propagate!
       loop do
         updated_ids = propagate_once!
+        updated_ids.each do |node_id|
+          @graph.emit_event(
+            event_type: "node_state_changed",
+            subject_type: "DAG::Node",
+            subject_id: node_id,
+            particulars: { "from" => "pending", "to" => "skipped" }
+          )
+        end
         break if updated_ids.empty?
       end
     end
@@ -44,6 +53,7 @@ module DAG
                AND e.compressed_at IS NULL
               JOIN dag_nodes parent
                 ON parent.id = e.from_node_id
+               AND parent.graph_id = e.graph_id
                AND parent.compressed_at IS NULL
               WHERE child.graph_id = #{graph_quoted}
                 AND child.compressed_at IS NULL

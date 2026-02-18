@@ -2,18 +2,8 @@ module DAG
   module GraphPolicies
     class Default < DAG::GraphPolicy
       def body_class_for_node_type(node_type)
-        case node_type.to_s
-        when DAG::Node::USER_MESSAGE
-          ::Messages::UserMessage
-        when DAG::Node::AGENT_MESSAGE
-          ::Messages::AgentMessage
-        when DAG::Node::TASK
-          ::Messages::ToolCall
-        when DAG::Node::SUMMARY
-          ::Messages::Summary
-        else
-          DAG::NodeBody
-        end
+        _ = node_type
+        DAG::NodeBody
       end
 
       def leaf_valid?(node)

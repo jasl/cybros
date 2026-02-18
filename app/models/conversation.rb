@@ -10,7 +10,11 @@ class Conversation < ApplicationRecord
     build_dag_graph if new_record? && dag_graph.nil?
   end
 
-  def record_event!(event_type:, subject:, particulars: {})
-    events.create!(event_type: event_type, subject: subject, particulars: particulars)
+  def dag_graph_policy
+    @dag_graph_policy ||= Messages::GraphPolicy.new
+  end
+
+  def dag_graph_hooks
+    @dag_graph_hooks ||= Messages::GraphHooks.new(conversation: self)
   end
 end

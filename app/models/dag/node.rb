@@ -182,21 +182,41 @@ module DAG
     end
 
     def body_input
-      body.input.is_a?(Hash) ? body.input : {}
+      if body.present?
+        body.input.is_a?(Hash) ? body.input : {}
+      else
+        @pending_body_input || {}
+      end
     end
 
     def body_input=(hash)
-      ensure_body
-      body.input = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+      normalized = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+
+      if body.present?
+        body.input = normalized
+      else
+        @pending_body_input = normalized
+        ensure_body
+      end
     end
 
     def body_output
-      body.output.is_a?(Hash) ? body.output : {}
+      if body.present?
+        body.output.is_a?(Hash) ? body.output : {}
+      else
+        @pending_body_output || {}
+      end
     end
 
     def body_output=(hash)
-      ensure_body
-      body.output = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+      normalized = hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+
+      if body.present?
+        body.output = normalized
+      else
+        @pending_body_output = normalized
+        ensure_body
+      end
     end
 
     def body_output_preview
@@ -208,8 +228,10 @@ module DAG
       def ensure_body
         return if body.present?
         return if node_type.blank?
+        return if graph.blank?
 
         self.body = graph_policy.body_class_for_node_type(node_type).new
+        apply_pending_body_io!
       end
 
       def body_type_matches_node_type
@@ -223,6 +245,16 @@ module DAG
 
       def graph_policy
         graph&.policy || DAG::GraphPolicies::Default.new
+      end
+
+      def apply_pending_body_io!
+        pending_body_input = @pending_body_input
+        pending_body_output = @pending_body_output
+        @pending_body_input = nil
+        @pending_body_output = nil
+
+        body.input = pending_body_input if pending_body_input.present?
+        body.output = pending_body_output if pending_body_output.present?
       end
 
       def transition_to!(to_state, from_states:, **attributes)

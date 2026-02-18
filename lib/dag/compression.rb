@@ -76,7 +76,7 @@ module DAG
             )
           end
 
-        @graph.record_event!(
+        @graph.emit_event(
           event_type: "subgraph_compressed",
           subject: summary_node,
           particulars: {

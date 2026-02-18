@@ -5,7 +5,7 @@
 ## 目标与原则
 
 - **动态 DAG**：会话没有固定终点；节点会随着用户对话与 Agent 执行动态新增，但图在任意时刻都必须保持合法。
-- **可观测与可审计**：节点/边与事件记录用于可视化、监控、审计与回放。
+- **可观测与可审计**：节点/边与 hooks 投影（例如 `Event`）用于可视化、监控、审计与回放。
 - **并发可调度**：基于 edge gating 判定可执行节点；多 worker 可并发 claim，避免重复执行。
 - **非破坏压缩**：压缩用于节约上下文，原始节点/边不删除，只标记为 `compressed_at`（审计保留）。
 
@@ -26,7 +26,10 @@
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
 
-`DAG::Graph` 通过 `attachable`（polymorphic）关联业务对象（当前为 `Conversation`）。`Conversation` 负责事件记录（`record_event!`）并将 DAG 入口方法 delegate 给 `dag_graph`。
+`DAG::Graph` 通过 `attachable`（polymorphic）关联业务对象（当前为 `Conversation`）。业务对象可选提供：
+
+- `dag_graph_policy`：返回 `DAG::GraphPolicy`（用于 node_type↔body 映射、leaf 修复规则等）
+- `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
 
 ### 节点：`DAG::Node`
 
@@ -59,12 +62,14 @@ preview 策略（里程碑 1）：
 - `agent_message`（`Messages::AgentMessage`）上限更长：`2000 chars`
 - `task`（`Messages::ToolCall`）的 `output_preview["result"]` 对非字符串 result 使用摘要字符串（避免巨大 JSON 的 `to_json` 峰值）
 
-默认映射（`DAG::GraphPolicies::Default`）：
+node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_policy` 可注入）：
 
-- `user_message` → `Messages::UserMessage`
-- `agent_message` → `Messages::AgentMessage`
-- `task` → `Messages::ToolCall`
-- `summary` → `Messages::Summary`
+- `Conversation`（`Messages::GraphPolicy`）：
+  - `user_message` → `Messages::UserMessage`
+  - `agent_message` → `Messages::AgentMessage`
+  - `task` → `Messages::ToolCall`
+  - `summary` → `Messages::Summary`
+- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBody`（通用 body，不依赖任何业务命名空间）
 
 #### 状态语义（skipped/cancelled 明确化）
 
@@ -89,11 +94,14 @@ preview 策略（里程碑 1）：
 
 `branch` 边使用 `metadata["branch_kinds"]`（数组）表达 lineage（例如 `["fork"]`、`["retry"]`）。在压缩边界去重合并时，`branch_kinds` 可能包含多个值（并集）。
 
-### 事件：`Event`
+### Hooks（可选）：`DAG::GraphHooks`
 
-- 模型：`app/models/event.rb`
-- 表：`events`
-- 作用：记录关键动作（创建节点/边、状态变化、压缩等），用于审计、监控与 UI 时间线。
+> DAG 引擎不直接写入 `Event`（也不写任何业务副作用）；它只在关键动作上调用 hooks（best-effort：异常会被吞掉并 log）。
+
+- 接口：`app/models/dag/graph_hooks.rb`
+  - `record_event(graph:, event_type:, subject_type:, subject_id:, particulars: {})`
+- 注入点：`attachable.dag_graph_hooks`（例如 `Conversation` 返回 `Messages::GraphHooks` 写入 `events` 表）
+- 默认：`DAG::GraphHooks::Noop`（不做任何事）
 
 ## 图不变量（Invariants）
 
@@ -133,6 +141,8 @@ preview 策略（里程碑 1）：
 
 > 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 executable `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死。
 
+> 可观测（hooks）：Scheduler claim 会尝试 emit `node_state_changed`（`pending → running`）。
+
 ### Runner：执行与落库
 
 - 实现：`lib/dag/runner.rb`
@@ -142,10 +152,12 @@ preview 策略（里程碑 1）：
 - 执行流程：
   1. 组装上下文 `graph.context_for(node)`
   2. `DAG.executor_registry.execute(node:, context:)`
-  3. 按结果落库为终态并记录事件
+  3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
   4. 执行后触发下一轮 tick
 
 > 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。
+
+> 可观测（hooks）：FailurePropagation 会尝试 emit `node_state_changed`（`pending → skipped`）。
 
 ### Jobs：推进图执行（Solid Queue / ActiveJob）
 
