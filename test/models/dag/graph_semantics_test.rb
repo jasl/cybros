@@ -1,6 +1,6 @@
 require "test_helper"
 
-class DAG::GraphPolicyTest < ActiveSupport::TestCase
+class DAG::GraphSemanticsTest < ActiveSupport::TestCase
   test "validate_leaf_invariant! repairs leaves for attachable graphs" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
