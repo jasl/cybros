@@ -66,7 +66,7 @@
 
 - 引擎**不**在 DB 层对 `dag_nodes.node_type` 做 check constraint（允许业务扩展）。
 - 对 conversation graphs：`attachable.dag_node_body_namespace` 必须返回一个 NodeBody 命名空间（Module），引擎按约定将 `node_type` 映射到 `#{namespace}::#{node_type.camelize}`，且该常量必须 `< DAG::NodeBody`；未知/未定义类型默认失败，避免拼写错误/脏数据导致 Scheduler/Context/Leaf/FailurePropagation 产生不可解释行为。
-- 对无 `dag_node_body_namespace` 的 graphs：引擎统一使用 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）。
+- 对缺失 `dag_node_body_namespace` 的 graphs：视为图配置错误；节点创建必须失败（不做 silent fallback）。
 
 ### 2.2 节点状态（`dag_nodes.state`）
 
@@ -154,7 +154,7 @@ Active 视图内必须保持一致（不允许 drift）：
   - `character_message` → `Messages::CharacterMessage`
   - `task` → `Messages::Task`
   - `summary` → `Messages::Summary`
-- 若 graph.attachable 不提供 `dag_node_body_namespace`：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）。
+> 若 `dag_node_body_namespace` 缺失或返回非 Module：图配置错误；节点创建必须失败（不做 silent fallback）。
 
 #### 2.5.2 负载字段最小约定
 
@@ -191,8 +191,7 @@ Active 视图内必须保持一致（不允许 drift）：
 - 对 conversation graphs（attachable 提供 `dag_node_body_namespace`）：
   - 引擎会扫描该 namespace 下所有 `< DAG::NodeBody` 的子类，基于 hooks 计算 turn anchor / transcript candidates / leaf terminal types / default leaf repair type。
   - 这意味着：扩展新 node_type 时，除了提供 `node_type ↔ body` 的约定映射外，还应在对应 body 上声明必要的 hooks（而不是修改 DAG 核心）。
-- 对 generic graphs（无 `dag_node_body_namespace`）：
-  - 不要求上述 hooks 完整存在；默认行为应尽量保守且不引入自动修复副作用。
+- `dag_node_body_namespace` 缺失时，不保证 hooks 扫描与 leaf 修复等行为可用（因为该图本身被视为 misconfigured）。
 
 ### 2.6 节点观测字段（usage/output_stats）
 

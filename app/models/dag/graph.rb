@@ -264,7 +264,7 @@ module DAG
 
         body_class
       else
-        DAG::NodeBodies::Generic
+        raise KeyError, "attachable must define dag_node_body_namespace"
       end
     end
 

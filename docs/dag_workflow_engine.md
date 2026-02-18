@@ -81,7 +81,7 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
   - `character_message` → `Messages::CharacterMessage`
   - `task` → `Messages::Task`
   - `summary` → `Messages::Summary`
-- 若 graph.attachable 不提供 `dag_node_body_namespace`：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）
+- `dag_node_body_namespace` 是 conversation graphs 的必需扩展点；若缺失或返回非 Module，node 创建会失败（避免悄悄吞掉未知 node_type）。
 
 #### NodeBody semantic hooks（Milestone 1）
 
@@ -148,7 +148,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 - `node_type in {agent_message, character_message}`
 - 或者 `state in {pending, running}`（允许执行中的中间态）
 
-修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy`（即 graph 自身）提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 `agent_message/character_message` 时，自动追加一个 `agent_message(pending)` 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。对不提供 `dag_node_body_namespace` 的 generic graphs，leaf invariant 判定视为成立（不做自动修复）。
+修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy`（即 graph 自身）提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 leaf-terminal 类型时，自动追加一个默认 leaf repair 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
 
 ## 调度与执行
 

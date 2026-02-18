@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::GraphPolicyTest < ActiveSupport::TestCase
-  test "validate_leaf_invariant! repairs leaves for attachable graphs but not for generic graphs" do
+  test "validate_leaf_invariant! repairs leaves for attachable graphs" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -20,13 +20,6 @@ class DAG::GraphPolicyTest < ActiveSupport::TestCase
       edge_type: DAG::Edge::SEQUENCE,
       metadata: { "generated_by" => "leaf_invariant" }
     )
-
-    generic = DAG::Graph.create!
-    generic_leaf = generic.nodes.create!(node_type: "anything", state: DAG::Node::FINISHED, metadata: {})
-
-    created = generic.with_graph_lock! { generic.validate_leaf_invariant! }
-    assert_not created
-    assert_equal [generic_leaf.id], generic.leaf_nodes.pluck(:id)
   end
 
   test "transcript_for delegates inclusion decisions to NodeBody class hooks" do

@@ -1,15 +1,18 @@
 require "test_helper"
 
 class DAG::GraphTest < ActiveSupport::TestCase
-  test "can be created without attachable" do
+  test "can be created without attachable but cannot create nodes" do
     graph = DAG::Graph.create!
 
     assert_nil graph.attachable
     assert_equal DAG::GraphHooks::NOOP, graph.hooks
     assert_equal graph, graph.policy
 
-    node = graph.nodes.create!(node_type: "task", state: DAG::Node::FINISHED, metadata: {})
-    assert node.body.is_a?(DAG::NodeBodies::Generic)
+    error =
+      assert_raises(ActiveRecord::RecordInvalid) do
+        graph.nodes.create!(node_type: "task", state: DAG::Node::FINISHED, metadata: {})
+      end
+    assert_match(/Node type is unknown/, error.message)
   end
 
   test "turn helpers scope to active nodes and compute stability" do
