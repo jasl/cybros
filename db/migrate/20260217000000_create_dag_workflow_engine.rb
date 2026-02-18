@@ -45,10 +45,16 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                    foreign_key: { to_table: :dag_node_bodies },
                    index: { unique: true }
 
-      t.references :retry_of, type: :uuid, foreign_key: { to_table: :dag_nodes }
+      t.uuid :retry_of_id
+      t.index :retry_of_id, name: "index_dag_nodes_on_retry_of_id"
 
-      t.references :compressed_by, type: :uuid, foreign_key: { to_table: :dag_nodes }
+      t.uuid :compressed_by_id
+      t.index :compressed_by_id, name: "index_dag_nodes_on_compressed_by_id"
       t.datetime :compressed_at
+      t.check_constraint(
+        "((compressed_at IS NULL) = (compressed_by_id IS NULL))",
+        name: "check_dag_nodes_compressed_fields_consistent"
+      )
 
       t.datetime :context_excluded_at
       t.check_constraint(
@@ -113,6 +119,16 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
     end
 
     add_index :dag_nodes, %i[graph_id id], unique: true, name: "index_dag_nodes_graph_id_id_unique"
+
+    add_foreign_key :dag_nodes, :dag_nodes,
+                    column: %i[graph_id retry_of_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_nodes_retry_of_graph_scoped"
+
+    add_foreign_key :dag_nodes, :dag_nodes,
+                    column: %i[graph_id compressed_by_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_nodes_compressed_by_graph_scoped"
 
     add_foreign_key :dag_edges, :dag_nodes,
                     column: %i[graph_id from_node_id],

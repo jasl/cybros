@@ -149,7 +149,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: x.id, to_node_id: y.id, edge_type: DAG::Edge::SEQUENCE)
     graph.edges.create!(from_node_id: y.id, to_node_id: z.id, edge_type: DAG::Edge::SEQUENCE)
 
-    y.update!(compressed_at: Time.current)
+    y.update!(compressed_at: Time.current, compressed_by_id: x.id)
 
     context = conversation.context_for(z.id)
     ids = context.map { |node| node.fetch("node_id") }
@@ -167,7 +167,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
 
     refute_includes graph.leaf_nodes.pluck(:id), a.id
 
-    b.update!(compressed_at: Time.current)
+    b.update!(compressed_at: Time.current, compressed_by_id: a.id)
 
     assert_includes graph.leaf_nodes.pluck(:id), a.id
   end

@@ -133,6 +133,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.index ["graph_id", "turn_id"], name: "index_dag_nodes_turn"
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
+    t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
     t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
     t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
     t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[])", name: "check_dag_nodes_state_enum"
@@ -160,7 +161,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   add_foreign_key "dag_node_visibility_patches", "dag_nodes", column: ["graph_id", "node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_visibility_patches_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_nodes", "dag_node_bodies", column: "body_id"
-  add_foreign_key "dag_nodes", "dag_nodes", column: "compressed_by_id"
-  add_foreign_key "dag_nodes", "dag_nodes", column: "retry_of_id"
+  add_foreign_key "dag_nodes", "dag_nodes", column: ["graph_id", "compressed_by_id"], primary_key: ["graph_id", "id"], name: "fk_dag_nodes_compressed_by_graph_scoped"
+  add_foreign_key "dag_nodes", "dag_nodes", column: ["graph_id", "retry_of_id"], primary_key: ["graph_id", "id"], name: "fk_dag_nodes_retry_of_graph_scoped"
   add_foreign_key "events", "conversations"
 end

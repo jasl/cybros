@@ -24,7 +24,7 @@ class DAG::EdgeTest < ActiveSupport::TestCase
     from_node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
     to_node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
-    to_node.update!(compressed_at: Time.current)
+    to_node.update!(compressed_at: Time.current, compressed_by_id: to_node.id)
 
     edge = graph.edges.build(from_node_id: from_node.id, to_node_id: to_node.id, edge_type: DAG::Edge::SEQUENCE)
     assert_not edge.valid?
@@ -42,7 +42,7 @@ class DAG::EdgeTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
     graph.edges.create!(from_node_id: b.id, to_node_id: c.id, edge_type: DAG::Edge::SEQUENCE)
 
-    b.update!(compressed_at: Time.current)
+    b.update!(compressed_at: Time.current, compressed_by_id: b.id)
 
     edge = graph.edges.build(from_node_id: c.id, to_node_id: a.id, edge_type: DAG::Edge::SEQUENCE)
     assert edge.valid?

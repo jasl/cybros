@@ -137,7 +137,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
     assert_equal :deferred, node.request_soft_delete!
     assert DAG::NodeVisibilityPatch.where(graph_id: graph.id, node_id: node.id).exists?
 
-    node.update_columns(compressed_at: Time.current, updated_at: Time.current)
+    node.update_columns(compressed_at: Time.current, compressed_by_id: node.id, updated_at: Time.current)
     running.update_columns(state: DAG::Node::FINISHED, updated_at: Time.current)
 
     graph.with_graph_lock! do

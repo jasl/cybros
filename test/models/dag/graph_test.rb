@@ -29,7 +29,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
     a.update!(state: DAG::Node::FINISHED)
     assert graph.turn_stable?(a.turn_id)
 
-    b.update!(compressed_at: Time.current)
+    b.update!(compressed_at: Time.current, compressed_by_id: b.id)
     assert_equal [a.id], graph.turn_node_ids(a.turn_id)
     assert_includes graph.turn_node_ids(a.turn_id, include_compressed: true), b.id
   end
