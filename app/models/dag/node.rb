@@ -44,18 +44,6 @@ module DAG
 
     before_validation :ensure_body
 
-    def pending?
-      state == PENDING
-    end
-
-    def running?
-      state == RUNNING
-    end
-
-    def finished?
-      state == FINISHED
-    end
-
     def terminal?
       TERMINAL_STATES.include?(state)
     end
