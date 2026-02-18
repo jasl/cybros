@@ -64,8 +64,7 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
     create_table :dag_node_visibility_patches, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
-      t.references :node, null: false, type: :uuid,
-                   foreign_key: { to_table: :dag_nodes, on_delete: :cascade }
+      t.references :node, null: false, type: :uuid
       t.datetime :context_excluded_at
       t.datetime :deleted_at
       t.timestamps
@@ -84,8 +83,8 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.index %i[graph_id edge_type], where: "compressed_at IS NULL",
               name: "index_dag_edges_active_type"
 
-      t.references :from_node, type: :uuid, foreign_key: { to_table: :dag_nodes }, null: false
-      t.references :to_node, type: :uuid, foreign_key: { to_table: :dag_nodes }, null: false
+      t.references :from_node, type: :uuid, null: false
+      t.references :to_node, type: :uuid, null: false
       t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
 
       t.string :edge_type, null: false
@@ -99,5 +98,25 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.datetime :compressed_at
       t.timestamps
     end
+
+    add_index :dag_nodes, %i[graph_id id], unique: true, name: "index_dag_nodes_graph_id_id_unique"
+
+    add_foreign_key :dag_edges, :dag_nodes,
+                    column: %i[graph_id from_node_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_edges_from_node_graph_scoped",
+                    on_delete: :cascade
+
+    add_foreign_key :dag_edges, :dag_nodes,
+                    column: %i[graph_id to_node_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_edges_to_node_graph_scoped",
+                    on_delete: :cascade
+
+    add_foreign_key :dag_node_visibility_patches, :dag_nodes,
+                    column: %i[graph_id node_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_visibility_patches_node_graph_scoped",
+                    on_delete: :cascade
   end
 end

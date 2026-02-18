@@ -34,6 +34,15 @@
 - **写入期校验**：禁止创建 active edge 指向 inactive node（例如 model validation）。
 - **查询层防御**：Context/Leaf/Scheduler/FailurePropagation 必须做 active endpoint filtering，将“active edge 指向 inactive node”的脏数据视为不存在。
 
+### 1.2.1 Graph-scoped foreign keys（DB 级约束）
+
+为降低脏数据故障面、避免 “跨图引用” 污染引擎行为，里程碑 1 要求以下引用在数据库层面必须是 **graph scoped**（规范性要求）：
+
+- `dag_edges (graph_id, from_node_id)` / `(graph_id, to_node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
+- `dag_node_visibility_patches (graph_id, node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
+
+这意味着：即使绕过模型校验（例如 `save!(validate: false)`），DB 也会拒绝插入跨 graph 的 edge/patch。
+
 ### 1.3 include_compressed（约定）
 
 - **默认行为**：只在 Active 图上工作（Context、Scheduler、Leaf、可视化默认）。

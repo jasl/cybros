@@ -65,13 +65,15 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     dirty_parent = graph_b.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
     child = graph_a.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
 
-    DAG::Edge.new(
-      graph_id: graph_a.id,
-      from_node_id: dirty_parent.id,
-      to_node_id: child.id,
-      edge_type: DAG::Edge::DEPENDENCY,
-      metadata: {}
-    ).save!(validate: false)
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      DAG::Edge.new(
+        graph_id: graph_a.id,
+        from_node_id: dirty_parent.id,
+        to_node_id: child.id,
+        edge_type: DAG::Edge::DEPENDENCY,
+        metadata: {}
+      ).save!(validate: false)
+    end
 
     claimed = DAG::Scheduler.claim_executable_nodes(graph: graph_a, limit: 10)
     assert_equal [child.id], claimed.map(&:id)

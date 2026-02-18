@@ -35,4 +35,18 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
       node.update_column(:deleted_at, Time.current)
     end
   end
+
+  test "dag_node_visibility_patches enforces node graph_id at the database layer" do
+    conversation_a = Conversation.create!
+    graph_a = conversation_a.dag_graph
+
+    conversation_b = Conversation.create!
+    graph_b = conversation_b.dag_graph
+
+    node_b = graph_b.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      DAG::NodeVisibilityPatch.new(graph_id: graph_a.id, node_id: node_b.id).save!(validate: false)
+    end
+  end
 end

@@ -120,6 +120,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.index ["compressed_by_id"], name: "index_dag_nodes_on_compressed_by_id"
     t.index ["graph_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
     t.index ["graph_id", "created_at"], name: "index_dag_nodes_created_at"
+    t.index ["graph_id", "id"], name: "index_dag_nodes_graph_id_id_unique", unique: true
     t.index ["graph_id", "retry_of_id"], name: "index_dag_nodes_retry_of"
     t.index ["graph_id", "state", "node_type"], name: "index_dag_nodes_lookup"
     t.index ["graph_id", "turn_id"], name: "index_dag_nodes_turn"
@@ -146,10 +147,10 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
-  add_foreign_key "dag_edges", "dag_nodes", column: "from_node_id"
-  add_foreign_key "dag_edges", "dag_nodes", column: "to_node_id"
+  add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
+  add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "to_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_to_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_node_visibility_patches", "dag_graphs", column: "graph_id", on_delete: :cascade
-  add_foreign_key "dag_node_visibility_patches", "dag_nodes", column: "node_id", on_delete: :cascade
+  add_foreign_key "dag_node_visibility_patches", "dag_nodes", column: ["graph_id", "node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_visibility_patches_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_nodes", "dag_node_bodies", column: "body_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "compressed_by_id"
