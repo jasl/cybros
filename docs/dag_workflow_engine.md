@@ -41,6 +41,8 @@
   - `metadata`：JSONB
   - `retry_of_id`：重试 lineage
   - `compressed_at / compressed_by_id`：压缩标记
+  - `context_excluded_at`：从 LLM context（`context_for`）默认输出中排除（纯视图层语义）
+  - `deleted_at`：软删除；从 context/transcript 默认输出中排除（纯视图层语义）
   - `started_at / finished_at`：执行时间戳
 
 #### NodeBody 扩展表（STI + JSONB）
@@ -191,9 +193,30 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
 
 `context_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 
+Context 可见性（视图层）：
+
+- `context_for` 默认会过滤：
+  - `context_excluded_at IS NOT NULL`
+  - `deleted_at IS NOT NULL`
+- 可通过参数显式包含：
+  - `include_excluded:true`
+  - `include_deleted:true`
+- target 节点无论是否被 exclude/delete 都会强制包含在输出中（避免 executor 缺失自身 I/O）。
+
 > 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
 
 更完整的 DAG 行为规范见：`docs/dag_behavior_spec.md`。
+
+## Transcript（对话记录视图）
+
+为支持产品侧 “取最近 X 条对话记录” 等需求，`DAG::Graph` 提供 transcript 投影：
+
+- `graph.transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)`
+  - 默认只保留 `user_message` 与可读的 `agent_message`
+  - 默认不包含 `task/summary`，不暴露 tool chain 细节
+  - `context_excluded_at` 不影响 transcript（exclude 是 context-only）
+
+> transcript 是视图层 API，不改变 DAG 结构与调度语义。
 
 ## 子图压缩（Manual）
 

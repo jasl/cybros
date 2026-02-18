@@ -35,6 +35,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.references :compressed_by, type: :uuid, foreign_key: { to_table: :dag_nodes }
       t.datetime :compressed_at
 
+      t.datetime :context_excluded_at
+      t.datetime :deleted_at
+
       t.datetime :started_at
       t.datetime :finished_at
       t.timestamps

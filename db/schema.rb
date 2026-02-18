@@ -91,7 +91,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.uuid "body_id", null: false
     t.datetime "compressed_at"
     t.uuid "compressed_by_id"
+    t.datetime "context_excluded_at"
     t.datetime "created_at", null: false
+    t.datetime "deleted_at"
     t.datetime "finished_at"
     t.uuid "graph_id", null: false
     t.jsonb "metadata", default: {}, null: false

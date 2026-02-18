@@ -35,4 +35,140 @@ class ConversationContextTest < ActiveSupport::TestCase
 
     assert_equal long_content, agent_full.dig("payload", "output", "content")
   end
+
+  test "context_for filters excluded nodes by default but include_excluded:true includes them" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    user = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "hi" },
+      metadata: {}
+    )
+    agent1 = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: {},
+      metadata: {}
+    )
+    task = graph.nodes.create!(
+      node_type: DAG::Node::TASK,
+      state: DAG::Node::FINISHED,
+      body_output: { "result" => "ok" },
+      metadata: {}
+    )
+    agent2 = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::PENDING,
+      metadata: {}
+    )
+
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent1.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: agent1.id, to_node_id: task.id, edge_type: DAG::Edge::DEPENDENCY)
+    graph.edges.create!(from_node_id: task.id, to_node_id: agent2.id, edge_type: DAG::Edge::SEQUENCE)
+
+    agent1.exclude_from_context!
+    task.exclude_from_context!
+
+    filtered = conversation.context_for(agent2.id)
+    assert_equal [user.id, agent2.id], filtered.map { |node| node.fetch("node_id") }
+
+    included = conversation.context_for(agent2.id, include_excluded: true)
+    assert_equal [user.id, agent1.id, task.id, agent2.id], included.map { |node| node.fetch("node_id") }
+  end
+
+  test "context_for always includes target even if excluded or deleted" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    agent = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+
+    agent.exclude_from_context!
+    agent.soft_delete!
+
+    context = conversation.context_for(agent.id)
+    assert_equal [agent.id], context.map { |node| node.fetch("node_id") }
+  end
+
+  test "soft deleted nodes are excluded from context by default" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    user = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "hi" },
+      metadata: {}
+    )
+    agent = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::PENDING,
+      metadata: {}
+    )
+
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+    user.soft_delete!
+
+    context = conversation.context_for(agent.id)
+    ids = context.map { |node| node.fetch("node_id") }
+
+    assert_equal [agent.id], ids
+  end
+
+  test "transcript_for hides tool/task nodes and empty agent_message nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    user = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "hi" },
+      metadata: {}
+    )
+    agent1 = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: {},
+      metadata: {}
+    )
+    task = graph.nodes.create!(
+      node_type: DAG::Node::TASK,
+      state: DAG::Node::FINISHED,
+      body_output: { "result" => "ok" },
+      metadata: {}
+    )
+    agent2 = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::PENDING,
+      metadata: {}
+    )
+
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent1.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: agent1.id, to_node_id: task.id, edge_type: DAG::Edge::DEPENDENCY)
+    graph.edges.create!(from_node_id: task.id, to_node_id: agent2.id, edge_type: DAG::Edge::SEQUENCE)
+
+    transcript = conversation.transcript_for(agent2.id)
+    assert_equal [user.id, agent2.id], transcript.map { |node| node.fetch("node_id") }
+
+    limited = conversation.transcript_for(agent2.id, limit: 1)
+    assert_equal [agent2.id], limited.map { |node| node.fetch("node_id") }
+  end
+
+  test "transcript_for excludes deleted target by default but include_deleted:true includes it" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    agent = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: { "content" => "hello" },
+      metadata: {}
+    )
+
+    agent.soft_delete!
+
+    assert_equal [], conversation.transcript_for(agent.id)
+    assert_equal [agent.id], conversation.transcript_for(agent.id, include_deleted: true).map { |node| node.fetch("node_id") }
+  end
 end

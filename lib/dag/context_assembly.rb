@@ -4,10 +4,9 @@ module DAG
       @graph = graph
     end
 
-    def call(target_node_id, mode: :preview)
+    def call(target_node_id, mode: :preview, include_excluded: false, include_deleted: false)
       node_ids = ancestor_node_ids_for(target_node_id)
       nodes = load_nodes(node_ids)
-      bodies = load_bodies(nodes: nodes, mode: mode)
 
       edges = @graph.edges.active.where(
         edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,
@@ -18,7 +17,20 @@ module DAG
       end
 
       ordered_ids = DAG::TopologicalSort.call(node_ids: nodes.keys, edges: edges)
-      ordered_ids.map do |node_id|
+
+      included_ids = ordered_ids.select do |node_id|
+        include_node_in_context?(
+          nodes.fetch(node_id),
+          target_node_id: target_node_id,
+          include_excluded: include_excluded,
+          include_deleted: include_deleted
+        )
+      end
+
+      included_nodes = included_ids.map { |node_id| nodes.fetch(node_id) }
+      bodies = load_bodies(nodes: included_nodes, mode: mode)
+
+      included_ids.map do |node_id|
         node = nodes.fetch(node_id)
         body = bodies[node.body_id]
         context_hash_for(node, body, mode: mode)
@@ -65,12 +77,12 @@ module DAG
       def load_nodes(node_ids)
         @graph.nodes
           .where(id: node_ids, compressed_at: nil)
-          .select(:id, :node_type, :state, :metadata, :body_id)
+          .select(:id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
           .index_by(&:id)
       end
 
       def load_bodies(nodes:, mode:)
-        body_ids = nodes.values.map(&:body_id).compact.uniq
+        body_ids = nodes.map(&:body_id).compact.uniq
 
         body_scope = DAG::NodeBody.where(id: body_ids)
         body_scope =
@@ -81,6 +93,15 @@ module DAG
           end
 
         body_scope.index_by(&:id)
+      end
+
+      def include_node_in_context?(node, target_node_id:, include_excluded:, include_deleted:)
+        return true if node.id.to_s == target_node_id.to_s
+
+        return false if !include_deleted && node.deleted_at.present?
+        return false if !include_excluded && node.context_excluded_at.present?
+
+        true
       end
 
       def context_hash_for(node, body, mode:)

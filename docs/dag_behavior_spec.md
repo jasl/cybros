@@ -222,6 +222,41 @@ Active 视图内必须保持一致（不允许 drift）：
 
 允许 STI 子类覆写派生逻辑（例如 ToolCall 的摘要化），但必须遵守上限与可读性目标。
 
+### 4.5 Context 可见性标记（exclude/delete，非结构性）
+
+为支持 LLM Playground 等产品场景，Active 图允许对节点设置“可见性标记”。这些标记是**纯视图层语义**：
+
+- 不改变 DAG 的结构（不影响 `compressed_at`、不重连边）
+- 不影响 Scheduler/Leaf/FailurePropagation（引擎推进只看结构与状态）
+
+字段：
+
+- `dag_nodes.context_excluded_at`：从 **Context 输出**中排除该节点（默认）
+- `dag_nodes.deleted_at`：软删除；从 **Context 输出**与 **Transcript 输出**中排除该节点（默认）
+
+#### 4.5.1 Context 输出过滤（默认）
+
+`graph.context_for(target_node_id)` 的默认行为：
+
+- 祖先闭包与拓扑排序基准仍基于 **完整 Active causal 子图**（包含被 exclude/delete 的节点），以保证输出顺序稳定且不因过滤而错乱。
+- 输出时过滤：
+  - 若 `deleted_at` 非空：默认不输出该节点（除非 `include_deleted:true`）
+  - 若 `context_excluded_at` 非空：默认不输出该节点（除非 `include_excluded:true`）
+- **target 节点必须强制输出**：即使它被 exclude 或 soft-delete，也必须包含在 context 中（避免 executor 无法获得自身 I/O）。
+
+#### 4.5.2 Transcript 视图（不受 exclude 影响）
+
+`graph.transcript_for(target_node_id)` 提供“取对话记录”的稳定入口，默认规则：
+
+- transcript 不受 `context_excluded_at` 影响（exclude 是 context-only 语义）
+- transcript 默认不包含：
+  - `task` / `summary`
+  - “无可读 content 的中间 `agent_message`”（例如只用于 tool planning 或 tool_calls 的节点）
+- soft-delete（`deleted_at`）默认从 transcript 中排除（除非 `include_deleted:true`）
+- 若 target 节点已 soft-delete 且未显式 `include_deleted:true`，则 transcript 返回空数组
+
+> transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
+
 ---
 
 ## 5) Leaf invariant（只看 causal；自动修复）

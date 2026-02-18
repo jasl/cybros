@@ -71,6 +71,38 @@ module DAG
       EXECUTABLE_NODE_TYPES.include?(node_type)
     end
 
+    def context_excluded?
+      context_excluded_at.present?
+    end
+
+    def deleted?
+      deleted_at.present?
+    end
+
+    def exclude_from_context!(at: Time.current)
+      graph.with_graph_lock! do
+        update!(context_excluded_at: at)
+      end
+    end
+
+    def include_in_context!
+      graph.with_graph_lock! do
+        update!(context_excluded_at: nil)
+      end
+    end
+
+    def soft_delete!(at: Time.current)
+      graph.with_graph_lock! do
+        update!(deleted_at: at)
+      end
+    end
+
+    def restore!
+      graph.with_graph_lock! do
+        update!(deleted_at: nil)
+      end
+    end
+
     def mark_running!
       transition_to!(RUNNING, from_states: [PENDING], started_at: Time.current)
     end

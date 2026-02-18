@@ -33,12 +33,65 @@ module DAG
       end
     end
 
-    def context_for(target_node_id, mode: :preview)
-      DAG::ContextAssembly.new(graph: self).call(target_node_id, mode: mode)
+    def context_for(target_node_id, mode: :preview, include_excluded: false, include_deleted: false)
+      DAG::ContextAssembly.new(graph: self).call(
+        target_node_id,
+        mode: mode,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
     end
 
-    def context_for_full(target_node_id)
-      context_for(target_node_id, mode: :full)
+    def context_for_full(target_node_id, include_excluded: false, include_deleted: false)
+      context_for(
+        target_node_id,
+        mode: :full,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)
+      unless include_deleted
+        deleted_at = nodes.where(id: target_node_id).pick(:deleted_at)
+        return [] if deleted_at.present?
+      end
+
+      transcript = context_for(
+        target_node_id,
+        mode: mode,
+        include_excluded: true,
+        include_deleted: include_deleted
+      ).select do |context_node|
+        node_type = context_node["node_type"]
+
+        case node_type
+        when DAG::Node::USER_MESSAGE
+          true
+        when DAG::Node::AGENT_MESSAGE
+          state = context_node["state"].to_s
+          preview_content = context_node.dig("payload", "output_preview", "content").to_s
+
+          state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present?
+        else
+          false
+        end
+      end
+
+      if limit
+        transcript = transcript.last(Integer(limit))
+      end
+
+      transcript
+    end
+
+    def transcript_for_full(target_node_id, limit: nil, include_deleted: false)
+      transcript_for(
+        target_node_id,
+        limit: limit,
+        mode: :full,
+        include_deleted: include_deleted
+      )
     end
 
     def compress!(node_ids:, summary_content:, summary_metadata: {})
