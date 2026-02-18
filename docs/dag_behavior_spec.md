@@ -246,6 +246,29 @@ Active 视图内必须保持一致（不允许 drift）：
 - 应由引擎提供的 API（例如 `DAG::Node#exclude_from_context!/soft_delete!`）在图锁内强制执行该 gating
 - 数据库层面必须以 check constraint 固化 “terminal-only” 的约束（running/pending 无法被标记为 excluded/deleted）
 
+#### 4.5.0.1 Defer queue（request_* API，运行中申请，idle 时生效）
+
+严格 gating 对引擎正确性最安全，但在产品层（例如 LLM Playground）往往需要 “运行中先申请隐藏/删除，稍后自动生效”。因此里程碑 1 额外提供 defer queue：
+
+- **strict API（会 raise）**：
+  - `exclude_from_context! / include_in_context! / soft_delete! / restore!`
+  - 当 node 非 terminal 或 graph 非 idle（存在 running 节点）时直接拒绝（raise）。
+- **request API（不会因 gating raise）**：
+  - `request_exclude_from_context! / request_include_in_context! / request_soft_delete! / request_restore!`
+  - 返回值为 `:applied`（立即生效）或 `:deferred`（已入队，等待自动生效）。
+
+defer queue 的存储与应用规则（normative）：
+
+- 表：`dag_node_visibility_patches`
+  - 每个 node 最多一条 pending patch（唯一键：`(graph_id,node_id)`）。
+  - patch 记录保存的是**最终 desired 值**（而不是 delta），并对 `context_excluded_at` 与 `deleted_at` 两列做字段级 last-write-wins 合并。
+  - patch 表不强制 terminal-only 约束；terminal-only 仍由 `dag_nodes` 的 check constraint 固化。
+- 自动应用（apply）条件：**graph idle（无 running）且 node terminal**。
+  - 应用在 `TickGraphJob` 的图锁内执行，并要求发生在 Scheduler claim 之前（避免 “本轮 tick claim 出 running 导致永远不 idle”）。
+  - 应用成功后必须删除 patch 记录（队列消费）。
+- stale patch 清理：
+  - 若 node 变为 inactive（`compressed_at` 非空）或不存在，patch 视为 stale 并删除。
+
 #### 4.5.1 Context 输出过滤（默认）
 
 `graph.context_for(target_node_id)` 的默认行为：

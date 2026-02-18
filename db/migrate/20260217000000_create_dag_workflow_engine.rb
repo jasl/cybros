@@ -55,6 +55,18 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.timestamps
     end
 
+    create_table :dag_node_visibility_patches, id: :uuid, default: -> { "uuidv7()" } do |t|
+      t.references :graph, null: false, type: :uuid,
+                   foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
+      t.references :node, null: false, type: :uuid,
+                   foreign_key: { to_table: :dag_nodes, on_delete: :cascade }
+      t.datetime :context_excluded_at
+      t.datetime :deleted_at
+      t.timestamps
+
+      t.index %i[graph_id node_id], unique: true, name: "index_dag_visibility_patches_uniqueness"
+    end
+
     create_table :dag_edges, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, type: :uuid, foreign_key: { to_table: :dag_graphs }, null: false
       t.index %i[graph_id from_node_id to_node_id edge_type], unique: true,

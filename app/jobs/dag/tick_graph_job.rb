@@ -10,6 +10,7 @@ module DAG
 
       graph.with_graph_try_lock do
         DAG::FailurePropagation.propagate!(graph: graph)
+        graph.apply_visibility_patches_if_idle!
         nodes = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: limit)
         nodes.each do |node|
           DAG::ExecuteNodeJob.perform_later(node.id)

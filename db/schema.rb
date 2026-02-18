@@ -88,6 +88,18 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.datetime "updated_at", null: false
   end
 
+  create_table "dag_node_visibility_patches", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "context_excluded_at"
+    t.datetime "created_at", null: false
+    t.datetime "deleted_at"
+    t.uuid "graph_id", null: false
+    t.uuid "node_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["graph_id", "node_id"], name: "index_dag_visibility_patches_uniqueness", unique: true
+    t.index ["graph_id"], name: "index_dag_node_visibility_patches_on_graph_id"
+    t.index ["node_id"], name: "index_dag_node_visibility_patches_on_node_id"
+  end
+
   create_table "dag_nodes", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.uuid "body_id", null: false
     t.datetime "compressed_at"
@@ -134,6 +146,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: "from_node_id"
   add_foreign_key "dag_edges", "dag_nodes", column: "to_node_id"
+  add_foreign_key "dag_node_visibility_patches", "dag_graphs", column: "graph_id", on_delete: :cascade
+  add_foreign_key "dag_node_visibility_patches", "dag_nodes", column: "node_id", on_delete: :cascade
   add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_nodes", "dag_node_bodies", column: "body_id"
   add_foreign_key "dag_nodes", "dag_nodes", column: "compressed_by_id"

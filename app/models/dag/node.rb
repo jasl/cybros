@@ -82,29 +82,49 @@ module DAG
     def exclude_from_context!(at: Time.current)
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
-        update!(context_excluded_at: at)
+        update_visibility_columns!(context_excluded_at: at)
+        clear_visibility_patch!
       end
     end
 
     def include_in_context!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
-        update!(context_excluded_at: nil)
+        update_visibility_columns!(context_excluded_at: nil)
+        clear_visibility_patch!
       end
     end
 
     def soft_delete!(at: Time.current)
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
-        update!(deleted_at: at)
+        update_visibility_columns!(deleted_at: at)
+        clear_visibility_patch!
       end
     end
 
     def restore!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
-        update!(deleted_at: nil)
+        update_visibility_columns!(deleted_at: nil)
+        clear_visibility_patch!
       end
+    end
+
+    def request_exclude_from_context!(at: Time.current)
+      request_visibility_patch!(context_excluded_at: at, deleted_at: KEEP)
+    end
+
+    def request_include_in_context!
+      request_visibility_patch!(context_excluded_at: nil, deleted_at: KEEP)
+    end
+
+    def request_soft_delete!(at: Time.current)
+      request_visibility_patch!(context_excluded_at: KEEP, deleted_at: at)
+    end
+
+    def request_restore!
+      request_visibility_patch!(context_excluded_at: KEEP, deleted_at: nil)
     end
 
     def mark_running!
@@ -261,6 +281,8 @@ module DAG
 
     private
 
+      KEEP = :keep
+
       def ensure_body
         return if body.present?
         return if node_type.blank?
@@ -289,6 +311,80 @@ module DAG
         if graph.nodes.active.where(state: RUNNING).exists?
           raise ArgumentError, "cannot change visibility while graph has running nodes"
         end
+      end
+
+      def request_visibility_patch!(context_excluded_at:, deleted_at:)
+        outcome = nil
+
+        graph.with_graph_lock! do
+          graph_idle = !graph.nodes.active.where(state: RUNNING).exists?
+
+          if graph_idle && terminal?
+            patch = DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).lock.first
+
+            base_context_excluded_at = patch ? patch.context_excluded_at : self.context_excluded_at
+            base_deleted_at = patch ? patch.deleted_at : self.deleted_at
+
+            desired_context_excluded_at =
+              context_excluded_at == KEEP ? base_context_excluded_at : context_excluded_at
+            desired_deleted_at = deleted_at == KEEP ? base_deleted_at : deleted_at
+
+            update_visibility_columns!(
+              context_excluded_at: desired_context_excluded_at,
+              deleted_at: desired_deleted_at
+            )
+
+            patch&.destroy!
+            outcome = :applied
+          else
+            upsert_visibility_patch!(context_excluded_at: context_excluded_at, deleted_at: deleted_at)
+            outcome = :deferred
+          end
+        end
+
+        graph.kick! if outcome == :deferred
+
+        outcome
+      end
+
+      def upsert_visibility_patch!(context_excluded_at:, deleted_at:)
+        patch_scope = DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).lock
+        patch = patch_scope.first
+
+        base_context_excluded_at = patch ? patch.context_excluded_at : self.context_excluded_at
+        base_deleted_at = patch ? patch.deleted_at : self.deleted_at
+
+        desired_context_excluded_at =
+          context_excluded_at == KEEP ? base_context_excluded_at : context_excluded_at
+        desired_deleted_at = deleted_at == KEEP ? base_deleted_at : deleted_at
+
+        if patch
+          patch.update!(
+            context_excluded_at: desired_context_excluded_at,
+            deleted_at: desired_deleted_at
+          )
+        else
+          DAG::NodeVisibilityPatch.create!(
+            graph_id: graph_id,
+            node_id: id,
+            context_excluded_at: desired_context_excluded_at,
+            deleted_at: desired_deleted_at
+          )
+        end
+      end
+
+      def clear_visibility_patch!
+        DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).delete_all
+      end
+
+      def update_visibility_columns!(context_excluded_at: KEEP, deleted_at: KEEP)
+        now = Time.current
+
+        updates = { updated_at: now }
+        updates[:context_excluded_at] = context_excluded_at unless context_excluded_at == KEEP
+        updates[:deleted_at] = deleted_at unless deleted_at == KEEP
+
+        update_columns(updates)
       end
 
       def apply_pending_body_io!

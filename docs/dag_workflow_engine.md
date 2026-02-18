@@ -169,6 +169,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
 
 - `DAG::TickGraphJob`
   - 对同一 graph 做 tick 去重（advisory lock try-lock）
+  - 在图锁内执行顺序：`FailurePropagation` → `graph.apply_visibility_patches_if_idle!` → Scheduler claim
   - claim executable nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
@@ -209,6 +210,9 @@ Context 可见性（视图层）：
   - 仅允许对 terminal 节点设置/清除 `context_excluded_at/deleted_at`
   - 且要求 graph idle（Active 图中不存在任何 `state=running` 的节点）
   - 目的：避免执行中上下文被改导致不可解释行为
+  - 若需要 “运行中先申请，空闲后生效”，可使用 request API（defer queue）：
+    - `request_exclude_from_context!/request_include_in_context!/request_soft_delete!/request_restore!`
+    - 可能返回 `:deferred` 并写入 `dag_node_visibility_patches`；Tick job 在 graph idle + node terminal 时自动应用并消费队列（详见 behavior spec）。
 
 > 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
 

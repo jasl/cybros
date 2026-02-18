@@ -132,6 +132,34 @@ module DAG
       DAG::TickGraphJob.perform_later(id, limit: limit)
     end
 
+    def apply_visibility_patches_if_idle!
+      return 0 if nodes.active.where(state: DAG::Node::RUNNING).exists?
+
+      applied = 0
+      now = Time.current
+
+      DAG::NodeVisibilityPatch.where(graph_id: id).order(:updated_at, :id).lock.find_each do |patch|
+        node = nodes.find_by(id: patch.node_id)
+
+        if node.nil? || node.compressed_at.present? || node.graph_id != id
+          patch.destroy!
+          next
+        end
+
+        next unless node.terminal?
+
+        node.update_columns(
+          context_excluded_at: patch.context_excluded_at,
+          deleted_at: patch.deleted_at,
+          updated_at: now
+        )
+        patch.destroy!
+        applied += 1
+      end
+
+      applied
+    end
+
     def hooks
       key = attachable_cache_key
       if defined?(@hooks_cache_key) && @hooks_cache_key == key
@@ -279,6 +307,10 @@ module DAG
       def purge_graph_records
         self.class.with_connection do |connection|
           graph_id_quoted = connection.quote(id)
+
+          connection.delete(<<~SQL.squish, "purge_dag_visibility_patches")
+            DELETE FROM dag_node_visibility_patches WHERE graph_id = #{graph_id_quoted}
+          SQL
 
           connection.delete(<<~SQL.squish, "purge_dag_edges")
             DELETE FROM dag_edges WHERE graph_id = #{graph_id_quoted}
