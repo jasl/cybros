@@ -61,6 +61,71 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/running nodes/, error.message)
   end
 
+  test "can_* visibility helpers reflect strict gating and current flags" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "hi" },
+      metadata: {}
+    )
+
+    assert node.can_exclude_from_context?
+    assert_not node.can_include_in_context?
+    assert node.can_soft_delete?
+    assert_not node.can_restore?
+
+    node.exclude_from_context!
+    assert_not node.can_exclude_from_context?
+    assert node.can_include_in_context?
+
+    node.soft_delete!
+    assert_not node.can_soft_delete?
+    assert node.can_restore?
+
+    graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    assert_not node.can_include_in_context?
+    assert_not node.can_restore?
+  end
+
+  test "can_* mutation helpers match retry/edit/regenerate/fork preconditions" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    task = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::ERRORED, metadata: {})
+    downstream = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: task.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
+    assert task.can_retry?
+
+    downstream.update!(state: DAG::Node::FINISHED)
+    assert_not task.can_retry?
+
+    agent = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: { "content" => "hello" },
+      metadata: {}
+    )
+    assert agent.can_regenerate?
+
+    child = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    graph.edges.create!(from_node_id: agent.id, to_node_id: child.id, edge_type: DAG::Edge::SEQUENCE)
+    assert_not agent.can_regenerate?
+
+    user = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
+    assert user.can_edit?
+
+    running = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    graph.edges.create!(from_node_id: user.id, to_node_id: running.id, edge_type: DAG::Edge::SEQUENCE)
+    assert_not user.can_edit?
+
+    assert user.can_fork?
+    pending = graph.nodes.create!(node_type: DAG::Node::USER_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    assert_not pending.can_fork?
+  end
+
   test "retry! rejects attempts when downstream nodes are not pending" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

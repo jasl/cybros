@@ -87,12 +87,20 @@ module DAG
       end
     end
 
+    def can_exclude_from_context?
+      visibility_mutation_allowed_now? && !context_excluded?
+    end
+
     def include_in_context!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
         update_visibility_columns!(context_excluded_at: nil)
         clear_visibility_patch!
       end
+    end
+
+    def can_include_in_context?
+      visibility_mutation_allowed_now? && context_excluded?
     end
 
     def soft_delete!(at: Time.current)
@@ -103,12 +111,20 @@ module DAG
       end
     end
 
+    def can_soft_delete?
+      visibility_mutation_allowed_now? && !deleted?
+    end
+
     def restore!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
         update_visibility_columns!(deleted_at: nil)
         clear_visibility_patch!
       end
+    end
+
+    def can_restore?
+      visibility_mutation_allowed_now? && deleted?
     end
 
     def request_exclude_from_context!(at: Time.current)
@@ -200,6 +216,24 @@ module DAG
       new_node
     end
 
+    def can_retry?
+      return false if compressed_at.present?
+      return false unless body&.retriable?
+      return false unless [ERRORED, REJECTED, CANCELLED].include?(state)
+
+      descendant_ids = active_causal_descendant_ids - [id]
+      if graph.nodes.active.where(id: descendant_ids).where.not(state: PENDING).exists?
+        return false
+      end
+
+      outgoing_blocking_edges = active_outgoing_blocking_edges
+      return true if outgoing_blocking_edges.empty?
+
+      child_states =
+        graph.nodes.active.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
+      outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == PENDING }
+    end
+
     def regenerate!
       new_node = nil
 
@@ -210,6 +244,14 @@ module DAG
       new_node
     end
 
+    def can_regenerate?
+      return false if compressed_at.present?
+      return false unless body&.regeneratable?
+      return false unless state == FINISHED
+
+      active_outgoing_blocking_edges.empty?
+    end
+
     def edit!(new_input:)
       new_node = nil
 
@@ -218,6 +260,15 @@ module DAG
       end
 
       new_node
+    end
+
+    def can_edit?
+      return false if compressed_at.present?
+      return false unless body&.editable?
+      return false unless state == FINISHED
+
+      descendant_ids = active_causal_descendant_ids - [id]
+      graph.nodes.active.where(id: descendant_ids, state: [PENDING, RUNNING]).none?
     end
 
     def fork!(node_type:, state:, body_input: {}, body_output: {}, metadata: {})
@@ -235,6 +286,10 @@ module DAG
       end
 
       new_node
+    end
+
+    def can_fork?
+      compressed_at.nil? && terminal?
     end
 
     def body_input
@@ -305,12 +360,48 @@ module DAG
         graph&.policy || DAG::GraphPolicies::Default.new
       end
 
+      def visibility_mutation_allowed_now?
+        terminal? && graph.nodes.active.where(state: RUNNING).none?
+      end
+
       def assert_visibility_mutation_allowed!
         raise ArgumentError, "can only change visibility for terminal nodes" unless terminal?
 
         if graph.nodes.active.where(state: RUNNING).exists?
           raise ArgumentError, "cannot change visibility while graph has running nodes"
         end
+      end
+
+      def active_causal_descendant_ids
+        self.class.with_connection do |connection|
+          node_quoted = connection.quote(id)
+          graph_quoted = connection.quote(graph_id)
+
+          sql = <<~SQL
+            WITH RECURSIVE descendants(node_id) AS (
+              SELECT #{node_quoted}::uuid
+              UNION
+              SELECT e.to_node_id
+              FROM dag_edges e
+              JOIN descendants d ON e.from_node_id = d.node_id
+              JOIN dag_nodes n ON n.id = e.to_node_id
+              WHERE e.graph_id = #{graph_quoted}
+                AND e.compressed_at IS NULL
+                AND e.edge_type IN ('sequence', 'dependency')
+                AND n.compressed_at IS NULL
+            )
+            SELECT DISTINCT node_id FROM descendants
+          SQL
+
+          connection.select_values(sql)
+        end
+      end
+
+      def active_outgoing_blocking_edges
+        graph.edges.active
+          .where(from_node_id: id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+          .where(to_node_id: graph.nodes.active.select(:id))
+          .to_a
       end
 
       def request_visibility_patch!(context_excluded_at:, deleted_at:)
