@@ -71,8 +71,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
   end
 
   create_table "dag_graphs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.uuid "attachable_id", null: false
-    t.string "attachable_type", null: false
+    t.uuid "attachable_id"
+    t.string "attachable_type"
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.index ["attachable_type", "attachable_id"], name: "index_dag_graphs_on_attachable", unique: true

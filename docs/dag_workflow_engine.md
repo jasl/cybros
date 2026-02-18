@@ -69,7 +69,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
   - `agent_message` → `Messages::AgentMessage`
   - `task` → `Messages::ToolCall`
   - `summary` → `Messages::Summary`
-- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBody`（通用 body，不依赖任何业务命名空间）
+- 引擎默认（`DAG::GraphPolicies::Default`）：返回 `DAG::NodeBodies::Generic`（通用 body，不依赖任何业务命名空间）
 
 #### 状态语义（skipped/cancelled 明确化）
 

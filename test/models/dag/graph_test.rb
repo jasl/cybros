@@ -1,6 +1,17 @@
 require "test_helper"
 
 class DAG::GraphTest < ActiveSupport::TestCase
+  test "can be created without attachable" do
+    graph = DAG::Graph.create!
+
+    assert_nil graph.attachable
+    assert_equal DAG::GraphHooks::NOOP, graph.hooks
+    assert graph.policy.is_a?(DAG::GraphPolicies::Default)
+
+    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    assert node.body.is_a?(DAG::NodeBodies::Generic)
+  end
+
   test "emit_event raises when given an unknown event_type" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

@@ -31,5 +31,7 @@ module DAG
         _ = particulars
       end
     end
+
+    NOOP = Noop.new.freeze
   end
 end

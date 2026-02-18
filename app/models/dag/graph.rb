@@ -4,7 +4,7 @@ module DAG
 
     LOCK_PREFIX = "dag:advisory:graph".freeze
 
-    belongs_to :attachable, polymorphic: true
+    belongs_to :attachable, polymorphic: true, optional: true
 
     has_many :nodes,
              class_name: "DAG::Node",
@@ -62,17 +62,31 @@ module DAG
     end
 
     def hooks
-      @hooks ||=
-        if attachable.respond_to?(:dag_graph_hooks)
-          attachable.dag_graph_hooks || DAG::GraphHooks::Noop.new
+      key = attachable_cache_key
+      if defined?(@hooks_cache_key) && @hooks_cache_key == key
+        return @hooks
+      end
+
+      @hooks_cache_key = key
+
+      @hooks =
+        if attachable&.respond_to?(:dag_graph_hooks)
+          attachable.dag_graph_hooks || DAG::GraphHooks::NOOP
         else
-          DAG::GraphHooks::Noop.new
+          DAG::GraphHooks::NOOP
         end
     end
 
     def policy
-      @policy ||=
-        if attachable.respond_to?(:dag_graph_policy)
+      key = attachable_cache_key
+      if defined?(@policy_cache_key) && @policy_cache_key == key
+        return @policy
+      end
+
+      @policy_cache_key = key
+
+      @policy =
+        if attachable&.respond_to?(:dag_graph_policy)
           attachable.dag_graph_policy || DAG::GraphPolicies::Default.new
         else
           DAG::GraphPolicies::Default.new
@@ -178,6 +192,10 @@ module DAG
     end
 
     private
+
+      def attachable_cache_key
+        [attachable_type, attachable_id]
+      end
 
       def validate_event_type!(event_type)
         return if DAG::GraphHooks::EventTypes::ALL.include?(event_type)

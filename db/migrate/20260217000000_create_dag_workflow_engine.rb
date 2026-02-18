@@ -1,7 +1,7 @@
 class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
   def change
     create_table :dag_graphs, id: :uuid, default: -> { "uuidv7()" } do |t|
-      t.references :attachable, type: :uuid, polymorphic: true, index: { unique: true }, null: false
+      t.references :attachable, type: :uuid, polymorphic: true, index: { unique: true }
 
       t.timestamps
     end

@@ -3,7 +3,7 @@ module DAG
     class Default < DAG::GraphPolicy
       def body_class_for_node_type(node_type)
         _ = node_type
-        DAG::NodeBody
+        DAG::NodeBodies::Generic
       end
 
       def leaf_valid?(node)
