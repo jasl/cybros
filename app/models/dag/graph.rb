@@ -112,6 +112,52 @@ module DAG
       )
     end
 
+    def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
+      limit_turns = Integer(limit_turns)
+      return [] if limit_turns <= 0
+
+      turn_scope = nodes.active.where(node_type: DAG::Node::USER_MESSAGE)
+      turn_scope = turn_scope.where(deleted_at: nil) unless include_deleted
+
+      turn_ids =
+        turn_scope
+          .group(:turn_id)
+          .order(Arel.sql("MAX(created_at) DESC"))
+          .limit(limit_turns)
+          .pluck(:turn_id)
+          .reverse
+
+      return [] if turn_ids.empty?
+
+      node_scope = nodes.active.where(turn_id: turn_ids, node_type: [DAG::Node::USER_MESSAGE, DAG::Node::AGENT_MESSAGE])
+      node_scope = node_scope.where(deleted_at: nil) unless include_deleted
+
+      node_records =
+        node_scope
+          .select(:id, :turn_id, :node_type, :state, :metadata, :body_id)
+          .order(:id)
+          .to_a
+
+      bodies = load_transcript_bodies(node_records: node_records, mode: mode)
+
+      by_turn = node_records.group_by(&:turn_id)
+      ordered_nodes = turn_ids.flat_map { |turn_id| by_turn.fetch(turn_id, []) }
+
+      context_nodes = ordered_nodes.map do |node|
+        body = bodies[node.body_id]
+        transcript_context_hash_for(node, body, mode: mode)
+      end
+
+      transcript = filter_transcript_nodes(context_nodes)
+      apply_transcript_preview_overrides!(transcript)
+
+      transcript
+    end
+
+    def transcript_recent_turns_full(limit_turns:, include_deleted: false)
+      transcript_recent_turns(limit_turns: limit_turns, mode: :full, include_deleted: include_deleted)
+    end
+
     def compress!(node_ids:, summary_content:, summary_metadata: {})
       DAG::Compression.new(graph: self).compress!(
         node_ids: node_ids,
@@ -307,6 +353,79 @@ module DAG
 
       def attachable_cache_key
         [attachable_type, attachable_id]
+      end
+
+      def load_transcript_bodies(node_records:, mode:)
+        body_ids = node_records.map(&:body_id).compact.uniq
+        return {} if body_ids.empty?
+
+        body_scope = DAG::NodeBody.where(id: body_ids)
+        body_scope =
+          if mode.to_sym == :full
+            body_scope.select(:id, :type, :input, :output, :output_preview)
+          else
+            body_scope.select(:id, :type, :input, :output_preview)
+          end
+
+        body_scope.index_by(&:id)
+      end
+
+      def transcript_context_hash_for(node, body, mode:)
+        payload_hash = {
+          "input" => body&.input.is_a?(Hash) ? body.input : {},
+          "output_preview" => body&.output_preview.is_a?(Hash) ? body.output_preview : {},
+        }
+
+        if mode.to_sym == :full
+          payload_hash["output"] = body&.output.is_a?(Hash) ? body.output : {}
+        end
+
+        {
+          "node_id" => node.id,
+          "turn_id" => node.turn_id,
+          "node_type" => node.node_type,
+          "state" => node.state,
+          "payload" => payload_hash,
+          "metadata" => node.metadata,
+        }
+      end
+
+      def filter_transcript_nodes(context_nodes)
+        context_nodes.select do |context_node|
+          node_type = context_node["node_type"]
+
+          case node_type
+          when DAG::Node::USER_MESSAGE
+            true
+          when DAG::Node::AGENT_MESSAGE
+            state = context_node["state"].to_s
+            preview_content = context_node.dig("payload", "output_preview", "content").to_s
+            metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
+            transcript_visible = metadata["transcript_visible"] == true
+
+            state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present? || transcript_visible
+          else
+            false
+          end
+        end
+      end
+
+      def apply_transcript_preview_overrides!(transcript)
+        transcript.each do |context_node|
+          next unless context_node["node_type"] == DAG::Node::AGENT_MESSAGE
+
+          payload = context_node["payload"].is_a?(Hash) ? context_node["payload"] : {}
+          output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
+          next if output_preview["content"].to_s.present?
+
+          metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
+          transcript_preview = metadata["transcript_preview"]
+          next unless transcript_preview.is_a?(String) && transcript_preview.present?
+
+          output_preview["content"] = transcript_preview.truncate(2000)
+          payload["output_preview"] = output_preview
+          context_node["payload"] = payload
+        end
       end
 
       def validate_event_type!(event_type)

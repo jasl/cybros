@@ -229,6 +229,9 @@ Context 可见性（视图层）：
 
 为支持产品侧 “取最近 X 条对话记录” 等需求，`DAG::Graph` 提供 transcript 投影：
 
+- `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
+  - 按 `turn_id` 聚合，只查询最近 N 轮的 `user_message/agent_message`
+  - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）
 - `graph.transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)`
   - 默认只保留 `user_message` 与可读的 `agent_message`
   - 默认不包含 `task/summary`，不暴露 tool chain 细节
@@ -238,8 +241,7 @@ Context 可见性（视图层）：
     - `metadata["transcript_preview"]`（可选 String，作为展示文本）
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
-
-> 后续建议：当图很大时，考虑用 turn_id / transcript 索引（或专用边）提供不依赖 context 闭包的 transcript 查询路径。
+> 推荐用法：UI 取最近记录优先用 `transcript_recent_turns`；需要 “锚定某个节点的精确视图” 再用 `transcript_for(target)`.
 
 ## 子图压缩（Manual）
 

@@ -5,6 +5,8 @@ class Conversation < ApplicationRecord
            to: :dag_graph, allow_nil: false
   delegate :transcript_for, :transcript_for_full,
            to: :dag_graph, allow_nil: false
+  delegate :transcript_recent_turns, :transcript_recent_turns_full,
+           to: :dag_graph, allow_nil: false
 
   has_many :events, dependent: :destroy
 
