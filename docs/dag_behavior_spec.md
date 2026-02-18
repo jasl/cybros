@@ -617,3 +617,24 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - Scheduler claim：`pending → running`
 - Runner apply_result：`running → finished/errored/rejected/cancelled`
 - FailurePropagation：`pending → skipped`
+
+---
+
+## 10) Audit/Repair（非规范：诊断与自愈工具）
+
+为降低脏数据的连带故障面、支持 CI/线上排障，里程碑 1 提供 `DAG::GraphAudit`（非规范性工具）：
+
+- `DAG::GraphAudit.scan(graph:)`：只读扫描常见问题（返回 issue 列表）
+- `DAG::GraphAudit.repair!(graph:)`：在 graph lock 内 best-effort 修复一组安全问题（不改变引擎语义）
+
+覆盖的 issue 类型（里程碑 1）：
+
+- `active_edge_to_inactive_node`：active edge 指向 inactive node（修复：压缩该 edge）
+- `stale_visibility_patch`：patch 指向 inactive node（修复：删除 patch）
+- `leaf_invariant_violation`：Active 图 leaf 不合法（修复：调用 `validate_leaf_invariant!`）
+- `stale_running_node`：running lease 过期（修复：running→errored，见 2.3.1）
+
+Rake tasks（可选）：
+
+- `bin/rails dag:audit[graph_id]`
+- `bin/rails dag:repair[graph_id]`
