@@ -196,4 +196,108 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   ensure
     Messages.send(:remove_const, :HookRaises) if Messages.const_defined?(:HookRaises, false)
   end
+
+  test "scan reports cycle_detected when active edges form a cycle" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    c = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    now = Time.current
+    DAG::Edge.insert_all!(
+      [
+        {
+          graph_id: graph.id,
+          from_node_id: a.id,
+          to_node_id: b.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          graph_id: graph.id,
+          from_node_id: b.id,
+          to_node_id: c.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          graph_id: graph.id,
+          from_node_id: c.id,
+          to_node_id: a.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+      ]
+    )
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_CYCLE_DETECTED])
+    assert issues.any? { |issue| issue["type"] == DAG::GraphAudit::ISSUE_CYCLE_DETECTED }
+  end
+
+  test "scan reports toposort_failed when topological sorting raises unexpectedly" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    original_call = DAG::TopologicalSort.method(:call)
+    DAG::TopologicalSort.define_singleton_method(:call) do |node_ids:, edges:|
+      _ = node_ids
+      _ = edges
+      raise "boom"
+    end
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED])
+
+    assert issues.any? { |issue| issue["type"] == DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED }
+  ensure
+    DAG::TopologicalSort.define_singleton_method(:call, original_call) if original_call
+  end
+
+  test "scan reports node_body_drift when node_type does not match stored NodeBody STI type" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.body.update_column(:type, Messages::UserMessage.name)
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT])
+    assert issues.any? { |issue| issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT }
+  end
+
+  test "scan reports unknown_node_type when node_type cannot be mapped to a NodeBody class" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.update_column(:node_type, "bogus_type")
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE])
+    assert issues.any? { |issue| issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE }
+  end
+
+  test "scan reports node_type_maps_to_non_node_body when node_type maps to a non-NodeBody constant" do
+    Messages.const_set(:NotABody, Class.new)
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.update_column(:node_type, "not_a_body")
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY])
+    assert issues.any? do |issue|
+      issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY
+    end
+  ensure
+    Messages.send(:remove_const, :NotABody) if Messages.const_defined?(:NotABody, false)
+  end
 end

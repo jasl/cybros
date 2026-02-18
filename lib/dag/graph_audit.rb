@@ -1,17 +1,27 @@
 module DAG
   class GraphAudit
     ISSUE_MISCONFIGURED_GRAPH = "misconfigured_graph"
+    ISSUE_CYCLE_DETECTED = "cycle_detected"
+    ISSUE_TOPOLOGICAL_SORT_FAILED = "toposort_failed"
     ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE = "active_edge_to_inactive_node"
     ISSUE_STALE_VISIBILITY_PATCH = "stale_visibility_patch"
     ISSUE_LEAF_INVARIANT_VIOLATION = "leaf_invariant_violation"
     ISSUE_STALE_RUNNING_NODE = "stale_running_node"
+    ISSUE_UNKNOWN_NODE_TYPE = "unknown_node_type"
+    ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY = "node_type_maps_to_non_node_body"
+    ISSUE_NODE_BODY_DRIFT = "node_body_drift"
 
     DEFAULT_TYPES = [
       ISSUE_MISCONFIGURED_GRAPH,
+      ISSUE_CYCLE_DETECTED,
+      ISSUE_TOPOLOGICAL_SORT_FAILED,
       ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE,
       ISSUE_STALE_VISIBILITY_PATCH,
       ISSUE_LEAF_INVARIANT_VIOLATION,
       ISSUE_STALE_RUNNING_NODE,
+      ISSUE_UNKNOWN_NODE_TYPE,
+      ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY,
+      ISSUE_NODE_BODY_DRIFT,
     ].freeze
 
     def self.scan(graph:, types: DEFAULT_TYPES, now: Time.current)
@@ -34,6 +44,11 @@ module DAG
       if @types.include?(ISSUE_MISCONFIGURED_GRAPH)
         issue = misconfigured_graph_issue
         issues << issue if issue
+      end
+
+      if @types.include?(ISSUE_CYCLE_DETECTED) || @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
+        issue = cycle_or_toposort_failed_issue
+        issues << issue if issue && @types.include?(issue["type"])
       end
 
       if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -84,6 +99,17 @@ module DAG
         end
       end
 
+      if @types.include?(ISSUE_UNKNOWN_NODE_TYPE) ||
+          @types.include?(ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY) ||
+          @types.include?(ISSUE_NODE_BODY_DRIFT)
+        namespace = node_body_namespace_for_type_drift
+        if namespace
+          node_type_drift_issues(namespace: namespace).each do |issue|
+            issues << issue if @types.include?(issue["type"])
+          end
+        end
+      end
+
       issues
     end
 
@@ -93,6 +119,14 @@ module DAG
       @graph.with_graph_lock! do
         if @types.include?(ISSUE_MISCONFIGURED_GRAPH)
           results["repaired"][ISSUE_MISCONFIGURED_GRAPH] = 0
+        end
+
+        if @types.include?(ISSUE_CYCLE_DETECTED)
+          results["repaired"][ISSUE_CYCLE_DETECTED] = 0
+        end
+
+        if @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
+          results["repaired"][ISSUE_TOPOLOGICAL_SORT_FAILED] = 0
         end
 
         if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -119,6 +153,18 @@ module DAG
         if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
           created = @graph.validate_leaf_invariant!
           results["repaired"][ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
+        end
+
+        if @types.include?(ISSUE_UNKNOWN_NODE_TYPE)
+          results["repaired"][ISSUE_UNKNOWN_NODE_TYPE] = 0
+        end
+
+        if @types.include?(ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY)
+          results["repaired"][ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY] = 0
+        end
+
+        if @types.include?(ISSUE_NODE_BODY_DRIFT)
+          results["repaired"][ISSUE_NODE_BODY_DRIFT] = 0
         end
       end
 
@@ -492,6 +538,45 @@ module DAG
           .pluck(:id)
       end
 
+      def cycle_or_toposort_failed_issue
+        node_ids = @graph.nodes.active.pluck(:id)
+        node_id_set = node_ids.index_by(&:itself)
+
+        edge_pairs = @graph.edges.active.pluck(:from_node_id, :to_node_id)
+        edges =
+          edge_pairs.filter_map do |(from_node_id, to_node_id)|
+            next unless node_id_set.key?(from_node_id) && node_id_set.key?(to_node_id)
+
+            { from: from_node_id, to: to_node_id }
+          end
+
+        DAG::TopologicalSort.call(node_ids: node_ids, edges: edges)
+        nil
+      rescue DAG::TopologicalSort::CycleError
+        issue_hash(
+          type: ISSUE_CYCLE_DETECTED,
+          severity: "error",
+          subject_type: "DAG::Graph",
+          subject_id: @graph.id,
+          details: {
+            "node_count" => node_ids.length,
+            "edge_count" => edges.length,
+          }
+        )
+      rescue StandardError => error
+        issue_hash(
+          type: ISSUE_TOPOLOGICAL_SORT_FAILED,
+          severity: "error",
+          subject_type: "DAG::Graph",
+          subject_id: @graph.id,
+          details: {
+            "node_count" => node_ids.length,
+            "edge_count" => edges.length,
+            "error" => "#{error.class}: #{error.message}",
+          }
+        )
+      end
+
       def stale_visibility_patch_ids
         DAG::NodeVisibilityPatch.where(graph_id: @graph.id)
           .joins("JOIN dag_nodes n ON n.id = dag_node_visibility_patches.node_id")
@@ -511,6 +596,79 @@ module DAG
           .where(state: DAG::Node::RUNNING)
           .where("lease_expires_at IS NOT NULL AND lease_expires_at < ?", @now)
           .pluck(:id)
+      end
+
+      def node_body_namespace_for_type_drift
+        attachable = @graph.attachable
+        return nil if attachable.nil?
+        return nil unless attachable.respond_to?(:dag_node_body_namespace)
+
+        namespace = attachable.dag_node_body_namespace
+        return nil unless namespace.is_a?(Module)
+
+        namespace
+      rescue StandardError
+        nil
+      end
+
+      def node_type_drift_issues(namespace:)
+        namespace_name = namespace.name
+
+        records =
+          @graph.nodes.active
+            .joins(:body)
+            .pluck(
+              Arel.sql("dag_nodes.id"),
+              Arel.sql("dag_nodes.node_type"),
+              Arel.sql("dag_node_bodies.type")
+            )
+
+        records.filter_map do |(node_id, node_type, body_type)|
+          node_type = node_type.to_s
+          expected_class =
+            begin
+              "#{namespace_name}::#{node_type.camelize}".safe_constantize
+            rescue StandardError
+              nil
+            end
+
+          if expected_class.nil?
+            issue_hash(
+              type: ISSUE_UNKNOWN_NODE_TYPE,
+              severity: "error",
+              subject_type: "DAG::Node",
+              subject_id: node_id,
+              details: {
+                "node_type" => node_type,
+                "namespace" => namespace_name,
+              }
+            )
+          elsif !(expected_class < DAG::NodeBody)
+            issue_hash(
+              type: ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY,
+              severity: "error",
+              subject_type: "DAG::Node",
+              subject_id: node_id,
+              details: {
+                "node_type" => node_type,
+                "namespace" => namespace_name,
+                "mapped_class" => expected_class.name,
+              }
+            )
+          elsif body_type.to_s != expected_class.name
+            issue_hash(
+              type: ISSUE_NODE_BODY_DRIFT,
+              severity: "error",
+              subject_type: "DAG::Node",
+              subject_id: node_id,
+              details: {
+                "node_type" => node_type,
+                "expected_body_type" => expected_class.name,
+                "actual_body_type" => body_type.to_s,
+              }
+            )
+          end
+        end
       end
   end
 end
