@@ -102,6 +102,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
   - `record_event(graph:, event_type:, subject_type:, subject_id:, particulars: {})`
 - 注入点：`attachable.dag_graph_hooks`（例如 `Conversation` 返回 `Messages::GraphHooks` 写入 `events` 表）
 - 默认：`DAG::GraphHooks::Noop`（不做任何事）
+- 约束：引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`），建议只使用常量（避免 typo）。
 
 ## 图不变量（Invariants）
 

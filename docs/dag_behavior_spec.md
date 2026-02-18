@@ -438,6 +438,10 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `leaf_invariant_repaired`：leaf 修复追加节点
 - `node_state_changed`：节点状态迁移
 
+实现约束：
+
+- 引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`）。新增类型必须同步更新常量与本文档，否则视为实现与规范不一致。
+
 `node_state_changed` 的触发点（里程碑 1）：
 
 - Scheduler claim：`pending → running`
