@@ -202,7 +202,9 @@ module DAG
           return problems
         end
 
-        body_classes = node_body_classes(namespace)
+        body_classes, class_problems = node_body_classes(namespace)
+        problems.concat(class_problems)
+
         if body_classes.empty?
           problems << problem_hash(
             code: "node_body_namespace_has_no_bodies",
@@ -223,15 +225,83 @@ module DAG
       end
 
       def node_body_classes(namespace)
-        namespace.constants(false).filter_map do |constant_name|
-          constant = namespace.const_get(constant_name)
-          next unless constant.is_a?(Class)
-          next unless constant < DAG::NodeBody
+        problems = []
+        body_classes =
+          namespace.constants(false).filter_map do |constant_name|
+            constant = namespace.const_get(constant_name)
+            next unless constant.is_a?(Class)
+            next unless constant < DAG::NodeBody
 
-          constant
-        rescue NameError
-          nil
-        end
+            constant
+          rescue StandardError => error
+            problems << problem_hash(
+              code: "node_body_class_load_error",
+              severity: "error",
+              message: "failed to load NodeBody class from namespace",
+              extras: {
+                "namespace" => namespace.name,
+                "constant_name" => constant_name.to_s,
+                "error" => "#{error.class}: #{error.message}",
+              }
+            )
+            nil
+          end
+
+        [body_classes, problems]
+      end
+
+      def safe_body_class_hook(body_class, hook_name)
+        [body_class.public_send(hook_name), nil]
+      rescue StandardError => error
+        [
+          nil,
+          problem_hash(
+            code: "node_body_hook_error",
+            severity: "error",
+            message: "NodeBody hook #{hook_name} raised an error",
+            extras: {
+              "class" => body_class.name,
+              "hook" => hook_name.to_s,
+              "error" => "#{error.class}: #{error.message}",
+            }
+          ),
+        ]
+      end
+
+      def node_type_key_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :node_type_key)
+        problems << problem if problem
+        value&.to_s
+      end
+
+      def default_leaf_repair_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :default_leaf_repair?)
+        problems << problem if problem
+        value == true
+      end
+
+      def executable_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :executable?)
+        problems << problem if problem
+        value == true
+      end
+
+      def leaf_terminal_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :leaf_terminal?)
+        problems << problem if problem
+        value == true
+      end
+
+      def turn_anchor_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :turn_anchor?)
+        problems << problem if problem
+        value == true
+      end
+
+      def transcript_candidate_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :transcript_candidate?)
+        problems << problem if problem
+        value == true
       end
 
       def node_type_key_mismatch_problems(body_classes)
@@ -239,7 +309,7 @@ module DAG
 
         body_classes.each do |body_class|
           expected = body_class.name.demodulize.underscore
-          actual = body_class.node_type_key.to_s
+          actual = node_type_key_for(body_class, problems: problems).to_s
 
           next if actual == expected
 
@@ -259,45 +329,50 @@ module DAG
       end
 
       def node_type_key_collision_problems(body_classes)
+        problems = []
         by_key = Hash.new { |hash, key| hash[key] = [] }
 
         body_classes.each do |body_class|
-          key = body_class.node_type_key.to_s
+          key = node_type_key_for(body_class, problems: problems).to_s
           by_key[key] << body_class.name
         end
 
-        by_key.filter_map do |key, class_names|
-          next if key.present? && class_names.length == 1
+        collision_problems =
+          by_key.filter_map do |key, class_names|
+            next if key.present? && class_names.length == 1
 
-          problem_hash(
-            code: "node_type_key_collision",
-            severity: "error",
-            message: "NodeBody node_type_key must be present and unique within the namespace",
-            extras: {
-              "key" => key,
-              "classes" => class_names.sort,
-            }
-          )
-        end
+            problem_hash(
+              code: "node_type_key_collision",
+              severity: "error",
+              message: "NodeBody node_type_key must be present and unique within the namespace",
+              extras: {
+                "key" => key,
+                "classes" => class_names.sort,
+              }
+            )
+          end
+
+        problems.concat(collision_problems)
+        problems
       end
 
       def default_leaf_repair_problems(body_classes)
-        repair_bodies = body_classes.select(&:default_leaf_repair?)
+        problems = []
+        repair_bodies =
+          body_classes.select { |body_class| default_leaf_repair_for(body_class, problems: problems) }
         if repair_bodies.length != 1
-          return [
-            problem_hash(
-              code: "default_leaf_repair_not_unique",
-              severity: "error",
-              message: "expected exactly 1 NodeBody with default_leaf_repair?==true",
-              extras: { "classes" => repair_bodies.map(&:name).sort }
-            ),
-          ]
+          problems << problem_hash(
+            code: "default_leaf_repair_not_unique",
+            severity: "error",
+            message: "expected exactly 1 NodeBody with default_leaf_repair?==true",
+            extras: { "classes" => repair_bodies.map(&:name).sort }
+          )
+          return problems
         end
 
         body_class = repair_bodies.first
-        problems = []
 
-        unless body_class.executable?
+        unless executable_for(body_class, problems: problems)
           problems << problem_hash(
             code: "default_leaf_repair_not_executable",
             severity: "error",
@@ -306,7 +381,7 @@ module DAG
           )
         end
 
-        unless body_class.leaf_terminal?
+        unless leaf_terminal_for(body_class, problems: problems)
           problems << problem_hash(
             code: "default_leaf_repair_not_leaf_terminal",
             severity: "error",
@@ -361,7 +436,15 @@ module DAG
       def transcript_recent_turn_support_problems(body_classes)
         problems = []
 
-        if body_classes.none?(&:turn_anchor?)
+        has_turn_anchor = false
+        has_transcript_candidate = false
+
+        body_classes.each do |body_class|
+          has_turn_anchor ||= turn_anchor_for(body_class, problems: problems)
+          has_transcript_candidate ||= transcript_candidate_for(body_class, problems: problems)
+        end
+
+        unless has_turn_anchor
           problems << problem_hash(
             code: "missing_turn_anchor_node_type",
             severity: "warn",
@@ -370,7 +453,7 @@ module DAG
           )
         end
 
-        if body_classes.none?(&:transcript_candidate?)
+        unless has_transcript_candidate
           problems << problem_hash(
             code: "missing_transcript_candidate_node_type",
             severity: "warn",

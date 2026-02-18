@@ -723,8 +723,10 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `dag_node_body_namespace_missing`
 - `dag_node_body_namespace_not_module`
 - `node_body_namespace_has_no_bodies`
+- `node_body_class_load_error`
 - `node_type_key_mismatch`
 - `node_type_key_collision`
+- `node_body_hook_error`
 - `default_leaf_repair_not_unique`
 - `default_leaf_repair_not_executable`
 - `default_leaf_repair_not_leaf_terminal`

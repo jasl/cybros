@@ -171,4 +171,29 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   ensure
     Messages.send(:remove_const, :InvalidDestination) if Messages.const_defined?(:InvalidDestination, false)
   end
+
+  test "scan reports misconfigured_graph when a NodeBody hook raises" do
+    Messages.const_set(
+      :HookRaises,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def default_leaf_repair?
+            raise "boom"
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    assert_includes problem_codes, "node_body_hook_error"
+  ensure
+    Messages.send(:remove_const, :HookRaises) if Messages.const_defined?(:HookRaises, false)
+  end
 end
