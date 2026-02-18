@@ -23,7 +23,7 @@
 
 - 模型：`app/models/dag/graph.rb`
 - 责任：
-  - 图变更的事务边界（`mutate!`）
+  - 图变更的事务边界（`mutate!(turn_id: nil)`：可选 turn_id 传播）
   - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
   - 语义策略（`policy`）：node_type↔body 映射、leaf invariant 的合法性/修复动作（`DAG::GraphPolicy` / `DAG::GraphPolicies::*`）
   - 叶子不变量自修复（`validate_leaf_invariant!`）
@@ -41,6 +41,7 @@
 - 关键字段：
   - `node_type`：`user_message | agent_message | task | summary`
   - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
+  - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享）
   - `metadata`：JSONB
   - `retry_of_id`：重试 lineage
   - `compressed_at / compressed_by_id`：压缩标记
@@ -197,6 +198,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
 2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
 4. 输出结构（默认 preview）：`[{node_id, node_type, state, payload:{input,output_preview}, metadata}]`
+   - 每个节点额外包含：`turn_id`（用于按轮次分组与强 gating 输入）
 
 `context_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 

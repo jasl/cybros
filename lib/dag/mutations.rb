@@ -1,7 +1,8 @@
 module DAG
   class Mutations
-    def initialize(graph:)
+    def initialize(graph:, turn_id: nil)
       @graph = graph
+      @turn_id = turn_id
       @executable_pending_nodes_created = false
     end
 
@@ -20,15 +21,26 @@ module DAG
         end
       end
 
-      node = @graph.nodes.create!(
-        {
-          node_type: node_type,
-          state: state,
-          metadata: metadata,
-          body_input: body_input,
-          body_output: body_output,
-        }.merge(attributes)
-      )
+      effective_turn_id =
+        if attributes.key?(:turn_id)
+          attributes.delete(:turn_id)
+        else
+          @turn_id
+        end
+
+      node_attributes = {
+        node_type: node_type,
+        state: state,
+        metadata: metadata,
+        body_input: body_input,
+        body_output: body_output,
+      }.merge(attributes)
+
+      if effective_turn_id.present?
+        node_attributes[:turn_id] = effective_turn_id
+      end
+
+      node = @graph.nodes.create!(node_attributes)
 
       @graph.emit_event(
         event_type: DAG::GraphHooks::EventTypes::NODE_CREATED,
@@ -73,6 +85,7 @@ module DAG
         node_type: node_type,
         state: state,
         metadata: metadata,
+        turn_id: nil,
         body_input: body_input,
         body_output: body_output
       )
@@ -125,6 +138,7 @@ module DAG
         state: DAG::Node::PENDING,
         metadata: retry_metadata,
         retry_of_id: old.id,
+        turn_id: old.turn_id,
         body_input: body_input,
       )
 
@@ -184,6 +198,7 @@ module DAG
         node_type: old.node_type,
         state: DAG::Node::PENDING,
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats"),
+        turn_id: old.turn_id,
         body_input: old.body.input_for_retry,
       )
 
@@ -236,6 +251,7 @@ module DAG
         node_type: old.node_type,
         state: DAG::Node::FINISHED,
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats"),
+        turn_id: old.turn_id,
         body_input: new_body_input,
         finished_at: now
       )

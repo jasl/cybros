@@ -30,6 +30,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
         name: "check_dag_nodes_state_enum"
       )
 
+      t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
+      t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
+
       t.references :body, type: :uuid, null: false,
                    foreign_key: { to_table: :dag_node_bodies },
                    index: { unique: true }

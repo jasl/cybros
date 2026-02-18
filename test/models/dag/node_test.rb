@@ -196,6 +196,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::PENDING, retried.state
     assert_equal original.id, retried.retry_of_id
+    assert_equal original.turn_id, retried.turn_id
     assert_equal 2, retried.metadata["attempt"]
     assert original.reload.compressed_at.present?
     assert_equal retried.id, original.compressed_by_id
@@ -297,6 +298,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::PENDING, regenerated.state
     assert_equal DAG::Node::AGENT_MESSAGE, regenerated.node_type
+    assert_equal original.turn_id, regenerated.turn_id
     assert_nil regenerated.metadata["usage"]
     assert_nil regenerated.metadata["output_stats"]
 
@@ -342,6 +344,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     edited = a.edit!(new_input: { "content" => "hi2" })
 
     assert_equal DAG::Node::FINISHED, edited.state
+    assert_equal a.turn_id, edited.turn_id
     assert_equal "hi2", edited.body_input["content"]
     assert_nil edited.metadata["usage"]
     assert_nil edited.metadata["output_stats"]

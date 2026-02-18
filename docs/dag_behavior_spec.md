@@ -160,6 +160,25 @@ Active 视图内必须保持一致（不允许 drift）：
 - `metadata["usage"]`
 - `metadata["output_stats"]`
 
+### 2.7 `turn_id`（对话轮次 / 执行 span）
+
+为支持 “圈定本轮产生的子图集合” 与未来的强 gating 校验（例如 squash/rewire），里程碑 1 引入：
+
+- `dag_nodes.turn_id`：UUID（默认值 `uuidv7()`），用于标记某个节点属于哪一轮（turn/span）。
+
+核心语义（normative）：
+
+- 同一轮产生的所有节点共享相同 `turn_id`。
+- `retry/regenerate/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
+- `fork` 开启新轮次：fork 出来的 `new_node.turn_id` 由 DB default 生成（不继承父节点 turn_id）
+- leaf invariant repair 创建的 `agent_message(pending)` 必须继承 leaf 的 `turn_id`（引擎层强制）
+
+推荐用法：
+
+- executor/业务代码在执行某个节点 `node` 时，若要创建本轮下游节点，使用：
+  - `graph.mutate!(turn_id: node.turn_id) { |m| ... }`
+  - 这样 `m.create_node` 会默认继承该 `turn_id`（除非显式传 `turn_id: nil` 强制开新轮次）。
+
 ---
 
 ## 3) Edges（正交语义：Causal vs Lineage）
@@ -222,6 +241,7 @@ Active 视图内必须保持一致（不允许 drift）：
 ```json
 {
   "node_id": "...",
+  "turn_id": "...",
   "node_type": "user_message|agent_message|task|summary",
   "state": "pending|running|finished|errored|rejected|skipped|cancelled",
   "payload": {

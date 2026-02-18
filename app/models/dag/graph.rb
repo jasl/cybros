@@ -15,13 +15,13 @@ module DAG
 
     before_destroy :purge_graph_records
 
-    def mutate!
+    def mutate!(turn_id: nil)
       raise ArgumentError, "block required" unless block_given?
 
       executable_pending_nodes_created = false
 
       with_graph_lock! do
-        mutations = DAG::Mutations.new(graph: self)
+        mutations = DAG::Mutations.new(graph: self, turn_id: turn_id)
         yield mutations
 
         executable_pending_nodes_created =
@@ -160,6 +160,19 @@ module DAG
       applied
     end
 
+    def active_nodes_for_turn(turn_id)
+      nodes.active.where(turn_id: turn_id)
+    end
+
+    def turn_node_ids(turn_id, include_compressed: false)
+      scope = include_compressed ? nodes : nodes.active
+      scope.where(turn_id: turn_id).pluck(:id)
+    end
+
+    def turn_stable?(turn_id)
+      active_nodes_for_turn(turn_id).where.not(state: DAG::Node::TERMINAL_STATES).none?
+    end
+
     def hooks
       key = attachable_cache_key
       if defined?(@hooks_cache_key) && @hooks_cache_key == key
@@ -257,7 +270,7 @@ module DAG
       leaf_nodes.each do |leaf|
         next if policy.leaf_valid?(leaf)
 
-        repaired_node = nodes.create!(policy.leaf_repair_node_attributes(leaf))
+        repaired_node = nodes.create!(policy.leaf_repair_node_attributes(leaf).merge(turn_id: leaf.turn_id))
         edges.create!(
           policy.leaf_repair_edge_attributes(leaf, repaired_node).merge(
             from_node_id: leaf.id,

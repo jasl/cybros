@@ -12,6 +12,25 @@ class DAG::GraphTest < ActiveSupport::TestCase
     assert node.body.is_a?(DAG::NodeBodies::Generic)
   end
 
+  test "turn helpers scope to active nodes and compute stability" do
+    graph = DAG::Graph.create!
+
+    a = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+    b = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, turn_id: a.turn_id, metadata: {})
+    c = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+
+    assert_equal [a.id, b.id].sort, graph.active_nodes_for_turn(a.turn_id).pluck(:id).sort
+    refute_includes graph.active_nodes_for_turn(a.turn_id).pluck(:id), c.id
+
+    assert_not graph.turn_stable?(a.turn_id)
+    a.update!(state: DAG::Node::FINISHED)
+    assert graph.turn_stable?(a.turn_id)
+
+    b.update!(compressed_at: Time.current)
+    assert_equal [a.id], graph.turn_node_ids(a.turn_id)
+    assert_includes graph.turn_node_ids(a.turn_id, include_compressed: true), b.id
+  end
+
   test "emit_event raises when given an unknown event_type" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

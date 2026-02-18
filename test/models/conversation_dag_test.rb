@@ -29,6 +29,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
     assert_equal DAG::Node::PENDING, leaf.state
 
     user_message = graph.nodes.find_by!(node_type: DAG::Node::USER_MESSAGE)
+    assert_equal user_message.turn_id, leaf.turn_id
     assert graph.edges.active.exists?(
       from_node_id: user_message.id,
       to_node_id: leaf.id,
@@ -90,6 +91,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
     refute_includes ids, root.id
 
     actual_fork = root.fork!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING)
+    refute_equal root.turn_id, actual_fork.turn_id
     fork_context = conversation.context_for(actual_fork.id)
     fork_ids = fork_context.map { |node| node.fetch("node_id") }
 

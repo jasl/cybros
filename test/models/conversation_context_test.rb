@@ -26,6 +26,8 @@ class ConversationContextTest < ActiveSupport::TestCase
     preview = conversation.context_for(agent.id)
     agent_preview = preview.find { |node| node.fetch("node_id") == agent.id }
 
+    assert agent_preview.key?("turn_id")
+    assert_equal agent.turn_id, agent_preview.fetch("turn_id")
     assert_equal({ "content" => "hi" }, preview.find { |node| node.fetch("node_id") == user.id }.dig("payload", "input"))
     assert agent_preview.dig("payload", "output_preview", "content").length <= Messages::AgentMessage.new.preview_max_chars
     assert_not agent_preview.fetch("payload").key?("output")

@@ -77,7 +77,7 @@ module DAG
       def load_nodes(node_ids)
         @graph.nodes
           .where(id: node_ids, compressed_at: nil)
-          .select(:id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+          .select(:id, :node_type, :state, :metadata, :body_id, :turn_id, :context_excluded_at, :deleted_at)
           .index_by(&:id)
       end
 
@@ -116,6 +116,7 @@ module DAG
 
         {
           "node_id" => node.id,
+          "turn_id" => node.turn_id,
           "node_type" => node.node_type,
           "state" => node.state,
           "payload" => payload_hash,
