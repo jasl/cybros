@@ -80,6 +80,9 @@ module DAG
     end
 
     def emit_event(event_type:, particulars: {}, subject: nil, subject_type: nil, subject_id: nil)
+      event_type = event_type.to_s
+      validate_event_type!(event_type)
+
       if subject
         subject_type = subject.class.name
         subject_id = subject.id
@@ -88,19 +91,21 @@ module DAG
       raise ArgumentError, "subject_type required" if subject_type.blank?
       raise ArgumentError, "subject_id required" if subject_id.blank?
 
-      hooks.record_event(
-        graph: self,
-        event_type: event_type,
-        subject_type: subject_type,
-        subject_id: subject_id,
-        particulars: particulars
-      )
-    rescue StandardError => error
-      Rails.logger.error(
-        "[DAG] graph_hooks_error graph_id=#{id} event_type=#{event_type} " \
-        "subject_type=#{subject_type} subject_id=#{subject_id} error=#{error.class}: #{error.message}"
-      )
-      nil
+      begin
+        hooks.record_event(
+          graph: self,
+          event_type: event_type,
+          subject_type: subject_type,
+          subject_id: subject_id,
+          particulars: particulars
+        )
+      rescue StandardError => error
+        Rails.logger.error(
+          "[DAG] graph_hooks_error graph_id=#{id} event_type=#{event_type} " \
+          "subject_type=#{subject_type} subject_id=#{subject_id} error=#{error.class}: #{error.message}"
+        )
+        nil
+      end
     end
 
     def advisory_lock_name
@@ -173,6 +178,14 @@ module DAG
     end
 
     private
+
+      def validate_event_type!(event_type)
+        return if DAG::GraphHooks::EventTypes::ALL.include?(event_type)
+
+        raise ArgumentError,
+              "unknown DAG graph hook event_type=#{event_type.inspect}. " \
+              "Add it to DAG::GraphHooks::EventTypes and update docs/spec."
+      end
 
       def purge_graph_records
         self.class.with_connection do |connection|

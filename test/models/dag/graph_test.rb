@@ -1,6 +1,17 @@
 require "test_helper"
 
 class DAG::GraphTest < ActiveSupport::TestCase
+  test "emit_event raises when given an unknown event_type" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::FINISHED, metadata: {})
+
+    assert_raises(ArgumentError) do
+      graph.emit_event(event_type: "unknown_event_type", subject: node)
+    end
+  end
+
   test "destroy purges nodes, edges, and bodies for the graph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
