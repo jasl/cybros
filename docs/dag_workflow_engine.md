@@ -13,6 +13,9 @@
 
 - 依赖 PostgreSQL 18 提供的 `uuidv7()` 作为主键默认值（见 `db/schema.rb`）。
 - 所有核心表主键为 `uuid`，并用 `uuidv7()` 生成以获得更好的插入局部性与时间有序性。
+- 可靠性例外：对引擎关键枚举字段在 DB 层增加 check constraint（避免脏数据渗透引擎）：
+  - `dag_nodes.state`：仅允许固定状态集合
+  - `dag_edges.edge_type`：仅允许固定边类型集合
 
 ## 领域模型与存储
 
@@ -202,6 +205,10 @@ Context 可见性（视图层）：
   - `include_excluded:true`
   - `include_deleted:true`
 - target 节点无论是否被 exclude/delete 都会强制包含在输出中（避免 executor 缺失自身 I/O）。
+- 写入期 gating（里程碑 1）：
+  - 仅允许对 terminal 节点设置/清除 `context_excluded_at/deleted_at`
+  - 且要求 graph idle（Active 图中不存在任何 `state=running` 的节点）
+  - 目的：避免执行中上下文被改导致不可解释行为
 
 > 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
 
@@ -215,8 +222,13 @@ Context 可见性（视图层）：
   - 默认只保留 `user_message` 与可读的 `agent_message`
   - 默认不包含 `task/summary`，不暴露 tool chain 细节
   - `context_excluded_at` 不影响 transcript（exclude 是 context-only）
+  - `agent_message` 可通过 metadata 显式进入 transcript：
+    - `metadata["transcript_visible"] == true`
+    - `metadata["transcript_preview"]`（可选 String，作为展示文本）
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
+
+> 后续建议：当图很大时，考虑用 turn_id / transcript 索引（或专用边）提供不依赖 context 闭包的 transcript 查询路径。
 
 ## 子图压缩（Manual）
 

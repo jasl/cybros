@@ -234,6 +234,18 @@ Active 视图内必须保持一致（不允许 drift）：
 - `dag_nodes.context_excluded_at`：从 **Context 输出**中排除该节点（默认）
 - `dag_nodes.deleted_at`：软删除；从 **Context 输出**与 **Transcript 输出**中排除该节点（默认）
 
+#### 4.5.0 写入期 gating（防止执行中不可解释行为）
+
+为避免 “节点执行中（running）上下文被改写” 导致不可解释行为，里程碑 1 采用严格 gating：
+
+- 仅允许对 **terminal 节点**设置/清除 `context_excluded_at/deleted_at`
+- 且要求 graph 处于 idle：Active 图中不存在任何 `state=running` 的节点
+
+实现要求：
+
+- 应由引擎提供的 API（例如 `DAG::Node#exclude_from_context!/soft_delete!`）在图锁内强制执行该 gating
+- 数据库层面必须以 check constraint 固化 “terminal-only” 的约束（running/pending 无法被标记为 excluded/deleted）
+
 #### 4.5.1 Context 输出过滤（默认）
 
 `graph.context_for(target_node_id)` 的默认行为：
@@ -252,10 +264,15 @@ Active 视图内必须保持一致（不允许 drift）：
 - transcript 默认不包含：
   - `task` / `summary`
   - “无可读 content 的中间 `agent_message`”（例如只用于 tool planning 或 tool_calls 的节点）
+- 对 `agent_message`，除 “可读 content” 外，允许通过 metadata 显式进入 transcript：
+  - `metadata["transcript_visible"] == true`：强制进入 transcript
+  - `metadata["transcript_preview"]`（可选 String）：当 `payload.output_preview["content"]` 为空时，作为 transcript 展示文本（view 层注入，不写回 body）
 - soft-delete（`deleted_at`）默认从 transcript 中排除（除非 `include_deleted:true`）
 - 若 target 节点已 soft-delete 且未显式 `include_deleted:true`，则 transcript 返回空数组
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
+
+> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_for` 的祖先闭包；建议引入 turn_id 或显式 transcript 索引/边来提供更高效的查询路径。
 
 ---
 

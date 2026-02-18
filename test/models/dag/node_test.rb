@@ -29,6 +29,38 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/Messages::ToolCall/, node.errors[:body].join)
   end
 
+  test "exclude_from_context! and soft_delete! reject non-terminal nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::PENDING, metadata: {})
+
+    error = assert_raises(ArgumentError) { node.exclude_from_context! }
+    assert_match(/terminal/, error.message)
+
+    error = assert_raises(ArgumentError) { node.soft_delete! }
+    assert_match(/terminal/, error.message)
+  end
+
+  test "exclude_from_context! and soft_delete! reject mutations while graph has running nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    _running = graph.nodes.create!(node_type: DAG::Node::TASK, state: DAG::Node::RUNNING, metadata: {})
+    terminal = graph.nodes.create!(
+      node_type: DAG::Node::USER_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "hi" },
+      metadata: {}
+    )
+
+    error = assert_raises(ArgumentError) { terminal.exclude_from_context! }
+    assert_match(/running nodes/, error.message)
+
+    error = assert_raises(ArgumentError) { terminal.soft_delete! }
+    assert_match(/running nodes/, error.message)
+  end
+
   test "retry! rejects attempts when downstream nodes are not pending" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

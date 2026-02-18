@@ -82,7 +82,12 @@ class ConversationContextTest < ActiveSupport::TestCase
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    agent = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
+    agent = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: { "content" => "hello" },
+      metadata: {}
+    )
 
     agent.exclude_from_context!
     agent.soft_delete!
@@ -170,5 +175,22 @@ class ConversationContextTest < ActiveSupport::TestCase
 
     assert_equal [], conversation.transcript_for(agent.id)
     assert_equal [agent.id], conversation.transcript_for(agent.id, include_deleted: true).map { |node| node.fetch("node_id") }
+  end
+
+  test "transcript_for includes agent_message when transcript_visible metadata is true and injects transcript_preview content" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    agent = graph.nodes.create!(
+      node_type: DAG::Node::AGENT_MESSAGE,
+      state: DAG::Node::FINISHED,
+      body_output: {},
+      metadata: { "transcript_visible" => true, "transcript_preview" => "(structured)" }
+    )
+
+    transcript = conversation.transcript_for(agent.id)
+
+    assert_equal [agent.id], transcript.map { |node| node.fetch("node_id") }
+    assert_equal "(structured)", transcript.first.dig("payload", "output_preview", "content")
   end
 end

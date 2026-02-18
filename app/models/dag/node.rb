@@ -81,24 +81,28 @@ module DAG
 
     def exclude_from_context!(at: Time.current)
       graph.with_graph_lock! do
+        assert_visibility_mutation_allowed!
         update!(context_excluded_at: at)
       end
     end
 
     def include_in_context!
       graph.with_graph_lock! do
+        assert_visibility_mutation_allowed!
         update!(context_excluded_at: nil)
       end
     end
 
     def soft_delete!(at: Time.current)
       graph.with_graph_lock! do
+        assert_visibility_mutation_allowed!
         update!(deleted_at: at)
       end
     end
 
     def restore!
       graph.with_graph_lock! do
+        assert_visibility_mutation_allowed!
         update!(deleted_at: nil)
       end
     end
@@ -277,6 +281,14 @@ module DAG
 
       def graph_policy
         graph&.policy || DAG::GraphPolicies::Default.new
+      end
+
+      def assert_visibility_mutation_allowed!
+        raise ArgumentError, "can only change visibility for terminal nodes" unless terminal?
+
+        if graph.nodes.active.where(state: RUNNING).exists?
+          raise ArgumentError, "cannot change visibility while graph has running nodes"
+        end
       end
 
       def apply_pending_body_io!

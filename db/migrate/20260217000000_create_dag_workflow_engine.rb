@@ -25,6 +25,10 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.string :node_type, null: false
       t.string :state, null: false
       t.jsonb :metadata, null: false, default: {}
+      t.check_constraint(
+        "state IN ('pending','running','finished','errored','rejected','skipped','cancelled')",
+        name: "check_dag_nodes_state_enum"
+      )
 
       t.references :body, type: :uuid, null: false,
                    foreign_key: { to_table: :dag_node_bodies },
@@ -37,6 +41,14 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.datetime :context_excluded_at
       t.datetime :deleted_at
+      t.check_constraint(
+        "context_excluded_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
+        name: "check_dag_nodes_context_excluded_terminal"
+      )
+      t.check_constraint(
+        "deleted_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
+        name: "check_dag_nodes_deleted_terminal"
+      )
 
       t.datetime :started_at
       t.datetime :finished_at
@@ -60,6 +72,10 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.string :edge_type, null: false
       t.jsonb :metadata, null: false, default: {}
+      t.check_constraint(
+        "edge_type IN ('sequence','dependency','branch')",
+        name: "check_dag_edges_edge_type_enum"
+      )
 
       t.datetime :compressed_at
       t.timestamps

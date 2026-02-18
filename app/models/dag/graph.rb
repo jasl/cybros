@@ -71,11 +71,29 @@ module DAG
         when DAG::Node::AGENT_MESSAGE
           state = context_node["state"].to_s
           preview_content = context_node.dig("payload", "output_preview", "content").to_s
+          metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
+          transcript_visible = metadata["transcript_visible"] == true
 
-          state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present?
+          state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) || preview_content.present? || transcript_visible
         else
           false
         end
+      end
+
+      transcript.each do |context_node|
+        next unless context_node["node_type"] == DAG::Node::AGENT_MESSAGE
+
+        payload = context_node["payload"].is_a?(Hash) ? context_node["payload"] : {}
+        output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
+        next if output_preview["content"].to_s.present?
+
+        metadata = context_node["metadata"].is_a?(Hash) ? context_node["metadata"] : {}
+        transcript_preview = metadata["transcript_preview"]
+        next unless transcript_preview.is_a?(String) && transcript_preview.present?
+
+        output_preview["content"] = transcript_preview.truncate(2000)
+        payload["output_preview"] = output_preview
+        context_node["payload"] = payload
       end
 
       if limit
