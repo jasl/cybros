@@ -204,6 +204,23 @@ Active 视图内必须保持一致（不允许 drift）：
   - `graph.mutate!(turn_id: node.turn_id) { |m| ... }`
   - 这样 `m.create_node` 会默认继承该 `turn_id`（除非显式传 `turn_id: nil` 强制开新轮次）。
 
+### 2.8 `idempotency_key`（去重键，graph+turn 作用域）
+
+为避免同一轮次内重复创建相同节点（尤其是 tool call / 下游任务），里程碑 1 引入可选字段：
+
+- `dag_nodes.idempotency_key`：String（可为空）
+
+规范性约束：
+
+- 在 Active 视图内，`(graph_id, turn_id, node_type, idempotency_key)` 必须唯一（当 `idempotency_key IS NOT NULL`）。
+- `idempotency_key` 只能用于 **已知 turn_id 的场景**（本规范要求：使用 idempotency_key 时必须显式/隐式提供 turn_id）。
+
+引擎行为（normative）：
+
+- `Mutations#create_node(..., idempotency_key: k)`：
+  - 若同 scope 下已存在节点，则必须返回既有节点（不新建）。
+  - 若调用参数与既有节点的 body I/O 或 state 不一致，必须 raise（避免 silent drift）。
+
 ---
 
 ## 3) Edges（正交语义：Causal vs Lineage）

@@ -35,6 +35,12 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
 
+      t.string :idempotency_key
+      t.index %i[graph_id turn_id node_type idempotency_key],
+              unique: true,
+              where: "compressed_at IS NULL AND idempotency_key IS NOT NULL",
+              name: "index_dag_nodes_idempotency"
+
       t.references :body, type: :uuid, null: false,
                    foreign_key: { to_table: :dag_node_bodies },
                    index: { unique: true }

@@ -112,6 +112,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.datetime "finished_at"
     t.uuid "graph_id", null: false
     t.datetime "heartbeat_at"
+    t.string "idempotency_key"
     t.datetime "lease_expires_at"
     t.jsonb "metadata", default: {}, null: false
     t.string "node_type", null: false
@@ -128,6 +129,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_17_002534) do
     t.index ["graph_id", "lease_expires_at"], name: "index_dag_nodes_running_lease", where: "((compressed_at IS NULL) AND ((state)::text = 'running'::text))"
     t.index ["graph_id", "retry_of_id"], name: "index_dag_nodes_retry_of"
     t.index ["graph_id", "state", "node_type"], name: "index_dag_nodes_lookup"
+    t.index ["graph_id", "turn_id", "node_type", "idempotency_key"], name: "index_dag_nodes_idempotency", unique: true, where: "((compressed_at IS NULL) AND (idempotency_key IS NOT NULL))"
     t.index ["graph_id", "turn_id"], name: "index_dag_nodes_turn"
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"

@@ -6,7 +6,16 @@ module DAG
       @executable_pending_nodes_created = false
     end
 
-    def create_node(node_type:, state:, content: nil, metadata: {}, body_input: {}, body_output: {}, **attributes)
+    def create_node(
+      node_type:,
+      state:,
+      content: nil,
+      idempotency_key: nil,
+      metadata: {},
+      body_input: {},
+      body_output: {},
+      **attributes
+    )
       body_input = normalize_hash(body_input)
       body_output = normalize_hash(body_output)
 
@@ -21,17 +30,39 @@ module DAG
         end
       end
 
-      effective_turn_id =
-        if attributes.key?(:turn_id)
-          attributes.delete(:turn_id)
-        else
-          @turn_id
+      effective_turn_id = attributes.key?(:turn_id) ? attributes.delete(:turn_id) : @turn_id
+
+      if idempotency_key.present?
+        raise ArgumentError, "idempotency_key requires turn_id" if effective_turn_id.blank?
+
+        existing =
+          @graph.nodes.active.find_by(
+            turn_id: effective_turn_id,
+            node_type: node_type,
+            idempotency_key: idempotency_key
+          )
+
+        if existing
+          assert_idempotent_node_match!(
+            existing,
+            expected_state: state,
+            expected_body_input: body_input,
+            expected_body_output: body_output
+          )
+
+          if existing.executable? && existing.pending?
+            @executable_pending_nodes_created = true
+          end
+
+          return existing
         end
+      end
 
       node_attributes = {
         node_type: node_type,
         state: state,
         metadata: metadata,
+        idempotency_key: idempotency_key,
         body_input: body_input,
         body_output: body_output,
       }.merge(attributes)
@@ -40,13 +71,30 @@ module DAG
         node_attributes[:turn_id] = effective_turn_id
       end
 
-      node = @graph.nodes.create!(node_attributes)
+      node =
+        if idempotency_key.present?
+          begin
+            DAG::Node.transaction(requires_new: true) do
+              @graph.nodes.create!(node_attributes)
+            end
+          rescue ActiveRecord::RecordNotUnique
+            @graph.nodes.active.find_by!(
+              turn_id: effective_turn_id,
+              node_type: node_type,
+              idempotency_key: idempotency_key
+            )
+          end
+        else
+          @graph.nodes.create!(node_attributes)
+        end
 
-      @graph.emit_event(
-        event_type: DAG::GraphHooks::EventTypes::NODE_CREATED,
-        subject: node,
-        particulars: { "node_type" => node.node_type, "state" => node.state }
-      )
+      if node.previously_new_record?
+        @graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::NODE_CREATED,
+          subject: node,
+          particulars: { "node_type" => node.node_type, "state" => node.state }
+        )
+      end
 
       if node.executable? && node.pending?
         @executable_pending_nodes_created = true
@@ -56,22 +104,40 @@ module DAG
     end
 
     def create_edge(from_node:, to_node:, edge_type:, metadata: {})
-      edge = @graph.edges.create!(
-        from_node_id: from_node.id,
-        to_node_id: to_node.id,
-        edge_type: edge_type,
-        metadata: metadata
-      )
+      existing =
+        @graph.edges.find_by(
+          from_node_id: from_node.id,
+          to_node_id: to_node.id,
+          edge_type: edge_type
+        )
+      return existing if existing && existing.compressed_at.nil?
+      raise ArgumentError, "edge already exists but is archived" if existing
 
-      @graph.emit_event(
-        event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
-        subject: edge,
-        particulars: {
-          "edge_type" => edge.edge_type,
-          "from_node_id" => edge.from_node_id,
-          "to_node_id" => edge.to_node_id,
-        }
-      )
+      edge =
+        begin
+          DAG::Edge.transaction(requires_new: true) do
+            @graph.edges.create!(
+              from_node_id: from_node.id,
+              to_node_id: to_node.id,
+              edge_type: edge_type,
+              metadata: metadata
+            )
+          end
+        rescue ActiveRecord::RecordNotUnique
+          @graph.edges.find_by!(from_node_id: from_node.id, to_node_id: to_node.id, edge_type: edge_type)
+        end
+
+      if edge.previously_new_record?
+        @graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
+          subject: edge,
+          particulars: {
+            "edge_type" => edge.edge_type,
+            "from_node_id" => edge.from_node_id,
+            "to_node_id" => edge.to_node_id,
+          }
+        )
+      end
 
       edge
     end
@@ -347,22 +413,35 @@ module DAG
       end
 
       def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
-        edge = @graph.edges.create!(
-          from_node_id: from_node_id,
-          to_node_id: to_node_id,
-          edge_type: edge_type,
-          metadata: metadata
-        )
+        existing = @graph.edges.find_by(from_node_id: from_node_id, to_node_id: to_node_id, edge_type: edge_type)
+        return existing if existing && existing.compressed_at.nil?
+        raise ArgumentError, "edge already exists but is archived" if existing
 
-        @graph.emit_event(
-          event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
-          subject: edge,
-          particulars: {
-            "edge_type" => edge.edge_type,
-            "from_node_id" => edge.from_node_id,
-            "to_node_id" => edge.to_node_id,
-          }
-        )
+        edge =
+          begin
+            DAG::Edge.transaction(requires_new: true) do
+              @graph.edges.create!(
+                from_node_id: from_node_id,
+                to_node_id: to_node_id,
+                edge_type: edge_type,
+                metadata: metadata
+              )
+            end
+          rescue ActiveRecord::RecordNotUnique
+            @graph.edges.find_by!(from_node_id: from_node_id, to_node_id: to_node_id, edge_type: edge_type)
+          end
+
+        if edge.previously_new_record?
+          @graph.emit_event(
+            event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
+            subject: edge,
+            particulars: {
+              "edge_type" => edge.edge_type,
+              "from_node_id" => edge.from_node_id,
+              "to_node_id" => edge.to_node_id,
+            }
+          )
+        end
 
         edge
       end
@@ -390,6 +469,19 @@ module DAG
           hash.deep_stringify_keys
         else
           {}
+        end
+      end
+
+      def assert_idempotent_node_match!(node, expected_state:, expected_body_input:, expected_body_output:)
+        if node.state != expected_state.to_s
+          raise ArgumentError, "idempotency_key collision with mismatched state"
+        end
+
+        actual_body_input = node.body&.input.is_a?(Hash) ? node.body.input : {}
+        actual_body_output = node.body&.output.is_a?(Hash) ? node.body.output : {}
+
+        if actual_body_input != expected_body_input || actual_body_output != expected_body_output
+          raise ArgumentError, "idempotency_key collision with mismatched body I/O"
         end
       end
   end
