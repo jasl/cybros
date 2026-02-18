@@ -186,7 +186,7 @@ module DAG
       now = Time.current
 
       unless old.body.retriable?
-        raise ArgumentError, "can only retry retriable nodes (task, agent_message, character_message)"
+        raise ArgumentError, "can only retry retriable nodes"
       end
 
       unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::CANCELLED].include?(old.state)
@@ -271,7 +271,7 @@ module DAG
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-        raise ArgumentError, "can only regenerate leaf agent_message/character_message nodes"
+        raise ArgumentError, "can only regenerate leaf nodes"
       end
 
       new_node = create_node(

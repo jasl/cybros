@@ -212,7 +212,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
     error = assert_raises(ArgumentError) { original.regenerate! }
-    assert_match(/leaf agent_message/, error.message)
+    assert_match(/leaf/, error.message)
   end
 
   test "retry! creates a replacement attempt, rewires outgoing blocking edges, and archives the old node" do
