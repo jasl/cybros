@@ -112,6 +112,8 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
 - 默认：`DAG::GraphHooks::Noop`（不做任何事）
 - 约束：引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`），建议只使用常量（避免 typo）。
 
+hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compress、leaf repair、node state 迁移，以及可见性 defer/apply（`node_visibility_*`）。完整列表见 `docs/dag_behavior_spec.md` 的第 9 节。
+
 ## 图不变量（Invariants）
 
 ### 1) 无环（Acyclic）

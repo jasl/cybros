@@ -157,17 +157,49 @@ module DAG
         node = nodes.find_by(id: patch.node_id)
 
         if node.nil? || node.compressed_at.present? || node.graph_id != id
+          emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_VISIBILITY_PATCH_DROPPED,
+            subject_type: "DAG::Node",
+            subject_id: patch.node_id,
+            particulars: {
+              "patch_id" => patch.id,
+              "reason" => node.nil? ? "node_missing" : "node_inactive_or_mismatched_graph",
+            }
+          )
           patch.destroy!
           next
         end
 
         next unless policy.visibility_mutation_allowed?(node: node, graph: self)
 
-        node.update_columns(
-          context_excluded_at: patch.context_excluded_at,
-          deleted_at: patch.deleted_at,
-          updated_at: now
-        )
+        from = {
+          "context_excluded_at" => node.context_excluded_at&.iso8601,
+          "deleted_at" => node.deleted_at&.iso8601,
+        }
+        to = {
+          "context_excluded_at" => patch.context_excluded_at&.iso8601,
+          "deleted_at" => patch.deleted_at&.iso8601,
+        }
+
+        if from != to
+          node.update_columns(
+            context_excluded_at: patch.context_excluded_at,
+            deleted_at: patch.deleted_at,
+            updated_at: now
+          )
+
+          emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_VISIBILITY_CHANGED,
+            subject: node,
+            particulars: {
+              "action" => "apply_visibility_patch",
+              "source" => "defer_apply",
+              "from" => from,
+              "to" => to,
+            }
+          )
+        end
+
         patch.destroy!
         applied += 1
       end

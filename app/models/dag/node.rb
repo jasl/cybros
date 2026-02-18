@@ -90,8 +90,10 @@ module DAG
     def exclude_from_context!(at: Time.current)
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
+        from = visibility_snapshot
         update_visibility_columns!(context_excluded_at: at)
         clear_visibility_patch!
+        emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "exclude_from_context")
       end
     end
 
@@ -102,8 +104,10 @@ module DAG
     def include_in_context!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
+        from = visibility_snapshot
         update_visibility_columns!(context_excluded_at: nil)
         clear_visibility_patch!
+        emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "include_in_context")
       end
     end
 
@@ -114,8 +118,10 @@ module DAG
     def soft_delete!(at: Time.current)
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
+        from = visibility_snapshot
         update_visibility_columns!(deleted_at: at)
         clear_visibility_patch!
+        emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "soft_delete")
       end
     end
 
@@ -126,8 +132,10 @@ module DAG
     def restore!
       graph.with_graph_lock! do
         assert_visibility_mutation_allowed!
+        from = visibility_snapshot
         update_visibility_columns!(deleted_at: nil)
         clear_visibility_patch!
+        emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "restore")
       end
     end
 
@@ -136,19 +144,35 @@ module DAG
     end
 
     def request_exclude_from_context!(at: Time.current)
-      request_visibility_patch!(context_excluded_at: at, deleted_at: KEEP)
+      request_visibility_patch!(
+        context_excluded_at: at,
+        deleted_at: KEEP,
+        action: "exclude_from_context"
+      )
     end
 
     def request_include_in_context!
-      request_visibility_patch!(context_excluded_at: nil, deleted_at: KEEP)
+      request_visibility_patch!(
+        context_excluded_at: nil,
+        deleted_at: KEEP,
+        action: "include_in_context"
+      )
     end
 
     def request_soft_delete!(at: Time.current)
-      request_visibility_patch!(context_excluded_at: KEEP, deleted_at: at)
+      request_visibility_patch!(
+        context_excluded_at: KEEP,
+        deleted_at: at,
+        action: "soft_delete"
+      )
     end
 
     def request_restore!
-      request_visibility_patch!(context_excluded_at: KEEP, deleted_at: nil)
+      request_visibility_patch!(
+        context_excluded_at: KEEP,
+        deleted_at: nil,
+        action: "restore"
+      )
     end
 
     def mark_running!
@@ -460,10 +484,12 @@ module DAG
         end
       end
 
-      def request_visibility_patch!(context_excluded_at:, deleted_at:)
+      def request_visibility_patch!(context_excluded_at:, deleted_at:, action:)
         outcome = nil
 
         graph.with_graph_lock! do
+          from = visibility_snapshot
+
           if graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
             patch = DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).lock.first
 
@@ -480,9 +506,20 @@ module DAG
             )
 
             patch&.destroy!
+            emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "request_applied", action: action)
             outcome = :applied
           else
-            upsert_visibility_patch!(context_excluded_at: context_excluded_at, deleted_at: deleted_at)
+            desired = upsert_visibility_patch!(context_excluded_at: context_excluded_at, deleted_at: deleted_at)
+
+            graph.emit_event(
+              event_type: DAG::GraphHooks::EventTypes::NODE_VISIBILITY_CHANGE_REQUESTED,
+              subject: self,
+              particulars: {
+                "action" => action,
+                "desired" => desired,
+                "reason" => graph_policy.visibility_mutation_error(node: self, graph: graph),
+              }
+            )
             outcome = :deferred
           end
         end
@@ -516,6 +553,8 @@ module DAG
             deleted_at: desired_deleted_at
           )
         end
+
+        visibility_snapshot_for(context_excluded_at: desired_context_excluded_at, deleted_at: desired_deleted_at)
       end
 
       def clear_visibility_patch!
@@ -540,6 +579,32 @@ module DAG
 
         body.input = pending_body_input if pending_body_input.present?
         body.output = pending_body_output if pending_body_output.present?
+      end
+
+      def visibility_snapshot
+        visibility_snapshot_for(context_excluded_at: context_excluded_at, deleted_at: deleted_at)
+      end
+
+      def visibility_snapshot_for(context_excluded_at:, deleted_at:)
+        {
+          "context_excluded_at" => context_excluded_at&.iso8601,
+          "deleted_at" => deleted_at&.iso8601,
+        }
+      end
+
+      def emit_visibility_changed_event!(from:, to:, source:, action:)
+        return if from == to
+
+        graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::NODE_VISIBILITY_CHANGED,
+          subject: self,
+          particulars: {
+            "action" => action,
+            "source" => source,
+            "from" => from,
+            "to" => to,
+          }
+        )
       end
 
       def transition_to!(to_state, from_states:, **attributes)

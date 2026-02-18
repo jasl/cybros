@@ -7,6 +7,9 @@ module DAG
       SUBGRAPH_COMPRESSED = "subgraph_compressed"
       LEAF_INVARIANT_REPAIRED = "leaf_invariant_repaired"
       NODE_STATE_CHANGED = "node_state_changed"
+      NODE_VISIBILITY_CHANGE_REQUESTED = "node_visibility_change_requested"
+      NODE_VISIBILITY_CHANGED = "node_visibility_changed"
+      NODE_VISIBILITY_PATCH_DROPPED = "node_visibility_patch_dropped"
 
       ALL = [
         NODE_CREATED,
@@ -15,6 +18,9 @@ module DAG
         SUBGRAPH_COMPRESSED,
         LEAF_INVARIANT_REPAIRED,
         NODE_STATE_CHANGED,
+        NODE_VISIBILITY_CHANGE_REQUESTED,
+        NODE_VISIBILITY_CHANGED,
+        NODE_VISIBILITY_PATCH_DROPPED,
       ].freeze
     end
 

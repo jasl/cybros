@@ -632,6 +632,9 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `subgraph_compressed`：压缩子图产生 summary
 - `leaf_invariant_repaired`：leaf 修复追加节点
 - `node_state_changed`：节点状态迁移
+- `node_visibility_change_requested`：可见性变更请求被 defer 入队（`request_*` 返回 `:deferred`）
+- `node_visibility_changed`：节点可见性字段实际发生变化（strict 立即生效、或 defer patch apply 生效）
+- `node_visibility_patch_dropped`：pending patch 被清理（例如 node 已归档/不存在导致 patch stale）
 
 实现约束：
 
@@ -642,6 +645,15 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - Scheduler claim：`pending → running`
 - Runner apply_result：`running → finished/errored/rejected/cancelled`
 - FailurePropagation：`pending → skipped`
+
+可见性相关 hooks 的触发点（里程碑 1）：
+
+- `node_visibility_change_requested`：`DAG::Node#request_*` 在不满足 strict gating 时写入 `dag_node_visibility_patches`
+- `node_visibility_changed`：
+  - `DAG::Node#exclude_from_context!/include_in_context!/soft_delete!/restore!`（strict）
+  - `DAG::Node#request_*` 在满足 gating 时立即生效（source=`request_applied`）
+  - `DAG::Graph#apply_visibility_patches_if_idle!` 消费 patch（source=`defer_apply`）
+- `node_visibility_patch_dropped`：`DAG::Graph#apply_visibility_patches_if_idle!` 清理 stale patch（node missing/inactive）
 
 ---
 
