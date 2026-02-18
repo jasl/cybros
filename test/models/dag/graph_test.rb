@@ -6,7 +6,6 @@ class DAG::GraphTest < ActiveSupport::TestCase
 
     assert_nil graph.attachable
     assert_equal DAG::GraphHooks::NOOP, graph.hooks
-    assert_equal graph, graph.policy
 
     error =
       assert_raises(ActiveRecord::RecordInvalid) do

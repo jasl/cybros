@@ -107,9 +107,9 @@
 
 - Scheduler claim 时会写入 `lease_expires_at`（短租约，claim lease）。
 - Runner 开始执行时会刷新 `heartbeat_at` 并延长 `lease_expires_at`（执行租约）。
-- 租约时长由 `graph.policy` 决定：
-  - claim lease：`graph.policy.claim_lease_seconds_for(...)`（里程碑 1 默认 `30.minutes`）
-  - execution lease：`graph.policy.execution_lease_seconds_for(node)`（里程碑 1 默认 `2.hours`）
+- 租约时长由 `graph` 决定：
+  - claim lease：`graph.claim_lease_seconds_for(...)`（里程碑 1 默认 `30.minutes`）
+  - execution lease：`graph.execution_lease_seconds_for(node)`（里程碑 1 默认 `2.hours`）
 - 若节点仍处于 `running` 且 `lease_expires_at < now`，引擎必须将其回收为：
   - `running → errored`
   - `metadata["error"] = "running_lease_expired"`
@@ -142,9 +142,9 @@ Payload 的列级约定：
 
 Active 视图内必须保持一致（不允许 drift）：
 
-- `node.body` 的 STI 类型必须等于 `graph.policy.body_class_for_node_type(node.node_type)`
+- `node.body` 的 STI 类型必须等于 `graph.body_class_for_node_type(node.node_type)`
 
-映射由 `graph.policy` 决定，通常由 attachable 注入。里程碑 1 的示例：
+映射由 `graph.body_class_for_node_type` 决定，通常由 attachable 注入。里程碑 1 的示例：
 
 - `Conversation`（`dag_node_body_namespace => Messages`）映射为：
   - `system_message` → `Messages::SystemMessage`
@@ -396,7 +396,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 实现要求：
 
-- gating 的决策权由 `graph.policy.visibility_mutation_error(node:, graph:)` 统一提供（返回 String reason 或 nil）。
+- gating 的决策权由 `graph.visibility_mutation_error(node:, graph:)` 统一提供（返回 String reason 或 nil）。
 - 引擎提供的 strict API（例如 `DAG::Node#exclude_from_context!/soft_delete!`）必须在图锁内强制执行该 gating，并在不允许时 raise 该 reason（便于 UI 与调试）。
 - 数据库层面必须以 check constraint 固化 “terminal-only” 的约束（running/pending 无法被标记为 excluded/deleted）
 
@@ -453,7 +453,7 @@ defer queue 的存储与应用规则（normative）：
 
 实现要求：
 
-- transcript 的过滤与可选的 preview 覆写应由 `graph.policy.transcript_include?` / `graph.policy.transcript_preview_override` 提供（里程碑 1 默认策略必须实现上述规则；attachable 可覆写以满足不同产品语义）。
+- transcript 的过滤与可选的 preview 覆写应由 `graph.transcript_include?` / `graph.transcript_preview_override` 提供（里程碑 1 默认实现必须满足上述规则；attachable 可覆写以满足不同产品语义）。
 - preview 覆写必须满足：
   - 当 `payload.output_preview["content"]` 为空时，优先使用 `metadata["transcript_preview"]`（若存在）
   - 否则对 `errored/rejected/cancelled/skipped` 生成安全预览文本（基于 `metadata["error"]/["reason"]`，截断），避免 UI 空白或泄漏敏感信息
@@ -475,7 +475,7 @@ defer queue 的存储与应用规则（normative）：
 
 ### 5.2 不变量与修复
 
-leaf 不变量由 `graph.policy` 决定其 “合法性” 与 “修复动作”；`DAG::Graph` 负责锁/事务/写库/事件。
+leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合法性” 与 “修复动作”；`DAG::Graph` 负责锁/事务/写库/事件。
 
 里程碑 1（Default policy）规则：每个 leaf 必须满足其一：
 
@@ -711,10 +711,26 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 
 覆盖的 issue 类型（里程碑 1）：
 
+- `misconfigured_graph`：图配置错误（例如 `dag_node_body_namespace` 缺失/非法、NodeBody hooks 互相冲突等；修复：无自动修复，仅用于诊断）
 - `active_edge_to_inactive_node`：active edge 指向 inactive node（修复：压缩该 edge）
 - `stale_visibility_patch`：patch 指向 inactive node（修复：删除 patch）
 - `leaf_invariant_violation`：Active 图 leaf 不合法（修复：调用 `validate_leaf_invariant!`）
 - `stale_running_node`：running lease 过期（修复：running→errored，见 2.3.1）
+
+`misconfigured_graph` 的 `details.problems[].code`（里程碑 1）：
+
+- `attachable_missing`
+- `dag_node_body_namespace_missing`
+- `dag_node_body_namespace_not_module`
+- `node_body_namespace_has_no_bodies`
+- `node_type_key_mismatch`
+- `node_type_key_collision`
+- `default_leaf_repair_not_unique`
+- `default_leaf_repair_not_executable`
+- `default_leaf_repair_not_leaf_terminal`
+- `invalid_created_content_destination`
+- `missing_turn_anchor_node_type`（warn）
+- `missing_transcript_candidate_node_type`（warn）
 
 Rake tasks（可选）：
 

@@ -18,6 +18,7 @@
 - Transcript 可靠性增强：当下游消息因依赖失败传播被标记为 `skipped`（或其它终态）时，仍能以“安全预览占位”的形式出现在 transcript，避免 UI 只剩用户输入的空白状态。
 - 类型系统松绑：移除 `DAG::Node` 对 node_type 的硬编码 enum/允许列表，并把“可执行/转写/安全预览”等语义下沉到 NodeBody；对 conversation graphs，未知 node_type 通过 `dag_node_body_namespace` 的约定映射默认严格失败。
 - 进一步下沉类型语义：引入 NodeBody semantic hooks（turn anchor / transcript candidates / leaf terminal / 默认 leaf repair / content 落点 / mermaid snippet），并删除 `DAG::Node` 的 node_type 常量，使 DAG 核心几乎不需要显式分支判断 node_type。
+- Audit 能力补强：`DAG::GraphAudit` 新增 `misconfigured_graph`，用于提前暴露 `dag_node_body_namespace` 与 NodeBody hooks 的结构性配置错误（无自动修复，仅诊断）。
 - 覆盖率链路修复：修复 Rails 并行测试下 SimpleCov 汇总为 0% 的问题，并设置整体覆盖率门槛 `minimum_coverage = 85`。
 - 新增场景级测试集，作为未来正式接入时的示例与回归保障；每个场景都以 `DAG::GraphAudit.scan(graph: graph)` 断言图不变量成立。
 
@@ -85,7 +86,7 @@
 
 修复：
 
-- 移除 `DAG::Node` 对 node_type 的 enum/允许列表约束；同时移除 GraphPolicy 体系并合并到 `DAG::Graph`（`graph.policy == graph`）。
+- 移除 `DAG::Node` 对 node_type 的 enum/允许列表约束；同时移除 GraphPolicy 体系并合并到 `DAG::Graph`（不再有 `graph.policy` 兼容层）。
 - 对 conversation graphs：新增 `attachable.dag_node_body_namespace` 扩展点，按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`（未知类型默认失败）。
 - 新增强不变量：只有可执行 NodeBody 才允许处于 `pending/running`，从而 Scheduler/FailurePropagation 可以移除 `node_type IN (...)` 过滤，避免维护可执行类型列表与类加载问题。
 

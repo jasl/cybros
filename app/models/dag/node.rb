@@ -363,7 +363,7 @@ module DAG
         return if graph.blank?
 
         begin
-          self.body = graph.policy.body_class_for_node_type(node_type).new
+          self.body = graph.body_class_for_node_type(node_type).new
           apply_pending_body_io!
         rescue KeyError, ArgumentError
           errors.add(:node_type, "is unknown")
@@ -376,7 +376,7 @@ module DAG
 
         expected_body_class =
           begin
-            graph.policy.body_class_for_node_type(node_type)
+            graph.body_class_for_node_type(node_type)
           rescue KeyError, ArgumentError
             errors.add(:node_type, "is unknown")
             return
@@ -384,10 +384,6 @@ module DAG
         return if body.is_a?(expected_body_class)
 
         errors.add(:body, "must be a #{expected_body_class.name} for node_type=#{node_type}")
-      end
-
-      def graph_policy
-        graph&.policy
       end
 
       def pending_or_running_requires_executable_body
@@ -398,15 +394,15 @@ module DAG
       end
 
       def visibility_mutation_allowed_now?
-        return false if graph_policy.nil?
+        return false if graph.nil?
 
-        graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
+        graph.visibility_mutation_allowed?(node: self, graph: graph)
       end
 
       def assert_visibility_mutation_allowed!
-        raise ArgumentError, "graph policy missing" if graph_policy.nil?
+        raise ArgumentError, "graph is missing or misconfigured" if graph.nil?
 
-        reason = graph_policy.visibility_mutation_error(node: self, graph: graph)
+        reason = graph.visibility_mutation_error(node: self, graph: graph)
         return if reason.nil?
 
         raise ArgumentError, reason
@@ -493,7 +489,7 @@ module DAG
         graph.with_graph_lock! do
           from = visibility_snapshot
 
-          if graph_policy.visibility_mutation_allowed?(node: self, graph: graph)
+          if graph.visibility_mutation_allowed?(node: self, graph: graph)
             patch = DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: id).lock.first
 
             base_context_excluded_at = patch ? patch.context_excluded_at : self.context_excluded_at
@@ -520,7 +516,7 @@ module DAG
               particulars: {
                 "action" => action,
                 "desired" => desired,
-                "reason" => graph_policy.visibility_mutation_error(node: self, graph: graph),
+                "reason" => graph.visibility_mutation_error(node: self, graph: graph),
               }
             )
             outcome = :deferred

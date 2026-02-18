@@ -38,7 +38,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/Messages::Task/, node.errors[:body].join)
   end
 
-  test "is invalid when node_type is unknown for the graph policy" do
+  test "is invalid when node_type is unknown for the graph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 

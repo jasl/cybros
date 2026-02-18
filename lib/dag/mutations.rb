@@ -20,7 +20,7 @@ module DAG
       body_output = normalize_hash(body_output)
 
       if !content.nil?
-        body_class = @graph.policy.body_class_for_node_type(node_type)
+        body_class = @graph.body_class_for_node_type(node_type)
         destination = body_class.created_content_destination
         unless destination.is_a?(Array) && destination.length == 2
           raise ArgumentError,

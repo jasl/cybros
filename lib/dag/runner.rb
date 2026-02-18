@@ -45,7 +45,7 @@ module DAG
       def refresh_running_lease!(node)
         now = Time.current
         started_at = node.started_at || now
-        lease_seconds = node.graph.policy.execution_lease_seconds_for(node)
+        lease_seconds = node.graph.execution_lease_seconds_for(node)
         lease_expires_at = now + lease_seconds
 
         affected_rows =

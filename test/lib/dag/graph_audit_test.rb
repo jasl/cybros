@@ -65,4 +65,110 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     assert_equal DAG::Node::ERRORED, node.reload.state
     assert_equal "running_lease_expired", node.metadata.fetch("error")
   end
+
+  test "scan reports misconfigured_graph when graph attachable is missing" do
+    graph = DAG::Graph.create!
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    assert_includes problem_codes, "attachable_missing"
+  end
+
+  test "scan reports misconfigured_graph when default_leaf_repair is not unique" do
+    Messages.const_set(
+      :BadLeafRepair,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def default_leaf_repair?
+            true
+          end
+
+          def executable?
+            true
+          end
+
+          def leaf_terminal?
+            true
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    assert_includes problem_codes, "default_leaf_repair_not_unique"
+  ensure
+    Messages.send(:remove_const, :BadLeafRepair) if Messages.const_defined?(:BadLeafRepair, false)
+  end
+
+  test "scan reports misconfigured_graph when node_type_key collides" do
+    Messages.const_set(
+      :CollisionOne,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def node_type_key
+            "collision"
+          end
+        end
+      end
+    )
+
+    Messages.const_set(
+      :CollisionTwo,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def node_type_key
+            "collision"
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    assert_includes problem_codes, "node_type_key_collision"
+  ensure
+    Messages.send(:remove_const, :CollisionOne) if Messages.const_defined?(:CollisionOne, false)
+    Messages.send(:remove_const, :CollisionTwo) if Messages.const_defined?(:CollisionTwo, false)
+  end
+
+  test "scan reports misconfigured_graph when created_content_destination is invalid" do
+    Messages.const_set(
+      :InvalidDestination,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def created_content_destination
+            [:bogus, "x"]
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    assert_includes problem_codes, "invalid_created_content_destination"
+  ensure
+    Messages.send(:remove_const, :InvalidDestination) if Messages.const_defined?(:InvalidDestination, false)
+  end
 end

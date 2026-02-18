@@ -180,7 +180,7 @@ module DAG
           next
         end
 
-        next unless policy.visibility_mutation_allowed?(node: node, graph: self)
+        next unless visibility_mutation_allowed?(node: node, graph: self)
 
         from = {
           "context_excluded_at" => node.context_excluded_at&.iso8601,
@@ -244,10 +244,6 @@ module DAG
         else
           DAG::GraphHooks::NOOP
         end
-    end
-
-    def policy
-      self
     end
 
     def body_class_for_node_type(node_type)
@@ -392,11 +388,11 @@ module DAG
       created_nodes = false
 
       leaf_nodes.each do |leaf|
-        next if policy.leaf_valid?(leaf)
+        next if leaf_valid?(leaf)
 
-        repaired_node = nodes.create!(policy.leaf_repair_node_attributes(leaf).merge(turn_id: leaf.turn_id))
+        repaired_node = nodes.create!(leaf_repair_node_attributes(leaf).merge(turn_id: leaf.turn_id))
         edges.create!(
-          policy.leaf_repair_edge_attributes(leaf, repaired_node).merge(
+          leaf_repair_edge_attributes(leaf, repaired_node).merge(
             from_node_id: leaf.id,
             to_node_id: repaired_node.id
           )
@@ -541,7 +537,7 @@ module DAG
       end
 
       def filter_transcript_nodes(context_nodes)
-        context_nodes.select { |context_node| policy.transcript_include?(context_node) }
+        context_nodes.select { |context_node| transcript_include?(context_node) }
       end
 
       def apply_transcript_preview_overrides!(transcript)
@@ -550,7 +546,7 @@ module DAG
           output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
           next if output_preview["content"].to_s.present?
 
-          override = policy.transcript_preview_override(context_node)
+          override = transcript_preview_override(context_node)
           next unless override.is_a?(String) && override.present?
 
           output_preview["content"] = override

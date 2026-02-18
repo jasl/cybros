@@ -26,7 +26,7 @@
 - 责任：
   - 图变更的事务边界（`mutate!(turn_id: nil)`：可选 turn_id 传播）
   - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
-  - 语义策略（`policy`）：由 `DAG::Graph` 自身实现（`graph.policy == graph`），包含 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等
+  - 语义策略：由 `DAG::Graph` 自身实现（不额外引入 policy 层），包含 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
 
@@ -148,7 +148,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 - `node_type in {agent_message, character_message}`
 - 或者 `state in {pending, running}`（允许执行中的中间态）
 
-修复策略：leaf invariant 的合法性判定与修复动作由 `graph.policy`（即 graph 自身）提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 leaf-terminal 类型时，自动追加一个默认 leaf repair 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
+修复策略：leaf invariant 的合法性判定与修复动作由 `DAG::Graph` 提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 leaf-terminal 类型时，自动追加一个默认 leaf repair 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
 
 ## 调度与执行
 
@@ -166,7 +166,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - `SELECT ... FOR UPDATE SKIP LOCKED`
   - 原子更新为 `running` 并设置 `claimed_at/claimed_by/lease_expires_at`（`started_at` 由 Runner 实际开始执行时写入）
 
-> claim lease 时长由 `graph.policy.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
+> claim lease 时长由 `graph.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
 
 > 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
 
@@ -189,7 +189,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
        - `dag_nodes.metadata["worker"]["execute_job_id"]`：执行 job_id（可选，用于排障/审计）
   4. 执行后触发下一轮 tick
 
-> execution lease 时长由 `graph.policy.execution_lease_seconds_for(node)` 决定；里程碑 1 默认值为 `2.hours`。
+> execution lease 时长由 `graph.execution_lease_seconds_for(node)` 决定；里程碑 1 默认值为 `2.hours`。
 
 > 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。
 
@@ -240,7 +240,7 @@ Context 可见性（视图层）：
 - target 节点无论是否被 exclude/delete 都会强制包含在输出中（避免 executor 缺失自身 I/O）。
 - 写入期 gating（里程碑 1）：
   - 默认策略：仅允许对 terminal 节点设置/清除 `context_excluded_at/deleted_at`，且要求 graph idle（Active 图中不存在任何 `state=running` 的节点）
-  - 决策权：由 `graph.policy.visibility_mutation_error(node:, graph:)` 统一决定（`DAG::Node` 的 strict API 会直接 raise 该 reason）
+  - 决策权：由 `graph.visibility_mutation_error(node:, graph:)` 统一决定（`DAG::Node` 的 strict API 会直接 raise 该 reason）
   - 目的：避免执行中上下文被改导致不可解释行为
   - 若需要 “运行中先申请，空闲后生效”，可使用 request API（defer queue）：
     - `request_exclude_from_context!/request_include_in_context!/request_soft_delete!/request_restore!`
@@ -265,7 +265,7 @@ Context 可见性（视图层）：
     - `metadata["transcript_visible"] == true`
     - `metadata["transcript_preview"]`（可选 String，作为展示文本）
   - 终态可见性强化：当 `agent_message/character_message` 进入终态且 `metadata["reason"]` 或 `metadata["error"]` 存在时，即使没有 content 也应进入 transcript，并以安全预览文本展示（避免 “依赖失败导致下游 skipped 而 UI 空白”）
-  - 决策权：transcript 的过滤/预览覆写由 `graph.policy.transcript_include?` / `graph.policy.transcript_preview_override` 提供（默认策略与行为规范一致；attachable 可覆写）
+  - 决策权：transcript 的过滤/预览覆写由 `graph.transcript_include?` / `graph.transcript_preview_override` 提供（默认实现与行为规范一致；attachable 可覆写）
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
 > 推荐用法：UI 取最近记录优先用 `transcript_recent_turns`；需要 “锚定某个节点的精确视图” 再用 `transcript_for(target)`.

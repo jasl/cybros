@@ -14,7 +14,7 @@ module DAG
     def claim_executable_nodes
       node_ids = []
       now = Time.current
-      lease_seconds = @graph.policy.claim_lease_seconds_for(nil)
+      lease_seconds = @graph.claim_lease_seconds_for(nil)
       lease_expires_at = now + lease_seconds
 
       DAG::Node.with_connection do |connection|
