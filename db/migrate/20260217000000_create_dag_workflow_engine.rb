@@ -23,12 +23,14 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.index %i[graph_id retry_of_id], name: "index_dag_nodes_retry_of"
 
       t.string :node_type, null: false
+
       t.string :state, null: false
-      t.jsonb :metadata, null: false, default: {}
       t.check_constraint(
         "state IN ('pending','running','finished','errored','rejected','skipped','cancelled')",
         name: "check_dag_nodes_state_enum"
       )
+
+      t.jsonb :metadata, null: false, default: {}
 
       t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
@@ -43,11 +45,12 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.datetime :compressed_at
 
       t.datetime :context_excluded_at
-      t.datetime :deleted_at
       t.check_constraint(
         "context_excluded_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
         name: "check_dag_nodes_context_excluded_terminal"
       )
+
+      t.datetime :deleted_at
       t.check_constraint(
         "deleted_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
         name: "check_dag_nodes_deleted_terminal"
@@ -86,11 +89,12 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
 
       t.string :edge_type, null: false
-      t.jsonb :metadata, null: false, default: {}
       t.check_constraint(
         "edge_type IN ('sequence','dependency','branch')",
         name: "check_dag_edges_edge_type_enum"
       )
+
+      t.jsonb :metadata, null: false, default: {}
 
       t.datetime :compressed_at
       t.timestamps
