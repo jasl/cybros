@@ -1,5 +1,7 @@
 module DAG
   class Runner
+    EXECUTION_LEASE_SECONDS = 2.hours
+
     def self.run_node!(node_id)
       new(node_id: node_id).run_node!
     end
@@ -14,6 +16,10 @@ module DAG
       return unless node.running?
 
       graph = node.graph
+      return if node.lease_expires_at.present? && node.lease_expires_at < Time.current
+
+      return unless refresh_running_lease!(node)
+
       context = graph.context_for(node.id)
 
       result = DAG.executor_registry.execute(node: node, context: context)
@@ -36,6 +42,25 @@ module DAG
     end
 
     private
+
+      def refresh_running_lease!(node)
+        now = Time.current
+        started_at = node.started_at || now
+        lease_expires_at = now + EXECUTION_LEASE_SECONDS
+
+        affected_rows =
+          DAG::Node.where(id: node.id, state: DAG::Node::RUNNING, compressed_at: nil).update_all(
+            started_at: started_at,
+            heartbeat_at: now,
+            lease_expires_at: lease_expires_at,
+            updated_at: now
+          )
+
+        return false unless affected_rows == 1
+
+        node.reload
+        true
+      end
 
       def apply_result(node, result)
         from_state = node.state

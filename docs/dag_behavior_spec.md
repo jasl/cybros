@@ -85,8 +85,24 @@
 
 时间戳约定：
 
-- `started_at`：仅在 `pending → running` 时写入
+- `claimed_at`：仅在 `pending → running`（被 Scheduler claim）时写入
+- `claimed_by`：claim 执行者标识（用于排障/观测）
+- `started_at`：Runner 实际开始执行时写入（可能晚于 claim）
+- `heartbeat_at`：Runner 续租/心跳时写入（里程碑 1 至少在开始执行时写入）
+- `lease_expires_at`：running lease 过期时间（Scheduler claim 时写入，Runner 开始执行时会延长）
 - `finished_at`：仅在进入 terminal state 时写入（含 skipped/cancelled）
+
+### 2.3.1 Running lease & reclaim（可靠性）
+
+为避免 worker 崩溃/队列卡死导致图永久停滞（例如永远有 running 节点从而无法 idle），里程碑 1 引入 running lease：
+
+- Scheduler claim 时会写入 `lease_expires_at`（短租约，claim lease）。
+- Runner 开始执行时会刷新 `heartbeat_at` 并延长 `lease_expires_at`（执行租约）。
+- 若节点仍处于 `running` 且 `lease_expires_at < now`，引擎必须将其回收为：
+  - `running → errored`
+  - `metadata["error"] = "running_lease_expired"`
+
+回收动作必须触发 `node_state_changed` hook（`from=running,to=errored`）。
 
 ### 2.4 可执行节点（Executable）
 

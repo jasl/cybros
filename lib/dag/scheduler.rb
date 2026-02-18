@@ -1,18 +1,22 @@
 module DAG
   class Scheduler
-    def self.claim_executable_nodes(graph:, limit:)
-      new(graph: graph, limit: limit).claim_executable_nodes
+    CLAIM_LEASE_SECONDS = 30.minutes
+
+    def self.claim_executable_nodes(graph:, limit:, claimed_by:)
+      new(graph: graph, limit: limit, claimed_by: claimed_by).claim_executable_nodes
     end
 
-    def initialize(graph:, limit:)
+    def initialize(graph:, limit:, claimed_by:)
       @graph = graph
       @graph_id = graph.id
       @limit = Integer(limit)
+      @claimed_by = claimed_by.to_s
     end
 
     def claim_executable_nodes
       node_ids = []
       now = Time.current
+      lease_expires_at = now + CLAIM_LEASE_SECONDS
 
       DAG::Node.with_connection do |connection|
         DAG::Node.transaction do
@@ -54,8 +58,15 @@ module DAG
 
           node_ids = connection.select_values(sql)
           if node_ids.any?
-            DAG::Node.where(id: node_ids, state: DAG::Node::PENDING)
-              .update_all(state: DAG::Node::RUNNING, started_at: now, updated_at: now)
+            DAG::Node.where(id: node_ids, state: DAG::Node::PENDING).update_all(
+              state: DAG::Node::RUNNING,
+              started_at: nil,
+              claimed_at: now,
+              claimed_by: @claimed_by,
+              lease_expires_at: lease_expires_at,
+              heartbeat_at: nil,
+              updated_at: now
+            )
 
             node_ids = DAG::Node.where(id: node_ids, state: DAG::Node::RUNNING).order(:id).pluck(:id)
           end

@@ -56,6 +56,13 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
         name: "check_dag_nodes_deleted_terminal"
       )
 
+      t.datetime :claimed_at
+      t.string :claimed_by
+      t.datetime :lease_expires_at
+      t.datetime :heartbeat_at
+      t.index %i[graph_id lease_expires_at], where: "compressed_at IS NULL AND state = 'running'",
+              name: "index_dag_nodes_running_lease"
+
       t.datetime :started_at
       t.datetime :finished_at
       t.timestamps

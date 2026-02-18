@@ -47,7 +47,9 @@
   - `compressed_at / compressed_by_id`：压缩标记
   - `context_excluded_at`：从 LLM context（`context_for`）默认输出中排除（纯视图层语义）
   - `deleted_at`：软删除；从 context/transcript 默认输出中排除（纯视图层语义）
-  - `started_at / finished_at`：执行时间戳
+  - `claimed_at / claimed_by`：被 Scheduler claim 的时间与执行者标识
+  - `lease_expires_at / heartbeat_at`：running lease 过期时间与心跳时间（用于回收卡死 running）
+  - `started_at / finished_at`：Runner 实际开始执行 / 进入终态的时间戳
 
 #### NodeBody 扩展表（STI + JSONB）
 
@@ -144,7 +146,7 @@ node_type ↔ body STI 映射由 `graph.policy` 决定（`attachable.dag_graph_p
     - `dependency`：父节点必须为 **finished** 才 unblock
 - 并发语义：
   - `SELECT ... FOR UPDATE SKIP LOCKED`
-  - 原子更新为 `running` 并设置 `started_at`
+  - 原子更新为 `running` 并设置 `claimed_at/claimed_by/lease_expires_at`（`started_at` 由 Runner 实际开始执行时写入）
 
 > 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 executable `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死。
 

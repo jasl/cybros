@@ -21,9 +21,14 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [child.id], claimed.map(&:id)
-    assert_equal DAG::Node::RUNNING, child.reload.state
+    child.reload
+    assert_equal DAG::Node::RUNNING, child.state
+    assert_nil child.started_at
+    assert_equal "test", child.claimed_by
+    assert child.claimed_at.present?
+    assert child.lease_expires_at.present?
 
     event = conversation.events.find_by!(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: child)
     assert_equal({ "from" => "pending", "to" => "running" }, event.particulars)
@@ -37,7 +42,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::DEPENDENCY)
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [], claimed
     assert_equal DAG::Node::PENDING, child.reload.state
   end
@@ -50,7 +55,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     child = graph.nodes.create!(node_type: DAG::Node::AGENT_MESSAGE, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: parent.id, to_node_id: child.id, edge_type: DAG::Edge::SEQUENCE)
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [child.id], claimed.map(&:id)
     assert_equal DAG::Node::RUNNING, child.reload.state
   end
@@ -75,7 +80,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
       ).save!(validate: false)
     end
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph_a, limit: 10)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph_a, limit: 10, claimed_by: "test")
     assert_equal [child.id], claimed.map(&:id)
   end
 
@@ -103,7 +108,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
 
     locked.pop
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 1)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 1, claimed_by: "test")
     assert_equal [second.id], claimed.map(&:id)
   ensure
     release << true

@@ -81,6 +81,9 @@ class DAG::RunnerTest < ActiveSupport::TestCase
 
     node.reload
     assert_equal DAG::Node::FINISHED, node.state
+    assert node.started_at.present?
+    assert node.heartbeat_at.present?
+    assert node.lease_expires_at.present?
     assert_equal 3, node.metadata.dig("usage", "total_tokens")
     assert_kind_of Integer, node.metadata.dig("output_stats", "body_output_bytes")
   ensure
