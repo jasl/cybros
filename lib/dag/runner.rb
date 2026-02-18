@@ -60,7 +60,7 @@ module DAG
 
         if transitioned
           node.graph.emit_event(
-            event_type: "node_state_changed",
+            event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
             subject: node,
             particulars: { "from" => from_state, "to" => node.state }
           )

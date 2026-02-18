@@ -31,7 +31,7 @@ module DAG
       )
 
       @graph.emit_event(
-        event_type: "node_created",
+        event_type: DAG::GraphHooks::EventTypes::NODE_CREATED,
         subject: node,
         particulars: { "node_type" => node.node_type, "state" => node.state }
       )
@@ -52,7 +52,7 @@ module DAG
       )
 
       @graph.emit_event(
-        event_type: "edge_created",
+        event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
         subject: edge,
         particulars: {
           "edge_type" => edge.edge_type,
@@ -149,7 +149,7 @@ module DAG
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
       @graph.emit_event(
-        event_type: "node_replaced",
+        event_type: DAG::GraphHooks::EventTypes::NODE_REPLACED,
         subject: new_node,
         particulars: {
           "kind" => "retry",
@@ -199,7 +199,7 @@ module DAG
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
 
       @graph.emit_event(
-        event_type: "node_replaced",
+        event_type: DAG::GraphHooks::EventTypes::NODE_REPLACED,
         subject: new_node,
         particulars: {
           "kind" => "regenerate",
@@ -254,7 +254,7 @@ module DAG
         archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: new_node.id, now: now)
 
       @graph.emit_event(
-        event_type: "node_replaced",
+        event_type: DAG::GraphHooks::EventTypes::NODE_REPLACED,
         subject: new_node,
         particulars: {
           "kind" => "edit",
@@ -339,7 +339,7 @@ module DAG
         )
 
         @graph.emit_event(
-          event_type: "edge_created",
+          event_type: DAG::GraphHooks::EventTypes::EDGE_CREATED,
           subject: edge,
           particulars: {
             "edge_type" => edge.edge_type,

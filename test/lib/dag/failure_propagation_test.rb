@@ -30,8 +30,8 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
     assert_equal DAG::Node::SKIPPED, blocked_by_c.first.fetch("state")
     assert_equal e2.id, blocked_by_c.first.fetch("edge_id")
 
-    assert conversation.events.exists?(event_type: "node_state_changed", subject: b)
-    assert conversation.events.exists?(event_type: "node_state_changed", subject: c)
+    assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: b)
+    assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: c)
   end
 
   test "propagate! does not skip nodes whose dependency parents are pending" do

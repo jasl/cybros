@@ -77,7 +77,7 @@ module DAG
           end
 
         @graph.emit_event(
-          event_type: "subgraph_compressed",
+          event_type: DAG::GraphHooks::EventTypes::SUBGRAPH_COMPRESSED,
           subject: summary_node,
           particulars: {
             "summary_node_id" => summary_node.id,

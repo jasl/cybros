@@ -64,7 +64,7 @@ module DAG
 
       node_ids.each do |node_id|
         @graph.emit_event(
-          event_type: "node_state_changed",
+          event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
           subject_type: "DAG::Node",
           subject_id: node_id,
           particulars: { "from" => "pending", "to" => "running" }

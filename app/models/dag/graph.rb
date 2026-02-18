@@ -148,7 +148,7 @@ module DAG
         )
 
         emit_event(
-          event_type: "leaf_invariant_repaired",
+          event_type: DAG::GraphHooks::EventTypes::LEAF_INVARIANT_REPAIRED,
           subject: repaired_node,
           particulars: { "leaf_node_id" => leaf.id }
         )

@@ -25,7 +25,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     assert_equal [child.id], claimed.map(&:id)
     assert_equal DAG::Node::RUNNING, child.reload.state
 
-    event = conversation.events.find_by!(event_type: "node_state_changed", subject: child)
+    event = conversation.events.find_by!(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: child)
     assert_equal({ "from" => "pending", "to" => "running" }, event.particulars)
   end
 
