@@ -43,6 +43,8 @@
 - `dag_nodes (graph_id, retry_of_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图 retry lineage 引用）。
 - `dag_nodes (graph_id, compressed_by_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图压缩归档引用）。
 - `dag_nodes (graph_id, lane_id)` 必须外键引用 `dag_lanes (graph_id, id)`（composite FK；禁止跨图 lane 引用）。
+- `dag_turns (graph_id, lane_id)` 必须外键引用 `dag_lanes (graph_id, id)`（composite FK；Turn 必须属于同一 graph 的某条 lane）。
+- `dag_nodes (graph_id, lane_id, turn_id)` 必须外键引用 `dag_turns (graph_id, lane_id, id)`（composite FK；保证 node 的 turn/lane 一致性）。
 
 这意味着：即使绕过模型校验（例如 `save!(validate: false)`），DB 也会拒绝插入跨 graph 的 edge/patch。
 
@@ -277,7 +279,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 产品通常需要“在一条 lane 内按对话轮次（turn）展示与计数”，但引擎内部的 `turn_id` 只是一种 span/分组标记，并不自带 UI 友好的“轮次数”序号。因此引擎提供 **turn anchor** 语义：
 
-- 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（通常是 `user_message`）。
+- 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（conversation graphs 默认 `user_message/agent_message/character_message`）。
 - `graph.turn_anchor_node_types` 返回该图配置下的 turn anchor node types。
 - `lane.turns` / `lane.turn_count` / `lane.turn_seq_for(turn_id)` 以 turn anchors 在该 lane 内的出现顺序生成一个 **1-based** 的 `turn_seq`。
 
@@ -304,6 +306,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 为支持 “圈定本轮产生的子图集合” 与未来的强 gating 校验（例如 squash/rewire），里程碑 1 引入：
 
 - `dag_nodes.turn_id`：UUID（默认值 `uuidv7()`），用于标记某个节点属于哪一轮（turn/span）。
+- `dag_turns`：Turn 一等公民表（`dag_turns.id == dag_nodes.turn_id`），用于为产品提供稳定的 turn 排序/分页索引。
 
 核心语义（normative）：
 

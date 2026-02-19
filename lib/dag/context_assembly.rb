@@ -45,27 +45,28 @@ module DAG
           graph_quoted = connection.quote(@graph.id)
 
           sql = <<~SQL
-            WITH RECURSIVE ancestors(node_id) AS (
+            WITH RECURSIVE active_nodes AS (
               SELECT dag_nodes.id
               FROM dag_nodes
-              WHERE dag_nodes.id = #{target_quoted}::uuid
-                AND dag_nodes.graph_id = #{graph_quoted}
+              WHERE dag_nodes.graph_id = #{graph_quoted}
                 AND dag_nodes.compressed_at IS NULL
-              UNION
+            ),
+            ancestors(node_id) AS (
+              SELECT active_nodes.id
+              FROM active_nodes
+              WHERE active_nodes.id = #{target_quoted}::uuid
+              UNION ALL
               SELECT e.from_node_id
-              FROM dag_edges e
-              JOIN ancestors a ON e.to_node_id = a.node_id
-              JOIN dag_nodes parent
-                ON parent.id = e.from_node_id
-               AND parent.graph_id = e.graph_id
-               AND parent.compressed_at IS NULL
-              JOIN dag_nodes child
-                ON child.id = e.to_node_id
-               AND child.graph_id = e.graph_id
-               AND child.compressed_at IS NULL
-              WHERE e.graph_id = #{graph_quoted}
-                AND e.compressed_at IS NULL
-                AND e.edge_type IN ('sequence', 'dependency')
+              FROM ancestors a
+              JOIN LATERAL (
+                SELECT dag_edges.from_node_id
+                FROM dag_edges
+                WHERE dag_edges.graph_id = #{graph_quoted}
+                  AND dag_edges.compressed_at IS NULL
+                  AND dag_edges.edge_type IN ('sequence', 'dependency')
+                  AND dag_edges.to_node_id = a.node_id
+              ) e ON true
+              JOIN active_nodes parent ON parent.id = e.from_node_id
             )
             SELECT DISTINCT node_id FROM ancestors
           SQL

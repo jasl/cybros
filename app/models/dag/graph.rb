@@ -9,6 +9,9 @@ module DAG
     has_many :lanes,
              class_name: "DAG::Lane",
              inverse_of: :graph
+    has_many :turns,
+             class_name: "DAG::Turn",
+             inverse_of: :graph
     has_many :nodes,
              class_name: "DAG::Node",
              inverse_of: :graph
@@ -105,15 +108,20 @@ module DAG
       turn_anchor_types = turn_anchor_node_types
       return [] if turn_anchor_types.empty?
 
-      turn_scope = nodes.active.where(node_type: turn_anchor_types)
-      turn_scope = turn_scope.where(deleted_at: nil) unless include_deleted
+      turn_scope =
+        turns
+          .where.not(anchor_node_id: nil)
+          .joins("JOIN dag_nodes anchors ON anchors.id = dag_turns.anchor_node_id")
+          .where("anchors.node_type IN (?)", turn_anchor_types)
+          .where(Arel.sql("anchors.compressed_at IS NULL"))
+
+      turn_scope = turn_scope.where(Arel.sql("anchors.deleted_at IS NULL")) unless include_deleted
 
       turn_ids =
         turn_scope
-          .group(:turn_id)
-          .order(Arel.sql("MAX(created_at) DESC"))
+          .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
           .limit(limit_turns)
-          .pluck(:turn_id)
+          .pluck(Arel.sql("dag_turns.id"))
           .reverse
 
       return [] if turn_ids.empty?

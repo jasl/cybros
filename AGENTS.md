@@ -89,6 +89,15 @@ Cybros uses **URL path-based multi-tenancy**:
 
 The central abstraction of Cybros is the **conversation DAG**. Each conversation is a directed acyclic graph where every interaction becomes a node.
 
+### Public API boundary (important)
+
+When working on DAG-related code (engine, app integration, tests, scripts):
+
+- Prefer **Public API** over touching internal tables/associations directly.
+- If the Public API is missing a capability, add/adjust the Public API + tests/doc, then use it (avoid “hacky” direct SQL/`update_columns` from the App domain).
+
+Doc: `docs/dag_public_api.md`
+
 #### Node Types
 - `user_message` — User's input to the agent
 - `agent_message` — Agent's response to the user

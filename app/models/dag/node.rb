@@ -17,6 +17,11 @@ module DAG
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
     belongs_to :lane, class_name: "DAG::Lane", inverse_of: :nodes
+    belongs_to :turn,
+               class_name: "DAG::Turn",
+               foreign_key: :turn_id,
+               optional: true,
+               inverse_of: :nodes
     belongs_to :body,
                class_name: "DAG::NodeBody",
                autosave: true,
@@ -47,6 +52,7 @@ module DAG
 
     before_validation :ensure_lane
     before_validation :ensure_body
+    after_create :ensure_turn_record!
 
     def terminal?
       TERMINAL_STATES.include?(state)
@@ -472,6 +478,52 @@ module DAG
         return unless mismatch
 
         errors.add(:lane_id, "must match existing nodes for this turn")
+      end
+
+      def ensure_turn_record!
+        turn = graph.turns.find_by(id: turn_id)
+
+        if turn.nil?
+          begin
+            turn =
+              graph.turns.create!(
+                id: turn_id,
+                lane_id: lane_id,
+                anchor_node_id: nil,
+                anchor_created_at: nil,
+                metadata: {}
+              )
+          rescue ActiveRecord::RecordNotUnique
+            turn = graph.turns.find_by(id: turn_id)
+          end
+        end
+
+        raise "turn record is missing after create" if turn.nil?
+        if turn.lane_id.to_s != lane_id.to_s
+          raise "turn.lane_id mismatch turn_id=#{turn_id} expected=#{lane_id} actual=#{turn.lane_id}"
+        end
+
+        return unless body&.class&.turn_anchor?
+
+        now = Time.current
+
+        turn.with_lock do
+          current_anchor_at = turn.anchor_created_at
+          current_anchor_id = turn.anchor_node_id
+
+          replace =
+            current_anchor_at.nil? ||
+              created_at < current_anchor_at ||
+              (created_at == current_anchor_at && id.to_s < current_anchor_id.to_s)
+
+          if replace
+            turn.update_columns(
+              anchor_node_id: id,
+              anchor_created_at: created_at,
+              updated_at: now
+            )
+          end
+        end
       end
 
       def lane_must_be_writable

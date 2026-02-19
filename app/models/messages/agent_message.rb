@@ -1,6 +1,10 @@
 module Messages
   class AgentMessage < ::DAG::NodeBody
     class << self
+      def turn_anchor?
+        true
+      end
+
       def transcript_candidate?
         true
       end

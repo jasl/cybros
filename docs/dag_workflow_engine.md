@@ -23,6 +23,8 @@
   - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
   - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
   - `dag_nodes (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Lane 分区一致性；禁止跨图 lane 引用）
+  - `dag_turns (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Turn 必须属于同一 graph 的某条 lane）
+  - `dag_nodes (graph_id, lane_id, turn_id)` → `dag_turns (graph_id, lane_id, id)`（Turn 一等公民；保证 node 的 turn/lane 一致性）
 - 压缩字段一致性（DB check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
 
 ## 领域模型与存储
@@ -61,6 +63,19 @@
   - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Topic`）
   - `metadata`：JSONB 扩展点
 
+### Turn：`DAG::Turn`（一等公民）
+
+- 模型：`app/models/dag/turn.rb`
+- 表：`dag_turns`
+- 目的：
+  - 为真实产品的“按轮次展示/分页/计数”提供稳定索引（避免每次从 `dag_nodes` 动态聚合）
+  - 支持“无 user 回合的纯角色互聊 / 系统自动消息 / merge/join 等只有 assistant 消息的回合”
+- 关键字段：
+  - `id`：turn_id（UUIDv7）
+  - `graph_id` / `lane_id`：turn 归属（一个 turn 必须属于某条 lane）
+  - `anchor_node_id` / `anchor_created_at`：该 turn 的“锚点消息”（由 NodeBody hooks `turn_anchor?` 决定；用于 turn 排序与游标分页）
+  - `metadata`：JSONB 扩展点
+
 ### 节点：`DAG::Node`
 
 - 模型：`app/models/dag/node.rb`
@@ -68,7 +83,7 @@
 - 关键字段：
   - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
   - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
-  - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享）
+  - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享；DB 层外键引用 `dag_turns`）
   - `lane_id`：Lane 分区（用于 UI 染色、分支索引、只读门禁）
   - `metadata`：JSONB
   - `retry_of_id`：重试 lineage
@@ -116,7 +131,7 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 
 - `node_type_key`：默认 `name.demodulize.underscore`（约定 `node_type` ↔ body 类名一对一）
 - `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
-- `turn_anchor?`：默认 `false`（用于 `transcript_recent_turns` 的 “turn anchor” SQL 预筛选；内置 `user_message` 为 true）
+- `turn_anchor?`：默认 `false`（用于 turn 锚点与 transcript 分页；conversation graphs 内置 `user_message/agent_message/character_message` 为 true）
 - `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选；内置 `user/agent/character` 为 true）
 - `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定；内置 `agent_message/character_message` 为 true）
 - `default_leaf_repair?`：默认 `false`（用于 leaf repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true；内置 `agent_message` 为 true、`character_message` 显式为 false）
@@ -281,7 +296,7 @@ Context 可见性（视图层）：
 为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（lane）” 等需求，DAG 提供 transcript 投影：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
-  - 按 `turn_id` 聚合：按 NodeBody hooks 的 `turn_anchor?` 选择 turn anchor（conversation graphs 默认 `user_message`）
+  - 按 `turn_id` 聚合：按 NodeBody hooks 的 `turn_anchor?` 选择 turn anchor（conversation graphs 默认 `user_message/agent_message/character_message`）
   - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
   - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
   - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）

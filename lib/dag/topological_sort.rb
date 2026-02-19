@@ -28,20 +28,18 @@ module DAG
         indegree[to] += 1
       end
 
-      outgoing.each_value(&:sort!)
-
-      available = @node_ids.select { |node_id| indegree[node_id].zero? }
+      available = MinHeap.new
+      @node_ids.each do |node_id|
+        available.push(node_id) if indegree[node_id].zero?
+      end
       result = []
 
-      while available.any?
-        node_id = available.shift
+      while (node_id = available.pop)
         result << node_id
 
         outgoing[node_id].each do |child_id|
           indegree[child_id] -= 1
-          if indegree[child_id].zero?
-            insert_sorted(available, child_id)
-          end
+          available.push(child_id) if indegree[child_id].zero?
         end
       end
 
@@ -54,9 +52,63 @@ module DAG
 
     private
 
-      def insert_sorted(array, value)
-        index = array.bsearch_index { |existing| existing >= value } || array.length
-        array.insert(index, value)
+      class MinHeap
+        def initialize
+          @data = []
+        end
+
+        def push(value)
+          @data << value
+          sift_up(@data.length - 1)
+        end
+
+        def pop
+          return nil if @data.empty?
+
+          min = @data.first
+          last = @data.pop
+          unless @data.empty?
+            @data[0] = last
+            sift_down(0)
+          end
+
+          min
+        end
+
+        private
+
+          def sift_up(index)
+            while index.positive?
+              parent = (index - 1) / 2
+              break if @data[parent] <= @data[index]
+
+              @data[parent], @data[index] = @data[index], @data[parent]
+              index = parent
+            end
+          end
+
+          def sift_down(index)
+            length = @data.length
+
+            loop do
+              left = (index * 2) + 1
+              right = left + 1
+              smallest = index
+
+              if left < length && @data[left] < @data[smallest]
+                smallest = left
+              end
+
+              if right < length && @data[right] < @data[smallest]
+                smallest = right
+              end
+
+              break if smallest == index
+
+              @data[smallest], @data[index] = @data[index], @data[smallest]
+              index = smallest
+            end
+          end
       end
   end
 end
