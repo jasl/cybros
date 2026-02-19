@@ -98,6 +98,41 @@ class ConversationContextTest < ActiveSupport::TestCase
     assert_equal [agent.id], context.map { |node| node.fetch("node_id") }
   end
 
+  test "context_node_scope_for returns an ActiveRecord::Relation and respects include_excluded" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
+    task = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, body_output: { "result" => "ok" }, metadata: {})
+    agent = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+
+    graph.edges.create!(from_node_id: user.id, to_node_id: task.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: task.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+
+    task.exclude_from_context!
+
+    scope = graph.context_node_scope_for(agent.id)
+    assert scope.is_a?(ActiveRecord::Relation)
+
+    ids = scope.pluck(:id)
+    assert_includes ids, user.id
+    assert_includes ids, agent.id
+    refute_includes ids, task.id
+
+    included_ids = graph.context_node_scope_for(agent.id, include_excluded: true).pluck(:id)
+    assert_includes included_ids, task.id
+  end
+
+  test "context_for rejects non-positive limit_turns" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    agent = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+
+    assert_raises(ArgumentError) { graph.context_for(agent.id, limit_turns: 0) }
+    assert_raises(ArgumentError) { graph.context_node_scope_for(agent.id, limit_turns: 0) }
+  end
+
   test "soft deleted nodes are excluded from context by default" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

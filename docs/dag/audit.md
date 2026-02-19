@@ -133,5 +133,5 @@
 ## 5) 剩余风险与后续建议
 
 - **Turn 建模与群聊**：已引入 `dag_turns`（Turn 一等公民）并以 NodeBody hooks `turn_anchor?` 维护 turn anchor（conversation graphs 默认 `user_message/agent_message/character_message` 为 true），从而支持“无用户回合的纯角色互聊 / 只有 assistant 消息的 turn（例如 merge/join）”的 transcript 分页与 recent turns 查询。
-- **CTE 性能与索引**：Context/Leaf/Acyclicity 都依赖 recursive CTE；后续可基于真实数据量做 profiling，并按查询形态补齐索引与物化策略。
+- **CTE 性能与索引**：Acyclicity（新建 edge 环检测）、`context_closure_for`（祖先闭包）与部分改图操作（例如 descendants 扫描）依赖 recursive CTE；`context_for`（bounded window）与 leaf 判定不依赖。后续可基于真实数据量做 profiling，并按查询形态补齐索引与物化策略。
 - **全局 prompt 机制**：`system_message/developer_message` 目前作为 node_type 存在；若产品侧需要“全局 prompt + per-branch override”，建议明确注入点与冲突合并规则，并用专门场景测试固化。

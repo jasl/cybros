@@ -266,7 +266,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 ### context_for（bounded window）
 
-- 选择与 target 相关的 lanes（target lane 的 parent chain + incoming dependency source lanes 的 parent chain），并为每段 lane 计算 cutoff
+- 选择与 target 相关的 lanes（target lane 的 parent chain + incoming blocking source nodes（`sequence/dependency`）所在 lanes 的 parent chain），并为每段 lane 计算 cutoff
 - 从每段 lane 中取 `<= cutoff` 的 anchored turns（按 `dag_turns.anchor_created_at + anchor_node_id` keyset），合并后取最近 `limit_turns`
 - 强制 pin：
   - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）

@@ -405,7 +405,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
    - anchored turns 使用 `dag_turns.anchor_created_at + anchor_node_id` 作为稳定 keyset 排序键
    - 窗口覆盖与 target 相关的 lanes：
      - target 所在 lane 的 parent_lane 链（每段只取到 fork 点）
-     - target 的 incoming `dependency` 来源 lanes（merge 场景关键），并同样取各自的 parent_lane 链
+     - target 的 incoming blocking 来源 nodes（`sequence/dependency`；merge 场景关键），并同样取各自的 parent_lane 链
    - 每段计算 cutoff（上界）并取 `<= cutoff` 的 anchored turns（过滤 compressed anchors；`include_deleted:false` 时过滤 deleted anchors），每段最多取 `limit_turns` 个候选；合并后按全局排序键取最近 `limit_turns`
 
 2) **强制 pin 的 turns（不计入 `limit_turns` 预算）**

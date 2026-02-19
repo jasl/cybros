@@ -7,6 +7,8 @@ module DAG
 
     def initialize(graph:)
       @graph = graph
+      @lane_cache = {}
+      @node_cache = {}
     end
 
     def call(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, mode: :preview, include_excluded: false, include_deleted: false)
@@ -122,11 +124,7 @@ module DAG
 
       def lane_chain_segments(cutoff_node:)
         lane_id = cutoff_node.lane_id
-        lane =
-          @graph.lanes
-            .where(id: lane_id)
-            .select(:id, :parent_lane_id, :forked_from_node_id)
-            .first
+        lane = lane_record(lane_id)
         return [] if lane.nil?
 
         segments = []
@@ -154,18 +152,10 @@ module DAG
           fork_node_id = current_lane.forked_from_node_id
           break if fork_node_id.blank?
 
-          parent_lane =
-            @graph.lanes
-              .where(id: parent_lane_id)
-              .select(:id, :parent_lane_id, :forked_from_node_id)
-              .first
+          parent_lane = lane_record(parent_lane_id)
           break if parent_lane.nil?
 
-          fork_node =
-            @graph.nodes
-              .where(id: fork_node_id)
-              .select(:id, :lane_id, :turn_id, :created_at)
-              .first
+          fork_node = node_record(fork_node_id)
           break if fork_node.nil?
           break if fork_node.lane_id.to_s != parent_lane.id.to_s
 
@@ -190,6 +180,14 @@ module DAG
       end
 
       def window_turn_ids_for_segments(segments, limit_turns:, include_deleted:)
+        segments =
+          segments
+            .group_by(&:lane_id)
+            .values
+            .map do |lane_segments|
+              lane_segments.max_by { |segment| [segment.cutoff_created_at, segment.cutoff_node_id.to_s] }
+            end
+
         turn_rows =
           segments.flat_map do |segment|
             anchored_turn_rows_for_segment(
@@ -339,6 +337,24 @@ module DAG
           "payload" => payload_hash,
           "metadata" => node.metadata,
         }
+      end
+
+      def lane_record(lane_id)
+        lane_id = lane_id.to_s
+        @lane_cache[lane_id] ||=
+          @graph.lanes
+            .where(id: lane_id)
+            .select(:id, :parent_lane_id, :forked_from_node_id)
+            .first
+      end
+
+      def node_record(node_id)
+        node_id = node_id.to_s
+        @node_cache[node_id] ||=
+          @graph.nodes
+            .where(id: node_id)
+            .select(:id, :lane_id, :turn_id, :created_at)
+            .first
       end
   end
 end
