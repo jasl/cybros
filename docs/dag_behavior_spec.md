@@ -281,7 +281,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（conversation graphs 默认 `user_message/agent_message/character_message`）。
 - `graph.turn_anchor_node_types` 返回该图配置下的 turn anchor node types。
-- `lane.turn_entries` / `lane.turn_count` / `lane.turn_seq_for(turn_id)` 以 turn anchors 在该 lane 内的出现顺序生成一个 **1-based** 的 `turn_seq`。
+- `lane.anchored_turns` / `lane.turn_count` / `lane.turn_seq_for(turn_id)` 以 turn anchors 在该 lane 内的出现顺序生成一个 **1-based** 的 `turn_seq`。
 
 统计口径（normative）：
 
