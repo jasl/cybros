@@ -226,7 +226,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 - `DAG::TickGraphJob`
   - 对同一 graph 做 tick 去重（advisory lock try-lock）
-  - 在图锁内执行顺序：`FailurePropagation` → `graph.apply_visibility_patches_if_idle!` → Scheduler claim
+  - 在图锁内执行顺序：`RunningLeaseReclaimer` → `FailurePropagation` → `graph.apply_visibility_patches_if_idle!` → Scheduler claim
   - claim pending nodes → enqueue `DAG::ExecuteNodeJob`
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
@@ -281,7 +281,9 @@ Context 可见性（视图层）：
 为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（lane）” 等需求，DAG 提供 transcript 投影：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
-  - 按 `turn_id` 聚合：以 `user_message` 作为 turn anchor（只查询最近 N 轮的 user_message），再返回这些轮次内的 `user_message/agent_message/character_message`
+  - 按 `turn_id` 聚合：按 NodeBody hooks 的 `turn_anchor?` 选择 turn anchor（conversation graphs 默认 `user_message`）
+  - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
+  - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
   - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）
 - `lane.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
   - **lane-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 lane 的 turn 混在一起）

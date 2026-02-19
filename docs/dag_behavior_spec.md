@@ -285,7 +285,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - 只看 **同一条 lane** 内的 nodes，且 `node_type IN graph.turn_anchor_node_types`。
 - **必须包含**已压缩（inactive）与软删除（`deleted_at` 非空）的历史 anchors：`turn_seq` 不回填、不重算。
-- 排序规则：按每个 turn 的 anchor 节点的 `MIN(created_at)` 升序；再以一个稳定的 tie-breaker（例如 `MIN(id)`）保证确定性。
+- 排序规则：对每个 `turn_id`，按 anchor 节点的 `(created_at ASC, id ASC)` 选出该 turn 的 “anchor row”，再按 `(anchor_created_at ASC, anchor_id ASC)` 排序生成 `turn_seq`（保证稳定确定性）。
 
 可选的“可见 turns”（非规范，用于 UI）：
 
@@ -740,7 +740,7 @@ Active 版本确定规则：
 
 - graph idle：Active 图中不存在任何 `state=running` 的节点
 - target 为 `finished`
-- target 为 leaf（Active 图中无 outgoing blocking edges）
+- target 必须无任何 outgoing blocking edges（`sequence/dependency`，包含 inactive 边；用于避免 adopt 时需要恢复下游）
 - `version_set_id` 不跨 turn/lane（同组必须共享 `turn_id` 与 `lane_id`）
 
 行为（normative）：
@@ -748,6 +748,7 @@ Active 版本确定规则：
 1) 归档（archive）该 `version_set_id` 下所有其它 Active 版本（node + incident edges）。
 2) 若 target 为 inactive，则将 target 恢复为 Active（清 `compressed_at/compressed_by_id`）。
 3) 恢复 target 与当前 Active 上游之间的 incoming blocking edges（清这些 edges 的 `compressed_at`）。
+   - 若不存在任何来自 Active nodes 的 incoming blocking edges，必须失败（避免 adopt 出现孤立节点）。
 4) 为保持 leaf invariant，必要时可清理该 turn 内因版本切换产生的“无效 leaf”（例如 orphan 的 finished task），将其归档。
 
 ### 7.8 merge（分支合并回目标 lane：创建 join 节点）
