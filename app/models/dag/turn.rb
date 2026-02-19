@@ -3,7 +3,7 @@ module DAG
     self.table_name = "dag_turns"
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :turns
-    belongs_to :lane, class_name: "DAG::Lane", inverse_of: :turns
+    belongs_to :lane, class_name: "DAG::Lane", inverse_of: :turn_records
 
     has_many :nodes,
              class_name: "DAG::Node",

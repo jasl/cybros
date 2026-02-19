@@ -110,7 +110,7 @@ Doc: `docs/dag_public_api.md`
 - `finished` — Completed successfully
 - `errored` — Failed (retryable for agent nodes)
 - `rejected` — User declined to authorize the operation
-- `canceled` — User canceled the conversation
+- `cancelled` — User canceled the conversation
 - `skipped` — User skipped the node (e.g. the task is unneeded)
 
 #### Edge Types

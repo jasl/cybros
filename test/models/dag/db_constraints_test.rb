@@ -1,4 +1,5 @@
 require "test_helper"
+require "securerandom"
 
 class DAG::DBConstraintsTest < ActiveSupport::TestCase
   test "dag_nodes.state is constrained at the database layer" do
@@ -108,6 +109,69 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
 
     assert_raises(ActiveRecord::StatementInvalid) do
       node.update_column(:compressed_by_id, other.id)
+    end
+  end
+
+  test "dag_turns anchor fields are constrained for consistency at the database layer" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    lane = graph.main_lane
+
+    turn = graph.turns.create!(lane_id: lane.id, metadata: {})
+
+    assert_raises(ActiveRecord::StatementInvalid) do
+      turn.update_column(:anchor_node_id, SecureRandom.uuid)
+    end
+  end
+
+  test "dag_turns.lane_id is constrained to the same graph at the database layer" do
+    conversation_a = Conversation.create!
+    graph_a = conversation_a.dag_graph
+
+    conversation_b = Conversation.create!
+    graph_b = conversation_b.dag_graph
+
+    lane_b = graph_b.main_lane
+
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      DAG::Turn.new(graph_id: graph_a.id, lane_id: lane_b.id, metadata: {}).save!(validate: false)
+    end
+  end
+
+  test "dag_nodes.turn_id is constrained to existing dag_turns at the database layer" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      DAG::Node.with_connection do |connection|
+        node.update_column(:turn_id, SecureRandom.uuid)
+        connection.execute("SET CONSTRAINTS fk_dag_nodes_turn_graph_scoped IMMEDIATE")
+      end
+    end
+  end
+
+  test "dag_nodes cannot change lanes without matching dag_turns row (lane+turn consistency at the database layer)" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    lane_a = graph.main_lane
+    lane_b = graph.lanes.create!(role: DAG::Lane::BRANCH, metadata: {})
+
+    node =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane_a.id,
+        metadata: {}
+      )
+
+    assert_raises(ActiveRecord::InvalidForeignKey) do
+      DAG::Node.with_connection do |connection|
+        node.update_column(:lane_id, lane_b.id)
+        connection.execute("SET CONSTRAINTS fk_dag_nodes_turn_graph_scoped IMMEDIATE")
+      end
     end
   end
 end

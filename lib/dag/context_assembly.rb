@@ -55,7 +55,7 @@ module DAG
               SELECT active_nodes.id
               FROM active_nodes
               WHERE active_nodes.id = #{target_quoted}::uuid
-              UNION ALL
+              UNION
               SELECT e.from_node_id
               FROM ancestors a
               JOIN LATERAL (
@@ -68,7 +68,7 @@ module DAG
               ) e ON true
               JOIN active_nodes parent ON parent.id = e.from_node_id
             )
-            SELECT DISTINCT node_id FROM ancestors
+            SELECT node_id FROM ancestors
           SQL
 
           connection.select_values(sql)

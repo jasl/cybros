@@ -26,7 +26,7 @@ module DAG
     has_many :nodes,
              class_name: "DAG::Node",
              inverse_of: :lane
-    has_many :turns,
+    has_many :turn_records,
              class_name: "DAG::Turn",
              inverse_of: :lane
 
@@ -38,38 +38,37 @@ module DAG
     end
 
     def turns(include_deleted: true)
-      turn_anchor_types = graph.turn_anchor_node_types
+      anchor_rows =
+        graph.turns
+          .where(lane_id: id)
+          .where.not(anchor_node_id: nil)
+          .joins(<<~SQL.squish)
+            JOIN dag_nodes anchors
+              ON anchors.id = dag_turns.anchor_node_id
+             AND anchors.graph_id = dag_turns.graph_id
+             AND anchors.lane_id = dag_turns.lane_id
+          SQL
+          .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
+          .pluck(
+            Arel.sql("dag_turns.id"),
+            Arel.sql("dag_turns.anchor_created_at"),
+            Arel.sql("anchors.deleted_at IS NOT NULL")
+          )
 
-      if turn_anchor_types.empty?
-        []
-      else
-        anchor_rows =
-          graph.turns
-            .where(lane_id: id)
-            .where.not(anchor_node_id: nil)
-            .joins("JOIN dag_nodes anchors ON anchors.id = dag_turns.anchor_node_id")
-            .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
-            .pluck(
-              Arel.sql("dag_turns.id"),
-              Arel.sql("dag_turns.anchor_created_at"),
-              Arel.sql("anchors.deleted_at IS NOT NULL")
-            )
-
-        turns =
-          anchor_rows.each_with_index.map do |(turn_id, anchor_created_at, anchor_deleted), index|
-            {
-              turn_id: turn_id,
-              seq: index + 1,
-              anchor_created_at: anchor_created_at,
-              anchor_deleted: anchor_deleted == true,
-            }
-          end
-
-        if include_deleted
-          turns
-        else
-          turns.reject { |turn| turn.fetch(:anchor_deleted) }
+      turns =
+        anchor_rows.each_with_index.map do |(turn_id, anchor_created_at, anchor_deleted), index|
+          {
+            turn_id: turn_id,
+            seq: index + 1,
+            anchor_created_at: anchor_created_at,
+            anchor_deleted: anchor_deleted == true,
+          }
         end
+
+      if include_deleted
+        turns
+      else
+        turns.reject { |turn| turn.fetch(:anchor_deleted) }
       end
     end
 
@@ -233,71 +232,71 @@ module DAG
           raise ArgumentError, "before_turn_id and after_turn_id are mutually exclusive"
         end
 
-        turn_anchor_types = graph.turn_anchor_node_types
-        if turn_anchor_types.empty?
-          []
-        else
-          anchors =
-            graph.turns
-              .where(lane_id: id)
-              .where.not(anchor_node_id: nil)
-              .joins("JOIN dag_nodes anchors ON anchors.id = dag_turns.anchor_node_id")
-              .where(Arel.sql("anchors.compressed_at IS NULL"))
+        anchors =
+          graph.turns
+            .where(lane_id: id)
+            .where.not(anchor_node_id: nil)
+            .joins(<<~SQL.squish)
+              JOIN dag_nodes anchors
+                ON anchors.id = dag_turns.anchor_node_id
+               AND anchors.graph_id = dag_turns.graph_id
+               AND anchors.lane_id = dag_turns.lane_id
+            SQL
+            .where(Arel.sql("anchors.compressed_at IS NULL"))
 
-          anchors = anchors.where(Arel.sql("anchors.deleted_at IS NULL")) unless include_deleted
+        anchors = anchors.where(Arel.sql("anchors.deleted_at IS NULL")) unless include_deleted
 
-          cursor_created_at = nil
-          cursor_anchor_id = nil
+        cursor_created_at = nil
+        cursor_anchor_id = nil
 
-          if before_turn_id.present? || after_turn_id.present?
-            cursor_turn_id = before_turn_id.presence || after_turn_id
+        if before_turn_id.present? || after_turn_id.present?
+          cursor_turn_id = before_turn_id.presence || after_turn_id
 
-            cursor_created_at, cursor_anchor_id =
-              anchors
-                .where("dag_turns.id = ?", cursor_turn_id)
-                .pick(Arel.sql("dag_turns.anchor_created_at"), Arel.sql("dag_turns.anchor_node_id"))
+          cursor_created_at, cursor_anchor_id =
+            anchors
+              .where("dag_turns.id = ?", cursor_turn_id)
+              .pick(Arel.sql("dag_turns.anchor_created_at"), Arel.sql("dag_turns.anchor_node_id"))
 
-            if cursor_created_at.nil? || cursor_anchor_id.nil?
-              raise ArgumentError, "cursor turn_id is unknown or not visible"
-            end
+          if cursor_created_at.nil? || cursor_anchor_id.nil?
+            raise ArgumentError, "cursor turn_id is unknown or not visible"
           end
-
-          if before_turn_id.present?
-            turn_ids =
-              anchors
-                .where(
-                  "dag_turns.anchor_created_at < ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id < ?)",
-                  cursor_created_at,
-                  cursor_created_at,
-                  cursor_anchor_id
-                )
-                .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
-                .limit(limit_turns)
-                .pluck(Arel.sql("dag_turns.id"))
-                .reverse
-          elsif after_turn_id.present?
-            turn_ids =
-              anchors
-                .where(
-                  "dag_turns.anchor_created_at > ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id > ?)",
-                  cursor_created_at,
-                  cursor_created_at,
-                  cursor_anchor_id
-                )
-                .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
-                .limit(limit_turns)
-                .pluck(Arel.sql("dag_turns.id"))
-          else
-            turn_ids =
-              anchors
-                .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
-                .limit(limit_turns)
-                .pluck(Arel.sql("dag_turns.id"))
-                .reverse
-          end
-
-          turn_ids.map(&:to_s)
         end
+
+        if before_turn_id.present?
+          turn_ids =
+            anchors
+              .where(
+                "dag_turns.anchor_created_at < ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id < ?)",
+                cursor_created_at,
+                cursor_created_at,
+                cursor_anchor_id
+              )
+              .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
+              .limit(limit_turns)
+              .pluck(Arel.sql("dag_turns.id"))
+              .reverse
+        elsif after_turn_id.present?
+          turn_ids =
+            anchors
+              .where(
+                "dag_turns.anchor_created_at > ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id > ?)",
+                cursor_created_at,
+                cursor_created_at,
+                cursor_anchor_id
+              )
+              .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
+              .limit(limit_turns)
+              .pluck(Arel.sql("dag_turns.id"))
+        else
+          turn_ids =
+            anchors
+              .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
+              .limit(limit_turns)
+              .pluck(Arel.sql("dag_turns.id"))
+              .reverse
+        end
+
+        turn_ids.map(&:to_s)
       end
 
       def transcript_for_turn_ids(turn_ids:, mode:, include_deleted:)

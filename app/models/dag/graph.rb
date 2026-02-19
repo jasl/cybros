@@ -105,14 +105,15 @@ module DAG
       limit_turns = Integer(limit_turns)
       return [] if limit_turns <= 0
 
-      turn_anchor_types = turn_anchor_node_types
-      return [] if turn_anchor_types.empty?
-
       turn_scope =
         turns
           .where.not(anchor_node_id: nil)
-          .joins("JOIN dag_nodes anchors ON anchors.id = dag_turns.anchor_node_id")
-          .where("anchors.node_type IN (?)", turn_anchor_types)
+          .joins(<<~SQL.squish)
+            JOIN dag_nodes anchors
+              ON anchors.id = dag_turns.anchor_node_id
+             AND anchors.graph_id = dag_turns.graph_id
+             AND anchors.lane_id = dag_turns.lane_id
+          SQL
           .where(Arel.sql("anchors.compressed_at IS NULL"))
 
       turn_scope = turn_scope.where(Arel.sql("anchors.deleted_at IS NULL")) unless include_deleted
