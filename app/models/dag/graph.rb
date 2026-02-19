@@ -15,6 +15,9 @@ module DAG
     has_many :nodes,
              class_name: "DAG::Node",
              inverse_of: :graph
+    has_many :node_events,
+             class_name: "DAG::NodeEvent",
+             inverse_of: :graph
     has_many :edges,
              class_name: "DAG::Edge",
              inverse_of: :graph
@@ -112,6 +115,44 @@ module DAG
         include_excluded: include_excluded,
         include_deleted: include_deleted
       )
+    end
+
+    def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
+      limit = Integer(limit)
+      raise ArgumentError, "limit must be > 0" if limit <= 0
+
+      limit = [limit, 1000].min
+
+      scope = node_event_scope_for(node_id, kinds: kinds).ordered
+
+      if after_event_id.present?
+        scope = scope.where("id > ?", after_event_id)
+      end
+
+      scope
+        .limit(limit)
+        .select(:id, :node_id, :kind, :text, :payload, :created_at)
+        .map do |event|
+          {
+            "event_id" => event.id,
+            "node_id" => event.node_id,
+            "kind" => event.kind,
+            "text" => event.text,
+            "payload" => event.payload,
+            "created_at" => event.created_at&.iso8601,
+          }
+        end
+    end
+
+    def node_event_scope_for(node_id, kinds: nil)
+      scope = node_events.where(node_id: node_id)
+
+      kinds = Array(kinds).map(&:to_s).reject(&:blank?) if kinds
+      if kinds&.any?
+        scope = scope.where(kind: kinds)
+      end
+
+      scope
     end
 
     def transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)

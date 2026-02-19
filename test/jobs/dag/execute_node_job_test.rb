@@ -4,17 +4,19 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
   include ActiveJob::TestHelper
 
   class FakeTaskExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
       DAG::ExecutionResult.finished(metadata: { "ok" => true })
     end
   end
 
   class FakeAgentMessageExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
       DAG::ExecutionResult.finished(content: "done")
     end
   end

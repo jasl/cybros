@@ -4,8 +4,9 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   class IntentAwareAgentExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = context
+      _ = stream
 
       intent = node.metadata["rerun_intent"].to_s
       graph = node.graph

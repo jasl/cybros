@@ -4,17 +4,19 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   class SkipExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
       DAG::ExecutionResult.skipped(reason: "not needed")
     end
   end
 
   class UsageExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
 
       DAG::ExecutionResult.finished(
         payload: { "content" => "ok" },
@@ -30,9 +32,10 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   class ToolCallArrayResultExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
 
       DAG::ExecutionResult.finished(
         payload: { "result" => [1, 2, 3] },

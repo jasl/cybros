@@ -1,19 +1,20 @@
 require "test_helper"
 
-class DAG::ChatbotFlowTest < ActiveSupport::TestCase
+class DAG::ChatbotStreamingFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
-  class FixedContentExecutor
-    def initialize(content)
-      @content = content
-    end
-
+  class StreamingExecutor
     def execute(node:, context:, stream:)
       _ = node
       _ = context
-      _ = stream
 
-      DAG::ExecutionResult.finished(payload: { "content" => @content }, usage: { "total_tokens" => 1 })
+      stream.output_delta!("你")
+      stream.output_delta!("好")
+      stream.progress(phase: "llm", message: "streaming")
+
+      DAG::ExecutionResult.finished_streamed(
+        usage: { "total_tokens" => 1 }
+      )
     end
   end
 
@@ -22,10 +23,10 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "chatbot flow: system+developer+user context, leaf repair, and transcript excludes system/developer" do
+  test "chatbot streaming flow: executor streams output deltas, final output is materialized, and node events are queryable" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    turn_id = "0194f3c0-0000-7000-8000-00000000c001"
+    turn_id = "0194f3c0-0000-7000-8000-00000000c012"
 
     system = nil
     developer = nil
@@ -40,12 +41,10 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
       m.create_edge(from_node: developer, to_node: user, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    repaired = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).to_a
-    assert_equal 1, repaired.length
-    agent = repaired.first
+    agent = graph.nodes.active.find_by!(turn_id: turn_id, node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(Messages::AgentMessage.node_type_key, FixedContentExecutor.new("你好"))
+    registry.register(Messages::AgentMessage.node_type_key, StreamingExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -56,16 +55,26 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
 
       DAG::Runner.run_node!(agent.id)
 
+      agent.reload
+      assert_equal DAG::Node::FINISHED, agent.state
+      assert_equal "你好", agent.body_output["content"]
+
+      events = graph.node_event_page_for(agent.id)
+      output_deltas = events.select { |event| event.fetch("kind") == DAG::NodeEvent::OUTPUT_DELTA }
+      assert_equal ["你", "好"], output_deltas.map { |event| event.fetch("text") }
+      assert events.any? { |event| event.fetch("kind") == DAG::NodeEvent::PROGRESS }
+
       context = conversation.context_for(agent.id)
       context_ids = context.map { |node| node.fetch("node_id") }
       assert_equal [system.id, developer.id, user.id, agent.id], context_ids
 
+      full = conversation.context_for_full(agent.id)
+      agent_full = full.find { |node| node.fetch("node_id") == agent.id }
+      assert_equal "你好", agent_full.dig("payload", "output", "content")
+
       transcript = conversation.transcript_for(agent.id)
       assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
       assert_equal "你好", transcript.last.dig("payload", "output_preview", "content")
-
-      assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::LEAF_INVARIANT_REPAIRED, subject: agent)
-      assert conversation.events.exists?(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED, subject: agent)
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure

@@ -4,8 +4,9 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   class LaneAwareAgentExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = context
+      _ = stream
 
       graph = node.graph
 

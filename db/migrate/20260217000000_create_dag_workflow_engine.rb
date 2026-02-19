@@ -134,6 +134,22 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.timestamps
     end
 
+    create_table :dag_node_events, id: :uuid, default: -> { "uuidv7()" } do |t|
+      t.references :graph, null: false, type: :uuid,
+                   foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
+
+      t.uuid :node_id, null: false
+
+      t.string :kind, null: false
+      t.text :text
+      t.jsonb :payload, null: false, default: {}
+
+      t.datetime :created_at, null: false
+
+      t.index %i[graph_id node_id id], name: "index_dag_node_events_graph_node_id_id"
+      t.index %i[graph_id node_id kind id], name: "index_dag_node_events_graph_node_kind_id"
+    end
+
     create_table :dag_node_visibility_patches, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
@@ -211,6 +227,12 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                     column: %i[graph_id node_id],
                     primary_key: %i[graph_id id],
                     name: "fk_dag_visibility_patches_node_graph_scoped",
+                    on_delete: :cascade
+
+    add_foreign_key :dag_node_events, :dag_nodes,
+                    column: %i[graph_id node_id],
+                    primary_key: %i[graph_id id],
+                    name: "fk_dag_node_events_node_graph_scoped",
                     on_delete: :cascade
 
     add_foreign_key :dag_lanes, :dag_lanes, column: :parent_lane_id, on_delete: :nullify

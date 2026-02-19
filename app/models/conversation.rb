@@ -3,6 +3,7 @@ class Conversation < ApplicationRecord
           dependent: :destroy, autosave: true
   delegate :mutate!, :compress!, :kick!, :context_for, :context_for_full,
            :context_closure_for, :context_closure_for_full,
+           :node_event_page_for, :node_event_scope_for,
            :context_node_scope_for, :to_mermaid,
            to: :dag_graph, allow_nil: false
   delegate :transcript_for, :transcript_for_full,

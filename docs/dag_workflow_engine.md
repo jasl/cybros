@@ -222,8 +222,10 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
 - 执行流程：
   1. 组装上下文 `graph.context_for(node.id)`（默认 bounded window；需要全量祖先闭包时用 `context_closure_for`）
-  2. `DAG.executor_registry.execute(node:, context:)`
+  2. `DAG.executor_registry.execute(node:, context:, stream:)`
+     - `stream` 为 `DAG::NodeEventStream`：把增量输出/进度/log 以 append-only 的方式写入 `dag_node_events`
   3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
+     - 若 executor 返回 `ExecutionResult.finished_streamed`：Runner 会汇总该 node 的 `output_delta` events 并物化写回 NodeBody.output（最终 output_preview 仍由 output 派生）
      - 观测信息：
        - `dag_nodes.metadata["usage"]`：executor 回传的 tokens/cost usage（一次执行/一次调用）
        - `dag_nodes.metadata["output_stats"]`：输出体积/结构统计（含 `pg_column_size` 的 DB 侧字节大小；仅 finished 写入）

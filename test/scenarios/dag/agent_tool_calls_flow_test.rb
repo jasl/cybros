@@ -4,7 +4,8 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   class PlanningAndFinalAgentExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
+      _ = stream
       phase = node.metadata["phase"].to_s
 
       if phase == "plan"
@@ -59,8 +60,9 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   end
 
   class ToolCallExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = context
+      _ = stream
 
       name = node.body_input["name"].to_s
 

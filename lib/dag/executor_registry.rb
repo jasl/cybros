@@ -13,8 +13,8 @@ module DAG
       @executors.fetch(node.node_type) { @default_executor }
     end
 
-    def execute(node:, context:)
-      executor_for(node).execute(node: node, context: context)
+    def execute(node:, context:, stream:)
+      executor_for(node).execute(node: node, context: context, stream: stream)
     end
   end
 

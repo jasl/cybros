@@ -8,9 +8,10 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
       @payload = payload
     end
 
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = node
       _ = context
+      _ = stream
 
       DAG::ExecutionResult.finished(payload: @payload, usage: { "total_tokens" => 1 })
     end

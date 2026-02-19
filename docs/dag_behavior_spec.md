@@ -252,6 +252,35 @@ Active 视图内必须保持一致（不允许 drift）：
 - `metadata["timing"]`
 - `metadata["worker"]`
 
+#### 2.6.5 Node events（流式/进度/events；append-only）
+
+为支持 ChatGPT/Codex-like 的 “token streaming / 执行进度 / 可回放审计”，里程碑 1 引擎引入 node-scoped 的 append-only 事件流：
+
+- 表：`dag_node_events`
+  - `graph_id` / `node_id` / `kind` / `text` / `payload` / `created_at`
+  - 事件顺序：按 `id`（uuidv7）升序（稳定 keyset；可分页）
+
+约定的 `kind`（不做 DB enum；保留扩展空间）：
+
+- `output_delta`：增量输出片段
+  - `text` 必须为 String（chunk 级别；不建议 token 级别）
+- `progress`：结构化进度
+  - 建议 payload：`{phase:, message:, percent:, data:}`（keys 为 string）
+- `log`：执行日志（tool log / debug log）
+  - `text` 为单行或短文本；可在 payload 中带 `{level:}` 等附加信息
+
+执行语义（normative）：
+
+- streaming 仅影响可观测性/实时展示，**不改变 DAG 的拓扑/调度语义**（Scheduler gating 仍只看 `state + blocking edges`）。
+- executor 接口：`execute(node:, context:, stream:)`
+  - **非流式**：返回 `DAG::ExecutionResult.finished(payload: ...)` 或 `finished(content: ...)`
+  - **流式**：通过 `stream.output_delta(...)` 写入 `output_delta` 事件，并返回 `DAG::ExecutionResult.finished_streamed(...)`
+    - 严格二选一：`finished_streamed` 不允许同时携带 `payload/content`；否则 Runner 必须将节点标记为 `errored`（实现错误）
+
+物化规则（normative）：
+
+- 当 executor 返回 `finished_streamed` 时，Runner 必须按 `id ASC` 汇总该 node 的 `output_delta.text` 并拼接为最终字符串，然后再调用 `node.mark_finished!(content: ...)` 写入 NodeBody 的最终 output（同时 output_preview 从 output 派生）。
+
 ### 2.7 `lane_id`（分区 / Thread-like Lane）
 
 里程碑 1 引入 Lane 分区模型，用于把一张 DAG 图中的分支子图“染色/索引”为若干个分区（Thread-like）。规范性要求：

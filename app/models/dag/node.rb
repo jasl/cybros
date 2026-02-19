@@ -40,6 +40,9 @@ module DAG
              foreign_key: :to_node_id,
              dependent: :destroy,
              inverse_of: :to_node
+    has_many :node_events,
+             class_name: "DAG::NodeEvent",
+             inverse_of: :node
 
     validates :node_type, presence: true
     validates :state, inclusion: { in: STATES }

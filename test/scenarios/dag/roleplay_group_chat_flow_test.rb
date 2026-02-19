@@ -4,8 +4,9 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   class CharacterExecutor
-    def execute(node:, context:)
+    def execute(node:, context:, stream:)
       _ = context
+      _ = stream
 
       actor = node.metadata["actor"].to_s
       content =

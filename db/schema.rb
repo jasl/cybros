@@ -67,7 +67,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
     t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
-    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying::text, 'dependency'::character varying::text, 'branch'::character varying::text])", name: "check_dag_edges_edge_type_enum"
+    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying, 'dependency'::character varying, 'branch'::character varying]::text[])", name: "check_dag_edges_edge_type_enum"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
   end
 
@@ -103,7 +103,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.index ["graph_id"], name: "index_dag_lanes_on_graph_id"
     t.check_constraint "merged_into_lane_id IS NULL OR merged_into_lane_id <> id", name: "check_dag_lanes_no_self_merge"
     t.check_constraint "parent_lane_id IS NULL OR parent_lane_id <> id", name: "check_dag_lanes_no_self_parent"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_dag_lanes_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_dag_lanes_role_enum"
   end
 
   create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -113,6 +113,18 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.jsonb "output_preview", default: {}, null: false
     t.string "type", null: false
     t.datetime "updated_at", null: false
+  end
+
+  create_table "dag_node_events", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "graph_id", null: false
+    t.string "kind", null: false
+    t.uuid "node_id", null: false
+    t.jsonb "payload", default: {}, null: false
+    t.text "text"
+    t.index ["graph_id", "node_id", "id"], name: "index_dag_node_events_graph_node_id_id"
+    t.index ["graph_id", "node_id", "kind", "id"], name: "index_dag_node_events_graph_node_kind_id"
+    t.index ["graph_id"], name: "index_dag_node_events_on_graph_id"
   end
 
   create_table "dag_node_visibility_patches", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -167,9 +179,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'cancelled'::character varying::text]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'cancelled'::character varying::text]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying::text, 'running'::character varying::text, 'finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'cancelled'::character varying::text])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -210,7 +222,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.datetime "updated_at", null: false
     t.index ["conversation_id"], name: "index_topics_main_per_conversation", unique: true, where: "((role)::text = 'main'::text)"
     t.index ["conversation_id"], name: "index_topics_on_conversation_id"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_topics_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_topics_role_enum"
   end
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
@@ -223,6 +235,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
   add_foreign_key "dag_lanes", "dag_lanes", column: "parent_lane_id", on_delete: :nullify
   add_foreign_key "dag_lanes", "dag_nodes", column: "forked_from_node_id", on_delete: :nullify
   add_foreign_key "dag_lanes", "dag_nodes", column: "root_node_id", on_delete: :nullify
+  add_foreign_key "dag_node_events", "dag_graphs", column: "graph_id", on_delete: :cascade
+  add_foreign_key "dag_node_events", "dag_nodes", column: ["graph_id", "node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_node_events_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_node_visibility_patches", "dag_graphs", column: "graph_id", on_delete: :cascade
   add_foreign_key "dag_node_visibility_patches", "dag_nodes", column: ["graph_id", "node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_visibility_patches_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_nodes", "dag_graphs", column: "graph_id"

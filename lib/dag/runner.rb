@@ -10,6 +10,8 @@ module DAG
     end
 
     def run_node!
+      stream = nil
+
       node = DAG::Node.find_by(id: @node_id)
       return if node.nil?
       return unless node.running?
@@ -21,9 +23,14 @@ module DAG
 
       context = graph.context_for(node.id)
 
-      result = DAG.executor_registry.execute(node: node, context: context)
+      stream = DAG::NodeEventStream.new(node: node)
+      result = DAG.executor_registry.execute(node: node, context: context, stream: stream)
+
+      stream.flush!
+
+      streamed_output = streamed_output_for(node) if result.streamed_output?
       graph.with_graph_lock! do
-        apply_result(node, result)
+        apply_result(node, result, streamed_output: streamed_output)
         DAG::FailurePropagation.propagate!(graph: graph)
         graph.validate_leaf_invariant!
       end
@@ -37,6 +44,14 @@ module DAG
         end
       end
     ensure
+      begin
+        stream&.flush!
+      rescue StandardError => error
+        Rails.logger.error(
+          "[DAG] node_event_stream_flush_error node_id=#{@node_id} error=#{error.class}: #{error.message}"
+        )
+      end
+
       DAG::TickGraphJob.perform_later(node.graph_id) if node
     end
 
@@ -64,7 +79,25 @@ module DAG
         true
       end
 
-      def apply_result(node, result)
+      def streamed_output_for(node)
+        DAG::NodeEvent.with_connection do |connection|
+          graph_quoted = connection.quote(node.graph_id)
+          node_quoted = connection.quote(node.id)
+          kind_quoted = connection.quote(DAG::NodeEvent::OUTPUT_DELTA)
+
+          sql = <<~SQL
+            SELECT COALESCE(string_agg(text, '' ORDER BY id), '')
+            FROM dag_node_events
+            WHERE graph_id = #{graph_quoted}
+              AND node_id = #{node_quoted}::uuid
+              AND kind = #{kind_quoted}
+          SQL
+
+          connection.select_value(sql).to_s
+        end
+      end
+
+      def apply_result(node, result, streamed_output: nil)
         from_state = node.state
         metadata = normalize_hook_metadata(result.metadata)
         if result.usage.is_a?(Hash) && result.usage.present?
@@ -74,7 +107,18 @@ module DAG
         transitioned =
           case result.state
           when DAG::Node::FINISHED
-            node.mark_finished!(content: result.content, payload: result.payload, metadata: metadata)
+            if result.streamed_output?
+              if result.content.present? || result.payload.present?
+                node.mark_errored!(
+                  error: "invalid_execution_result=finished_streamed_with_payload_or_content",
+                  metadata: metadata
+                )
+              else
+                node.mark_finished!(content: streamed_output.to_s, metadata: metadata)
+              end
+            else
+              node.mark_finished!(content: result.content, payload: result.payload, metadata: metadata)
+            end
           when DAG::Node::ERRORED
             node.mark_errored!(error: result.error || "errored", metadata: metadata)
           when DAG::Node::REJECTED
