@@ -643,7 +643,9 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 
 里程碑 1（Default policy）修复策略：
 
-- 若发现 leaf 为 terminal 且 `leaf_terminal? == false`，系统自动追加 “默认 leaf repair” 子节点（由 NodeBody hooks 中唯一 `default_leaf_repair? == true` 的 body 决定；里程碑 1 默认 `agent_message(pending)`），并用 `sequence` 连接。
+- 若发现 leaf 为 terminal 且 `leaf_terminal? == false`，系统自动追加 “默认 leaf repair” 子节点（由 NodeBody hooks 中唯一 `default_leaf_repair? == true` 的 body 决定；里程碑 1 默认 `agent_message`），并用 `sequence` 连接。
+  - 默认：`agent_message(pending)`（继续推进图执行）
+  - 例外（规范性要求）：当 leaf 为 `stopped`（user stop）时，leaf repair **不得**创建新的 pending work；修复节点应为 terminal（建议 `agent_message(finished)` 并写 `metadata["transcript_preview"]="Stopped"` 类占位），以满足“stop 不应自动续跑”的产品语义。
 - 修复必须在图锁+事务内进行，并记录事件 `leaf_invariant_repaired`。
 - 修复必须在图锁+事务内进行（可观测可通过 hooks 投影，见第 9 节）。
 

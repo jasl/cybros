@@ -444,6 +444,35 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal DAG::Node::PENDING, node.reload.state
   end
 
+  test "stop! repairs leaf invariant for stopped non-leaf-terminal leaves without creating new pending work" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    task = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+    assert_equal [task.id], graph.leaf_nodes.pluck(:id)
+
+    assert task.stop!(reason: "stopped_by_user")
+
+    task.reload
+    assert_equal DAG::Node::STOPPED, task.state
+
+    leaves = graph.leaf_nodes.order(:id).to_a
+    assert_equal 1, leaves.length
+
+    leaf = leaves.first
+    assert_equal Messages::AgentMessage.node_type_key, leaf.node_type
+    assert_equal DAG::Node::FINISHED, leaf.state
+    assert_equal "Stopped: stopped_by_user", leaf.metadata["transcript_preview"]
+
+    assert graph.edges.active.exists?(
+      from_node_id: task.id,
+      to_node_id: leaf.id,
+      edge_type: DAG::Edge::SEQUENCE
+    )
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
+  end
+
   test "mark_skipped! works from pending" do
     conversation = Conversation.create!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})

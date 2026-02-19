@@ -463,6 +463,20 @@ module DAG
           finished_at: now,
           metadata: metadata,
         }
+      elsif leaf.stopped?
+        now = Time.current
+        reason = leaf.metadata.is_a?(Hash) ? leaf.metadata["reason"].to_s : ""
+
+        metadata["reason"] = reason.presence || "stopped"
+        metadata["transcript_preview"] = reason.present? ? "Stopped: #{reason}" : "Stopped"
+
+        {
+          node_type: node_type,
+          state: DAG::Node::FINISHED,
+          lane_id: leaf.lane_id,
+          finished_at: now,
+          metadata: metadata,
+        }
       else
         {
           node_type: node_type,

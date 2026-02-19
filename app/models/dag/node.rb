@@ -254,6 +254,8 @@ module DAG
           )
 
         if transitioned
+          graph.validate_leaf_invariant!
+
           graph.emit_event(
             event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
             subject: self,
@@ -283,6 +285,8 @@ module DAG
           )
 
         if transitioned
+          graph.validate_leaf_invariant!
+
           graph.emit_event(
             event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
             subject: self,
@@ -313,6 +317,7 @@ module DAG
 
         if transitioned
           materialize_output_deltas_for_stop!
+          graph.validate_leaf_invariant!
 
           graph.emit_event(
             event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
