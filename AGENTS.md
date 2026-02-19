@@ -27,8 +27,12 @@ bin/rails test test/path/file_test.rb:42 # Run single test method by line number
 bin/rails test:system                    # Run system tests (Capybara + Selenium)
 bin/ci                                   # Run full CI suite (style, security, tests)
 
-# For parallel test execution issues, use:
-PARALLEL_WORKERS=1 bin/rails test
+# Tests default to a single process for speed and determinism.
+# Opt into parallelization via:
+PARALLEL_WORKERS=8 bin/rails test
+
+# Enable local coverage (CI always enables it):
+COVERAGE=1 bin/rails test
 ```
 
 CI pipeline (`bin/ci`) runs:

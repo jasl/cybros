@@ -1,25 +1,29 @@
-require "simplecov"
-require "fileutils"
+TEST_COVERAGE_ENABLED = ENV["CI"].to_s.strip != "" || ENV["COVERAGE"].to_s.strip != ""
 
-# Rails parallel tests can leave multiple named entries in `.resultset.json`.
-# Clearing at the start avoids merging stale results across separate `bin/rails test`
-# runs (e.g., when the worker count changes), which can otherwise skew coverage.
-SimpleCov::ResultMerger.synchronize_resultset do
-  FileUtils.mkdir_p(SimpleCov.coverage_path)
-  File.write(SimpleCov::ResultMerger.resultset_path, "{}\n")
-end
+if TEST_COVERAGE_ENABLED
+  require "simplecov"
+  require "fileutils"
 
-SimpleCov.enable_for_subprocesses true
-SimpleCov.start "rails" do
-  # Track coverage for app code only
-  add_filter "/test/"
-  add_filter "/config/"
-  add_filter "/db/"
-  add_filter "/vendor/"
+  # Rails parallel tests can leave multiple named entries in `.resultset.json`.
+  # Clearing at the start avoids merging stale results across separate `bin/rails test`
+  # runs (e.g., when the worker count changes), which can otherwise skew coverage.
+  SimpleCov::ResultMerger.synchronize_resultset do
+    FileUtils.mkdir_p(SimpleCov.coverage_path)
+    File.write(SimpleCov::ResultMerger.resultset_path, "{}\n")
+  end
 
-  # Enforce overall coverage (evaluated on the final merged result) in CI.
-  ci_enabled = ENV["CI"].to_s.strip != ""
-  minimum_coverage(ci_enabled ? 85 : 0)
+  SimpleCov.enable_for_subprocesses true
+  SimpleCov.start "rails" do
+    # Track coverage for app code only
+    add_filter "/test/"
+    add_filter "/config/"
+    add_filter "/db/"
+    add_filter "/vendor/"
+
+    # Enforce overall coverage (evaluated on the final merged result) in CI.
+    ci_enabled = ENV["CI"].to_s.strip != ""
+    minimum_coverage(ci_enabled ? 85 : 0)
+  end
 end
 
 ENV["RAILS_ENV"] ||= "test"
@@ -40,8 +44,16 @@ module ActiveSupport
       end
     end
 
-    # Run tests in parallel with specified workers
-    parallelize(workers: :number_of_processors)
+    # Default to a single process for speed and determinism (especially with coverage enabled).
+    # Opt into parallelization via `PARALLEL_WORKERS`.
+    parallel_workers =
+      if ENV["PARALLEL_WORKERS"].to_s.strip != ""
+        Integer(ENV.fetch("PARALLEL_WORKERS"))
+      else
+        1
+      end
+
+    parallelize(workers: parallel_workers) if parallel_workers > 1
 
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
