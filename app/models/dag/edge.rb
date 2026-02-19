@@ -77,10 +77,6 @@ module DAG
               SELECT e.to_node_id
               FROM dag_edges e
               JOIN search s ON e.from_node_id = s.node_id
-              JOIN dag_nodes from_node
-                ON from_node.id = e.from_node_id
-               AND from_node.graph_id = e.graph_id
-               AND from_node.compressed_at IS NULL
               JOIN dag_nodes to_node
                 ON to_node.id = e.to_node_id
                AND to_node.graph_id = e.graph_id

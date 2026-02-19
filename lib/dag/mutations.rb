@@ -435,7 +435,7 @@ module DAG
       new_node
     end
 
-	    def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
+      def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
       old = locked_active_node!(node)
       now = Time.current
 
@@ -491,11 +491,11 @@ module DAG
         }
       )
 
-	      new_node
-	    end
+        new_node
+      end
 
-	    def adopt_version!(node:)
-	      target = locked_node!(node)
+      def adopt_version!(node:)
+        target = locked_node!(node)
       now = Time.current
 
       if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?

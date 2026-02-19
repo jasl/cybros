@@ -115,4 +115,3 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
     assert_nil lane.turn_seq_for(turn_2, include_deleted: false)
   end
 end
-

@@ -155,6 +155,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
     t.index ["graph_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
     t.index ["graph_id", "created_at"], name: "index_dag_nodes_created_at"
     t.index ["graph_id", "id"], name: "index_dag_nodes_graph_id_id_unique", unique: true
+    t.index ["graph_id", "lane_id", "node_type", "created_at", "id"], name: "index_dag_nodes_active_lane_type_created", where: "(compressed_at IS NULL)"
+    t.index ["graph_id", "lane_id", "turn_id", "node_type", "id"], name: "index_dag_nodes_active_lane_turn_type", where: "(compressed_at IS NULL)"
     t.index ["graph_id", "lane_id"], name: "index_dag_nodes_lane"
     t.index ["graph_id", "lease_expires_at"], name: "index_dag_nodes_running_lease", where: "((compressed_at IS NULL) AND ((state)::text = 'running'::text))"
     t.index ["graph_id", "retry_of_id"], name: "index_dag_nodes_retry_of"

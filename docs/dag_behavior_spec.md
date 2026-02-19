@@ -548,6 +548,10 @@ defer queue 的存储与应用规则（normative）：
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
 
+非规范（产品建议）：
+
+- 对 “子话题/多 lane 的聊天记录” 与 “游标分页” 场景，推荐使用 lane-scoped 的分页原语（例如 `lane.transcript_page(limit_turns:, before_turn_id:, after_turn_id:)`），避免把不同 lane 的 turns 混在同一个列表里。
+
 > 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_for` 的祖先闭包；建议引入 turn_id 或显式 transcript 索引/边来提供更高效的查询路径。
 
 ---

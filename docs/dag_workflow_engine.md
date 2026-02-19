@@ -278,11 +278,19 @@ Context 可见性（视图层）：
 
 ## Transcript（对话记录视图）
 
-为支持产品侧 “取最近 X 条对话记录” 等需求，`DAG::Graph` 提供 transcript 投影：
+为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（lane）” 等需求，DAG 提供 transcript 投影：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
   - 按 `turn_id` 聚合：以 `user_message` 作为 turn anchor（只查询最近 N 轮的 user_message），再返回这些轮次内的 `user_message/agent_message/character_message`
   - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）
+- `lane.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
+  - **lane-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 lane 的 turn 混在一起）
+  - keyset pagination：
+    - 初次加载：不传 `before_turn_id/after_turn_id` → 返回该 lane 最近 N 轮
+    - 上拉更老：传 `before_turn_id`（通常取上一页返回的 `before_turn_id`）→ 返回更早的 N 轮
+    - 下拉更新：传 `after_turn_id`（通常取上一页返回的 `after_turn_id`）→ 返回更新的 N 轮
+  - 返回：`{"turn_ids","before_turn_id","after_turn_id","transcript"}`
+- `graph.transcript_page(lane_id:, ...)`：对 `lane.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
 - `graph.transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)`
   - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
   - 默认不包含 `system_message/developer_message/task/summary`，不暴露 prompt 与 tool chain 细节
@@ -336,6 +344,7 @@ Context 可见性（视图层）：
 - 线性 1k 节点创建
 - fan-out + join 的 context_for
 - scheduler claim 100
+- transcript 分页查询（200 turns 取最近 20）
 
 运行：
 

@@ -257,8 +257,8 @@ module DAG
       outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == PENDING }
     end
 
-	    def rerun!(metadata_patch: {}, body_input_patch: {})
-	      new_node = nil
+      def rerun!(metadata_patch: {}, body_input_patch: {})
+        new_node = nil
 
       graph.mutate! do |m|
         new_node =
@@ -269,19 +269,19 @@ module DAG
           )
       end
 
-	      new_node
-	    end
+        new_node
+      end
 
-	    def can_rerun?
-	      return false if compressed_at.present?
-	      return false unless body&.rerunnable?
-	      return false unless state == FINISHED
+      def can_rerun?
+        return false if compressed_at.present?
+        return false unless body&.rerunnable?
+        return false unless state == FINISHED
 
-	      active_outgoing_blocking_edges.empty?
-	    end
+        active_outgoing_blocking_edges.empty?
+      end
 
-	    def versions(include_inactive: true)
-	      version_set = effective_version_set_id
+      def versions(include_inactive: true)
+        version_set = effective_version_set_id
 
       scope = graph.nodes.where(version_set_id: version_set)
       scope = scope.active unless include_inactive

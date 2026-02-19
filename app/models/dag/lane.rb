@@ -105,6 +105,29 @@ module DAG
       end
     end
 
+    def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
+      transcript_page(limit_turns: limit_turns, mode: mode, include_deleted: include_deleted).fetch("transcript")
+    end
+
+    def transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
+      turn_ids =
+        transcript_turn_ids_page(
+          limit_turns: limit_turns,
+          before_turn_id: before_turn_id,
+          after_turn_id: after_turn_id,
+          include_deleted: include_deleted
+        )
+
+      transcript = transcript_for_turn_ids(turn_ids: turn_ids, mode: mode, include_deleted: include_deleted)
+
+      {
+        "turn_ids" => turn_ids,
+        "before_turn_id" => turn_ids.first,
+        "after_turn_id" => turn_ids.last,
+        "transcript" => transcript,
+      }
+    end
+
     def turn_node_ids(turn_id, include_compressed: false, include_deleted: true)
       scope = include_compressed ? nodes : nodes.active
       scope = scope.where(turn_id: turn_id)
@@ -194,6 +217,97 @@ module DAG
     end
 
     private
+
+      def transcript_turn_ids_page(limit_turns:, before_turn_id:, after_turn_id:, include_deleted:)
+        limit_turns = Integer(limit_turns)
+        return [] if limit_turns <= 0
+
+        before_turn_id = before_turn_id&.to_s
+        after_turn_id = after_turn_id&.to_s
+
+        if before_turn_id.present? && after_turn_id.present?
+          raise ArgumentError, "before_turn_id and after_turn_id are mutually exclusive"
+        end
+
+        turn_anchor_types = graph.turn_anchor_node_types
+        if turn_anchor_types.empty?
+          []
+        else
+          anchor_nodes = nodes.active.where(node_type: turn_anchor_types)
+          anchor_nodes = anchor_nodes.where(deleted_at: nil) unless include_deleted
+
+          cursor_anchor =
+            if before_turn_id.present? || after_turn_id.present?
+              cursor_turn_id = before_turn_id.presence || after_turn_id
+              anchor_nodes.where(turn_id: cursor_turn_id).order(:created_at, :id).first
+            end
+
+          if (before_turn_id.present? || after_turn_id.present?) && cursor_anchor.nil?
+            raise ArgumentError, "cursor turn_id is unknown or not visible"
+          end
+
+          grouped = anchor_nodes.group(:turn_id)
+
+          if before_turn_id.present?
+            turn_ids =
+              grouped
+                .having(
+                  "MIN(created_at) < ? OR (MIN(created_at) = ? AND MIN(dag_nodes.id::text) < ?)",
+                  cursor_anchor.created_at,
+                  cursor_anchor.created_at,
+                  cursor_anchor.id.to_s
+                )
+                .order(Arel.sql("MIN(created_at) DESC"), Arel.sql("MIN(dag_nodes.id::text) DESC"))
+                .limit(limit_turns)
+                .pluck(:turn_id)
+                .reverse
+          elsif after_turn_id.present?
+            turn_ids =
+              grouped
+                .having(
+                  "MIN(created_at) > ? OR (MIN(created_at) = ? AND MIN(dag_nodes.id::text) > ?)",
+                  cursor_anchor.created_at,
+                  cursor_anchor.created_at,
+                  cursor_anchor.id.to_s
+                )
+                .order(Arel.sql("MIN(created_at) ASC"), Arel.sql("MIN(dag_nodes.id::text) ASC"))
+                .limit(limit_turns)
+                .pluck(:turn_id)
+          else
+            turn_ids =
+              grouped
+                .order(Arel.sql("MIN(created_at) DESC"), Arel.sql("MIN(dag_nodes.id::text) DESC"))
+                .limit(limit_turns)
+                .pluck(:turn_id)
+                .reverse
+          end
+
+          turn_ids.map(&:to_s)
+        end
+      end
+
+      def transcript_for_turn_ids(turn_ids:, mode:, include_deleted:)
+        turn_ids = Array(turn_ids).map(&:to_s).uniq
+        return [] if turn_ids.empty?
+
+        candidate_types = graph.transcript_candidate_node_types
+        return [] if candidate_types.empty?
+
+        node_scope = nodes.active.where(turn_id: turn_ids, node_type: candidate_types)
+        node_scope = node_scope.where(deleted_at: nil) unless include_deleted
+
+        node_records =
+          node_scope
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
+            .order(:id)
+            .to_a
+
+        by_turn = node_records.group_by(&:turn_id)
+        ordered_nodes = turn_ids.flat_map { |turn_id| by_turn.fetch(turn_id, []) }
+
+        projection = DAG::TranscriptProjection.new(graph: graph)
+        projection.project(node_records: ordered_nodes, mode: mode)
+      end
 
       def apply_compact_context_visibility!(keep_nodes:, exclude_nodes:, at:, now:)
         keep_ids =

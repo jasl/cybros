@@ -134,28 +134,34 @@ module DAG
           .order(:id)
           .to_a
 
-      bodies = load_transcript_bodies(node_records: node_records, mode: mode)
-
       by_turn = node_records.group_by(&:turn_id)
       ordered_nodes = turn_ids.flat_map { |turn_id| by_turn.fetch(turn_id, []) }
 
-      context_nodes = ordered_nodes.map do |node|
-        body = bodies[node.body_id]
-        transcript_context_hash_for(node, body, mode: mode)
-      end
-
-      transcript = filter_transcript_nodes(context_nodes)
-      apply_transcript_preview_overrides!(transcript)
-
-      transcript
+      projection = DAG::TranscriptProjection.new(graph: self)
+      projection.project(node_records: ordered_nodes, mode: mode)
     end
 
     def transcript_recent_turns_full(limit_turns:, include_deleted: false)
       transcript_recent_turns(limit_turns: limit_turns, mode: :full, include_deleted: include_deleted)
     end
 
+    def transcript_page(lane_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
+      lane = lanes.find(lane_id)
+      lane.transcript_page(
+        limit_turns: limit_turns,
+        before_turn_id: before_turn_id,
+        after_turn_id: after_turn_id,
+        mode: mode,
+        include_deleted: include_deleted
+      )
+    end
+
     def turn_anchor_node_types
       node_type_keys_for_hook(:turn_anchor?)
+    end
+
+    def transcript_candidate_node_types
+      node_type_keys_for_hook(:transcript_candidate?)
     end
 
     def compress!(node_ids:, summary_content:, summary_metadata: {})
@@ -511,10 +517,6 @@ module DAG
           .uniq
       end
 
-      def transcript_candidate_node_types
-        node_type_keys_for_hook(:transcript_candidate?)
-      end
-
       def leaf_terminal_node_types
         node_type_keys_for_hook(:leaf_terminal?)
       end
@@ -533,42 +535,6 @@ module DAG
 
       def attachable_cache_key
         [attachable_type, attachable_id]
-      end
-
-      def load_transcript_bodies(node_records:, mode:)
-        body_ids = node_records.map(&:body_id).compact.uniq
-        return {} if body_ids.empty?
-
-        body_scope = DAG::NodeBody.where(id: body_ids)
-        body_scope =
-          if mode.to_sym == :full
-            body_scope.select(:id, :type, :input, :output, :output_preview)
-          else
-            body_scope.select(:id, :type, :input, :output_preview)
-          end
-
-        body_scope.index_by(&:id)
-      end
-
-      def transcript_context_hash_for(node, body, mode:)
-        payload_hash = {
-          "input" => body&.input.is_a?(Hash) ? body.input : {},
-          "output_preview" => body&.output_preview.is_a?(Hash) ? body.output_preview : {},
-        }
-
-        if mode.to_sym == :full
-          payload_hash["output"] = body&.output.is_a?(Hash) ? body.output : {}
-        end
-
-        {
-          "node_id" => node.id,
-          "turn_id" => node.turn_id,
-          "lane_id" => node.lane_id,
-          "node_type" => node.node_type,
-          "state" => node.state,
-          "payload" => payload_hash,
-          "metadata" => node.metadata,
-        }
       end
 
       def filter_transcript_nodes(context_nodes)

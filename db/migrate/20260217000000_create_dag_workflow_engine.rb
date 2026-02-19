@@ -68,6 +68,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.index %i[graph_id lane_id], name: "index_dag_nodes_lane"
 
       t.string :node_type, null: false
+      t.index %i[graph_id lane_id node_type created_at id],
+              where: "compressed_at IS NULL",
+              name: "index_dag_nodes_active_lane_type_created"
 
       t.string :state, null: false
       t.check_constraint(
@@ -79,6 +82,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
+      t.index %i[graph_id lane_id turn_id node_type id],
+              where: "compressed_at IS NULL",
+              name: "index_dag_nodes_active_lane_turn_type"
 
       t.uuid :version_set_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id version_set_id], name: "index_dag_nodes_version_set"
