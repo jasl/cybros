@@ -67,13 +67,13 @@ module Messages
       end
     end
 
-    def retriable?
-      true
-    end
+	    def retriable?
+	      true
+	    end
 
-    def regeneratable?
-      true
-    end
+	    def rerunnable?
+	      true
+	    end
 
     def preview_max_chars
       2000

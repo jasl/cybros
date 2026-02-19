@@ -257,22 +257,59 @@ module DAG
       outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == PENDING }
     end
 
-    def regenerate!
-      new_node = nil
+	    def rerun!(metadata_patch: {}, body_input_patch: {})
+	      new_node = nil
 
       graph.mutate! do |m|
-        new_node = m.regenerate_replace!(node: self)
+        new_node =
+          m.rerun_replace!(
+            node: self,
+            metadata_patch: metadata_patch,
+            body_input_patch: body_input_patch
+          )
       end
 
-      new_node
+	      new_node
+	    end
+
+	    def can_rerun?
+	      return false if compressed_at.present?
+	      return false unless body&.rerunnable?
+	      return false unless state == FINISHED
+
+	      active_outgoing_blocking_edges.empty?
+	    end
+
+	    def versions(include_inactive: true)
+	      version_set = effective_version_set_id
+
+      scope = graph.nodes.where(version_set_id: version_set)
+      scope = scope.active unless include_inactive
+
+      scope.order(:created_at, :id)
     end
 
-    def can_regenerate?
-      return false if compressed_at.present?
-      return false unless body&.regeneratable?
-      return false unless state == FINISHED
+    def version_count(include_inactive: true)
+      versions(include_inactive: include_inactive).count
+    end
 
-      active_outgoing_blocking_edges.empty?
+    def version_number(include_inactive: true)
+      ids = versions(include_inactive: include_inactive).pluck(:id)
+      index = ids.index(id)
+
+      if index
+        index + 1
+      end
+    end
+
+    def adopt_version!
+      adopted = nil
+
+      graph.mutate! do |m|
+        adopted = m.adopt_version!(node: self)
+      end
+
+      adopted
     end
 
     def edit!(new_input:)
@@ -360,6 +397,14 @@ module DAG
     private
 
       KEEP = :keep
+
+      def effective_version_set_id
+        if version_set_id.present?
+          version_set_id
+        else
+          graph&.nodes&.where(id: id)&.pick(:version_set_id)
+        end
+      end
 
       def ensure_lane
         return if lane_id.present?

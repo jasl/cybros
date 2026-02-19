@@ -27,7 +27,7 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "roleplay flow: multiple executable character_message nodes in one turn, regenerate, and transcript views" do
+  test "roleplay flow: multiple executable character_message nodes in one turn, rerun, and transcript views" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c020"
@@ -62,23 +62,23 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
       transcript_types = transcript.map { |node| node.fetch("node_type") }
       assert_equal [Messages::UserMessage.node_type_key, Messages::CharacterMessage.node_type_key, Messages::CharacterMessage.node_type_key], transcript_types
 
-      regenerated = alice.reload.regenerate!
-      assert_equal Messages::CharacterMessage.node_type_key, regenerated.node_type
-      assert_equal DAG::Node::PENDING, regenerated.state
-      assert_equal alice.turn_id, regenerated.turn_id
+      rerun_alice = alice.reload.rerun!
+      assert_equal Messages::CharacterMessage.node_type_key, rerun_alice.node_type
+      assert_equal DAG::Node::PENDING, rerun_alice.state
+      assert_equal alice.turn_id, rerun_alice.turn_id
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal [regenerated.id], claimed.map(&:id)
-      DAG::Runner.run_node!(regenerated.id)
+      assert_equal [rerun_alice.id], claimed.map(&:id)
+      DAG::Runner.run_node!(rerun_alice.id)
 
       recent = graph.transcript_recent_turns(limit_turns: 1)
       node_ids = recent.map { |node| node.fetch("node_id") }
-      assert_includes node_ids, regenerated.id
+      assert_includes node_ids, rerun_alice.id
       assert_includes node_ids, bob.id
       refute_includes node_ids, alice.id
 
-      thread_view = graph.transcript_for(regenerated.id)
-      assert_equal [user.id, regenerated.id], thread_view.map { |node| node.fetch("node_id") }
+      thread_view = graph.transcript_for(rerun_alice.id)
+      assert_equal [user.id, rerun_alice.id], thread_view.map { |node| node.fetch("node_id") }
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure

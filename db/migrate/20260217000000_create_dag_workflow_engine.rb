@@ -80,6 +80,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
 
+      t.uuid :version_set_id, null: false, default: -> { "uuidv7()" }
+      t.index %i[graph_id version_set_id], name: "index_dag_nodes_version_set"
+
       t.string :idempotency_key
       t.index %i[graph_id turn_id node_type idempotency_key],
               unique: true,

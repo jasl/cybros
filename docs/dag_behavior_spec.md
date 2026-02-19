@@ -18,7 +18,7 @@
 `compressed_at` 是 DAG 的统一“活跃视图（active view）”开关，用于两类场景：
 
 1) **子图压缩**（Compression）：用 `summary` 节点替代一个已完成子图。  
-2) **版本替换/改写**（Replace/Rewrites）：`retry/regenerate/edit` 产生新版本并归档旧版本。
+2) **版本替换/改写**（Replace/Rewrites）：`retry/rerun/edit` 产生新版本并归档旧版本。
 
 > 关键点：Active/Inactive 是“视图层语义”，不是数据删除；Inactive 仍可用于审计、回放与 UI 版本浏览。
 
@@ -243,7 +243,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 #### 2.6.4 attempt-specific（禁止继承）
 
-`retry/regenerate/edit` 生成的新节点必须 **不继承** 旧节点的：
+`retry/rerun/edit` 生成的新节点必须 **不继承** 旧节点的：
 
 - `metadata["usage"]`
 - `metadata["output_stats"]`
@@ -273,6 +273,32 @@ Active 视图内必须保持一致（不允许 drift）：
 - Compression 不允许跨 lane 压缩；summary 节点必须继承被压缩子图的 `lane_id`。
 - Context/Transcript 输出必须携带 `lane_id`（用于 UI 染色与对话树展示）。
 
+#### 2.7.1 Lane turns（turn_seq / turn_count）
+
+产品通常需要“在一条 lane 内按对话轮次（turn）展示与计数”，但引擎内部的 `turn_id` 只是一种 span/分组标记，并不自带 UI 友好的“轮次数”序号。因此引擎提供 **turn anchor** 语义：
+
+- 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（通常是 `user_message`）。
+- `graph.turn_anchor_node_types` 返回该图配置下的 turn anchor node types。
+- `lane.turns` / `lane.turn_count` / `lane.turn_seq_for(turn_id)` 以 turn anchors 在该 lane 内的出现顺序生成一个 **1-based** 的 `turn_seq`。
+
+统计口径（normative）：
+
+- 只看 **同一条 lane** 内的 nodes，且 `node_type IN graph.turn_anchor_node_types`。
+- **必须包含**已压缩（inactive）与软删除（`deleted_at` 非空）的历史 anchors：`turn_seq` 不回填、不重算。
+- 排序规则：按每个 turn 的 anchor 节点的 `MIN(created_at)` 升序；再以一个稳定的 tie-breaker（例如 `MIN(id)`）保证确定性。
+
+可选的“可见 turns”（非规范，用于 UI）：
+
+- `include_deleted: false` 仅过滤掉 `anchor_deleted==true` 的 turns，但 **不重排** `turn_seq`（允许出现 seq gap）。
+
+Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/summary 策略）：
+
+- `lane.turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `lane.turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `lane.node_ids_for_turn_ids(turn_ids:, include_compressed: false, include_deleted: true)`
+- `lane.node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)`
+- `lane.compress_turn_seq_range!(start_seq:, end_seq:, summary_content:, summary_metadata: {})`（内部调用 `graph.compress!`）
+
 ### 2.8 `turn_id`（对话轮次 / 执行 span）
 
 为支持 “圈定本轮产生的子图集合” 与未来的强 gating 校验（例如 squash/rewire），里程碑 1 引入：
@@ -283,7 +309,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - 同一轮产生的所有节点共享相同 `turn_id`。
 - 同一 graph 内，对任意 `turn_id`（只看 Active）：该 turn 的所有节点必须属于同一个 lane（`lane_id` 不可跨 lane）。
-- `retry/regenerate/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
+- `retry/rerun/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
 - `fork` 开启新轮次：fork 出来的 `new_node.turn_id` 由 DB default 生成（不继承父节点 turn_id）
 - leaf invariant repair 创建的默认 leaf repair 消息节点（里程碑 1 默认 `agent_message(pending)`）必须继承 leaf 的 `turn_id`（引擎层强制）
 
@@ -306,9 +332,21 @@ Active 视图内必须保持一致（不允许 drift）：
 
 引擎行为（normative）：
 
-- `Mutations#create_node(..., idempotency_key: k)`：
-  - 若同 scope 下已存在节点，则必须返回既有节点（不新建）。
-  - 若调用参数与既有节点的 body I/O 或 state 不一致，必须 raise（避免 silent drift）。
+  - `Mutations#create_node(..., idempotency_key: k)`：
+    - 若同 scope 下已存在节点，则必须返回既有节点（不新建）。
+    - 若调用参数与既有节点的 body I/O 或 state 不一致，必须 raise（避免 silent drift）。
+
+### 2.10 `version_set_id`（版本组，swipe/多版本）
+
+为支持 ChatGPT 风格的“同一条回复多版本（swipe）”与版本采纳（adopt），引擎引入：
+
+- `dag_nodes.version_set_id`：UUID（默认值 `uuidv7()`，非空）。
+
+语义（normative）：
+
+- 默认情况下，每个新建 node 都会获得一个独立的 `version_set_id`（表示“尚未形成多版本”）。
+- 对于 replace 系列（`retry/rerun/edit`）产生的新版本：`new_node.version_set_id` **必须继承** `old_node.version_set_id`，从而形成版本组。
+- `version_set_id` **不得**跨 turn 或跨 lane：同一版本组内的所有节点必须共享相同的 `turn_id` 与 `lane_id`（引擎应在改图时强制/校验）。
 
 ---
 
@@ -318,7 +356,7 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - `sequence`（因果/阻塞，causal + blocking）：表示 “A 之后才能做 B”
 - `dependency`（因果/阻塞，causal + blocking）：表示 “B 依赖 A 的成功输出”
-- `branch`（谱系/非阻塞，lineage）：用于 provenance（fork/edit/regenerate/retry）
+- `branch`（谱系/非阻塞，lineage）：用于 provenance（fork/edit/rerun/retry）
 
 定义：
 
@@ -451,9 +489,27 @@ defer queue 的存储与应用规则（normative）：
   - patch 表不强制 terminal-only 约束；terminal-only 仍由 `dag_nodes` 的 check constraint 固化。
 - 自动应用（apply）条件：**graph idle（无 running）且 node terminal**。
   - 应用在 `TickGraphJob` 的图锁内执行，并要求发生在 Scheduler claim 之前（避免 “本轮 tick claim 出 running 导致永远不 idle”）。
-  - 应用成功后必须删除 patch 记录（队列消费）。
+- 应用成功后必须删除 patch 记录（队列消费）。
 - stale patch 清理：
   - 若 node 变为 inactive（`compressed_at` 非空）或不存在，patch 视为 stale 并删除。
+
+#### 4.5.0.2 Turn context compaction（compact_turn_context!，显式收缩上下文）
+
+产品常见需求：对“单轮 turn 的中间过程”做收缩（例如 tool calls、规划草稿等不希望进入后续 LLM context），但又不希望做结构性压缩（compression）或生成 summary 节点。引擎提供一个基于 visibility 的原语：
+
+- `lane.compact_turn_context!(turn_id:, keep_node_ids:, at: Time.current)`
+
+语义（normative）：
+
+- 必须在图锁内执行，并遵守与 strict visibility 相同的 gating（graph idle + node terminal）。
+- 仅作用于 **该 lane + 该 turn_id 的 Active nodes**：
+  - `keep_node_ids` 中的节点必须保留在 context 中（清 `context_excluded_at`）。
+  - 其它节点将被标记为 `context_excluded_at = at`（从后续 context 默认排除）。
+- 不改变 DAG 结构（不归档节点/边、不重连边、不引入 summary）。
+
+典型用法（非规范）：
+
+- 对 chatbot：保留 “用户输入（turn anchor）” + “当前采用版本的最终回复（agent_message）”，排除中间 task/草稿/中间消息等。
 
 #### 4.5.1 Context 输出过滤（默认）
 
@@ -555,7 +611,7 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 
 ---
 
-## 7) Graph mutations（fork/retry/regenerate/edit）
+## 7) Graph mutations（fork/retry/rerun/edit）
 
 ### 7.1 统一约束（必须）
 
@@ -586,15 +642,16 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 4) 创建 lineage `branch`: `from_node → new_node`，`metadata["branch_kinds"] = ["fork"]`
 5) 写回 `new_lane.root_node_id = new_node.id`
 
-### 7.3 replace（版本替换：retry/regenerate/edit 的共同骨架）
+### 7.3 replace（版本替换：retry/rerun/edit 的共同骨架）
 
 replace 的共同语义：在 Active 图中以 `new_node` 替换 `old_node`，并将旧版本归档到 Inactive 图。
 
 共同步骤（old → new）：
 
 1) 创建 `new_node`（同 node_type；payload/input 复制或覆盖；output 清空或保留按操作定义）
+   - `new_node.version_set_id` 必须继承 `old_node.version_set_id`
 2) 复制 old 的 **incoming blocking edges** 到 new（from 不变，to=new）
-3) 创建 lineage `branch`：`old → new`，`branch_kinds=["retry|regenerate|edit"]`
+3) 创建 lineage `branch`：`old → new`，`branch_kinds=["retry|rerun|edit"]`
 4) 归档 old（以及需要归档的下游子图/边界，见各操作定义）
 5) 可通过 hooks 投影 `node_replaced`（kind、old_id/new_id、归档范围；见第 9 节）
 
@@ -625,13 +682,13 @@ Active 版本确定规则：
   - old 的 **outgoing blocking edges** 会被 new 接管（重新创建为 `new → child`）
   - old 的 incident edges 会被归档（从 Active 图移除）
 
-### 7.5 regenerate（LLM 回复重新生成：leaf 版本替换）
+### 7.5 rerun（LLM 回复重新运行：leaf 版本替换）
 
-目的：对已完成的 `agent_message/character_message` 重新生成（swipe 多版本）。
+目的：对已完成的 `agent_message/character_message` 重新运行（swipe 多版本）。
 
 前置条件：
 
-- `old.body.regeneratable? == true`（当前：`agent_message`/`character_message`）
+- `old.body.rerunnable? == true`（当前：`agent_message`/`character_message`）
 - `old.state == finished`
 - `old` 为 **leaf**（无 outgoing blocking edges）
 
@@ -666,11 +723,28 @@ Active 版本确定规则：
 
 ### 7.7 多版本（swipe）表达
 
-- regenerate/edit/retry 都通过 replace 产生多版本。
-- 历史版本表现为 Inactive nodes/edges；Active 图永远只有一个“当前版本”。
-- UI 若要提供 swipe/版本浏览，应：
-  - 以 `node_replaced` hooks 的投影（若接入）或 Inactive `branch` 边回溯版本关系；
-  - 以 `created_at` 或 `id(uuidv7)` 排序呈现版本序列。
+- rerun/edit/retry 都通过 replace 产生多版本。
+- 历史版本表现为 Inactive nodes/edges；Active 图在一个 `version_set_id` 内应只有一个“当前采用版本”。
+- UI 若要提供 swipe/版本浏览，应优先以 `version_set_id` 分组列出 versions，并以 `created_at` 或 `id(uuidv7)` 排序呈现版本序列。
+- lineage（`branch`）与 hooks（`node_replaced`）仍可作为审计/回放来源，但不应作为版本查询的唯一依据。
+
+#### 7.7.1 adopt_version（版本采纳：切换采用版本）
+
+当同一 `version_set_id` 存在多个版本时，引擎提供 “采纳某个版本作为当前版本” 的原语（用于 ChatGPT 风格版本切换）。
+
+前置条件（normative）：
+
+- graph idle：Active 图中不存在任何 `state=running` 的节点
+- target 为 `finished`
+- target 为 leaf（Active 图中无 outgoing blocking edges）
+- `version_set_id` 不跨 turn/lane（同组必须共享 `turn_id` 与 `lane_id`）
+
+行为（normative）：
+
+1) 归档（archive）该 `version_set_id` 下所有其它 Active 版本（node + incident edges）。
+2) 若 target 为 inactive，则将 target 恢复为 Active（清 `compressed_at/compressed_by_id`）。
+3) 恢复 target 与当前 Active 上游之间的 incoming blocking edges（清这些 edges 的 `compressed_at`）。
+4) 为保持 leaf invariant，必要时可清理该 turn 内因版本切换产生的“无效 leaf”（例如 orphan 的 finished task），将其归档。
 
 ### 7.8 merge（分支合并回目标 lane：创建 join 节点）
 
@@ -756,7 +830,7 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 
 - `node_created`：创建 node
 - `edge_created`：创建 edge
-- `node_replaced`：replace（retry/regenerate/edit）产生新版本
+- `node_replaced`：replace（retry/rerun/edit）产生新版本
 - `subgraph_compressed`：压缩子图产生 summary
 - `leaf_invariant_repaired`：leaf 修复追加节点
 - `node_state_changed`：节点状态迁移

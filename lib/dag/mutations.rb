@@ -396,6 +396,7 @@ module DAG
         retry_of_id: old.id,
         turn_id: old.turn_id,
         lane_id: old.lane_id,
+        version_set_id: old.version_set_id,
         body_input: body_input,
       )
 
@@ -434,30 +435,37 @@ module DAG
       new_node
     end
 
-    def regenerate_replace!(node:)
+	    def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
       old = locked_active_node!(node)
       now = Time.current
 
-      unless old.body.regeneratable?
-        raise ArgumentError, "can only regenerate regeneratable nodes"
+      unless old.body.rerunnable?
+        raise ArgumentError, "can only rerun rerunnable nodes"
       end
 
       unless old.state == DAG::Node::FINISHED
-        raise ArgumentError, "can only regenerate finished nodes"
+        raise ArgumentError, "can only rerun finished nodes"
       end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-        raise ArgumentError, "can only regenerate leaf nodes"
+        raise ArgumentError, "can only rerun leaf nodes"
       end
+
+      metadata_patch = normalize_hash(metadata_patch)
+      body_input_patch = normalize_hash(body_input_patch)
 
       new_node = create_node(
         node_type: old.node_type,
         state: DAG::Node::PENDING,
-        metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker"),
+        metadata:
+          old.metadata
+            .except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker")
+            .merge(metadata_patch),
         turn_id: old.turn_id,
         lane_id: old.lane_id,
-        body_input: old.body.input_for_retry,
+        version_set_id: old.version_set_id,
+        body_input: old.body.input_for_retry.deep_merge(body_input_patch),
       )
 
       copy_incoming_blocking_edges!(from_node_id: old.id, to_node_id: new_node.id)
@@ -466,7 +474,7 @@ module DAG
         from_node_id: old.id,
         to_node_id: new_node.id,
         edge_type: DAG::Edge::BRANCH,
-        metadata: { "branch_kinds" => ["regenerate"] }
+        metadata: { "branch_kinds" => ["rerun"] }
       )
 
       archived_edge_ids = archive_nodes_and_incident_edges!(node_ids: [old.id], compressed_by_id: new_node.id, now: now)
@@ -475,7 +483,7 @@ module DAG
         event_type: DAG::GraphHooks::EventTypes::NODE_REPLACED,
         subject: new_node,
         particulars: {
-          "kind" => "regenerate",
+          "kind" => "rerun",
           "old_id" => old.id,
           "new_id" => new_node.id,
           "archived_node_ids" => [old.id],
@@ -483,7 +491,66 @@ module DAG
         }
       )
 
-      new_node
+	      new_node
+	    end
+
+	    def adopt_version!(node:)
+	      target = locked_node!(node)
+      now = Time.current
+
+      if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
+        raise ArgumentError, "cannot adopt version while graph has running nodes"
+      end
+
+      unless target.finished?
+        raise ArgumentError, "can only adopt finished nodes"
+      end
+
+      if @graph.edges.where(from_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES).exists?
+        raise ArgumentError, "can only adopt leaf nodes"
+      end
+
+      active_versions = @graph.nodes.active.where(version_set_id: target.version_set_id).lock.to_a
+      if active_versions.empty? && target.compressed_at.present?
+        raise ArgumentError, "cannot adopt version when no active version exists"
+      end
+
+      if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.lane_id != target.lane_id }
+        raise ArgumentError, "version_set_id must not span multiple turns or lanes"
+      end
+
+      nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
+
+      if nodes_to_archive.any?
+        archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: target.id, now: now)
+      end
+
+      if target.compressed_at.present?
+        @graph.nodes.where(id: target.id).update_all(
+          compressed_at: nil,
+          compressed_by_id: nil,
+          updated_at: now
+        )
+      end
+
+      active_node_ids = @graph.nodes.active.select(:id)
+
+      unless @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).exists?
+        raise ArgumentError, "cannot adopt version without active incoming edges"
+      end
+
+      @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).update_all(
+        compressed_at: nil,
+        updated_at: now
+      )
+
+      if active_outgoing_blocking_edges_from(target.id).any?
+        raise ArgumentError, "cannot adopt non-leaf nodes"
+      end
+
+      cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
+
+      @graph.nodes.reload.find(target.id)
     end
 
     def edit_replace!(node:, new_input:)
@@ -511,6 +578,7 @@ module DAG
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker"),
         turn_id: old.turn_id,
         lane_id: old.lane_id,
+        version_set_id: old.version_set_id,
         body_input: new_body_input,
         finished_at: now
       )
@@ -564,6 +632,11 @@ module DAG
       def locked_active_node!(node_or_id)
         node_id = node_or_id.is_a?(DAG::Node) ? node_or_id.id : node_or_id
         @graph.nodes.where(compressed_at: nil).lock.find(node_id)
+      end
+
+      def locked_node!(node_or_id)
+        node_id = node_or_id.is_a?(DAG::Node) ? node_or_id.id : node_or_id
+        @graph.nodes.lock.find(node_id)
       end
 
       def active_causal_descendant_ids_for(node_id)
@@ -668,6 +741,36 @@ module DAG
           hash.deep_stringify_keys
         else
           {}
+        end
+      end
+
+      def cleanup_invalid_leaves_in_turn!(lane_id:, turn_id:, compressed_by_id:, now:)
+        leaf_terminal_types = @graph.send(:leaf_terminal_node_types)
+        turn_anchor_types = @graph.turn_anchor_node_types
+
+        loop do
+          leaves =
+            @graph.leaf_nodes
+              .where(lane_id: lane_id, turn_id: turn_id)
+              .select(:id, :node_type, :state)
+              .to_a
+
+          invalid_leaves =
+            leaves.select do |leaf|
+              !leaf_terminal_types.include?(leaf.node_type.to_s) && !leaf.pending? && !leaf.running?
+            end
+
+          break if invalid_leaves.empty?
+
+          if invalid_leaves.any? { |leaf| turn_anchor_types.include?(leaf.node_type.to_s) }
+            raise ArgumentError, "cannot adopt version because it would invalidate turn anchors"
+          end
+
+          archive_nodes_and_incident_edges!(
+            node_ids: invalid_leaves.map(&:id),
+            compressed_by_id: compressed_by_id,
+            now: now
+          )
         end
       end
 

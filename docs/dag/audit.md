@@ -9,7 +9,7 @@
 范围（本次覆盖）：
 
 - DAG 引擎核心：Scheduler / Runner / FailurePropagation / Context / Transcript / Mutations / Compression / 可视化（Mermaid）
-- 改图能力：fork / retry / regenerate / edit / visibility patches（exclude/delete 的 request/apply）
+- 改图能力：fork / retry / rerun / edit / visibility patches（exclude/delete 的 request/apply）
 - “应用接入”层面：以测试用例模拟 Chatbot、编程 Agent 的并行工具链、SillyTavern/多角色群聊与复杂改图组合
 
 结论（当前实现与测试的落点）：
@@ -123,8 +123,9 @@
 
 - `chatbot_flow_test.rb`：GPT 网页版风格（system→developer→user→agent）；验证 context/transcript 默认行为与 leaf repair。
 - `agent_tool_calls_flow_test.rb`：编程 Agent 风格（planning→并行 tasks→join 消息）；验证调度顺序、tool result 注入、planning 消息默认隐藏、失败传播导致 skipped 占位可见。
-- `roleplay_group_chat_flow_test.rb`：多角色群聊（同 turn 多条 `character_message` 并行执行、其中一个 regenerate）；验证 turn 聚合视图与按节点锚定视图的差异。
-- `graph_surgery_and_visibility_flow_test.rb`：visibility patch defer/apply + compress + edit + retry/regenerate 的交叉回归；验证“改图/隐藏节点”组合操作后 GraphAudit 仍为空。
+- `roleplay_group_chat_flow_test.rb`：多角色群聊（同 turn 多条 `character_message` 并行执行、其中一个 rerun）；验证 turn 聚合视图与按节点锚定视图的差异。
+- `graph_surgery_and_visibility_flow_test.rb`：visibility patch defer/apply + compress + edit + retry/rerun 的交叉回归；验证“改图/隐藏节点”组合操作后 GraphAudit 仍为空。
+- `rerun_versions_and_compact_flow_test.rb`：多版本 rerun + adopt 切换版本 + turn context compaction；覆盖 ChatGPT 风格的版本切换与“单轮中间过程不入上下文”需求。
 - `lane_branch_and_merge_flow_test.rb`：分支对话（fork 创建 branch lane/topic）、merge 回 main（join 节点）、merge 后分支可继续、再显式 archive 分支并验证“禁新 turn / 允许收尾”，以及 archived lane 仍可作为 merge source。
 
 ---

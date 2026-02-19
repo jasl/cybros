@@ -54,13 +54,13 @@ module DAG
       false
     end
 
-    def editable?
-      false
-    end
+	    def editable?
+	      false
+	    end
 
-    def regeneratable?
-      false
-    end
+	    def rerunnable?
+	      false
+	    end
 
     def executable?
       self.class.executable?

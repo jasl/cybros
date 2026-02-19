@@ -34,7 +34,224 @@ module DAG
       archived_at.present?
     end
 
+    def turns(include_deleted: true)
+      turn_anchor_types = graph.turn_anchor_node_types
+
+      if turn_anchor_types.empty?
+        []
+      else
+        rows =
+          nodes
+            .where(node_type: turn_anchor_types)
+            .group(:turn_id)
+            .order(Arel.sql("MIN(created_at) ASC"), Arel.sql("MIN(dag_nodes.id::text) ASC"))
+            .pluck(
+              :turn_id,
+              Arel.sql("MIN(created_at)"),
+              Arel.sql("BOOL_OR(deleted_at IS NOT NULL)")
+            )
+
+        turns =
+          rows.each_with_index.map do |(turn_id, anchor_created_at, anchor_deleted), index|
+            {
+              "turn_id" => turn_id,
+              "seq" => index + 1,
+              "anchor_created_at" => anchor_created_at,
+              "anchor_deleted" => anchor_deleted == true,
+            }
+          end
+
+        if include_deleted
+          turns
+        else
+          turns.reject { |turn| turn.fetch("anchor_deleted") }
+        end
+      end
+    end
+
+    def visible_turns
+      turns(include_deleted: false)
+    end
+
+    def turn_count(include_deleted: true)
+      turns(include_deleted: include_deleted).length
+    end
+
+    def turn_ids(include_deleted: true)
+      turns(include_deleted: include_deleted).map { |turn| turn.fetch("turn_id") }
+    end
+
+    def turn_seq_for(turn_id, include_deleted: true)
+      turn_id = turn_id.to_s
+
+      turn = turns(include_deleted: include_deleted).find { |row| row.fetch("turn_id").to_s == turn_id }
+
+      if turn
+        turn.fetch("seq")
+      end
+    end
+
+    def turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)
+      turn_anchor_types = graph.turn_anchor_node_types
+
+      if turn_anchor_types.empty?
+        []
+      else
+        scope = include_compressed ? nodes : nodes.active
+        scope = scope.where(turn_id: turn_id, node_type: turn_anchor_types)
+        scope = scope.where(deleted_at: nil) unless include_deleted
+
+        scope.order(:id).pluck(:id)
+      end
+    end
+
+    def turn_node_ids(turn_id, include_compressed: false, include_deleted: true)
+      scope = include_compressed ? nodes : nodes.active
+      scope = scope.where(turn_id: turn_id)
+      scope = scope.where(deleted_at: nil) unless include_deleted
+
+      scope.order(:id).pluck(:id)
+    end
+
+    def node_ids_for_turn_ids(turn_ids:, include_compressed: false, include_deleted: true)
+      turn_ids = Array(turn_ids).map(&:to_s).uniq
+      return [] if turn_ids.empty?
+
+      scope = include_compressed ? nodes : nodes.active
+      scope = scope.where(turn_id: turn_ids)
+      scope = scope.where(deleted_at: nil) unless include_deleted
+
+      scope.order(:id).pluck(:id)
+    end
+
+    def node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)
+      start_seq = Integer(start_seq)
+      end_seq = Integer(end_seq)
+
+      if start_seq > end_seq
+        raise ArgumentError, "start_seq must be <= end_seq"
+      end
+
+      turn_ids =
+        turns(include_deleted: true)
+          .select { |row| row.fetch("seq").between?(start_seq, end_seq) }
+          .map { |row| row.fetch("turn_id") }
+
+      node_ids_for_turn_ids(
+        turn_ids: turn_ids,
+        include_compressed: include_compressed,
+        include_deleted: include_deleted
+      )
+    end
+
+    def compress_turn_seq_range!(start_seq:, end_seq:, summary_content:, summary_metadata: {})
+      node_ids =
+        node_ids_for_turn_seq_range(
+          start_seq: start_seq,
+          end_seq: end_seq,
+          include_compressed: false,
+          include_deleted: true
+        )
+
+      graph.compress!(
+        node_ids: node_ids,
+        summary_content: summary_content,
+        summary_metadata: summary_metadata
+      )
+    end
+
+    def compact_turn_context!(turn_id:, keep_node_ids:, at: Time.current)
+      keep_node_ids = Array(keep_node_ids).map(&:to_s).uniq
+      now = Time.current
+
+      graph.with_graph_lock! do
+        if graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
+          raise ArgumentError, "cannot compact while graph has running nodes"
+        end
+
+        turn_nodes = nodes.active.where(turn_id: turn_id).lock.to_a
+
+        unless turn_nodes.all?(&:terminal?)
+          raise ArgumentError, "can only compact turns when all active nodes are terminal"
+        end
+
+        turn_node_ids = turn_nodes.map { |node| node.id.to_s }
+        unexpected_keep_ids = keep_node_ids - turn_node_ids
+        if unexpected_keep_ids.any?
+          raise ArgumentError, "keep_node_ids must belong to this lane and turn"
+        end
+
+        keep_nodes = turn_nodes.select { |node| keep_node_ids.include?(node.id.to_s) }
+        exclude_nodes = turn_nodes.reject { |node| keep_node_ids.include?(node.id.to_s) }
+
+        apply_compact_context_visibility!(
+          keep_nodes: keep_nodes,
+          exclude_nodes: exclude_nodes,
+          at: at,
+          now: now
+        )
+      end
+    end
+
     private
+
+      def apply_compact_context_visibility!(keep_nodes:, exclude_nodes:, at:, now:)
+        keep_ids =
+          keep_nodes
+            .select { |node| node.context_excluded_at.present? }
+            .map(&:id)
+
+        if keep_ids.any?
+          nodes.where(id: keep_ids).update_all(context_excluded_at: nil, updated_at: now)
+          DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: keep_ids).delete_all
+
+          keep_nodes.each do |node|
+            next unless keep_ids.include?(node.id)
+
+            emit_context_visibility_event!(node, from_context_excluded_at: node.context_excluded_at, to_context_excluded_at: nil, action: "include_in_context")
+          end
+        end
+
+        exclude_ids =
+          exclude_nodes
+            .reject { |node| node.context_excluded_at == at }
+            .map(&:id)
+
+        if exclude_ids.any?
+          nodes.where(id: exclude_ids).update_all(context_excluded_at: at, updated_at: now)
+          DAG::NodeVisibilityPatch.where(graph_id: graph_id, node_id: exclude_ids).delete_all
+
+          exclude_nodes.each do |node|
+            next unless exclude_ids.include?(node.id)
+
+            emit_context_visibility_event!(node, from_context_excluded_at: node.context_excluded_at, to_context_excluded_at: at, action: "exclude_from_context")
+          end
+        end
+      end
+
+      def emit_context_visibility_event!(node, from_context_excluded_at:, to_context_excluded_at:, action:)
+        from = visibility_snapshot_for(context_excluded_at: from_context_excluded_at, deleted_at: node.deleted_at)
+        to = visibility_snapshot_for(context_excluded_at: to_context_excluded_at, deleted_at: node.deleted_at)
+        return if from == to
+
+        graph.emit_event(
+          event_type: DAG::GraphHooks::EventTypes::NODE_VISIBILITY_CHANGED,
+          subject: node,
+          particulars: {
+            "action" => action,
+            "source" => "strict",
+            "from" => from,
+            "to" => to,
+          }
+        )
+      end
+
+      def visibility_snapshot_for(context_excluded_at:, deleted_at:)
+        {
+          "context_excluded_at" => context_excluded_at&.iso8601,
+          "deleted_at" => deleted_at&.iso8601,
+        }
+      end
 
       def lane_relationships_must_match_graph
         return if graph_id.blank?

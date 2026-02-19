@@ -123,7 +123,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_not node.can_restore?
   end
 
-  test "can_* mutation helpers match retry/edit/regenerate/fork preconditions" do
+  test "can_* mutation helpers match retry/edit/rerun/fork preconditions" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -141,11 +141,11 @@ class DAG::NodeTest < ActiveSupport::TestCase
       body_output: { "content" => "hello" },
       metadata: {}
     )
-    assert agent.can_regenerate?
+    assert agent.can_rerun?
 
     child = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: agent.id, to_node_id: child.id, edge_type: DAG::Edge::SEQUENCE)
-    assert_not agent.can_regenerate?
+    assert_not agent.can_rerun?
 
     user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
     assert user.can_edit?
@@ -198,7 +198,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/downstream nodes are pending or running/, error.message)
   end
 
-  test "regenerate! rejects attempts when agent_message is not a leaf" do
+  test "rerun! rejects attempts when agent_message is not a leaf" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -211,7 +211,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     downstream = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
-    error = assert_raises(ArgumentError) { original.regenerate! }
+    error = assert_raises(ArgumentError) { original.rerun! }
     assert_match(/leaf/, error.message)
   end
 
@@ -231,6 +231,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal original.lane_id, retried.lane_id
     assert_equal original.id, retried.retry_of_id
     assert_equal original.turn_id, retried.turn_id
+    assert_equal original.version_set_id, retried.version_set_id
     assert_equal 2, retried.metadata["attempt"]
     assert original.reload.compressed_at.present?
     assert_equal retried.id, original.compressed_by_id
@@ -312,7 +313,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal 4, retried.metadata["attempt"]
   end
 
-  test "regenerate! replaces a finished agent_message leaf" do
+  test "rerun! replaces a finished agent_message leaf" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -339,23 +340,24 @@ class DAG::NodeTest < ActiveSupport::TestCase
       edge_type: DAG::Edge::SEQUENCE
     )
 
-    regenerated = original.regenerate!
+    rerun_node = original.rerun!
 
-    assert_equal DAG::Node::PENDING, regenerated.state
-    assert_equal Messages::AgentMessage.node_type_key, regenerated.node_type
-    assert_equal original.lane_id, regenerated.lane_id
-    assert_equal original.turn_id, regenerated.turn_id
-    assert_nil regenerated.metadata["usage"]
-    assert_nil regenerated.metadata["output_stats"]
-    assert_nil regenerated.metadata["timing"]
-    assert_nil regenerated.metadata["worker"]
+    assert_equal DAG::Node::PENDING, rerun_node.state
+    assert_equal Messages::AgentMessage.node_type_key, rerun_node.node_type
+    assert_equal original.lane_id, rerun_node.lane_id
+    assert_equal original.turn_id, rerun_node.turn_id
+    assert_equal original.version_set_id, rerun_node.version_set_id
+    assert_nil rerun_node.metadata["usage"]
+    assert_nil rerun_node.metadata["output_stats"]
+    assert_nil rerun_node.metadata["timing"]
+    assert_nil rerun_node.metadata["worker"]
 
     assert original.reload.compressed_at.present?
-    assert_equal regenerated.id, original.compressed_by_id
+    assert_equal rerun_node.id, original.compressed_by_id
 
     assert graph.edges.active.exists?(
       from_node_id: user.id,
-      to_node_id: regenerated.id,
+      to_node_id: rerun_node.id,
       edge_type: DAG::Edge::SEQUENCE
     )
     assert edge.reload.compressed_at.present?
@@ -399,6 +401,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_equal DAG::Node::FINISHED, edited.state
     assert_equal a.lane_id, edited.lane_id
     assert_equal a.turn_id, edited.turn_id
+    assert_equal a.version_set_id, edited.version_set_id
     assert_equal "hi2", edited.body_input["content"]
     assert_nil edited.metadata["usage"]
     assert_nil edited.metadata["output_stats"]

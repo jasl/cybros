@@ -154,6 +154,10 @@ module DAG
       transcript_recent_turns(limit_turns: limit_turns, mode: :full, include_deleted: include_deleted)
     end
 
+    def turn_anchor_node_types
+      node_type_keys_for_hook(:turn_anchor?)
+    end
+
     def compress!(node_ids:, summary_content:, summary_metadata: {})
       DAG::Compression.new(graph: self).compress!(
         node_ids: node_ids,
@@ -505,10 +509,6 @@ module DAG
           .filter_map(&:node_type_key)
           .compact
           .uniq
-      end
-
-      def turn_anchor_node_types
-        node_type_keys_for_hook(:turn_anchor?)
       end
 
       def transcript_candidate_node_types

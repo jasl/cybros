@@ -149,6 +149,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
     t.string "state", null: false
     t.uuid "turn_id", default: -> { "uuidv7()" }, null: false
     t.datetime "updated_at", null: false
+    t.uuid "version_set_id", default: -> { "uuidv7()" }, null: false
     t.index ["body_id"], name: "index_dag_nodes_on_body_id", unique: true
     t.index ["compressed_by_id"], name: "index_dag_nodes_on_compressed_by_id"
     t.index ["graph_id", "compressed_at"], name: "index_dag_nodes_compressed_at"
@@ -160,6 +161,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
     t.index ["graph_id", "state", "node_type"], name: "index_dag_nodes_lookup"
     t.index ["graph_id", "turn_id", "node_type", "idempotency_key"], name: "index_dag_nodes_idempotency", unique: true, where: "((compressed_at IS NULL) AND (idempotency_key IS NOT NULL))"
     t.index ["graph_id", "turn_id"], name: "index_dag_nodes_turn"
+    t.index ["graph_id", "version_set_id"], name: "index_dag_nodes_version_set"
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
