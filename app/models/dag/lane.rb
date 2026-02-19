@@ -40,31 +40,48 @@ module DAG
       if turn_anchor_types.empty?
         []
       else
-        rows =
-          nodes
-            .where(node_type: turn_anchor_types)
-            .group(:turn_id)
-            .order(Arel.sql("MIN(created_at) ASC"), Arel.sql("MIN(dag_nodes.id::text) ASC"))
-            .pluck(
-              :turn_id,
-              Arel.sql("MIN(created_at)"),
-              Arel.sql("BOOL_OR(deleted_at IS NOT NULL)")
+        anchor_nodes = graph.nodes.where(lane_id: id, node_type: turn_anchor_types)
+
+        anchor_subquery =
+          anchor_nodes
+            .select(
+              Arel.sql(
+                "DISTINCT ON (dag_nodes.turn_id) " \
+                "dag_nodes.turn_id, " \
+                "dag_nodes.created_at AS anchor_created_at, " \
+                "dag_nodes.id AS anchor_id, " \
+                "dag_nodes.deleted_at IS NOT NULL AS anchor_deleted"
+              )
             )
+            .order(Arel.sql("dag_nodes.turn_id, dag_nodes.created_at ASC, dag_nodes.id ASC"))
+
+        anchors =
+          DAG::Node
+            .from(anchor_subquery, :anchors)
+            .select(
+              Arel.sql("anchors.turn_id"),
+              Arel.sql("anchors.anchor_created_at"),
+              Arel.sql("anchors.anchor_id"),
+              Arel.sql("anchors.anchor_deleted")
+            )
+            .order(Arel.sql("anchors.anchor_created_at ASC"), Arel.sql("anchors.anchor_id ASC"))
+
+        rows = anchors.pluck(Arel.sql("anchors.turn_id"), Arel.sql("anchors.anchor_created_at"), Arel.sql("anchors.anchor_deleted"))
 
         turns =
           rows.each_with_index.map do |(turn_id, anchor_created_at, anchor_deleted), index|
             {
-              "turn_id" => turn_id,
-              "seq" => index + 1,
-              "anchor_created_at" => anchor_created_at,
-              "anchor_deleted" => anchor_deleted == true,
+              turn_id: turn_id,
+              seq: index + 1,
+              anchor_created_at: anchor_created_at,
+              anchor_deleted: anchor_deleted == true,
             }
           end
 
         if include_deleted
           turns
         else
-          turns.reject { |turn| turn.fetch("anchor_deleted") }
+          turns.reject { |turn| turn.fetch(:anchor_deleted) }
         end
       end
     end
@@ -78,16 +95,16 @@ module DAG
     end
 
     def turn_ids(include_deleted: true)
-      turns(include_deleted: include_deleted).map { |turn| turn.fetch("turn_id") }
+      turns(include_deleted: include_deleted).map { |turn| turn.fetch(:turn_id) }
     end
 
     def turn_seq_for(turn_id, include_deleted: true)
       turn_id = turn_id.to_s
 
-      turn = turns(include_deleted: include_deleted).find { |row| row.fetch("turn_id").to_s == turn_id }
+      turn = turns(include_deleted: include_deleted).find { |row| row.fetch(:turn_id).to_s == turn_id }
 
       if turn
-        turn.fetch("seq")
+        turn.fetch(:seq)
       end
     end
 
@@ -106,7 +123,7 @@ module DAG
     end
 
     def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
-      transcript_page(limit_turns: limit_turns, mode: mode, include_deleted: include_deleted).fetch("transcript")
+      transcript_page(limit_turns: limit_turns, mode: mode, include_deleted: include_deleted).fetch(:transcript)
     end
 
     def transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
@@ -121,10 +138,10 @@ module DAG
       transcript = transcript_for_turn_ids(turn_ids: turn_ids, mode: mode, include_deleted: include_deleted)
 
       {
-        "turn_ids" => turn_ids,
-        "before_turn_id" => turn_ids.first,
-        "after_turn_id" => turn_ids.last,
-        "transcript" => transcript,
+        turn_ids: turn_ids,
+        before_turn_id: turn_ids.first,
+        after_turn_id: turn_ids.last,
+        transcript: transcript,
       }
     end
 
@@ -157,8 +174,8 @@ module DAG
 
       turn_ids =
         turns(include_deleted: true)
-          .select { |row| row.fetch("seq").between?(start_seq, end_seq) }
-          .map { |row| row.fetch("turn_id") }
+          .select { |row| row.fetch(:seq).between?(start_seq, end_seq) }
+          .map { |row| row.fetch(:turn_id) }
 
       node_ids_for_turn_ids(
         turn_ids: turn_ids,

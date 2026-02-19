@@ -97,13 +97,13 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
 
     all_turns = lane.turns
     assert_equal 3, all_turns.length
-    assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch("turn_id") }
-    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch("seq") }
-    assert_equal [false, true, false], all_turns.map { |row| row.fetch("anchor_deleted") }
+    assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch(:turn_id) }
+    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch(:seq) }
+    assert_equal [false, true, false], all_turns.map { |row| row.fetch(:anchor_deleted) }
 
     visible = lane.turns(include_deleted: false)
-    assert_equal [turn_1, turn_3], visible.map { |row| row.fetch("turn_id") }
-    assert_equal [1, 3], visible.map { |row| row.fetch("seq") }
+    assert_equal [turn_1, turn_3], visible.map { |row| row.fetch(:turn_id) }
+    assert_equal [1, 3], visible.map { |row| row.fetch(:seq) }
 
     assert_equal visible, lane.visible_turns
 

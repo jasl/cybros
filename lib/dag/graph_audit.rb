@@ -48,7 +48,7 @@ module DAG
 
       if @types.include?(ISSUE_CYCLE_DETECTED) || @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
         issue = cycle_or_toposort_failed_issue
-        issues << issue if issue && @types.include?(issue["type"])
+        issues << issue if issue && @types.include?(issue.fetch(:type))
       end
 
       if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -105,7 +105,7 @@ module DAG
         namespace = node_body_namespace_for_type_drift
         if namespace
           node_type_drift_issues(namespace: namespace).each do |issue|
-            issues << issue if @types.include?(issue["type"])
+            issues << issue if @types.include?(issue.fetch(:type))
           end
         end
       end
@@ -114,19 +114,21 @@ module DAG
     end
 
     def repair!
-      results = { "repaired" => {}, "now" => @now }
+      results = { repaired: {}, now: @now }
 
       @graph.with_graph_lock! do
+        repaired = results.fetch(:repaired)
+
         if @types.include?(ISSUE_MISCONFIGURED_GRAPH)
-          results["repaired"][ISSUE_MISCONFIGURED_GRAPH] = 0
+          repaired[ISSUE_MISCONFIGURED_GRAPH] = 0
         end
 
         if @types.include?(ISSUE_CYCLE_DETECTED)
-          results["repaired"][ISSUE_CYCLE_DETECTED] = 0
+          repaired[ISSUE_CYCLE_DETECTED] = 0
         end
 
         if @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
-          results["repaired"][ISSUE_TOPOLOGICAL_SORT_FAILED] = 0
+          repaired[ISSUE_TOPOLOGICAL_SORT_FAILED] = 0
         end
 
         if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -134,7 +136,7 @@ module DAG
           if edge_ids.any?
             @graph.edges.where(id: edge_ids).update_all(compressed_at: @now, updated_at: @now)
           end
-          results["repaired"][ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE] = edge_ids.length
+          repaired[ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE] = edge_ids.length
         end
 
         if @types.include?(ISSUE_STALE_VISIBILITY_PATCH)
@@ -142,29 +144,29 @@ module DAG
           if patch_ids.any?
             DAG::NodeVisibilityPatch.where(id: patch_ids).delete_all
           end
-          results["repaired"][ISSUE_STALE_VISIBILITY_PATCH] = patch_ids.length
+          repaired[ISSUE_STALE_VISIBILITY_PATCH] = patch_ids.length
         end
 
         if @types.include?(ISSUE_STALE_RUNNING_NODE)
           node_ids = DAG::RunningLeaseReclaimer.reclaim!(graph: @graph, now: @now)
-          results["repaired"][ISSUE_STALE_RUNNING_NODE] = node_ids.length
+          repaired[ISSUE_STALE_RUNNING_NODE] = node_ids.length
         end
 
         if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
           created = @graph.validate_leaf_invariant!
-          results["repaired"][ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
+          repaired[ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
         end
 
         if @types.include?(ISSUE_UNKNOWN_NODE_TYPE)
-          results["repaired"][ISSUE_UNKNOWN_NODE_TYPE] = 0
+          repaired[ISSUE_UNKNOWN_NODE_TYPE] = 0
         end
 
         if @types.include?(ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY)
-          results["repaired"][ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY] = 0
+          repaired[ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY] = 0
         end
 
         if @types.include?(ISSUE_NODE_BODY_DRIFT)
-          results["repaired"][ISSUE_NODE_BODY_DRIFT] = 0
+          repaired[ISSUE_NODE_BODY_DRIFT] = 0
         end
       end
 
@@ -177,7 +179,7 @@ module DAG
         problems = misconfigured_graph_problems
         return nil if problems.empty?
 
-        severity = problems.any? { |problem| problem["severity"] == "error" } ? "error" : "warn"
+        severity = problems.any? { |problem| problem.fetch(:severity) == "error" } ? "error" : "warn"
 
         namespace = nil
         attachable = @graph.attachable
@@ -196,10 +198,10 @@ module DAG
           subject_type: "DAG::Graph",
           subject_id: @graph.id,
           details: {
-            "attachable_type" => @graph.attachable_type,
-            "attachable_id" => @graph.attachable_id,
-            "namespace" => namespace,
-            "problems" => problems,
+            attachable_type: @graph.attachable_type,
+            attachable_id: @graph.attachable_id,
+            namespace: namespace,
+            problems: problems,
           }
         )
       end
@@ -223,7 +225,7 @@ module DAG
             code: "dag_node_body_namespace_missing",
             severity: "error",
             message: "attachable must define dag_node_body_namespace",
-            extras: { "attachable_class" => attachable.class.name }
+            extras: { attachable_class: attachable.class.name }
           )
           return problems
         end
@@ -241,8 +243,8 @@ module DAG
             severity: "error",
             message: "dag_node_body_namespace must return a Module",
             extras: {
-              "returned_class" => namespace.class.name,
-              "returned_inspect" => namespace.inspect,
+              returned_class: namespace.class.name,
+              returned_inspect: namespace.inspect,
             }
           )
           return problems
@@ -256,7 +258,7 @@ module DAG
             code: "node_body_namespace_has_no_bodies",
             severity: "error",
             message: "dag_node_body_namespace has no NodeBody classes",
-            extras: { "namespace" => namespace.name }
+            extras: { namespace: namespace.name }
           )
           return problems
         end
@@ -285,9 +287,9 @@ module DAG
               severity: "error",
               message: "failed to load NodeBody class from namespace",
               extras: {
-                "namespace" => namespace.name,
-                "constant_name" => constant_name.to_s,
-                "error" => "#{error.class}: #{error.message}",
+                namespace: namespace.name,
+                constant_name: constant_name.to_s,
+                error: "#{error.class}: #{error.message}",
               }
             )
             nil
@@ -306,9 +308,9 @@ module DAG
             severity: "error",
             message: "NodeBody hook #{hook_name} raised an error",
             extras: {
-              "class" => body_class.name,
-              "hook" => hook_name.to_s,
-              "error" => "#{error.class}: #{error.message}",
+              class: body_class.name,
+              hook: hook_name.to_s,
+              error: "#{error.class}: #{error.message}",
             }
           ),
         ]
@@ -364,9 +366,9 @@ module DAG
             severity: "error",
             message: "NodeBody node_type_key must match class name for convention mapping",
             extras: {
-              "class" => body_class.name,
-              "node_type_key" => actual,
-              "expected" => expected,
+              class: body_class.name,
+              node_type_key: actual,
+              expected: expected,
             }
           )
         end
@@ -392,8 +394,8 @@ module DAG
               severity: "error",
               message: "NodeBody node_type_key must be present and unique within the namespace",
               extras: {
-                "key" => key,
-                "classes" => class_names.sort,
+                key: key,
+                classes: class_names.sort,
               }
             )
           end
@@ -411,7 +413,7 @@ module DAG
             code: "default_leaf_repair_not_unique",
             severity: "error",
             message: "expected exactly 1 NodeBody with default_leaf_repair?==true",
-            extras: { "classes" => repair_bodies.map(&:name).sort }
+            extras: { classes: repair_bodies.map(&:name).sort }
           )
           return problems
         end
@@ -423,7 +425,7 @@ module DAG
             code: "default_leaf_repair_not_executable",
             severity: "error",
             message: "default leaf repair NodeBody must be executable",
-            extras: { "class" => body_class.name }
+            extras: { class: body_class.name }
           )
         end
 
@@ -432,7 +434,7 @@ module DAG
             code: "default_leaf_repair_not_leaf_terminal",
             severity: "error",
             message: "default leaf repair NodeBody must be leaf_terminal",
-            extras: { "class" => body_class.name }
+            extras: { class: body_class.name }
           )
         end
 
@@ -462,8 +464,8 @@ module DAG
             severity: "error",
             message: "NodeBody created_content_destination must be [:input|:output, non-empty key]",
             extras: {
-              "class" => body_class.name,
-              "destination" => destination,
+              class: body_class.name,
+              destination: destination,
             }
           )
         rescue StandardError => error
@@ -472,8 +474,8 @@ module DAG
             severity: "error",
             message: "NodeBody created_content_destination raised an error",
             extras: {
-              "class" => body_class.name,
-              "error" => "#{error.class}: #{error.message}",
+              class: body_class.name,
+              error: "#{error.class}: #{error.message}",
             }
           )
         end
@@ -513,20 +515,20 @@ module DAG
 
       def issue_hash(type:, severity:, subject_type:, subject_id:, details:)
         {
-          "type" => type,
-          "severity" => severity,
-          "subject_type" => subject_type,
-          "subject_id" => subject_id,
-          "details" => details,
+          type: type,
+          severity: severity,
+          subject_type: subject_type,
+          subject_id: subject_id,
+          details: details,
         }
       end
 
       def problem_hash(code:, severity:, message:, extras:)
         {
-          "code" => code,
-          "severity" => severity,
-          "message" => message,
-          "extras" => extras,
+          code: code,
+          severity: severity,
+          message: message,
+          extras: extras,
         }
       end
 
@@ -559,8 +561,8 @@ module DAG
           subject_type: "DAG::Graph",
           subject_id: @graph.id,
           details: {
-            "node_count" => node_ids.length,
-            "edge_count" => edges.length,
+            node_count: node_ids.length,
+            edge_count: edges.length,
           }
         )
       rescue StandardError => error
@@ -570,9 +572,9 @@ module DAG
           subject_type: "DAG::Graph",
           subject_id: @graph.id,
           details: {
-            "node_count" => node_ids.length,
-            "edge_count" => edges.length,
-            "error" => "#{error.class}: #{error.message}",
+            node_count: node_ids.length,
+            edge_count: edges.length,
+            error: "#{error.class}: #{error.message}",
           }
         )
       end
@@ -639,8 +641,8 @@ module DAG
               subject_type: "DAG::Node",
               subject_id: node_id,
               details: {
-                "node_type" => node_type,
-                "namespace" => namespace_name,
+                node_type: node_type,
+                namespace: namespace_name,
               }
             )
           elsif !(expected_class < DAG::NodeBody)
@@ -650,9 +652,9 @@ module DAG
               subject_type: "DAG::Node",
               subject_id: node_id,
               details: {
-                "node_type" => node_type,
-                "namespace" => namespace_name,
-                "mapped_class" => expected_class.name,
+                node_type: node_type,
+                namespace: namespace_name,
+                mapped_class: expected_class.name,
               }
             )
           elsif body_type.to_s != expected_class.name
@@ -662,9 +664,9 @@ module DAG
               subject_type: "DAG::Node",
               subject_id: node_id,
               details: {
-                "node_type" => node_type,
-                "expected_body_type" => expected_class.name,
-                "actual_body_type" => body_type.to_s,
+                node_type: node_type,
+                expected_body_type: expected_class.name,
+                actual_body_type: body_type.to_s,
               }
             )
           end

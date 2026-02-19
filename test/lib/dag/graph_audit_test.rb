@@ -12,7 +12,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     b.update_columns(compressed_at: Time.current, compressed_by_id: a.id, updated_at: Time.current)
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    assert issues.any? { |i| i["type"] == DAG::GraphAudit::ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE }
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE }
 
     DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE])
     assert edge.reload.compressed_at.present?
@@ -28,7 +28,9 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     node.update_columns(compressed_at: Time.current, compressed_by_id: node.id, updated_at: Time.current)
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    assert issues.any? { |i| i["subject_id"] == patch.id && i["type"] == DAG::GraphAudit::ISSUE_STALE_VISIBILITY_PATCH }
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == patch.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_STALE_VISIBILITY_PATCH
+    end
 
     DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_STALE_VISIBILITY_PATCH])
     assert_not DAG::NodeVisibilityPatch.exists?(id: patch.id)
@@ -41,7 +43,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    assert issues.any? { |i| i["type"] == DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION }
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION }
 
     DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION])
     assert graph.nodes.active.exists?(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
@@ -59,7 +61,9 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     )
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    assert issues.any? { |i| i["subject_id"] == node.id && i["type"] == DAG::GraphAudit::ISSUE_STALE_RUNNING_NODE }
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_STALE_RUNNING_NODE
+    end
 
     DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_STALE_RUNNING_NODE])
     assert_equal DAG::Node::ERRORED, node.reload.state
@@ -70,10 +74,10 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = DAG::Graph.create!
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
     assert misconfigured
 
-    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
     assert_includes problem_codes, "attachable_missing"
   end
 
@@ -101,10 +105,10 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
     assert misconfigured
 
-    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
     assert_includes problem_codes, "default_leaf_repair_not_unique"
   ensure
     Messages.send(:remove_const, :BadLeafRepair) if Messages.const_defined?(:BadLeafRepair, false)
@@ -137,10 +141,10 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
     assert misconfigured
 
-    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
     assert_includes problem_codes, "node_type_key_collision"
   ensure
     Messages.send(:remove_const, :CollisionOne) if Messages.const_defined?(:CollisionOne, false)
@@ -163,10 +167,10 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
     assert misconfigured
 
-    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
     assert_includes problem_codes, "invalid_created_content_destination"
   ensure
     Messages.send(:remove_const, :InvalidDestination) if Messages.const_defined?(:InvalidDestination, false)
@@ -188,10 +192,10 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
-    misconfigured = issues.find { |issue| issue["type"] == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
     assert misconfigured
 
-    problem_codes = misconfigured.dig("details", "problems").map { |problem| problem["code"] }
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
     assert_includes problem_codes, "node_body_hook_error"
   ensure
     Messages.send(:remove_const, :HookRaises) if Messages.const_defined?(:HookRaises, false)
@@ -239,7 +243,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     )
 
     issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_CYCLE_DETECTED])
-    assert issues.any? { |issue| issue["type"] == DAG::GraphAudit::ISSUE_CYCLE_DETECTED }
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_CYCLE_DETECTED }
   end
 
   test "scan reports toposort_failed when topological sorting raises unexpectedly" do
@@ -257,7 +261,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
 
     issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED])
 
-    assert issues.any? { |issue| issue["type"] == DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED }
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED }
   ensure
     DAG::TopologicalSort.define_singleton_method(:call, original_call) if original_call
   end
@@ -270,7 +274,9 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     node.body.update_column(:type, Messages::UserMessage.name)
 
     issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT])
-    assert issues.any? { |issue| issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT }
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT
+    end
   end
 
   test "scan reports unknown_node_type when node_type cannot be mapped to a NodeBody class" do
@@ -281,7 +287,9 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     node.update_column(:node_type, "bogus_type")
 
     issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE])
-    assert issues.any? { |issue| issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE }
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE
+    end
   end
 
   test "scan reports node_type_maps_to_non_node_body when node_type maps to a non-NodeBody constant" do
@@ -295,7 +303,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
 
     issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY])
     assert issues.any? do |issue|
-      issue["subject_id"] == node.id && issue["type"] == DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY
     end
   ensure
     Messages.send(:remove_const, :NotABody) if Messages.const_defined?(:NotABody, false)
