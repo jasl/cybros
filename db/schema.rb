@@ -179,9 +179,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_19_000000) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'cancelled'::character varying]::text[])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'awaiting_approval'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|

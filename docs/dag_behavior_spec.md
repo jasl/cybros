@@ -82,23 +82,28 @@
 状态集合：
 
 - `pending`：已创建，待执行
+- `awaiting_approval`：等待人工审批/授权（pre-execution gate；不可被 Scheduler claim）
 - `running`：已被 claim，执行中
 - `finished`：成功完成（依赖满足仅认 `finished`）
 - `errored`：执行失败
 - `rejected`：用户拒绝授权
 - `skipped`：未开始且不再需要（只允许 `pending → skipped`）
-- `cancelled`：执行中被取消（只允许 `running → cancelled`）
+- `stopped`：用户 stop 生成/执行（允许 `pending|awaiting_approval|running → stopped`）
 
 **Terminal states**（终态）定义为：
 
-- `finished | errored | rejected | skipped | cancelled`
+- `finished | errored | rejected | skipped | stopped`
 
 ### 2.3 状态机（允许迁移）
 
 允许的迁移（其余迁移均为非法）：
 
+- `awaiting_approval → pending`（approve）
+- `awaiting_approval → rejected`（deny）
+- `awaiting_approval → stopped`（stop）
 - `pending → running`
-- `running → finished | errored | rejected | cancelled`
+- `pending → stopped`（stop）
+- `running → finished | errored | rejected | stopped`
 - `pending → skipped`
 
 时间戳约定：
@@ -108,7 +113,7 @@
 - `started_at`：Runner 实际开始执行时写入（可能晚于 claim）
 - `heartbeat_at`：Runner 续租/心跳时写入（里程碑 1 至少在开始执行时写入）
 - `lease_expires_at`：running lease 过期时间（Scheduler claim 时写入，Runner 开始执行时会延长）
-- `finished_at`：仅在进入 terminal state 时写入（含 skipped/cancelled）
+- `finished_at`：仅在进入 terminal state 时写入（含 skipped/stopped）
 
 ### 2.3.1 Running lease & reclaim（可靠性）
 
@@ -131,7 +136,7 @@
 
 新不变量（规范性要求）：
 
-- 只有 `NodeBody.executable? == true` 的节点才允许处于 `pending` 或 `running`。
+- 只有 `NodeBody.executable? == true` 的节点才允许处于 `pending` / `awaiting_approval` / `running`。
 
 因此 Scheduler/FailurePropagation 可以只按 `state` 与拓扑关系工作，不再需要维护 `node_type IN (...)` 的可执行列表。
 
@@ -404,12 +409,13 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 | parent.state | `sequence` 是否 unblock child | `dependency` 是否 unblock child |
 |---|---:|---:|
 | `pending` | 否 | 否 |
+| `awaiting_approval` | 否 | 否 |
 | `running` | 否 | 否 |
 | `finished` | 是 | 是 |
 | `errored` | 是 | 否 |
 | `rejected` | 是 | 否 |
 | `skipped` | 是 | 否 |
-| `cancelled` | 是 | 否 |
+| `stopped` | 是 | 否 |
 
 补充规则：
 
@@ -474,7 +480,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
   "turn_id": "...",
   "lane_id": "...",
   "node_type": "user_message|system_message|developer_message|agent_message|character_message|task|summary",
-  "state": "pending|running|finished|errored|rejected|skipped|cancelled",
+  "state": "pending|awaiting_approval|running|finished|errored|rejected|skipped|stopped",
   "payload": {
     "input": { },
     "output_preview": { },
@@ -605,7 +611,7 @@ Context 输出过滤（对 `context_for` 与 `context_closure_for` 均适用）�
 - transcript 的过滤与可选的 preview 覆写应由 `graph.transcript_include?` / `graph.transcript_preview_override` 提供（里程碑 1 默认实现必须满足上述规则；attachable 可覆写以满足不同产品语义）。
 - preview 覆写必须满足：
   - 当 `payload.output_preview["content"]` 为空时，优先使用 `metadata["transcript_preview"]`（若存在）
-  - 否则对 `errored/rejected/cancelled/skipped` 生成安全预览文本（基于 `metadata["error"]/["reason"]`，截断），避免 UI 空白或泄漏敏感信息
+  - 否则对 `errored/rejected/stopped/skipped` 生成安全预览文本（基于 `metadata["error"]/["reason"]`，截断），避免 UI 空白或泄漏敏感信息
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
 
@@ -633,7 +639,7 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 里程碑 1（Default policy）规则：每个 leaf 必须满足其一：
 
 - `leaf_terminal? == true`（由 NodeBody hooks 决定；里程碑 1 内置为 `agent_message/character_message`）
-- 或者 `state in {pending, running}`（允许执行中的中间态 leaf）
+- 或者 `state in {pending, awaiting_approval, running}`（允许执行中的中间态 leaf）
 
 里程碑 1（Default policy）修复策略：
 
@@ -660,6 +666,14 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 - 由于 “pending/running 必须可执行” 不变量，`child` 必须是可执行节点（`NodeBody.executable? == true`）
 - 存在任一 incoming `dependency` Active edge，使得其 parent 满足：
   - parent 为 terminal 且 `parent.state != finished`
+
+例外（规范性要求）：**required approval-deny 不传播 skipped**。若 parent 满足：
+
+- `parent.state == rejected`
+- `parent.metadata["reason"] == "approval_denied"`
+- `parent.metadata.dig("approval", "required") == true`
+
+则 FailurePropagation **不得**将该 `child` 标记为 `skipped`；`child` 必须保持 `pending` 并继续被 dependency 阻塞，以实现“拒绝后可恢复（approve/retry）”的产品语义。
 
 则：
 
@@ -731,7 +745,7 @@ Active 版本确定规则：
 前置条件：
 
 - `old.body.retriable? == true`（当前：`task`/`agent_message`/`character_message`）
-- `old.state in {errored, rejected, cancelled}`
+- `old.state in {errored, rejected, stopped}`
 - `old` 为 Active
 - old 的 **Active causal descendants（不含 old）必须全部为 pending**  
   （即：下游允许存在，但必须全部未执行；禁止出现 running/terminal，以避免改写已执行语义）
@@ -739,7 +753,8 @@ Active 版本确定规则：
 行为差异点：
 
 - new 节点：
-  - `state = pending`
+  - `state = pending`（默认）
+  - 若 `old.state == rejected` 且 `old.metadata["reason"] == "approval_denied"`：`state = awaiting_approval`
   - `retry_of_id = old.id`
   - `metadata["attempt"]` 自增（若缺省则从 1 起）
 - `payload.input` 复制自 `old.body.input_for_retry`
@@ -852,8 +867,8 @@ API（引擎层示例）：`Mutations#archive_lane!(lane:, mode: :finish|:cancel
 - 写入 `lane.archived_at = at`。
 - `mode = :finish`（默认）：仅归档，不修改节点状态；归档后仍允许同 turn 收尾（见第 2.7 节）。
 - `mode = :cancel`：
-  - 将该 lane 内 Active 的 `running → cancelled`（写 `finished_at`，metadata 合并 `reason`）
-  - 将该 lane 内 Active 的 `pending → skipped`（写 `finished_at`，metadata 合并 `reason`）
+  - 将该 lane 内 Active 的 `running → stopped`（写 `finished_at`，metadata 合并 `reason`）
+  - 将该 lane 内 Active 的 `pending → stopped`（写 `finished_at`，metadata 合并 `reason`）
   - 对每个被变更节点 emit `node_state_changed`（`from`/`to`）
 - leaf repair 在 archived lane 中 **不得**创建新的 pending work；修复节点应为 terminal（建议 `agent_message(finished)` 并写入 `finished_at`），以避免归档后重新生成待执行节点。
 
@@ -911,7 +926,7 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 `node_state_changed` 的触发点（里程碑 1）：
 
 - Scheduler claim：`pending → running`
-- Runner apply_result：`running → finished/errored/rejected/cancelled`
+- Runner apply_result：`running → finished/errored/rejected/stopped`
 - FailurePropagation：`pending → skipped`
 
 可见性相关 hooks 的触发点（里程碑 1）：

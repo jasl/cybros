@@ -99,19 +99,23 @@ When working on DAG-related code (engine, app integration, tests, scripts):
 Doc: `docs/dag_public_api.md`
 
 #### Node Types
+- `system_message` — System prompt / global rules (not executable)
+- `developer_message` — Developer prompt / product constraints (not executable)
 - `user_message` — User's input to the agent
 - `agent_message` — Agent's response to the user
+- `character_message` — Roleplay / multi-actor message (executable)
 - `task` — An executable action (tool call, MCP request, skill invocation)
 - `summary` — Compressed representation of a subgraph (for context economy)
 
 #### Node States
 - `pending` — Created but not yet processed
+- `awaiting_approval` — Waiting for human approval (pre-execution gate; not claimable)
 - `running` — Currently being executed
 - `finished` — Completed successfully
 - `errored` — Failed (retryable for agent nodes)
 - `rejected` — User declined to authorize the operation
-- `cancelled` — User canceled the conversation
 - `skipped` — User skipped the node (e.g. the task is unneeded)
+- `stopped` — User stopped generation/execution (terminal)
 
 #### Edge Types
 - `sequence` — Temporal ordering (A happens before B)
@@ -120,7 +124,7 @@ Doc: `docs/dag_public_api.md`
 
 #### Key DAG Properties
 1. **Dynamic**: Nodes are added as the conversation progresses; no predefined end state
-2. **Valid at all times**: Every leaf node must be an `agent_message` or be in a `pending`/`running` state
+2. **Valid at all times**: Every leaf node must be an `agent_message`/`character_message` or be in a `pending`/`awaiting_approval`/`running` state
 3. **Parallel execution**: Independent sibling nodes (same dependencies) execute concurrently
 4. **Subgraph compression**: Completed branches can be replaced with a `summary` node to save context
 5. **Non-destructive compression**: Original nodes are marked `compressed`, not deleted (audit trail)

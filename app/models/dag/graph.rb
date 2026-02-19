@@ -155,6 +155,57 @@ module DAG
       scope
     end
 
+    def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
+      limit = Integer(limit)
+      raise ArgumentError, "limit must be > 0" if limit <= 0
+
+      limit = [limit, 1000].min
+
+      scope = awaiting_approval_scope(lane_id: lane_id).order(:id)
+
+      if after_node_id.present?
+        scope = scope.where("dag_nodes.id > ?", after_node_id)
+      end
+
+      rows =
+        scope
+          .joins(:body)
+          .limit(limit)
+          .pluck(
+            Arel.sql("dag_nodes.id"),
+            Arel.sql("dag_nodes.turn_id"),
+            Arel.sql("dag_nodes.lane_id"),
+            Arel.sql("dag_nodes.node_type"),
+            Arel.sql("dag_nodes.state"),
+            Arel.sql("dag_nodes.metadata"),
+            Arel.sql("dag_nodes.created_at"),
+            Arel.sql("dag_node_bodies.input"),
+            Arel.sql("dag_node_bodies.output_preview")
+          )
+
+      rows.map do |(id, turn_id, lane_id, node_type, state, metadata, created_at, input, output_preview)|
+        {
+          "node_id" => id,
+          "turn_id" => turn_id,
+          "lane_id" => lane_id,
+          "node_type" => node_type,
+          "state" => state,
+          "payload" => {
+            "input" => input.is_a?(Hash) ? input : {},
+            "output_preview" => output_preview.is_a?(Hash) ? output_preview : {},
+          },
+          "metadata" => metadata,
+          "created_at" => created_at&.iso8601,
+        }
+      end
+    end
+
+    def awaiting_approval_scope(lane_id: nil)
+      scope = nodes.active.where(state: DAG::Node::AWAITING_APPROVAL)
+      scope = scope.where(lane_id: lane_id) if lane_id.present?
+      scope
+    end
+
     def transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)
       unless include_deleted
         deleted_at = nodes.where(id: target_node_id).pick(:deleted_at)
@@ -390,7 +441,7 @@ module DAG
       if leaf_terminal_node_types.include?(node.node_type.to_s)
         true
       else
-        node.pending? || node.running?
+        node.pending? || node.awaiting_approval? || node.running?
       end
     end
 

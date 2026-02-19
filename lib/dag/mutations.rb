@@ -308,7 +308,7 @@ module DAG
 
         sql_running = <<~SQL
           UPDATE dag_nodes
-             SET state = 'cancelled',
+             SET state = 'stopped',
                  finished_at = #{now_quoted},
                  metadata = dag_nodes.metadata || jsonb_build_object('reason', #{reason_quoted}),
                  updated_at = #{now_quoted}
@@ -321,7 +321,7 @@ module DAG
 
         sql_pending = <<~SQL
           UPDATE dag_nodes
-             SET state = 'skipped',
+             SET state = 'stopped',
                  finished_at = #{now_quoted},
                  metadata = dag_nodes.metadata || jsonb_build_object('reason', #{reason_quoted}),
                  updated_at = #{now_quoted}
@@ -341,7 +341,7 @@ module DAG
           event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
           subject_type: "DAG::Node",
           subject_id: node_id,
-          particulars: { "from" => "running", "to" => "cancelled" }
+          particulars: { "from" => "running", "to" => "stopped" }
         )
       end
 
@@ -350,7 +350,7 @@ module DAG
           event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
           subject_type: "DAG::Node",
           subject_id: node_id,
-          particulars: { "from" => "pending", "to" => "skipped" }
+          particulars: { "from" => "pending", "to" => "stopped" }
         )
       end
 
@@ -365,8 +365,8 @@ module DAG
         raise ArgumentError, "can only retry retriable nodes"
       end
 
-      unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::CANCELLED].include?(old.state)
-        raise ArgumentError, "can only retry errored, rejected, or cancelled nodes"
+      unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::STOPPED].include?(old.state)
+        raise ArgumentError, "can only retry errored, rejected, or stopped nodes"
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
@@ -389,9 +389,16 @@ module DAG
           .except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker")
           .merge("attempt" => attempt)
 
+      state =
+        if old.rejected? && old.metadata["reason"].to_s == "approval_denied"
+          DAG::Node::AWAITING_APPROVAL
+        else
+          DAG::Node::PENDING
+        end
+
       new_node = create_node(
         node_type: old.node_type,
-        state: DAG::Node::PENDING,
+        state: state,
         metadata: retry_metadata,
         retry_of_id: old.id,
         turn_id: old.turn_id,
@@ -435,7 +442,7 @@ module DAG
       new_node
     end
 
-      def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
+    def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
       old = locked_active_node!(node)
       now = Time.current
 
@@ -491,11 +498,11 @@ module DAG
         }
       )
 
-        new_node
-      end
+      new_node
+    end
 
-      def adopt_version!(node:)
-        target = locked_node!(node)
+    def adopt_version!(node:)
+      target = locked_node!(node)
       now = Time.current
 
       if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?

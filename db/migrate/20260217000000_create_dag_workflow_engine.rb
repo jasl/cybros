@@ -74,7 +74,7 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.string :state, null: false
       t.check_constraint(
-        "state IN ('pending','running','finished','errored','rejected','skipped','cancelled')",
+        "state IN ('pending','awaiting_approval','running','finished','errored','rejected','skipped','stopped')",
         name: "check_dag_nodes_state_enum"
       )
 
@@ -112,13 +112,13 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.datetime :context_excluded_at
       t.check_constraint(
-        "context_excluded_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
+        "context_excluded_at IS NULL OR state IN ('finished','errored','rejected','skipped','stopped')",
         name: "check_dag_nodes_context_excluded_terminal"
       )
 
       t.datetime :deleted_at
       t.check_constraint(
-        "deleted_at IS NULL OR state IN ('finished','errored','rejected','skipped','cancelled')",
+        "deleted_at IS NULL OR state IN ('finished','errored','rejected','skipped','stopped')",
         name: "check_dag_nodes_deleted_terminal"
       )
 

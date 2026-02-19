@@ -53,11 +53,11 @@ module Messages
         when DAG::Node::REJECTED
           reason_message = reason.present? ? reason : "rejected"
           "Rejected: #{reason_message}".truncate(2000)
-        when DAG::Node::CANCELLED
+        when DAG::Node::STOPPED
           if reason.present?
-            "Cancelled: #{reason}".truncate(2000)
+            "Stopped: #{reason}".truncate(2000)
           else
-            "Cancelled".truncate(2000)
+            "Stopped".truncate(2000)
           end
         when DAG::Node::SKIPPED
           if reason.present?
@@ -71,13 +71,13 @@ module Messages
       end
     end
 
-      def retriable?
-        true
-      end
+    def retriable?
+      true
+    end
 
-      def rerunnable?
-        true
-      end
+    def rerunnable?
+      true
+    end
 
     def preview_max_chars
       2000

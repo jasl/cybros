@@ -82,7 +82,7 @@
 - 表：`dag_nodes`
 - 关键字段：
   - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
-  - `state`：`pending | running | finished | errored | rejected | skipped | cancelled`
+  - `state`：`pending | awaiting_approval | running | finished | errored | rejected | skipped | stopped`
   - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享；DB 层外键引用 `dag_turns`）
   - `lane_id`：Lane 分区（用于 UI 染色、分支索引、只读门禁）
   - `metadata`：JSONB
@@ -137,15 +137,16 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 - `default_leaf_repair?`：默认 `false`（用于 leaf repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true；内置 `agent_message` 为 true、`character_message` 显式为 false）
 - `mermaid_snippet(node:)`：用于 Mermaid label 片段；默认读取 `output_preview["content"]`，各 body 可覆盖（如 system/developer/user 从 `input["content"]`，task 从 `input["name"]`）
 
-#### 状态语义（skipped/cancelled 明确化）
+#### 状态语义（awaiting_approval/stopped 明确化）
 
 - `pending`：已创建但未执行
+- `awaiting_approval`：等待人工审批/授权（pre-execution gate；不可被 Scheduler claim）
 - `running`：已被 claim，正在执行
 - `finished`：成功完成（依赖满足仅认 `finished`）
 - `errored`：执行失败
 - `rejected`：需要授权但被用户拒绝
 - `skipped`：**仅允许**从 `pending` 迁移，表示任务未开始且不再需要
-- `cancelled`：**仅允许**从 `running` 迁移，表示正在执行的任务被取消
+- `stopped`：用户 stop 生成/执行（允许 `pending|awaiting_approval|running → stopped`；terminal）
 
 ### 边：`DAG::Edge`
 
@@ -188,7 +189,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 规则：每个 leaf 必须满足其一：
 
 - `node_type in {agent_message, character_message}`
-- 或者 `state in {pending, running}`（允许执行中的中间态）
+- 或者 `state in {pending, awaiting_approval, running}`（允许执行中的中间态）
 
 修复策略：leaf invariant 的合法性判定与修复动作由 `DAG::Graph` 提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 leaf-terminal 类型时，自动追加一个默认 leaf repair 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
 
@@ -198,11 +199,11 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 - 入口：`DAG::Scheduler.claim_executable_nodes`
 - 实现：`lib/dag/scheduler.rb`
-- 可执行（executable）判定：
+  - 可执行（executable）判定：
   - `dag_nodes.state = pending`
-  - 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/running`（因此 Scheduler 无需再维护 `node_type IN (...)` 的可执行列表）
+  - 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/awaiting_approval/running`（因此 Scheduler 无需再维护 `node_type IN (...)` 的可执行列表）
   - incoming 阻塞边满足 edge gating：
-    - `sequence`：父节点为 **terminal**（`finished/errored/rejected/skipped/cancelled`）即可 unblock
+    - `sequence`：父节点为 **terminal**（`finished/errored/rejected/skipped/stopped`）即可 unblock
     - `dependency`：父节点必须为 **finished** 才 unblock
 - 并发语义：
   - `SELECT ... FOR UPDATE SKIP LOCKED`

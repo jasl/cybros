@@ -59,7 +59,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     node = graph.nodes.new(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     assert_not node.valid?
-    assert_includes node.errors[:state], "can only be pending/running for executable nodes"
+    assert_includes node.errors[:state], "can only be pending/awaiting_approval/running for executable nodes"
   end
 
   test "exclude_from_context! and soft_delete! reject non-terminal nodes" do
@@ -427,20 +427,20 @@ class DAG::NodeTest < ActiveSupport::TestCase
     )
   end
 
-  test "mark_cancelled! works from running" do
+  test "mark_stopped! works from running" do
     conversation = Conversation.create!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
-    assert node.mark_cancelled!(reason: "cancelled by user")
-    assert_equal DAG::Node::CANCELLED, node.state
-    assert_equal "cancelled by user", node.metadata["reason"]
+    assert node.mark_stopped!(reason: "stopped by user")
+    assert_equal DAG::Node::STOPPED, node.state
+    assert_equal "stopped by user", node.metadata["reason"]
   end
 
-  test "mark_cancelled! does not transition from pending" do
+  test "mark_stopped! does not transition from pending" do
     conversation = Conversation.create!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
-    assert_not node.mark_cancelled!(reason: "cannot cancel before running")
+    assert_not node.mark_stopped!(reason: "cannot stop before running")
     assert_equal DAG::Node::PENDING, node.reload.state
   end
 

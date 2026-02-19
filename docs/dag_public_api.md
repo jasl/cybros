@@ -22,6 +22,8 @@
 - `DAG::Graph#context_node_scope_for(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
 - `DAG::Graph#node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)`（bounded；keyset；用于流式/进度/UI 订阅）
 - `DAG::Graph#node_event_scope_for(node_id, kinds: nil)`（返回 ActiveRecord::Relation；无顺序保证）
+- `DAG::Graph#awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)`（bounded；keyset；用于工具授权队列）
+- `DAG::Graph#awaiting_approval_scope(lane_id: nil)`（返回 ActiveRecord::Relation；无顺序保证）
 - `DAG::Graph#transcript_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_recent_turns(limit_turns:, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_page(lane_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
@@ -80,6 +82,10 @@ end
   - `soft_delete!` / `restore!`
   - `request_exclude_from_context!` / `request_include_in_context!`
   - `request_soft_delete!` / `request_restore!`
+- 审批 / stop：
+  - `DAG::Node#approve!`（`awaiting_approval → pending`）
+  - `DAG::Node#deny_approval!`（`awaiting_approval → rejected`，默认 `metadata["reason"]="approval_denied"`）
+  - `DAG::Node#stop!`（`pending|awaiting_approval|running → stopped`）
 
 ### 3.4 Executor interface（流式/增量输出）
 
@@ -94,6 +100,7 @@ end
 - **非流式**：executor 返回 `DAG::ExecutionResult.finished(payload: ...)` 或 `finished(content: ...)`
 - **流式**：executor 通过 `stream.output_delta(...)` 写入增量输出，并返回 `DAG::ExecutionResult.finished_streamed(...)`
   - 约束：`finished_streamed` 不允许同时携带 `payload` 或 `content`（避免语义漂移）
+- **停止**（可选）：executor 返回 `DAG::ExecutionResult.stopped(reason: ...)`（Runner 会落库为 `stopped`；若有 streaming output 会物化 partial output）
 
 ## 4) 审计 / 诊断 API
 

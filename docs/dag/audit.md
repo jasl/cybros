@@ -1,4 +1,4 @@
-# DAG 引擎审计报告（Milestone 1，2026-02-18）
+# DAG 引擎审计报告（Milestone 1，2026-02-19）
 
 本报告在“宣布完成 Milestone 1 之前”的窗口期内完成，允许为正确性/可靠性/可观测性做破坏性调整；目标是用**场景测试**与**不变量审计**来验证引擎可支撑多类 LLM 应用（Chatbot / 编程 Agent / Roleplay 群聊），并在“改图/隐藏节点”后仍保持图正确。
 
@@ -17,6 +17,8 @@
 - `dag_nodes.node_type` 语义增强，新增 `system_message`、`developer_message`、`character_message`，并把 `character_message` 纳入 executable 集合（与 `agent_message` 同级）。
 - 引入 Lane 分区模型：新增 `dag_lanes` 与 `dag_nodes.lane_id`（一个 node 只能属于一个 lane）；fork 创建 branch lane+root node；merge 通过在 target lane 创建 join 节点表达“汇总点”（不隐式归档 source lanes；archive 为显式产品动作）。
 - Transcript 可靠性增强：当下游消息因依赖失败传播被标记为 `skipped`（或其它终态）时，仍能以“安全预览占位”的形式出现在 transcript，避免 UI 只剩用户输入的空白状态。
+- 流式/增量输出一等支持：新增 `dag_node_events`（node-scoped、append-only、keyset 分页），executor 通过 `NodeEventStream` 写 `output_delta/progress/log`；Runner 在 `finished_streamed` 时汇总 `output_delta` 并物化写回最终 output（保证 transcript/context 仍走稳定读路径）。
+- 人工审批 gate 与 user stop 一等语义：新增 `awaiting_approval`（pre-execution gate）与 terminal `stopped`；required approval-deny 下不自动 skipped 下游依赖节点，允许流程“阻塞但可恢复”（approve/retry）。
 - 类型系统松绑：移除 `DAG::Node` 对 node_type 的硬编码 enum/允许列表，并把“可执行/转写/安全预览”等语义下沉到 NodeBody；对 conversation graphs，未知 node_type 通过 `dag_node_body_namespace` 的约定映射默认严格失败。
 - 进一步下沉类型语义：引入 NodeBody semantic hooks（turn anchor / transcript candidates / leaf terminal / 默认 leaf repair / content 落点 / mermaid snippet），并删除 `DAG::Node` 的 node_type 常量，使 DAG 核心几乎不需要显式分支判断 node_type。
 - Audit 能力补强：`DAG::GraphAudit` 新增 `misconfigured_graph`，用于提前暴露 `dag_node_body_namespace` 与 NodeBody hooks 的结构性配置错误（无自动修复，仅诊断）。
@@ -59,12 +61,12 @@
 - leaf 只由 outgoing blocking edges（`sequence/dependency`）决定。
 - 对 conversation graphs：leaf 必须满足：
   - `node_type in {agent_message, character_message}`，或
-  - `state in {pending, running}`
+  - `state in {pending, awaiting_approval, running}`
 - 修复：对 terminal 且不满足 leaf-valid 的 leaf，追加 `agent_message(pending)` 子节点并以 `sequence` 连接（本次保持默认不变）。
 
 ### 2.5 Scheduler / Runner / FailurePropagation
 
-- 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/running`；因此 Scheduler/FailurePropagation 不再需要维护 `node_type IN (...)` 的可执行列表。
+- 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/awaiting_approval/running`；因此 Scheduler/FailurePropagation 不再需要维护 `node_type IN (...)` 的可执行列表。
 - edge gating：
   - `sequence`：parent terminal 即可 unblock
   - `dependency`：parent 必须 `finished` 才 unblock
@@ -74,7 +76,7 @@
 
 - `system_message` / `developer_message`：默认进入 context，默认不进入 transcript；内容写入 `payload.input["content"]`。
 - `agent_message` / `character_message`：默认进入 context，默认进入 transcript；内容写入 `payload.output["content"]`。
-- Transcript 终态可见性强化：当 `agent_message/character_message` 进入 `errored/rejected/cancelled/skipped` 等终态且具备 `metadata["reason"]`/`metadata["error"]` 时，必须允许进入 transcript，并用安全预览占位（避免 UI 空白）。
+- Transcript 终态可见性强化：当 `agent_message/character_message` 进入 `errored/rejected/stopped/skipped` 等终态且具备 `metadata["reason"]`/`metadata["error"]` 时，必须允许进入 transcript，并用安全预览占位（避免 UI 空白）。
 - Context/Transcript 输出包含 `lane_id`：用于 UI 染色与对话树展示。
 
 ---
@@ -122,6 +124,7 @@
 目录：`test/scenarios/dag/`
 
 - `chatbot_flow_test.rb`：GPT 网页版风格（system→developer→user→agent）；验证 context/transcript 默认行为与 leaf repair。
+- `chatbot_streaming_flow_test.rb`：ChatGPT/Codex-like 流式输出（output_delta/progress events + 最终 output 物化）；验证“流式与非流式可并存”且不改变调度语义。
 - `agent_tool_calls_flow_test.rb`：编程 Agent 风格（planning→并行 tasks→join 消息）；验证调度顺序、tool result 注入、planning 消息默认隐藏、失败传播导致 skipped 占位可见。
 - `roleplay_group_chat_flow_test.rb`：多角色群聊（同 turn 多条 `character_message` 并行执行、其中一个 rerun）；验证 turn 聚合视图与按节点锚定视图的差异。
 - `graph_surgery_and_visibility_flow_test.rb`：visibility patch defer/apply + compress + edit + retry/rerun 的交叉回归；验证“改图/隐藏节点”组合操作后 GraphAudit 仍为空。
@@ -134,4 +137,5 @@
 
 - **Turn 建模与群聊**：已引入 `dag_turns`（Turn 一等公民）并以 NodeBody hooks `turn_anchor?` 维护 turn anchor（conversation graphs 默认 `user_message/agent_message/character_message` 为 true），从而支持“无用户回合的纯角色互聊 / 只有 assistant 消息的 turn（例如 merge/join）”的 transcript 分页与 recent turns 查询。
 - **CTE 性能与索引**：Acyclicity（新建 edge 环检测）、`context_closure_for`（祖先闭包）与部分改图操作（例如 descendants 扫描）依赖 recursive CTE；`context_for`（bounded window）与 leaf 判定不依赖。后续可基于真实数据量做 profiling，并按查询形态补齐索引与物化策略。
+- **Node events retention 与实时订阅**：`dag_node_events` 是 append-only（便于审计与回放），但产品侧需要明确保留/裁剪策略（按时间/大小/按 node 终态后压缩等），并补齐 UI 订阅层（例如 SolidCable/Turbo stream/SSE）把 events 推到前端。
 - **全局 prompt 机制**：`system_message/developer_message` 目前作为 node_type 存在；若产品侧需要“全局 prompt + per-branch override”，建议明确注入点与冲突合并规则，并用专门场景测试固化。

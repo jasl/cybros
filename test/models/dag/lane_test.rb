@@ -152,7 +152,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_match(/Lane is archived/, error.message)
   end
 
-  test "archive_lane! mode cancel cancels running and skips pending without creating new pending work" do
+  test "archive_lane! mode cancel stops running and pending without creating new pending work" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
@@ -163,7 +163,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
     pending = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, lane_id: lane.id, metadata: {})
 
     graph.mutate! do |m|
-      m.archive_lane!(lane: lane, mode: :cancel, at: Time.current, reason: "user_cancelled")
+      m.archive_lane!(lane: lane, mode: :cancel, at: Time.current, reason: "stopped_by_user")
     end
 
     state_events =
@@ -171,18 +171,18 @@ class DAG::LaneTest < ActiveSupport::TestCase
         .where(event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED)
         .pluck(:subject_id, :particulars)
         .to_h
-    assert_equal({ "from" => "running", "to" => "cancelled" }, state_events.fetch(running.id))
-    assert_equal({ "from" => "pending", "to" => "skipped" }, state_events.fetch(pending.id))
+    assert_equal({ "from" => "running", "to" => "stopped" }, state_events.fetch(running.id))
+    assert_equal({ "from" => "pending", "to" => "stopped" }, state_events.fetch(pending.id))
 
     lane.reload
     assert lane.archived_at.present?
 
-    assert_equal DAG::Node::CANCELLED, running.reload.state
-    assert_equal "user_cancelled", running.metadata["reason"]
+    assert_equal DAG::Node::STOPPED, running.reload.state
+    assert_equal "stopped_by_user", running.metadata["reason"]
     assert running.finished_at.present?
 
-    assert_equal DAG::Node::SKIPPED, pending.reload.state
-    assert_equal "user_cancelled", pending.metadata["reason"]
+    assert_equal DAG::Node::STOPPED, pending.reload.state
+    assert_equal "stopped_by_user", pending.metadata["reason"]
     assert pending.finished_at.present?
 
     assert graph.nodes.active.where(lane_id: lane.id, state: DAG::Node::PENDING).none?

@@ -3,15 +3,16 @@ module DAG
     self.table_name = "dag_nodes"
 
     PENDING = "pending"
+    AWAITING_APPROVAL = "awaiting_approval"
     RUNNING = "running"
     FINISHED = "finished"
     ERRORED = "errored"
     REJECTED = "rejected"
     SKIPPED = "skipped"
-    CANCELLED = "cancelled"
+    STOPPED = "stopped"
 
-    STATES = [PENDING, RUNNING, FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
-    TERMINAL_STATES = [FINISHED, ERRORED, REJECTED, SKIPPED, CANCELLED].freeze
+    STATES = [PENDING, AWAITING_APPROVAL, RUNNING, FINISHED, ERRORED, REJECTED, SKIPPED, STOPPED].freeze
+    TERMINAL_STATES = [FINISHED, ERRORED, REJECTED, SKIPPED, STOPPED].freeze
 
     enum :state, STATES.index_by(&:itself)
 
@@ -228,14 +229,101 @@ module DAG
       )
     end
 
-    def mark_cancelled!(reason: nil, metadata: {})
+    def mark_stopped!(reason: nil, metadata: {})
       reason_metadata = reason ? { "reason" => reason.to_s } : {}
       transition_to!(
-        CANCELLED,
+        STOPPED,
         from_states: [RUNNING],
         finished_at: Time.current,
         metadata: self.metadata.merge(metadata).merge(reason_metadata)
       )
+    end
+
+    def approve!(metadata: {}, at: Time.current)
+      at = Time.current if at.nil?
+      metadata = normalize_hook_metadata(metadata)
+      transitioned = false
+
+      graph.with_graph_lock! do
+        from = state
+        transitioned =
+          transition_to!(
+            PENDING,
+            from_states: [AWAITING_APPROVAL],
+            metadata: self.metadata.merge(metadata)
+          )
+
+        if transitioned
+          graph.emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+            subject: self,
+            particulars: { "from" => from, "to" => PENDING }
+          )
+        end
+      end
+
+      graph.kick! if transitioned
+      transitioned
+    end
+
+    def deny_approval!(reason: "approval_denied", metadata: {}, at: Time.current)
+      at = Time.current if at.nil?
+      reason = reason.to_s.presence || "approval_denied"
+      metadata = normalize_hook_metadata(metadata)
+      transitioned = false
+
+      graph.with_graph_lock! do
+        from = state
+        transitioned =
+          transition_to!(
+            REJECTED,
+            from_states: [AWAITING_APPROVAL],
+            finished_at: at,
+            metadata: self.metadata.merge(metadata).merge("reason" => reason)
+          )
+
+        if transitioned
+          graph.emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+            subject: self,
+            particulars: { "from" => from, "to" => REJECTED }
+          )
+        end
+      end
+
+      graph.kick! if transitioned
+      transitioned
+    end
+
+    def stop!(reason: "stopped_by_user", metadata: {}, at: Time.current)
+      at = Time.current if at.nil?
+      reason = reason.to_s.presence || "stopped_by_user"
+      metadata = normalize_hook_metadata(metadata)
+      transitioned = false
+
+      graph.with_graph_lock! do
+        from = state
+        transitioned =
+          transition_to!(
+            STOPPED,
+            from_states: [PENDING, AWAITING_APPROVAL, RUNNING],
+            finished_at: at,
+            metadata: self.metadata.merge(metadata).merge("reason" => reason)
+          )
+
+        if transitioned
+          materialize_output_deltas_for_stop!
+
+          graph.emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+            subject: self,
+            particulars: { "from" => from, "to" => STOPPED }
+          )
+        end
+      end
+
+      graph.kick! if transitioned
+      transitioned
     end
 
     def retry!
@@ -251,7 +339,7 @@ module DAG
     def can_retry?
       return false if compressed_at.present?
       return false unless body&.retriable?
-      return false unless [ERRORED, REJECTED, CANCELLED].include?(state)
+      return false unless [ERRORED, REJECTED, STOPPED].include?(state)
 
       descendant_ids = active_causal_descendant_ids - [id]
       if graph.nodes.active.where(id: descendant_ids).where.not(state: PENDING).exists?
@@ -266,8 +354,8 @@ module DAG
       outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == PENDING }
     end
 
-      def rerun!(metadata_patch: {}, body_input_patch: {})
-        new_node = nil
+    def rerun!(metadata_patch: {}, body_input_patch: {})
+      new_node = nil
 
       graph.mutate! do |m|
         new_node =
@@ -278,19 +366,19 @@ module DAG
           )
       end
 
-        new_node
-      end
+      new_node
+    end
 
-      def can_rerun?
-        return false if compressed_at.present?
-        return false unless body&.rerunnable?
-        return false unless state == FINISHED
+    def can_rerun?
+      return false if compressed_at.present?
+      return false unless body&.rerunnable?
+      return false unless state == FINISHED
 
-        active_outgoing_blocking_edges.empty?
-      end
+      active_outgoing_blocking_edges.empty?
+    end
 
-      def versions(include_inactive: true)
-        version_set = effective_version_set_id
+    def versions(include_inactive: true)
+      version_set = effective_version_set_id
 
       scope = graph.nodes.where(version_set_id: version_set)
       scope = scope.active unless include_inactive
@@ -461,10 +549,10 @@ module DAG
       end
 
       def pending_or_running_requires_executable_body
-        return unless state.in?([PENDING, RUNNING])
+        return unless state.in?([PENDING, AWAITING_APPROVAL, RUNNING])
         return if body&.executable?
 
-        errors.add(:state, "can only be pending/running for executable nodes")
+        errors.add(:state, "can only be pending/awaiting_approval/running for executable nodes")
       end
 
       def turn_lane_must_be_consistent
@@ -751,6 +839,47 @@ module DAG
             "to" => to,
           }
         )
+      end
+
+      def materialize_output_deltas_for_stop!
+        deltas =
+          DAG::NodeEvent.where(
+            graph_id: graph_id,
+            node_id: id,
+            kind: DAG::NodeEvent::OUTPUT_DELTA
+          )
+
+        return unless deltas.exists?
+
+        content =
+          DAG::NodeEvent.with_connection do |connection|
+            graph_quoted = connection.quote(graph_id)
+            node_quoted = connection.quote(id)
+            kind_quoted = connection.quote(DAG::NodeEvent::OUTPUT_DELTA)
+
+            sql = <<~SQL
+              SELECT COALESCE(string_agg(text, '' ORDER BY id), '')
+              FROM dag_node_events
+              WHERE graph_id = #{graph_quoted}
+                AND node_id = #{node_quoted}::uuid
+                AND kind = #{kind_quoted}
+            SQL
+
+            connection.select_value(sql).to_s
+          end
+
+        return if content.blank?
+
+        body.apply_finished_content!(content)
+        body.save!
+      end
+
+      def normalize_hook_metadata(metadata)
+        if metadata.is_a?(Hash)
+          metadata.deep_stringify_keys
+        else
+          {}
+        end
       end
 
       def transition_to!(to_state, from_states:, **attributes)

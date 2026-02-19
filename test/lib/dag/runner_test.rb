@@ -44,6 +44,19 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     end
   end
 
+  class StopMidStreamExecutor
+    def execute(node:, context:, stream:)
+      _ = context
+
+      stream.output_delta!("hel")
+      node.stop!(reason: "stopped_by_user")
+
+      DAG::ExecutionResult.finished_streamed(
+        usage: { "total_tokens" => 1 }
+      )
+    end
+  end
+
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
@@ -163,6 +176,29 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     assert_kind_of Integer, node.metadata.dig("timing", "queue_latency_ms")
     assert_kind_of Integer, node.metadata.dig("timing", "run_duration_ms")
     assert_equal "job-123", node.metadata.dig("worker", "execute_job_id")
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
+  test "runner does not override a node that was stopped mid-stream, and stop materializes partial output" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(Messages::AgentMessage.node_type_key, StopMidStreamExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    DAG::Runner.run_node!(node.id)
+
+    node.reload
+    assert_equal DAG::Node::STOPPED, node.state
+    assert_equal "hel", node.body_output["content"]
+    assert_equal "hel", node.body_output_preview["content"]
+
+    assert_enqueued_with(job: DAG::TickGraphJob, args: [graph.id])
   ensure
     DAG.executor_registry = original_registry
   end

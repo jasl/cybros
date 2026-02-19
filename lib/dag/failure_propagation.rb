@@ -58,7 +58,12 @@ module DAG
               WHERE child.graph_id = #{graph_quoted}
                 AND child.compressed_at IS NULL
                 AND child.state = 'pending'
-                AND parent.state IN ('errored', 'rejected', 'skipped', 'cancelled')
+                AND parent.state IN ('errored', 'rejected', 'skipped', 'stopped')
+                AND NOT (
+                  parent.state = 'rejected'
+                  AND parent.metadata ->> 'reason' = 'approval_denied'
+                  AND parent.metadata #>> '{approval,required}' = 'true'
+                )
               GROUP BY child.id
             )
             UPDATE dag_nodes

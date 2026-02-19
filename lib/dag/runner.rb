@@ -28,7 +28,9 @@ module DAG
 
       stream.flush!
 
-      streamed_output = streamed_output_for(node) if result.streamed_output?
+      if result.streamed_output? || result.state == DAG::Node::STOPPED
+        streamed_output = streamed_output_for(node)
+      end
       graph.with_graph_lock! do
         apply_result(node, result, streamed_output: streamed_output)
         DAG::FailurePropagation.propagate!(graph: graph)
@@ -128,8 +130,13 @@ module DAG
               error: "invalid_execution_result_state=skipped_for_running_node",
               metadata: metadata.merge("reason" => result.reason)
             )
-          when DAG::Node::CANCELLED
-            node.mark_cancelled!(reason: result.reason, metadata: metadata)
+          when DAG::Node::STOPPED
+            stopped = node.mark_stopped!(reason: result.reason, metadata: metadata)
+            if stopped && streamed_output.present?
+              node.body.apply_finished_content!(streamed_output)
+              node.body.save!
+            end
+            stopped
           else
             node.mark_errored!(error: "unknown_execution_result_state=#{result.state}", metadata: metadata)
           end

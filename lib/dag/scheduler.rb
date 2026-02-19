@@ -41,7 +41,7 @@ module DAG
                   AND (
                     (
                       dag_edges.edge_type = 'sequence'
-                      AND parents.state NOT IN ('finished', 'errored', 'rejected', 'skipped', 'cancelled')
+                      AND parents.state NOT IN ('finished', 'errored', 'rejected', 'skipped', 'stopped')
                     )
                     OR (
                       dag_edges.edge_type = 'dependency'

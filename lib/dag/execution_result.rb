@@ -22,8 +22,8 @@ module DAG
       new(state: DAG::Node::SKIPPED, reason: reason, metadata: metadata, usage: usage)
     end
 
-    def self.cancelled(reason: nil, metadata: {}, usage: nil)
-      new(state: DAG::Node::CANCELLED, reason: reason, metadata: metadata, usage: usage)
+    def self.stopped(reason: nil, metadata: {}, usage: nil)
+      new(state: DAG::Node::STOPPED, reason: reason, metadata: metadata, usage: usage)
     end
 
     def initialize(state:, content: nil, payload: nil, metadata: {}, usage: nil, error: nil, reason: nil, streamed_output: false)
