@@ -239,8 +239,7 @@ module DAG
       )
     end
 
-    def approve!(metadata: {}, at: Time.current)
-      at = Time.current if at.nil?
+    def approve!(metadata: {})
       metadata = normalize_hook_metadata(metadata)
       transitioned = false
 
