@@ -195,4 +195,70 @@ class ConversationContextTest < ActiveSupport::TestCase
     assert_equal [agent.id], transcript.map { |node| node.fetch("node_id") }
     assert_equal "(structured)", transcript.first.dig("payload", "output_preview", "content")
   end
+
+  test "context_for pins system/developer messages and the most recent summaries across the graph" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+    system = nil
+    developer = nil
+    summaries = nil
+
+    graph.mutate! do |m|
+      system =
+        m.create_node(
+          node_type: Messages::SystemMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "sys",
+          metadata: {}
+        )
+      developer =
+        m.create_node(
+          node_type: Messages::DeveloperMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "dev",
+          metadata: {}
+        )
+
+      base_time = Time.current - 10.minutes
+      summaries =
+        5.times.map do |i|
+          node =
+            m.create_node(
+              node_type: "summary",
+              state: DAG::Node::FINISHED,
+              body_output: { "content" => "s#{i}" },
+              metadata: {}
+            )
+
+          at = base_time + i.seconds
+          node.update_columns(created_at: at, updated_at: at, finished_at: at)
+          node
+        end
+
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "hi", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: system, to_node: developer, edge_type: DAG::Edge::SEQUENCE)
+      summaries.each do |summary|
+        m.create_edge(from_node: summary, to_node: user, edge_type: DAG::Edge::SEQUENCE)
+      end
+      m.create_edge(from_node: developer, to_node: user, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    context = graph.context_for(agent.id, limit_turns: 1)
+    ids = context.map { |node| node.fetch("node_id") }
+
+    assert_includes ids, system.id
+    assert_includes ids, developer.id
+
+    summaries.last(3).each do |summary|
+      assert_includes ids, summary.id
+    end
+
+    assert_includes ids, user.id
+    assert_includes ids, agent.id
+  end
 end

@@ -221,7 +221,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - 非 `running` 节点直接 no-op
   - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
 - 执行流程：
-  1. 组装上下文 `graph.context_for(node)`
+  1. 组装上下文 `graph.context_for(node.id)`（默认 bounded window；需要全量祖先闭包时用 `context_closure_for`）
   2. `DAG.executor_registry.execute(node:, context:)`
   3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
      - 观测信息：
@@ -254,11 +254,26 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 ## 上下文组装（Context Assembly）
 
-入口：`DAG::Graph#context_for(target_node_id)`（`Conversation#context_for` delegate）
+入口：
 
-实现：`lib/dag/context_assembly.rb`
+- 默认（安全）：`DAG::Graph#context_for(target_node_id, limit_turns: 50, ...)`（`Conversation#context_for` delegate）
+- 显式危险（闭包）：`DAG::Graph#context_closure_for(target_node_id, ...)`（`Conversation#context_closure_for` delegate）
 
-步骤：
+实现：
+
+- bounded window：`lib/dag/context_window_assembly.rb`
+- ancestor closure：`lib/dag/context_closure_assembly.rb`
+
+### context_for（bounded window）
+
+- 选择与 target 相关的 lanes（target lane 的 parent chain + incoming dependency source lanes 的 parent chain），并为每段 lane 计算 cutoff
+- 从每段 lane 中取 `<= cutoff` 的 anchored turns（按 `dag_turns.anchor_created_at + anchor_node_id` keyset），合并后取最近 `limit_turns`
+- 强制 pin：
+  - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）
+  - 全图 Active 的 `system_message/developer_message` 与最近 3 个 `summary`
+- 在选中的 nodes 子图内对 `sequence/dependency` 做稳定 topo sort，然后做输出过滤（见下）
+
+### context_closure_for（ancestor closure；危险）
 
 1. recursive CTE 收集祖先闭包（只走未压缩的 **因果边**）：
    - 仅包含：`sequence/dependency`
@@ -268,11 +283,11 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
 4. 输出结构（默认 preview）：`[{node_id, turn_id, lane_id, node_type, state, payload:{input,output_preview}, metadata}]`
 
-`context_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
+`context_for_full` / `context_closure_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 
 Context 可见性（视图层）：
 
-- `context_for` 默认会过滤：
+- `context_for` / `context_closure_for` 默认会过滤：
   - `context_excluded_at IS NOT NULL`
   - `deleted_at IS NOT NULL`
 - 可通过参数显式包含：
@@ -299,7 +314,7 @@ Context 可见性（视图层）：
   - 按 `turn_id` 聚合：按 NodeBody hooks 的 `turn_anchor?` 选择 turn anchor（conversation graphs 默认 `user_message/agent_message/character_message`）
   - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
   - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
-  - 不依赖 `context_for` 的 ancestor 闭包（适合大图场景的 “最近记录” UI）
+  - 不依赖 `context_closure_for` 的祖先闭包（适合大图场景的 “最近记录” UI）
 - `lane.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
   - **lane-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 lane 的 turn 混在一起）
   - keyset pagination：

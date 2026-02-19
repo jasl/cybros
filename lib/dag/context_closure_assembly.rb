@@ -1,5 +1,5 @@
 module DAG
-  class ContextAssembly
+  class ContextClosureAssembly
     def initialize(graph:)
       @graph = graph
     end

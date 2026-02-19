@@ -121,8 +121,13 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
     assert_equal 40, page.fetch(:transcript).length
 
     last_agent_id = agent_node_ids.last
+    default_turns = DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
+
     context = graph.context_for(last_agent_id)
-    assert_equal turns * 2, context.length
+    assert_equal default_turns * 2, context.length
+
+    closure = graph.context_closure_for(last_agent_id)
+    assert_equal turns * 2, closure.length
   end
 
   private

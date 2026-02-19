@@ -389,11 +389,40 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 
 ---
 
-## 4) Context（仅 causal 闭包；preview 默认）
+## 4) Context（默认 bounded window；可选 causal 闭包；preview 默认）
+
+### 4.0 Window context（bounded turns window；默认）
+
+为避免在超大图上无意间加载 “全量祖先闭包” 造成性能爆炸，v1 将 `context_for` 定义为**安全默认**的 bounded window：
+
+- 入口：`graph.context_for(target_node_id, limit_turns: 50, ...)`
+- 目标：给 executor/LLM 一个“最近上下文窗口”，同时 pin 关键节点（system/developer/summary 与 fork/merge cutoff）。
+- 重要：`context_for` **不做祖先闭包**；若需要闭包请用 `context_closure_for`（4.1）。
+
+节点选择（normative）：
+
+1) **核心窗口（最多 `limit_turns` 个 anchored turns）**
+   - anchored turns 使用 `dag_turns.anchor_created_at + anchor_node_id` 作为稳定 keyset 排序键
+   - 窗口覆盖与 target 相关的 lanes：
+     - target 所在 lane 的 parent_lane 链（每段只取到 fork 点）
+     - target 的 incoming `dependency` 来源 lanes（merge 场景关键），并同样取各自的 parent_lane 链
+   - 每段计算 cutoff（上界）并取 `<= cutoff` 的 anchored turns（过滤 compressed anchors；`include_deleted:false` 时过滤 deleted anchors），每段最多取 `limit_turns` 个候选；合并后按全局排序键取最近 `limit_turns`
+
+2) **强制 pin 的 turns（不计入 `limit_turns` 预算）**
+   - 永远包含：
+     - `target_node.turn_id`
+     - 每条 lane 链段的 cutoff node 的 `turn_id`（即使该 turn 没有 anchor；确保 fork/merge 关键点稳定进入 context）
+
+3) **强制 pin 的 nodes（跨窗口的少量关键节点）**
+   - 全图 Active 的 `system_message` + `developer_message`（遵守 `include_excluded/include_deleted` 的输出过滤）
+   - 最近 `SUMMARY_PIN_LIMIT = 3` 个 `summary`（按 `created_at desc, id desc`）
+
+4) **turn 内节点**
+   - 取上述 turns 内的 Active nodes，并对所有节点（包括 pin nodes）做 4.5 的输出过滤（target 强制输出）。
 
 ### 4.1 Ancestor closure（祖先闭包）
 
-`context_for(target_node_id)` 的祖先闭包定义为：
+`context_closure_for(target_node_id)` 的祖先闭包定义为：
 
 - 从 target 开始，沿 **Active blocking edges**（`sequence/dependency`）向上递归收集所有祖先；
   - 其中 “Active blocking edge” 的判定必须同时满足：edge active 且两端节点 active（防御性忽略 “active edge 指向 inactive node” 的脏数据）
@@ -516,7 +545,7 @@ defer queue 的存储与应用规则（normative）：
 
 #### 4.5.1 Context 输出过滤（默认）
 
-`graph.context_for(target_node_id)` 的默认行为：
+Context 输出过滤（对 `context_for` 与 `context_closure_for` 均适用）的默认行为：
 
 - 祖先闭包与拓扑排序基准仍基于 **完整 Active causal 子图**（包含被 exclude/delete 的节点），以保证输出顺序稳定且不因过滤而错乱。
 - 输出时过滤：
@@ -555,7 +584,7 @@ defer queue 的存储与应用规则（normative）：
 
 - 对 “子话题/多 lane 的聊天记录” 与 “游标分页” 场景，推荐使用 lane-scoped 的分页原语（例如 `lane.transcript_page(limit_turns:, before_turn_id:, after_turn_id:)`），避免把不同 lane 的 turns 混在同一个列表里。
 
-> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_for` 的祖先闭包；建议引入 turn_id 或显式 transcript 索引/边来提供更高效的查询路径。
+> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_closure_for` 的祖先闭包；建议引入更明确的分页/索引原语（例如 lane-scoped paging）来避免全量闭包。
 
 ---
 

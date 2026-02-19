@@ -15,7 +15,11 @@
 
 ### Graph-level
 
-- `DAG::Graph#context_for(target_node_id, mode: :preview|:full, include_excluded:, include_deleted:)`
+- `DAG::Graph#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded:, include_deleted:)`（安全默认：bounded window）
+- `DAG::Graph#context_for_full(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`
+- `DAG::Graph#context_closure_for(target_node_id, mode: :preview|:full, include_excluded:, include_deleted:)`（危险：祖先闭包 + topo sort）
+- `DAG::Graph#context_closure_for_full(target_node_id, include_excluded:, include_deleted:)`
+- `DAG::Graph#context_node_scope_for(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
 - `DAG::Graph#transcript_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_recent_turns(limit_turns:, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_page(lane_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`

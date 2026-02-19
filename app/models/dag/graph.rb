@@ -51,8 +51,39 @@ module DAG
       end
     end
 
-    def context_for(target_node_id, mode: :preview, include_excluded: false, include_deleted: false)
-      DAG::ContextAssembly.new(graph: self).call(
+    def context_for(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      mode: :preview,
+      include_excluded: false,
+      include_deleted: false
+    )
+      DAG::ContextWindowAssembly.new(graph: self).call(
+        target_node_id,
+        limit_turns: limit_turns,
+        mode: mode,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def context_for_full(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      include_excluded: false,
+      include_deleted: false
+    )
+      context_for(
+        target_node_id,
+        limit_turns: limit_turns,
+        mode: :full,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def context_closure_for(target_node_id, mode: :preview, include_excluded: false, include_deleted: false)
+      DAG::ContextClosureAssembly.new(graph: self).call(
         target_node_id,
         mode: mode,
         include_excluded: include_excluded,
@@ -60,10 +91,24 @@ module DAG
       )
     end
 
-    def context_for_full(target_node_id, include_excluded: false, include_deleted: false)
-      context_for(
+    def context_closure_for_full(target_node_id, include_excluded: false, include_deleted: false)
+      context_closure_for(
         target_node_id,
         mode: :full,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def context_node_scope_for(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      include_excluded: false,
+      include_deleted: false
+    )
+      DAG::ContextWindowAssembly.new(graph: self).node_scope_for(
+        target_node_id,
+        limit_turns: limit_turns,
         include_excluded: include_excluded,
         include_deleted: include_deleted
       )
@@ -75,7 +120,7 @@ module DAG
         return [] if deleted_at.present?
       end
 
-      transcript = context_for(
+      transcript = context_closure_for(
         target_node_id,
         mode: mode,
         include_excluded: true,
