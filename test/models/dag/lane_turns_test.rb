@@ -95,17 +95,17 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
     user_2.soft_delete!
     assert user_2.reload.deleted_at.present?
 
-    all_turns = lane.turns
+    all_turns = lane.turn_entries
     assert_equal 3, all_turns.length
     assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch(:turn_id) }
     assert_equal [1, 2, 3], all_turns.map { |row| row.fetch(:seq) }
     assert_equal [false, true, false], all_turns.map { |row| row.fetch(:anchor_deleted) }
 
-    visible = lane.turns(include_deleted: false)
+    visible = lane.turn_entries(include_deleted: false)
     assert_equal [turn_1, turn_3], visible.map { |row| row.fetch(:turn_id) }
     assert_equal [1, 3], visible.map { |row| row.fetch(:seq) }
 
-    assert_equal visible, lane.visible_turns
+    assert_equal visible, lane.visible_turn_entries
 
     assert_equal 3, lane.turn_count
     assert_equal 2, lane.turn_count(include_deleted: false)

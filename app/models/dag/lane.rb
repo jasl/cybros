@@ -26,7 +26,7 @@ module DAG
     has_many :nodes,
              class_name: "DAG::Node",
              inverse_of: :lane
-    has_many :turn_records,
+    has_many :turns,
              class_name: "DAG::Turn",
              inverse_of: :lane
 
@@ -37,7 +37,7 @@ module DAG
       archived_at.present?
     end
 
-    def turns(include_deleted: true)
+    def turn_entries(include_deleted: true)
       anchor_rows =
         graph.turns
           .where(lane_id: id)
@@ -72,22 +72,22 @@ module DAG
       end
     end
 
-    def visible_turns
-      turns(include_deleted: false)
+    def visible_turn_entries
+      turn_entries(include_deleted: false)
     end
 
     def turn_count(include_deleted: true)
-      turns(include_deleted: include_deleted).length
+      turn_entries(include_deleted: include_deleted).length
     end
 
     def turn_ids(include_deleted: true)
-      turns(include_deleted: include_deleted).map { |turn| turn.fetch(:turn_id) }
+      turn_entries(include_deleted: include_deleted).map { |turn| turn.fetch(:turn_id) }
     end
 
     def turn_seq_for(turn_id, include_deleted: true)
       turn_id = turn_id.to_s
 
-      turn = turns(include_deleted: include_deleted).find { |row| row.fetch(:turn_id).to_s == turn_id }
+      turn = turn_entries(include_deleted: include_deleted).find { |row| row.fetch(:turn_id).to_s == turn_id }
 
       if turn
         turn.fetch(:seq)
@@ -159,7 +159,7 @@ module DAG
       end
 
       turn_ids =
-        turns(include_deleted: true)
+        turn_entries(include_deleted: true)
           .select { |row| row.fetch(:seq).between?(start_seq, end_seq) }
           .map { |row| row.fetch(:turn_id) }
 

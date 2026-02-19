@@ -28,7 +28,8 @@
 - `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
   - 返回 `{ turn_ids:, before_turn_id:, after_turn_id:, transcript: }`
   - `before_turn_id` / `after_turn_id` 为 keyset cursor，避免 OFFSET
-- `DAG::Lane#turns(include_deleted: true|false)`（面向 UI 的 turn 列表/计数；允许 seq gap）
+- `DAG::Lane#turns`（ActiveRecord 关联：返回该 lane 的 `DAG::Turn` records；包含未 anchor 的 turns）
+- `DAG::Lane#turn_entries(include_deleted: true|false)`（面向 UI 的 turn 列表/计数；允许 seq gap）
 - `DAG::Lane#turn_seq_for(turn_id, include_deleted: true|false)`
 - `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
@@ -92,4 +93,3 @@ end
 1. 先为缺失能力补一个 Public API（带测试与文档），并在 App 域迁移到新 API。
 2. 必要时允许破坏性改动：重命名/拆分 API、调整返回结构、调整索引/迁移（允许 `db:reset`）。
 3. 只有在紧急 debug/一次性脚本中，才临时直接读写表；且应在 PR 内明确标注并尽快回收。
-
