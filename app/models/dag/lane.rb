@@ -233,52 +233,77 @@ module DAG
         if turn_anchor_types.empty?
           []
         else
-          anchor_nodes = nodes.active.where(node_type: turn_anchor_types)
+          anchor_nodes = graph.nodes.active.where(lane_id: id, node_type: turn_anchor_types)
           anchor_nodes = anchor_nodes.where(deleted_at: nil) unless include_deleted
 
-          cursor_anchor =
-            if before_turn_id.present? || after_turn_id.present?
-              cursor_turn_id = before_turn_id.presence || after_turn_id
-              anchor_nodes.where(turn_id: cursor_turn_id).order(:created_at, :id).first
+          anchor_subquery =
+            anchor_nodes
+              .select(
+                Arel.sql(
+                  "DISTINCT ON (dag_nodes.turn_id) " \
+                  "dag_nodes.turn_id, " \
+                  "dag_nodes.created_at AS anchor_created_at, " \
+                  "dag_nodes.id AS anchor_id"
+                )
+              )
+              .order(Arel.sql("dag_nodes.turn_id, dag_nodes.created_at ASC, dag_nodes.id ASC"))
+
+          anchors =
+            DAG::Node
+              .from(anchor_subquery, :anchors)
+              .select(
+                Arel.sql("anchors.turn_id"),
+                Arel.sql("anchors.anchor_created_at"),
+                Arel.sql("anchors.anchor_id")
+              )
+
+          cursor_created_at = nil
+          cursor_anchor_id = nil
+
+          if before_turn_id.present? || after_turn_id.present?
+            cursor_turn_id = before_turn_id.presence || after_turn_id
+
+            cursor_created_at, cursor_anchor_id =
+              anchors
+                .where("anchors.turn_id = ?", cursor_turn_id)
+                .pick(Arel.sql("anchors.anchor_created_at"), Arel.sql("anchors.anchor_id"))
+
+            if cursor_created_at.nil? || cursor_anchor_id.nil?
+              raise ArgumentError, "cursor turn_id is unknown or not visible"
             end
-
-          if (before_turn_id.present? || after_turn_id.present?) && cursor_anchor.nil?
-            raise ArgumentError, "cursor turn_id is unknown or not visible"
           end
-
-          grouped = anchor_nodes.group(:turn_id)
 
           if before_turn_id.present?
             turn_ids =
-              grouped
-                .having(
-                  "MIN(created_at) < ? OR (MIN(created_at) = ? AND MIN(dag_nodes.id::text) < ?)",
-                  cursor_anchor.created_at,
-                  cursor_anchor.created_at,
-                  cursor_anchor.id.to_s
+              anchors
+                .where(
+                  "anchors.anchor_created_at < ? OR (anchors.anchor_created_at = ? AND anchors.anchor_id < ?)",
+                  cursor_created_at,
+                  cursor_created_at,
+                  cursor_anchor_id
                 )
-                .order(Arel.sql("MIN(created_at) DESC"), Arel.sql("MIN(dag_nodes.id::text) DESC"))
+                .order(Arel.sql("anchors.anchor_created_at DESC"), Arel.sql("anchors.anchor_id DESC"))
                 .limit(limit_turns)
-                .pluck(:turn_id)
+                .pluck(Arel.sql("anchors.turn_id"))
                 .reverse
           elsif after_turn_id.present?
             turn_ids =
-              grouped
-                .having(
-                  "MIN(created_at) > ? OR (MIN(created_at) = ? AND MIN(dag_nodes.id::text) > ?)",
-                  cursor_anchor.created_at,
-                  cursor_anchor.created_at,
-                  cursor_anchor.id.to_s
+              anchors
+                .where(
+                  "anchors.anchor_created_at > ? OR (anchors.anchor_created_at = ? AND anchors.anchor_id > ?)",
+                  cursor_created_at,
+                  cursor_created_at,
+                  cursor_anchor_id
                 )
-                .order(Arel.sql("MIN(created_at) ASC"), Arel.sql("MIN(dag_nodes.id::text) ASC"))
+                .order(Arel.sql("anchors.anchor_created_at ASC"), Arel.sql("anchors.anchor_id ASC"))
                 .limit(limit_turns)
-                .pluck(:turn_id)
+                .pluck(Arel.sql("anchors.turn_id"))
           else
             turn_ids =
-              grouped
-                .order(Arel.sql("MIN(created_at) DESC"), Arel.sql("MIN(dag_nodes.id::text) DESC"))
+              anchors
+                .order(Arel.sql("anchors.anchor_created_at DESC"), Arel.sql("anchors.anchor_id DESC"))
                 .limit(limit_turns)
-                .pluck(:turn_id)
+                .pluck(Arel.sql("anchors.turn_id"))
                 .reverse
           end
 
@@ -293,7 +318,7 @@ module DAG
         candidate_types = graph.transcript_candidate_node_types
         return [] if candidate_types.empty?
 
-        node_scope = nodes.active.where(turn_id: turn_ids, node_type: candidate_types)
+        node_scope = graph.nodes.active.where(lane_id: id, turn_id: turn_ids, node_type: candidate_types)
         node_scope = node_scope.where(deleted_at: nil) unless include_deleted
 
         node_records =

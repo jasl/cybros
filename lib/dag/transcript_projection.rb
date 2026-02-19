@@ -15,7 +15,11 @@ module DAG
           context_hash_for(node: node, body: body, mode: mode)
         end
 
-      transcript = context_nodes.select { |context_node| @graph.transcript_include?(context_node) }
+      apply_rules(context_nodes: context_nodes)
+    end
+
+    def apply_rules(context_nodes:)
+      transcript = Array(context_nodes).select { |context_node| @graph.transcript_include?(context_node) }
       apply_preview_overrides!(transcript)
       transcript
     end

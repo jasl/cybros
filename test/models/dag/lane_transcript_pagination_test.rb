@@ -76,6 +76,79 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [turn_3, turn_4], newer.fetch("turn_ids")
   end
 
+  test "transcript_page validates cursors and limit" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    lane = graph.main_lane
+
+    empty = lane.transcript_page(limit_turns: 0)
+    assert_equal [], empty.fetch("turn_ids")
+    assert_equal [], empty.fetch("transcript")
+
+    error =
+      assert_raises(ArgumentError) do
+        lane.transcript_page(limit_turns: 10, before_turn_id: "x", after_turn_id: "y")
+      end
+    assert_includes error.message, "mutually"
+
+    error =
+      assert_raises(ArgumentError) do
+        lane.transcript_page(limit_turns: 10, before_turn_id: "0194f3c0-0000-7000-8000-00000000dead")
+      end
+    assert_includes error.message, "cursor"
+  end
+
+  test "transcript_page orders turns by earliest anchor node (even with multiple anchors per turn)" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    lane = graph.main_lane
+
+    t1 = Time.current - 2.minutes
+    t2 = Time.current - 1.minute
+
+    turn_1 = "0194f3c0-0000-7000-8000-00000000ad01"
+    turn_2 = "0194f3c0-0000-7000-8000-00000000ad02"
+
+    graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: lane.id,
+      turn_id: turn_1,
+      body_input: { "content" => "late" },
+      metadata: {},
+      created_at: t2,
+      updated_at: t2
+    )
+
+    graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: lane.id,
+      turn_id: turn_1,
+      body_input: { "content" => "early" },
+      metadata: {},
+      created_at: t1,
+      updated_at: t1
+    )
+
+    graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: lane.id,
+      turn_id: turn_2,
+      body_input: { "content" => "t2" },
+      metadata: {},
+      created_at: t2 + 10.seconds,
+      updated_at: t2 + 10.seconds
+    )
+
+    page = lane.transcript_page(limit_turns: 1)
+    assert_equal [turn_2], page.fetch("turn_ids")
+
+    older = lane.transcript_page(limit_turns: 1, before_turn_id: page.fetch("before_turn_id"))
+    assert_equal [turn_1], older.fetch("turn_ids")
+  end
+
   test "transcript_page is lane-scoped (supports topics/subthreads)" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

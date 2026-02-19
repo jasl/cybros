@@ -79,8 +79,8 @@ module DAG
         include_deleted: include_deleted
       )
 
-      transcript = filter_transcript_nodes(transcript)
-      apply_transcript_preview_overrides!(transcript)
+      projection = DAG::TranscriptProjection.new(graph: self)
+      transcript = projection.apply_rules(context_nodes: transcript)
 
       if limit
         transcript = transcript.last(Integer(limit))
@@ -535,25 +535,6 @@ module DAG
 
       def attachable_cache_key
         [attachable_type, attachable_id]
-      end
-
-      def filter_transcript_nodes(context_nodes)
-        context_nodes.select { |context_node| transcript_include?(context_node) }
-      end
-
-      def apply_transcript_preview_overrides!(transcript)
-        transcript.each do |context_node|
-          payload = context_node["payload"].is_a?(Hash) ? context_node["payload"] : {}
-          output_preview = payload["output_preview"].is_a?(Hash) ? payload["output_preview"] : {}
-          next if output_preview["content"].to_s.present?
-
-          override = transcript_preview_override(context_node)
-          next unless override.is_a?(String) && override.present?
-
-          output_preview["content"] = override
-          payload["output_preview"] = output_preview
-          context_node["payload"] = payload
-        end
       end
 
       def validate_event_type!(event_type)
