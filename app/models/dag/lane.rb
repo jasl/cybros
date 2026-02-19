@@ -76,15 +76,15 @@ module DAG
       anchored_turns(include_deleted: false)
     end
 
-    def turn_count(include_deleted: true)
+    def anchored_turn_count(include_deleted: true)
       anchored_turns(include_deleted: include_deleted).length
     end
 
-    def turn_ids(include_deleted: true)
+    def anchored_turn_ids(include_deleted: true)
       anchored_turns(include_deleted: include_deleted).map { |turn| turn.fetch(:turn_id) }
     end
 
-    def turn_seq_for(turn_id, include_deleted: true)
+    def anchored_turn_seq_for(turn_id, include_deleted: true)
       turn_id = turn_id.to_s
 
       turn = anchored_turns(include_deleted: include_deleted).find { |row| row.fetch(:turn_id).to_s == turn_id }

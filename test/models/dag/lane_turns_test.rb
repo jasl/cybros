@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::LaneTurnsTest < ActiveSupport::TestCase
-  test "turn_count and turn_seq include compressed and soft-deleted turns" do
+  test "anchored_turn_count and anchored_turn_seq include compressed and soft-deleted turns" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -107,11 +107,11 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
 
     assert_equal visible, lane.visible_anchored_turns
 
-    assert_equal 3, lane.turn_count
-    assert_equal 2, lane.turn_count(include_deleted: false)
+    assert_equal 3, lane.anchored_turn_count
+    assert_equal 2, lane.anchored_turn_count(include_deleted: false)
 
-    assert_equal 1, lane.turn_seq_for(turn_1)
-    assert_equal 2, lane.turn_seq_for(turn_2)
-    assert_nil lane.turn_seq_for(turn_2, include_deleted: false)
+    assert_equal 1, lane.anchored_turn_seq_for(turn_1)
+    assert_equal 2, lane.anchored_turn_seq_for(turn_2)
+    assert_nil lane.anchored_turn_seq_for(turn_2, include_deleted: false)
   end
 end

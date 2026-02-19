@@ -30,7 +30,9 @@
   - `before_turn_id` / `after_turn_id` 为 keyset cursor，避免 OFFSET
 - `DAG::Lane#turns`（ActiveRecord 关联：返回该 lane 的 `DAG::Turn` records；包含未 anchor 的 turns）
 - `DAG::Lane#anchored_turns(include_deleted: true|false)`（面向 UI 的 turn 列表/计数；允许 seq gap）
-- `DAG::Lane#turn_seq_for(turn_id, include_deleted: true|false)`
+- `DAG::Lane#anchored_turn_count(include_deleted: true|false)`
+- `DAG::Lane#anchored_turn_ids(include_deleted: true|false)`
+- `DAG::Lane#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
 - `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
 ## 3) 写 API（Mutations / Commands）
