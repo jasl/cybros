@@ -201,11 +201,12 @@ module DAG
       if transitioned
         if payload.is_a?(Hash)
           body.merge_output!(payload)
-          body.save!
-        elsif !content.nil?
-          body.apply_finished_content!(content)
-          body.save!
         end
+
+        if !content.nil?
+          body.apply_finished_content!(content)
+        end
+        body.save! if payload.is_a?(Hash) || !content.nil?
 
         stats = compute_output_stats
         update_columns(

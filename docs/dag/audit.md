@@ -17,7 +17,7 @@
 - `dag_nodes.node_type` 语义增强，新增 `system_message`、`developer_message`、`character_message`，并把 `character_message` 纳入 executable 集合（与 `agent_message` 同级）。
 - 引入 Lane 分区模型：新增 `dag_lanes` 与 `dag_nodes.lane_id`（一个 node 只能属于一个 lane）；fork 创建 branch lane+root node；merge 通过在 target lane 创建 join 节点表达“汇总点”（不隐式归档 source lanes；archive 为显式产品动作）。
 - Transcript 可靠性增强：当下游消息因依赖失败传播被标记为 `skipped`（或其它终态）时，仍能以“安全预览占位”的形式出现在 transcript，避免 UI 只剩用户输入的空白状态。
-- 流式/增量输出一等支持：新增 `dag_node_events`（node-scoped、append-only、keyset 分页），executor 通过 `NodeEventStream` 写 `output_delta/progress/log`；Runner 在 `finished_streamed` 时汇总 `output_delta` 并物化写回最终 output（保证 transcript/context 仍走稳定读路径）。
+- 流式/增量输出一等支持：新增 `dag_node_events`（node-scoped、append-only、keyset 分页），executor 通过 `NodeEventStream` 写 `output_delta/progress/log`；Runner 在 `ExecutionResult.finished(..., streamed_output: true)`（或 `finished_streamed`）时汇总 `output_delta` 并物化写回最终 output（保证 transcript/context 仍走稳定读路径）。
 - 人工审批 gate 与 user stop 一等语义：新增 `awaiting_approval`（pre-execution gate）与 terminal `stopped`；required approval-deny 下不自动 skipped 下游依赖节点，允许流程“阻塞但可恢复”（approve/retry）。
 - 类型系统松绑：移除 `DAG::Node` 对 node_type 的硬编码 enum/允许列表，并把“可执行/转写/安全预览”等语义下沉到 NodeBody；对 conversation graphs，未知 node_type 通过 `dag_node_body_namespace` 的约定映射默认严格失败。
 - 进一步下沉类型语义：引入 NodeBody semantic hooks（turn anchor / transcript candidates / leaf terminal / 默认 leaf repair / content 落点 / mermaid snippet），并删除 `DAG::Node` 的 node_type 常量，使 DAG 核心几乎不需要显式分支判断 node_type。

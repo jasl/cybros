@@ -15,4 +15,7 @@ ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "API"
   inflect.acronym "DAG"
   inflect.acronym "LLM"
+  inflect.acronym "LRU"
+  inflect.acronym "MCP"
+  inflect.acronym "OpenAI"
 end

@@ -21,7 +21,13 @@ module DAG
 
       return unless refresh_running_lease!(node)
 
-      context = graph.context_for(node.id)
+      context_mode = DAG.executor_registry.context_mode_for(node)
+      context =
+        if context_mode == :full
+          graph.context_for_full(node.id)
+        else
+          graph.context_for(node.id)
+        end
 
       stream = DAG::NodeEventStream.new(node: node)
       result = DAG.executor_registry.execute(node: node, context: context, stream: stream)
@@ -125,13 +131,10 @@ module DAG
           case result.state
           when DAG::Node::FINISHED
             if result.streamed_output?
-              if result.content.present? || result.payload.present?
-                node.mark_errored!(
-                  error: "invalid_execution_result=finished_streamed_with_payload_or_content",
-                  metadata: metadata
-                )
+              if result.content.present?
+                node.mark_errored!(error: "invalid_execution_result=finished_streamed_with_content", metadata: metadata)
               else
-                node.mark_finished!(content: streamed_output.to_s, metadata: metadata)
+                node.mark_finished!(content: streamed_output.to_s, payload: result.payload, metadata: metadata)
               end
             else
               node.mark_finished!(content: result.content, payload: result.payload, metadata: metadata)

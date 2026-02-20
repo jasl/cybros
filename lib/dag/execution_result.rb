@@ -2,12 +2,19 @@ module DAG
   class ExecutionResult
     attr_reader :state, :content, :payload, :metadata, :usage, :error, :reason
 
-    def self.finished(content: nil, payload: nil, metadata: {}, usage: nil)
-      new(state: DAG::Node::FINISHED, content: content, payload: payload, metadata: metadata, usage: usage)
+    def self.finished(content: nil, payload: nil, metadata: {}, usage: nil, streamed_output: false)
+      new(
+        state: DAG::Node::FINISHED,
+        content: content,
+        payload: payload,
+        metadata: metadata,
+        usage: usage,
+        streamed_output: streamed_output
+      )
     end
 
     def self.finished_streamed(metadata: {}, usage: nil)
-      new(state: DAG::Node::FINISHED, metadata: metadata, usage: usage, streamed_output: true)
+      finished(metadata: metadata, usage: usage, streamed_output: true)
     end
 
     def self.errored(error:, metadata: {}, usage: nil)

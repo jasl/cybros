@@ -287,12 +287,14 @@ Active 视图内必须保持一致（不允许 drift）：
 - streaming 仅影响可观测性/实时展示，**不改变 DAG 的拓扑/调度语义**（Scheduler gating 仍只看 `state + blocking edges`）。
 - executor 接口：`execute(node:, context:, stream:)`
   - **非流式**：返回 `DAG::ExecutionResult.finished(payload: ...)` 或 `finished(content: ...)`
-  - **流式**：通过 `stream.output_delta(...)` 写入 `output_delta` 事件，并返回 `DAG::ExecutionResult.finished_streamed(...)`
-    - 严格二选一：`finished_streamed` 不允许同时携带 `payload/content`；否则 Runner 必须将节点标记为 `errored`（实现错误）
+  - **流式**：通过 `stream.output_delta(...)` 写入 `output_delta` 事件，并返回带 `streamed_output: true` 的 finished 结果：
+    - 推荐：`DAG::ExecutionResult.finished(streamed_output: true, payload: ..., metadata: ..., usage: ...)`
+    - 便捷：`DAG::ExecutionResult.finished_streamed(...)`（仅当无需额外 `payload` 时）
+    - 硬规则：当 `streamed_output: true` 时，`content` **必须为 nil**；否则 Runner 必须将节点标记为 `errored`（实现错误）
 
 物化规则（normative）：
 
-- 当 executor 返回 `finished_streamed` 时，Runner 必须按 `id ASC` 汇总该 node 的 `output_delta.text` 并拼接为最终字符串，然后再调用 `node.mark_finished!(content: ...)` 写入 NodeBody 的最终 output（同时 output_preview 从 output 派生）。
+- 当 executor 返回 `streamed_output: true` 时，Runner 必须按 `id ASC` 汇总该 node 的 `output_delta.text` 并拼接为最终字符串，然后调用 `node.mark_finished!(content: ...)` 写入 NodeBody 的最终 output（同时 output_preview 从 output 派生）。若 result 携带 `payload`，Runner 必须同时写入该 `payload`（merge into NodeBody.output）。
 
 retention 规则（normative；硬规则）：
 

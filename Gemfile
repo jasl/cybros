@@ -37,7 +37,7 @@ gem "web-push"
 gem "with_advisory_lock"
 
 # Windows does not include zoneinfo files, so bundle the tzinfo-data gem
-gem "tzinfo-data", platforms: %i[ windows jruby ]
+gem "tzinfo-data", platforms: %i[windows jruby]
 
 # Use the database-backed adapters for Rails.cache, Active Job, and Action Cable
 gem "solid_cache"
@@ -46,9 +46,6 @@ gem "solid_cable"
 
 # Use Active Storage variants [https://guides.rubyonrails.org/active_storage_overview.html#transforming-images]
 gem "image_processing", "~> 1.2"
-
-# Nearest neighbor search for pgvector [https://github.com/ankane/neighbor]
-gem "neighbor"
 
 # Add HTTP asset caching/compression and X-Sendfile acceleration to Puma [https://github.com/basecamp/thruster/]
 gem "thruster", require: false
@@ -62,11 +59,14 @@ gem "simple_inference", path: "vendor/simple_inference"
 gem "tokenizers"
 gem "tiktoken_ruby"
 
+# Nearest neighbor search for pgvector [https://github.com/ankane/neighbor]
+gem "neighbor"
+
 group :development, :test do
   gem "benchmark", require: false
 
   # See https://guides.rubyonrails.org/debugging_rails_applications.html#debugging-with-the-debug-gem
-  gem "debug", platforms: %i[ mri windows ], require: "debug/prelude"
+  gem "debug", platforms: %i[mri windows], require: "debug/prelude"
 
   # Audits gems for known security defects (use config/bundler-audit.yml to ignore issues)
   gem "bundler-audit", require: false
@@ -92,4 +92,6 @@ group :test do
   # Use system testing [https://guides.rubyonrails.org/testing.html#system-testing]
   gem "capybara"
   gem "selenium-webdriver"
+
+  gem "webrick"
 end

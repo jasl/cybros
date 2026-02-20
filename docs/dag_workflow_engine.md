@@ -227,7 +227,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - 非 `running` 节点直接 no-op
   - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
 - 执行流程：
-  1. 组装上下文 `graph.context_for(node.id)`（默认 bounded window；需要全量祖先闭包时用 `context_closure_for`）
+  1. 组装上下文（默认 `graph.context_for(node.id)`；executor 可声明需要 full context 时使用 `graph.context_for_full(node.id)`；需要全量祖先闭包时用 `context_closure_for*`）
   2. `DAG.executor_registry.execute(node:, context:, stream:)`
      - `stream` 为 `DAG::NodeEventStream`：把增量输出/进度/log 以 append-only 的方式写入 `dag_node_events`
   3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）

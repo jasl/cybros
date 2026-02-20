@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -42,6 +42,18 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
     t.bigint "blob_id", null: false
     t.string "variation_digest", null: false
     t.index ["blob_id", "variation_digest"], name: "index_active_storage_variant_records_uniqueness", unique: true
+  end
+
+  create_table "agent_memory_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.text "content", null: false
+    t.uuid "conversation_id"
+    t.datetime "created_at", null: false
+    t.vector "embedding", limit: 1536, null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_agent_memory_entries_on_conversation_id"
+    t.index ["embedding"], name: "index_agent_memory_entries_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
+    t.index ["metadata"], name: "index_agent_memory_entries_on_metadata", using: :gin
   end
 
   create_table "conversations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -235,6 +247,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_18_000000) do
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
+  add_foreign_key "agent_memory_entries", "conversations"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "to_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_to_node_graph_scoped", on_delete: :cascade
