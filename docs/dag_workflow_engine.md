@@ -281,11 +281,11 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 ### context_closure_for（ancestor closure；危险）
 
-1. recursive CTE 收集祖先闭包（只走未压缩的 **因果边**）：
+1. Ruby 遍历收集祖先闭包（只走未压缩的 **因果边**）：
    - 仅包含：`sequence/dependency`
    - `branch` 为纯 lineage，不参与 context
-   - 防御性硬化：忽略 “active edge 指向 inactive node” 的端点（active endpoint filtering）
-2. 过滤已压缩节点：默认排除 `compressed_at IS NOT NULL`
+   - 实现：先加载该 graph 的 active blocking edges，然后从 target 反向遍历得到 ancestor closure（避免 recursive CTE 的 plan 波动）
+2. 过滤已压缩节点：默认只包含 Active nodes（`compressed_at IS NULL`）
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
 4. 输出结构（默认 preview）：`[{node_id, turn_id, subgraph_id, node_type, state, payload:{input,output_preview}, metadata}]`
 
