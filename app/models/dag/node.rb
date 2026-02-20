@@ -17,7 +17,7 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
-    belongs_to :lane, class_name: "DAG::Lane", inverse_of: :nodes
+    belongs_to :subgraph, class_name: "DAG::Subgraph", inverse_of: :nodes
     belongs_to :turn,
                class_name: "DAG::Turn",
                foreign_key: :turn_id,
@@ -49,12 +49,12 @@ module DAG
     validates :state, inclusion: { in: STATES }
     validate :body_type_matches_node_type
     validate :pending_or_running_requires_executable_body
-    validate :turn_lane_must_be_consistent
-    validate :lane_must_be_writable, on: :create
+    validate :turn_subgraph_must_be_consistent
+    validate :subgraph_must_be_writable, on: :create
 
     scope :active, -> { where(compressed_at: nil) }
 
-    before_validation :ensure_lane
+    before_validation :ensure_subgraph
     before_validation :ensure_body
     after_create :ensure_turn_record!
 
@@ -117,6 +117,14 @@ module DAG
         update_visibility_columns!(deleted_at: at)
         clear_visibility_patch!
         emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "soft_delete")
+
+        if body&.class&.turn_anchor?
+          DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+            graph: graph,
+            subgraph_id: subgraph_id,
+            turn_ids: [turn_id]
+          )
+        end
       end
     end
 
@@ -131,6 +139,14 @@ module DAG
         update_visibility_columns!(deleted_at: nil)
         clear_visibility_patch!
         emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "restore")
+
+        if body&.class&.turn_anchor?
+          DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+            graph: graph,
+            subgraph_id: subgraph_id,
+            turn_ids: [turn_id]
+          )
+        end
       end
     end
 
@@ -507,20 +523,20 @@ module DAG
         end
       end
 
-      def ensure_lane
-        return if lane_id.present?
+      def ensure_subgraph
+        return if subgraph_id.present?
         return if graph.blank?
 
         if turn_id.present?
-          existing_lane_id =
-            graph.nodes.active.where(turn_id: turn_id).pick(:lane_id)
-          if existing_lane_id.present?
-            self.lane_id = existing_lane_id
+          existing_subgraph_id =
+            graph.nodes.active.where(turn_id: turn_id).pick(:subgraph_id)
+          if existing_subgraph_id.present?
+            self.subgraph_id = existing_subgraph_id
             return
           end
         end
 
-        self.lane_id = graph.main_lane.id
+        self.subgraph_id = graph.main_subgraph.id
       end
 
       def ensure_body
@@ -559,20 +575,20 @@ module DAG
         errors.add(:state, "can only be pending/awaiting_approval/running for executable nodes")
       end
 
-      def turn_lane_must_be_consistent
+      def turn_subgraph_must_be_consistent
         return if graph.blank?
         return if turn_id.blank?
-        return if lane_id.blank?
+        return if subgraph_id.blank?
 
         mismatch =
           graph.nodes.active
             .where(turn_id: turn_id)
             .where.not(id: id)
-            .where.not(lane_id: lane_id)
+            .where.not(subgraph_id: subgraph_id)
             .exists?
         return unless mismatch
 
-        errors.add(:lane_id, "must match existing nodes for this turn")
+        errors.add(:subgraph_id, "must match existing nodes for this turn")
       end
 
       def ensure_turn_record!
@@ -583,9 +599,12 @@ module DAG
             turn =
               graph.turns.create!(
                 id: turn_id,
-                lane_id: lane_id,
+                subgraph_id: subgraph_id,
+                anchored_seq: nil,
                 anchor_node_id: nil,
                 anchor_created_at: nil,
+                anchor_node_id_including_deleted: nil,
+                anchor_created_at_including_deleted: nil,
                 metadata: {}
               )
           rescue ActiveRecord::RecordNotUnique
@@ -594,42 +613,81 @@ module DAG
         end
 
         raise "turn record is missing after create" if turn.nil?
-        if turn.lane_id.to_s != lane_id.to_s
-          raise "turn.lane_id mismatch turn_id=#{turn_id} expected=#{lane_id} actual=#{turn.lane_id}"
+        if turn.subgraph_id.to_s != subgraph_id.to_s
+          raise "turn.subgraph_id mismatch turn_id=#{turn_id} expected=#{subgraph_id} actual=#{turn.subgraph_id}"
         end
 
         return unless body&.class&.turn_anchor?
-
-        now = Time.current
 
         turn.with_lock do
           current_anchor_at = turn.anchor_created_at
           current_anchor_id = turn.anchor_node_id
 
-          replace =
-            current_anchor_at.nil? ||
-              created_at < current_anchor_at ||
-              (created_at == current_anchor_at && id.to_s < current_anchor_id.to_s)
+          if deleted_at.nil?
+            replace_visible =
+              current_anchor_at.nil? ||
+                created_at < current_anchor_at ||
+                (created_at == current_anchor_at && id.to_s < current_anchor_id.to_s)
 
-          if replace
+            if replace_visible
+              turn.update_columns(
+                anchor_node_id: id,
+                anchor_created_at: created_at,
+                updated_at: Time.current
+              )
+            end
+          end
+
+          current_anchor_at_including_deleted = turn.anchor_created_at_including_deleted
+          current_anchor_id_including_deleted = turn.anchor_node_id_including_deleted
+
+          replace_including_deleted =
+            current_anchor_at_including_deleted.nil? ||
+              created_at < current_anchor_at_including_deleted ||
+              (created_at == current_anchor_at_including_deleted &&
+                id.to_s < current_anchor_id_including_deleted.to_s)
+
+          if replace_including_deleted
             turn.update_columns(
-              anchor_node_id: id,
-              anchor_created_at: created_at,
-              updated_at: now
+              anchor_node_id_including_deleted: id,
+              anchor_created_at_including_deleted: created_at,
+              updated_at: Time.current
             )
+          end
+
+          if turn.anchored_seq.nil?
+            seq = allocate_anchored_seq!
+            turn.update_columns(anchored_seq: seq, updated_at: Time.current)
           end
         end
       end
 
-      def lane_must_be_writable
-        return if lane.blank?
-        return if lane.archived_at.blank?
+      def allocate_anchored_seq!
+        DAG::Subgraph.with_connection do |connection|
+          graph_quoted = connection.quote(graph_id)
+          subgraph_quoted = connection.quote(subgraph_id)
 
-        if turn_id.present? && lane.nodes.active.where(turn_id: turn_id).exists?
+          sql = <<~SQL
+            UPDATE dag_subgraphs
+               SET next_anchored_seq = next_anchored_seq + 1
+             WHERE graph_id = #{graph_quoted}
+               AND id = #{subgraph_quoted}
+            RETURNING next_anchored_seq
+          SQL
+
+          connection.select_value(sql).to_i
+        end
+      end
+
+      def subgraph_must_be_writable
+        return if subgraph.blank?
+        return if subgraph.archived_at.blank?
+
+        if turn_id.present? && subgraph.nodes.active.where(turn_id: turn_id).exists?
           return
         end
 
-        errors.add(:lane, "is archived")
+        errors.add(:subgraph, "is archived")
       end
 
       def visibility_mutation_allowed_now?

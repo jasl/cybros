@@ -46,26 +46,26 @@ module DAG
 
       effective_turn_id = attributes.key?(:turn_id) ? attributes.delete(:turn_id) : @turn_id
 
-      if attributes.key?(:lane)
-        lane = attributes.delete(:lane)
-        attributes[:lane_id] = lane.is_a?(DAG::Lane) ? lane.id : lane
+      if attributes.key?(:subgraph)
+        subgraph = attributes.delete(:subgraph)
+        attributes[:subgraph_id] = subgraph.is_a?(DAG::Subgraph) ? subgraph.id : subgraph
       end
 
-      lane_id = attributes[:lane_id]
-      turn_lane_id =
+      subgraph_id = attributes[:subgraph_id]
+      turn_subgraph_id =
         if effective_turn_id.present?
-          @graph.nodes.active.where(turn_id: effective_turn_id).pick(:lane_id)
+          @graph.nodes.active.where(turn_id: effective_turn_id).pick(:subgraph_id)
         else
           nil
         end
 
-      if lane_id.present?
-        if turn_lane_id.present? && turn_lane_id.to_s != lane_id.to_s
-          raise ArgumentError, "lane_id conflicts with existing nodes for turn"
+      if subgraph_id.present?
+        if turn_subgraph_id.present? && turn_subgraph_id.to_s != subgraph_id.to_s
+          raise ArgumentError, "subgraph_id conflicts with existing nodes for turn"
         end
       else
-        lane_id = turn_lane_id || @graph.main_lane.id
-        attributes[:lane_id] = lane_id
+        subgraph_id = turn_subgraph_id || @graph.main_subgraph.id
+        attributes[:subgraph_id] = subgraph_id
       end
 
       if idempotency_key.present?
@@ -86,8 +86,8 @@ module DAG
             expected_body_output: body_output
           )
 
-          if existing.lane_id.to_s != lane_id.to_s
-            raise ArgumentError, "idempotency_key collision with mismatched lane"
+          if existing.subgraph_id.to_s != subgraph_id.to_s
+            raise ArgumentError, "idempotency_key collision with mismatched subgraph"
           end
 
           if existing.executable? && existing.pending?
@@ -123,8 +123,8 @@ module DAG
               node_type: node_type,
               idempotency_key: idempotency_key
             )
-            if node.lane_id.to_s != lane_id.to_s
-              raise ArgumentError, "idempotency_key collision with mismatched lane"
+            if node.subgraph_id.to_s != subgraph_id.to_s
+              raise ArgumentError, "idempotency_key collision with mismatched subgraph"
             end
             node
           end
@@ -191,10 +191,10 @@ module DAG
       raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
       raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
 
-      lane =
-        @graph.lanes.create!(
-          role: DAG::Lane::BRANCH,
-          parent_lane_id: from_node.lane_id,
+      subgraph =
+        @graph.subgraphs.create!(
+          role: DAG::Subgraph::BRANCH,
+          parent_subgraph_id: from_node.subgraph_id,
           forked_from_node_id: from_node.id,
           metadata: {}
         )
@@ -205,7 +205,7 @@ module DAG
         content: content,
         metadata: metadata,
         turn_id: nil,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
         body_input: body_input,
         body_output: body_output
       )
@@ -218,39 +218,39 @@ module DAG
         metadata: { "branch_kinds" => ["fork"] }
       )
 
-      lane.update!(root_node_id: node.id)
-      node.lane = lane
+      subgraph.update!(root_node_id: node.id)
+      node.subgraph = subgraph
 
       node
     end
 
-    def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {})
-      assert_lane_belongs_to_graph!(target_lane)
+    def merge_subgraphs!(target_subgraph:, target_from_node:, source_subgraphs_and_nodes:, node_type:, metadata: {})
+      assert_subgraph_belongs_to_graph!(target_subgraph)
       assert_node_belongs_to_graph!(target_from_node)
 
-      raise ArgumentError, "cannot merge into archived lane" if target_lane.archived_at.present?
-      raise ArgumentError, "target_from_node must belong to target_lane" if target_from_node.lane_id != target_lane.id
+      raise ArgumentError, "cannot merge into archived subgraph" if target_subgraph.archived_at.present?
+      raise ArgumentError, "target_from_node must belong to target_subgraph" if target_from_node.subgraph_id != target_subgraph.id
 
-      sources = Array(source_lanes_and_nodes)
-      raise ArgumentError, "source_lanes_and_nodes must not be empty" if sources.empty?
+      sources = Array(source_subgraphs_and_nodes)
+      raise ArgumentError, "source_subgraphs_and_nodes must not be empty" if sources.empty?
 
-      source_lane_ids = []
+      source_subgraph_ids = []
       sources.each do |entry|
-        lane = entry.fetch(:lane)
+        subgraph = entry.fetch(:subgraph)
         from_node = entry.fetch(:from_node)
 
-        assert_lane_belongs_to_graph!(lane)
+        assert_subgraph_belongs_to_graph!(subgraph)
         assert_node_belongs_to_graph!(from_node)
 
-        raise ArgumentError, "main lane cannot be merged into another lane" if lane.role == DAG::Lane::MAIN
-        raise ArgumentError, "cannot merge a lane into itself" if lane.id == target_lane.id
-        raise ArgumentError, "source from_node must belong to lane" if from_node.lane_id != lane.id
+        raise ArgumentError, "main subgraph cannot be merged into another subgraph" if subgraph.role == DAG::Subgraph::MAIN
+        raise ArgumentError, "cannot merge a subgraph into itself" if subgraph.id == target_subgraph.id
+        raise ArgumentError, "source from_node must belong to subgraph" if from_node.subgraph_id != subgraph.id
 
-        source_lane_ids << lane.id
+        source_subgraph_ids << subgraph.id
       end
 
       merge_metadata = normalize_hash(metadata)
-      merge_metadata["source_lane_ids"] = source_lane_ids.map(&:to_s).uniq.sort
+      merge_metadata["source_subgraph_ids"] = source_subgraph_ids.map(&:to_s).uniq.sort
 
       node =
         create_node(
@@ -258,7 +258,7 @@ module DAG
           state: DAG::Node::PENDING,
           metadata: merge_metadata,
           turn_id: nil,
-          lane_id: target_lane.id
+          subgraph_id: target_subgraph.id
         )
 
       create_edge(
@@ -269,22 +269,22 @@ module DAG
       )
 
       sources.each do |entry|
-        lane = entry.fetch(:lane)
+        subgraph = entry.fetch(:subgraph)
         from_node = entry.fetch(:from_node)
 
         create_edge(
           from_node: from_node,
           to_node: node,
           edge_type: DAG::Edge::DEPENDENCY,
-          metadata: { "generated_by" => "merge", "source_lane_id" => lane.id }
+          metadata: { "generated_by" => "merge", "source_subgraph_id" => subgraph.id }
         )
       end
 
       node
     end
 
-    def archive_lane!(lane:, mode: :finish, at: Time.current, reason: "lane_archived")
-      assert_lane_belongs_to_graph!(lane)
+    def archive_subgraph!(subgraph:, mode: :finish, at: Time.current, reason: "subgraph_archived")
+      assert_subgraph_belongs_to_graph!(subgraph)
 
       mode = mode.to_sym
       unless mode.in?([:finish, :cancel])
@@ -292,17 +292,17 @@ module DAG
       end
 
       at = Time.current if at.nil?
-      reason = reason.to_s.presence || "lane_archived"
+      reason = reason.to_s.presence || "subgraph_archived"
 
-      lane.update!(archived_at: at)
-      return lane if mode == :finish
+      subgraph.update!(archived_at: at)
+      return subgraph if mode == :finish
 
       running_ids = []
       pending_ids = []
 
       DAG::Node.with_connection do |connection|
         graph_quoted = connection.quote(@graph.id)
-        lane_quoted = connection.quote(lane.id)
+        subgraph_quoted = connection.quote(subgraph.id)
         now_quoted = connection.quote(at)
         reason_quoted = connection.quote(reason)
 
@@ -314,7 +314,7 @@ module DAG
                  updated_at = #{now_quoted}
            WHERE dag_nodes.graph_id = #{graph_quoted}
              AND dag_nodes.compressed_at IS NULL
-             AND dag_nodes.lane_id = #{lane_quoted}
+             AND dag_nodes.subgraph_id = #{subgraph_quoted}
              AND dag_nodes.state = 'running'
           RETURNING dag_nodes.id
         SQL
@@ -327,7 +327,7 @@ module DAG
                  updated_at = #{now_quoted}
            WHERE dag_nodes.graph_id = #{graph_quoted}
              AND dag_nodes.compressed_at IS NULL
-             AND dag_nodes.lane_id = #{lane_quoted}
+             AND dag_nodes.subgraph_id = #{subgraph_quoted}
              AND dag_nodes.state = 'pending'
           RETURNING dag_nodes.id
         SQL
@@ -354,7 +354,7 @@ module DAG
         )
       end
 
-      lane
+      subgraph
     end
 
     def retry_replace!(node:)
@@ -402,7 +402,7 @@ module DAG
         metadata: retry_metadata,
         retry_of_id: old.id,
         turn_id: old.turn_id,
-        lane_id: old.lane_id,
+        subgraph_id: old.subgraph_id,
         version_set_id: old.version_set_id,
         body_input: body_input,
       )
@@ -470,7 +470,7 @@ module DAG
             .except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker")
             .merge(metadata_patch),
         turn_id: old.turn_id,
-        lane_id: old.lane_id,
+        subgraph_id: old.subgraph_id,
         version_set_id: old.version_set_id,
         body_input: old.body.input_for_retry.deep_merge(body_input_patch),
       )
@@ -522,8 +522,8 @@ module DAG
         raise ArgumentError, "cannot adopt version when no active version exists"
       end
 
-      if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.lane_id != target.lane_id }
-        raise ArgumentError, "version_set_id must not span multiple turns or lanes"
+      if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.subgraph_id != target.subgraph_id }
+        raise ArgumentError, "version_set_id must not span multiple turns or subgraphs"
       end
 
       nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
@@ -555,7 +555,13 @@ module DAG
         raise ArgumentError, "cannot adopt non-leaf nodes"
       end
 
-      cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
+      cleanup_invalid_leaves_in_turn!(subgraph_id: target.subgraph_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
+
+      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        graph: @graph,
+        subgraph_id: target.subgraph_id,
+        turn_ids: [target.turn_id]
+      )
 
       @graph.nodes.reload.find(target.id)
     end
@@ -584,7 +590,7 @@ module DAG
         state: DAG::Node::FINISHED,
         metadata: old.metadata.except("error", "reason", "blocked_by", "usage", "output_stats", "timing", "worker"),
         turn_id: old.turn_id,
-        lane_id: old.lane_id,
+        subgraph_id: old.subgraph_id,
         version_set_id: old.version_set_id,
         body_input: new_body_input,
         finished_at: now
@@ -630,10 +636,10 @@ module DAG
         raise ArgumentError, "node must belong to the same graph"
       end
 
-      def assert_lane_belongs_to_graph!(lane)
-        return if lane.graph_id == @graph.id
+      def assert_subgraph_belongs_to_graph!(subgraph)
+        return if subgraph.graph_id == @graph.id
 
-        raise ArgumentError, "lane must belong to the same graph"
+        raise ArgumentError, "subgraph must belong to the same graph"
       end
 
       def locked_active_node!(node_or_id)
@@ -727,6 +733,12 @@ module DAG
 
       def archive_nodes_and_incident_edges!(node_ids:, compressed_by_id:, now:)
         node_ids = Array(node_ids).map(&:to_s).uniq
+        return [] if node_ids.empty?
+
+        turn_rows =
+          @graph.nodes
+            .where(id: node_ids)
+            .pluck(:subgraph_id, :turn_id)
 
         edge_ids = @graph.edges.active
           .where("from_node_id IN (?) OR to_node_id IN (?)", node_ids, node_ids)
@@ -740,6 +752,17 @@ module DAG
 
         @graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
 
+        turn_rows
+          .group_by { |(subgraph_id, _turn_id)| subgraph_id.to_s }
+          .each do |subgraph_id, rows|
+            turn_ids = rows.map { |(_subgraph_id, turn_id)| turn_id.to_s }.uniq
+            DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+              graph: @graph,
+              subgraph_id: subgraph_id,
+              turn_ids: turn_ids
+            )
+          end
+
         edge_ids
       end
 
@@ -751,14 +774,14 @@ module DAG
         end
       end
 
-      def cleanup_invalid_leaves_in_turn!(lane_id:, turn_id:, compressed_by_id:, now:)
+      def cleanup_invalid_leaves_in_turn!(subgraph_id:, turn_id:, compressed_by_id:, now:)
         leaf_terminal_types = @graph.send(:leaf_terminal_node_types)
         turn_anchor_types = @graph.turn_anchor_node_types
 
         loop do
           leaves =
             @graph.leaf_nodes
-              .where(lane_id: lane_id, turn_id: turn_id)
+              .where(subgraph_id: subgraph_id, turn_id: turn_id)
               .select(:id, :node_type, :state)
               .to_a
 

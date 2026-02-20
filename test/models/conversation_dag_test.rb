@@ -93,10 +93,10 @@ class ConversationDAGTest < ActiveSupport::TestCase
     actual_fork = root.fork!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
     refute_equal root.turn_id, actual_fork.turn_id
 
-    assert_equal DAG::Lane::BRANCH, actual_fork.lane.role
-    assert_equal graph.main_lane.id, actual_fork.lane.parent_lane_id
-    assert_equal root.id, actual_fork.lane.forked_from_node_id
-    assert_equal actual_fork.id, actual_fork.lane.root_node_id
+    assert_equal DAG::Subgraph::BRANCH, actual_fork.subgraph.role
+    assert_equal graph.main_subgraph.id, actual_fork.subgraph.parent_subgraph_id
+    assert_equal root.id, actual_fork.subgraph.forked_from_node_id
+    assert_equal actual_fork.id, actual_fork.subgraph.root_node_id
 
     fork_context = conversation.context_for(actual_fork.id)
     fork_ids = fork_context.map { |node| node.fetch("node_id") }

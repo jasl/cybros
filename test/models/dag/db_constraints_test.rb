@@ -66,18 +66,18 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
     end
   end
 
-  test "dag_nodes.lane_id is constrained to the same graph at the database layer" do
+  test "dag_nodes.subgraph_id is constrained to the same graph at the database layer" do
     conversation_a = Conversation.create!
     graph_a = conversation_a.dag_graph
 
     conversation_b = Conversation.create!
     graph_b = conversation_b.dag_graph
 
-    lane_a = graph_a.main_lane
+    subgraph_a = graph_a.main_subgraph
     node_b = graph_b.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
     assert_raises(ActiveRecord::InvalidForeignKey) do
-      node_b.update_column(:lane_id, lane_a.id)
+      node_b.update_column(:subgraph_id, subgraph_a.id)
     end
   end
 
@@ -115,26 +115,26 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   test "dag_turns anchor fields are constrained for consistency at the database layer" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
 
-    turn = graph.turns.create!(lane_id: lane.id, metadata: {})
+    turn = graph.turns.create!(subgraph_id: subgraph.id, metadata: {})
 
     assert_raises(ActiveRecord::StatementInvalid) do
       turn.update_column(:anchor_node_id, SecureRandom.uuid)
     end
   end
 
-  test "dag_turns.lane_id is constrained to the same graph at the database layer" do
+  test "dag_turns.subgraph_id is constrained to the same graph at the database layer" do
     conversation_a = Conversation.create!
     graph_a = conversation_a.dag_graph
 
     conversation_b = Conversation.create!
     graph_b = conversation_b.dag_graph
 
-    lane_b = graph_b.main_lane
+    subgraph_b = graph_b.main_subgraph
 
     assert_raises(ActiveRecord::InvalidForeignKey) do
-      DAG::Turn.new(graph_id: graph_a.id, lane_id: lane_b.id, metadata: {}).save!(validate: false)
+      DAG::Turn.new(graph_id: graph_a.id, subgraph_id: subgraph_b.id, metadata: {}).save!(validate: false)
     end
   end
 
@@ -152,24 +152,24 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
     end
   end
 
-  test "dag_nodes cannot change lanes without matching dag_turns row (lane+turn consistency at the database layer)" do
+  test "dag_nodes cannot change subgraphs without matching dag_turns row (subgraph+turn consistency at the database layer)" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    lane_a = graph.main_lane
-    lane_b = graph.lanes.create!(role: DAG::Lane::BRANCH, metadata: {})
+    subgraph_a = graph.main_subgraph
+    subgraph_b = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, metadata: {})
 
     node =
       graph.nodes.create!(
         node_type: Messages::Task.node_type_key,
         state: DAG::Node::FINISHED,
-        lane_id: lane_a.id,
+        subgraph_id: subgraph_a.id,
         metadata: {}
       )
 
     assert_raises(ActiveRecord::InvalidForeignKey) do
       DAG::Node.with_connection do |connection|
-        node.update_column(:lane_id, lane_b.id)
+        node.update_column(:subgraph_id, subgraph_b.id)
         connection.execute("SET CONSTRAINTS fk_dag_nodes_turn_graph_scoped IMMEDIATE")
       end
     end

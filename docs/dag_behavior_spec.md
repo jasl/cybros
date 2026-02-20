@@ -42,9 +42,9 @@
 - `dag_node_visibility_patches (graph_id, node_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK）。
 - `dag_nodes (graph_id, retry_of_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图 retry lineage 引用）。
 - `dag_nodes (graph_id, compressed_by_id)` 必须外键引用 `dag_nodes (graph_id, id)`（composite FK；禁止跨图压缩归档引用）。
-- `dag_nodes (graph_id, lane_id)` 必须外键引用 `dag_lanes (graph_id, id)`（composite FK；禁止跨图 lane 引用）。
-- `dag_turns (graph_id, lane_id)` 必须外键引用 `dag_lanes (graph_id, id)`（composite FK；Turn 必须属于同一 graph 的某条 lane）。
-- `dag_nodes (graph_id, lane_id, turn_id)` 必须外键引用 `dag_turns (graph_id, lane_id, id)`（composite FK；保证 node 的 turn/lane 一致性）。
+- `dag_nodes (graph_id, subgraph_id)` 必须外键引用 `dag_subgraphs (graph_id, id)`（composite FK；禁止跨图 subgraph 引用）。
+- `dag_turns (graph_id, subgraph_id)` 必须外键引用 `dag_subgraphs (graph_id, id)`（composite FK；Turn 必须属于同一 graph 的某条 subgraph）。
+- `dag_nodes (graph_id, subgraph_id, turn_id)` 必须外键引用 `dag_turns (graph_id, subgraph_id, id)`（composite FK；保证 node 的 turn/subgraph 一致性）。
 
 这意味着：即使绕过模型校验（例如 `save!(validate: false)`），DB 也会拒绝插入跨 graph 的 edge/patch。
 
@@ -286,54 +286,79 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - 当 executor 返回 `finished_streamed` 时，Runner 必须按 `id ASC` 汇总该 node 的 `output_delta.text` 并拼接为最终字符串，然后再调用 `node.mark_finished!(content: ...)` 写入 NodeBody 的最终 output（同时 output_preview 从 output 派生）。
 
-### 2.7 `lane_id`（分区 / Thread-like Lane）
+### 2.7 `subgraph_id`（分区 / Thread-like Subgraph）
 
-里程碑 1 引入 Lane 分区模型，用于把一张 DAG 图中的分支子图“染色/索引”为若干个分区（Thread-like）。规范性要求：
+里程碑 1 引入 Subgraph 分区模型，用于把一张 DAG 图中的分支子图“染色/索引”为若干个分区（Thread-like）。规范性要求：
 
-- `dag_nodes.lane_id` **必须存在**（一个 node 只能属于一个 lane）。
-- 每个 `DAG::Graph` 必须存在且仅存在一个 `main` lane（主线）。
-- `fork` 必须创建一个新的 `branch` lane，并把 fork 创建的第一条新 node 作为该 lane 的 `root_node`。
-- `archived_at` 非空表示 lane 已归档。归档后的 lane **禁止开启新 turn**（但允许同一 turn 的收尾）：
-  - 若要创建的 node 的 `turn_id` 在该 lane 内不存在任何 Active 节点：视为新 turn，必须失败
-  - 若该 `turn_id` 在该 lane 内已存在 Active 节点：视为同 turn 延续，允许创建（用于 executor/tool 链补节点、leaf repair 等）
+- `dag_nodes.subgraph_id` **必须存在**（一个 node 只能属于一个 subgraph）。
+- 每个 `DAG::Graph` 必须存在且仅存在一个 `main` subgraph（主线）。
+- `fork` 必须创建一个新的 `branch` subgraph，并把 fork 创建的第一条新 node 作为该 subgraph 的 `root_node`。
+- `archived_at` 非空表示 subgraph 已归档。归档后的 subgraph **禁止开启新 turn**（但允许同一 turn 的收尾）：
+  - 若要创建的 node 的 `turn_id` 在该 subgraph 内不存在任何 Active 节点：视为新 turn，必须失败
+  - 若该 `turn_id` 在该 subgraph 内已存在 Active 节点：视为同 turn 延续，允许创建（用于 executor/tool 链补节点、leaf repair 等）
 
-引擎默认 lane 选择（`Mutations#create_node`，normative）：
+引擎默认 subgraph 选择（`Mutations#create_node`，normative）：
 
-- 若显式传入 `lane_id`：使用该 lane（但必须与本次 `turn_id` 已存在节点的 lane 一致，否则必须 raise）。
-- 否则若存在有效的 `turn_id`：必须继承该 turn 内既有 active 节点的 `lane_id`（用于保证 executor 在同一轮内创建的 task/tool 节点不会落错 lane）。
-- 否则：默认落在 `graph.main_lane`。
+- 若显式传入 `subgraph_id`：使用该 subgraph（但必须与本次 `turn_id` 已存在节点的 subgraph 一致，否则必须 raise）。
+- 否则若存在有效的 `turn_id`：必须继承该 turn 内既有 active 节点的 `subgraph_id`（用于保证 executor 在同一轮内创建的 task/tool 节点不会落错 subgraph）。
+- 否则：默认落在 `graph.main_subgraph`。
 
 其它引擎行为（normative）：
 
-- leaf invariant repair 创建的默认 leaf repair 节点必须继承 leaf 的 `lane_id`。
-- Compression 不允许跨 lane 压缩；summary 节点必须继承被压缩子图的 `lane_id`。
-- Context/Transcript 输出必须携带 `lane_id`（用于 UI 染色与对话树展示）。
+- leaf invariant repair 创建的默认 leaf repair 节点必须继承 leaf 的 `subgraph_id`。
+- Compression 不允许跨 subgraph 压缩；summary 节点必须继承被压缩子图的 `subgraph_id`。
+- Context/Transcript 输出必须携带 `subgraph_id`（用于 UI 染色与对话树展示）。
 
-#### 2.7.1 Lane turns（turn_seq / turn_count）
+#### 2.7.1 Subgraph turns（anchored_seq / anchored_turn_count / anchored_turn_page）
 
-产品通常需要“在一条 lane 内按对话轮次（turn）展示与计数”，但引擎内部的 `turn_id` 只是一种 span/分组标记，并不自带 UI 友好的“轮次数”序号。因此引擎提供 **turn anchor** 语义：
+产品通常需要“在一条 subgraph 内按对话轮次（turn）展示与计数”，但引擎必须避免默认 O(n) 全量扫描。里程碑 1 将 turn 的“UI 序号/分页索引”物化在 `dag_turns`：
+
+- `dag_turns.id`（UUIDv7）：turn 的稳定排序/分页 key（推荐 keyset：`WHERE id < cursor ORDER BY id DESC LIMIT n`）。
+- `dag_turns.anchored_seq`（bigint；nullable）：该 turn 第一次出现 turn anchor 时被分配的 **1-based** 序号；只写一次，不回填、不重算。
+- `dag_subgraphs.next_anchored_seq`（bigint）：该 subgraph 的单调计数器，用于 O(1) 分配新 `anchored_seq`。
+
+turn anchors：
 
 - 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（conversation graphs 默认 `user_message/agent_message/character_message`）。
 - `graph.turn_anchor_node_types` 返回该图配置下的 turn anchor node types。
-- `lane.anchored_turns` / `lane.anchored_turn_count` / `lane.anchored_turn_seq_for(turn_id)` 以 turn anchors 在该 lane 内的出现顺序生成一个 **1-based** 的 `turn_seq`。
 
-统计口径（normative）：
+anchor 选择与可见性（normative）：
 
-- 只看 **同一条 lane** 内的 nodes，且 `node_type IN graph.turn_anchor_node_types`。
-- **必须包含**已压缩（inactive）与软删除（`deleted_at` 非空）的历史 anchors：`turn_seq` 不回填、不重算。
-- 排序规则：对每个 `turn_id`，按 anchor 节点的 `(created_at ASC, id ASC)` 选出该 turn 的 “anchor row”，再按 `(anchor_created_at ASC, anchor_id ASC)` 排序生成 `turn_seq`（保证稳定确定性）。
+- `dag_turns.anchor_node_id/anchor_created_at` 表示该 turn 当前“可见 anchor”（Active + 非 deleted）：
+  - 候选范围：同一 `graph+subgraph+turn` 内，`node_type IN graph.turn_anchor_node_types` 且 `compressed_at IS NULL AND deleted_at IS NULL`
+  - 选择规则：按 `(created_at ASC, id ASC)` 取最早者（稳定）
+  - 若无候选：置为 NULL
+- `dag_turns.anchor_node_id_including_deleted/anchor_created_at_including_deleted` 表示包含软删除的 anchor（仍不含 compressed）：
+  - 候选范围：同一 `graph+subgraph+turn` 内，`node_type IN graph.turn_anchor_node_types` 且 `compressed_at IS NULL`
+  - 选择规则同上
+  - 若无候选：置为 NULL
 
-可选的“可见 turns”（非规范，用于 UI）：
+anchored_seq 分配（normative）：
 
-- `include_deleted: false` 仅过滤掉 `anchor_deleted==true` 的 turns，但 **不重排** `turn_seq`（允许出现 seq gap）。
+- 当任意 `turn_anchor?` 节点首次出现在某个 turn 时，若 `dag_turns.anchored_seq IS NULL`：
+  - 必须原子地将 `dag_subgraphs.next_anchored_seq += 1` 并用返回值写入 `dag_turns.anchored_seq`
+- 之后即使该 turn 的 anchor 被压缩/删除，`anchored_seq` 也不得变化。
 
-Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/summary 策略）：
+Turn anchor refresh（normative）：
 
-- `lane.turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)`
-- `lane.turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
-- `lane.node_ids_for_turn_ids(turn_ids:, include_compressed: false, include_deleted: true)`
-- `lane.node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)`
-- `lane.compress_turn_seq_range!(start_seq:, end_seq:, summary_content:, summary_metadata: {})`（内部调用 `graph.compress!`）
+- `edit/retry/rerun/compress/soft_delete/restore` 等可能改变 turn 内 anchor 集合的操作，完成后 **必须**刷新该 turn 的 `dag_turns.anchor_*` 字段，确保 turn 不会因锚点变化而“意外消失”。
+
+对外 API（Public API 约定）：
+
+- 聊天记录（面向真实产品 UI）：`subgraph.transcript_page(...)`
+  - 只返回 “可见 turns”（默认 `dag_turns.anchor_node_id IS NOT NULL`；`include_deleted: true` 用 `anchor_node_id_including_deleted`）
+  - turn 的 keyset 排序只按 `turn_id`（UUIDv7），不依赖 `anchor_created_at`
+- turn 序号/范围索引（面向压缩/定位）：`subgraph.anchored_turn_page(...) / anchored_turn_count / anchored_turn_seq_for(...)`
+  - `include_deleted: true` 可包含历史上出现过 `anchored_seq` 的 turns（即使当前无可见 anchor）
+
+Subgraph 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/summary 策略）：
+
+- `subgraph.turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `subgraph.turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `subgraph.node_ids_for_turn_ids(turn_ids:, include_compressed: false, include_deleted: true)`
+- `subgraph.node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)`
+- `subgraph.compress_turn_seq_range!(start_seq:, end_seq:, summary_content:, summary_metadata: {})`（内部调用 `graph.compress!`）
+- `subgraph.compact_turn_context!(turn_id:, keep_node_ids:, at: Time.current)`
 
 ### 2.8 `turn_id`（对话轮次 / 执行 span）
 
@@ -345,7 +370,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 核心语义（normative）：
 
 - 同一轮产生的所有节点共享相同 `turn_id`。
-- 同一 graph 内，对任意 `turn_id`（只看 Active）：该 turn 的所有节点必须属于同一个 lane（`lane_id` 不可跨 lane）。
+- 同一 graph 内，对任意 `turn_id`（只看 Active）：该 turn 的所有节点必须属于同一个 subgraph（`subgraph_id` 不可跨 subgraph）。
 - `retry/rerun/edit` 是同一轮的版本替换：`new_node.turn_id == old.turn_id`
 - `fork` 开启新轮次：fork 出来的 `new_node.turn_id` 由 DB default 生成（不继承父节点 turn_id）
 - leaf invariant repair 创建的默认 leaf repair 消息节点（里程碑 1 默认 `agent_message(pending)`）必须继承 leaf 的 `turn_id`（引擎层强制）
@@ -383,7 +408,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 
 - 默认情况下，每个新建 node 都会获得一个独立的 `version_set_id`（表示“尚未形成多版本”）。
 - 对于 replace 系列（`retry/rerun/edit`）产生的新版本：`new_node.version_set_id` **必须继承** `old_node.version_set_id`，从而形成版本组。
-- `version_set_id` **不得**跨 turn 或跨 lane：同一版本组内的所有节点必须共享相同的 `turn_id` 与 `lane_id`（引擎应在改图时强制/校验）。
+- `version_set_id` **不得**跨 turn 或跨 subgraph：同一版本组内的所有节点必须共享相同的 `turn_id` 与 `subgraph_id`（引擎应在改图时强制/校验）。
 
 ---
 
@@ -437,16 +462,17 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 节点选择（normative）：
 
 1) **核心窗口（最多 `limit_turns` 个 anchored turns）**
-   - anchored turns 使用 `dag_turns.anchor_created_at + anchor_node_id` 作为稳定 keyset 排序键
-   - 窗口覆盖与 target 相关的 lanes：
-     - target 所在 lane 的 parent_lane 链（每段只取到 fork 点）
-     - target 的 incoming blocking 来源 nodes（`sequence/dependency`；merge 场景关键），并同样取各自的 parent_lane 链
-   - 每段计算 cutoff（上界）并取 `<= cutoff` 的 anchored turns（过滤 compressed anchors；`include_deleted:false` 时过滤 deleted anchors），每段最多取 `limit_turns` 个候选；合并后按全局排序键取最近 `limit_turns`
+   - anchored turns 指 `dag_turns.anchor_node_id IS NOT NULL` 的 turns（`include_deleted: true` 时用 `anchor_node_id_including_deleted`）
+   - anchored turns 使用 `dag_turns.id`（即 `turn_id`；UUIDv7）作为稳定 keyset 排序键（不依赖 `anchor_created_at`）
+   - 窗口覆盖与 target 相关的 subgraphs：
+     - target 所在 subgraph 的 parent_subgraph 链（每段只取到 fork 点）
+     - target 的 incoming blocking 来源 nodes（`sequence/dependency`；merge 场景关键）的各自 subgraph，并同样取各自的 parent_subgraph 链
+   - 对每条 subgraph 链段，计算 cutoff（上界）为该链段 cutoff node 的 `turn_id`，并取该 subgraph 内 `turn_id <= cutoff_turn_id` 的 anchored turns（每段最多取 `limit_turns` 个候选）；合并后按 `turn_id` 取最近 `limit_turns`
 
 2) **强制 pin 的 turns（不计入 `limit_turns` 预算）**
    - 永远包含：
      - `target_node.turn_id`
-     - 每条 lane 链段的 cutoff node 的 `turn_id`（即使该 turn 没有 anchor；确保 fork/merge 关键点稳定进入 context）
+     - 每条 subgraph 链段的 cutoff node 的 `turn_id`（即使该 turn 没有 anchor；确保 fork/merge 关键点稳定进入 context）
 
 3) **强制 pin 的 nodes（跨窗口的少量关键节点）**
    - 全图 Active 的 `system_message` + `developer_message`（遵守 `include_excluded/include_deleted` 的输出过滤）
@@ -478,7 +504,7 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 {
   "node_id": "...",
   "turn_id": "...",
-  "lane_id": "...",
+  "subgraph_id": "...",
   "node_type": "user_message|system_message|developer_message|agent_message|character_message|task|summary",
   "state": "pending|awaiting_approval|running|finished|errored|rejected|skipped|stopped",
   "payload": {
@@ -564,12 +590,12 @@ defer queue 的存储与应用规则（normative）：
 
 产品常见需求：对“单轮 turn 的中间过程”做收缩（例如 tool calls、规划草稿等不希望进入后续 LLM context），但又不希望做结构性压缩（compression）或生成 summary 节点。引擎提供一个基于 visibility 的原语：
 
-- `lane.compact_turn_context!(turn_id:, keep_node_ids:, at: Time.current)`
+- `subgraph.compact_turn_context!(turn_id:, keep_node_ids:, at: Time.current)`
 
 语义（normative）：
 
 - 必须在图锁内执行，并遵守与 strict visibility 相同的 gating（graph idle + node terminal）。
-- 仅作用于 **该 lane + 该 turn_id 的 Active nodes**：
+- 仅作用于 **该 subgraph + 该 turn_id 的 Active nodes**：
   - `keep_node_ids` 中的节点必须保留在 context 中（清 `context_excluded_at`）。
   - 其它节点将被标记为 `context_excluded_at = at`（从后续 context 默认排除）。
 - 不改变 DAG 结构（不归档节点/边、不重连边、不引入 summary）。
@@ -617,9 +643,9 @@ Context 输出过滤（对 `context_for` 与 `context_closure_for` 均适用）�
 
 非规范（产品建议）：
 
-- 对 “子话题/多 lane 的聊天记录” 与 “游标分页” 场景，推荐使用 lane-scoped 的分页原语（例如 `lane.transcript_page(limit_turns:, before_turn_id:, after_turn_id:)`），避免把不同 lane 的 turns 混在同一个列表里。
+- 对 “子话题/多 subgraph 的聊天记录” 与 “游标分页” 场景，推荐使用 subgraph-scoped 的分页原语（例如 `subgraph.transcript_page(limit_turns:, before_turn_id:, after_turn_id:)`），避免把不同 subgraph 的 turns 混在同一个列表里。
 
-> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_closure_for` 的祖先闭包；建议引入更明确的分页/索引原语（例如 lane-scoped paging）来避免全量闭包。
+> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_closure_for` 的祖先闭包；建议引入更明确的分页/索引原语（例如 subgraph-scoped paging）来避免全量闭包。
 
 ---
 
@@ -714,14 +740,14 @@ leaf 不变量由 `graph.leaf_valid?` / `graph.leaf_repair_*` 决定其 “合�
 
 行为：
 
-1) 创建新的 `branch` lane（分区）：
+1) 创建新的 `branch` subgraph（分区）：
    - `role = "branch"`
-   - `parent_lane_id = from_node.lane_id`
+   - `parent_subgraph_id = from_node.subgraph_id`
    - `forked_from_node_id = from_node.id`
-2) 创建 `new_node`（按入参 node_type/state/payload），并显式写入 `lane_id = new_lane.id`
+2) 创建 `new_node`（按入参 node_type/state/payload），并显式写入 `subgraph_id = new_subgraph.id`
 3) 创建 causal `sequence`: `from_node → new_node`
 4) 创建 lineage `branch`: `from_node → new_node`，`metadata["branch_kinds"] = ["fork"]`
-5) 写回 `new_lane.root_node_id = new_node.id`
+5) 写回 `new_subgraph.root_node_id = new_node.id`
 
 ### 7.3 replace（版本替换：retry/rerun/edit 的共同骨架）
 
@@ -819,7 +845,7 @@ Active 版本确定规则：
 - graph idle：Active 图中不存在任何 `state=running` 的节点
 - target 为 `finished`
 - target 必须无任何 outgoing blocking edges（`sequence/dependency`，包含 inactive 边；用于避免 adopt 时需要恢复下游）
-- `version_set_id` 不跨 turn/lane（同组必须共享 `turn_id` 与 `lane_id`）
+- `version_set_id` 不跨 turn/subgraph（同组必须共享 `turn_id` 与 `subgraph_id`）
 
 行为（normative）：
 
@@ -829,50 +855,51 @@ Active 版本确定规则：
    - 若不存在任何来自 Active nodes 的 incoming blocking edges，必须失败（避免 adopt 出现孤立节点）。
 4) 为保持 leaf invariant，必要时可清理该 turn 内因版本切换产生的“无效 leaf”（例如 orphan 的 finished task），将其归档。
 
-### 7.8 merge（分支合并回目标 lane：创建 join 节点）
+### 7.8 merge（分支合并回目标 subgraph：创建 join 节点）
 
-目的：把若干 source lanes 的当前 head “汇总/合并” 回目标 lane（通常为 main），引擎通过在 target lane 创建 join 节点表达“汇总点”。
+目的：把若干 source subgraphs 的当前 head “汇总/合并” 回目标 subgraph（通常为 main），引擎通过在 target subgraph 创建 join 节点表达“汇总点”。
 
-> 重要：merge **不**隐式归档 source lanes。产品若希望 “merge 后结束分支”，应显式调用 `archive_lane!`（见第 7.9 节）。
+> 重要：merge **不**隐式归档 source subgraphs。产品若希望 “merge 后结束分支”，应显式调用 `archive_subgraph!`（见第 7.9 节）。
 
 前置条件（normative）：
 
-- `target_lane.archived_at IS NULL`
-- 所有 source lanes 均满足：
-  - lane 可以已归档（允许 archived source）
-  - `lane.id != target_lane.id`
+- `target_subgraph.archived_at IS NULL`
+- 所有 source subgraphs 均满足：
+  - subgraph 可以已归档（允许 archived source）
+  - `subgraph.id != target_subgraph.id`
   - 与 target 属于同一 graph
-  - `lane.role != main`（main lane 不允许作为 source 合并进其它 lane）
-- `target_from_node.lane_id == target_lane.id`
-- 对每个 source：`source_from_node.lane_id == source_lane.id`
+  - `subgraph.role != main`（main subgraph 不允许作为 source 合并进其它 subgraph）
+- `target_from_node.subgraph_id == target_subgraph.id`
+- 对每个 source：`source_from_node.subgraph_id == source_subgraph.id`
 
 行为（normative）：
 
-1) 在 `target_lane` 创建一个新的 join 节点 `join_node`：
+1) 在 `target_subgraph` 创建一个新的 join 节点 `join_node`：
    - `state = pending`
-   - `lane_id = target_lane.id`
+   - `subgraph_id = target_subgraph.id`
    - `turn_id` 由 DB default 生成（不开启/不继承任何既有 turn）
    - `node_type` 由入参决定（产品示例：`agent_message`）
+   - `metadata` 合并 `source_subgraph_ids`（用于审计/回放；内容为 source subgraph ids 的稳定排序数组）
 2) 创建 causal `sequence`: `target_from_node → join_node`（`metadata["generated_by"]="merge"`）
 3) 对每个 source 创建 causal `dependency`: `source_from_node → join_node`
    - `metadata["generated_by"]="merge"`
-   - `metadata["source_lane_id"]=source_lane.id`
+   - `metadata["source_subgraph_id"]=source_subgraph.id`
 
-### 7.9 archive_lane（归档 lane：禁止新 turn，可选取消在途执行）
+### 7.9 archive_subgraph（归档 subgraph：禁止新 turn，可选 stop 在途执行）
 
-目的：把某个 lane 标记为“对话结束/只允许收尾”。归档后禁止开启新 turn；同 turn 的在途执行（executor/tool 链）可继续补节点并跑完（默认策略）。
+目的：把某个 subgraph 标记为“对话结束/只允许收尾”。归档后禁止开启新 turn；同 turn 的在途执行（executor/tool 链）可继续补节点并跑完（默认策略）。
 
-API（引擎层示例）：`Mutations#archive_lane!(lane:, mode: :finish|:cancel, at: now, reason: "lane_archived")`
+API（引擎层示例）：`Mutations#archive_subgraph!(subgraph:, mode: :finish|:cancel, at: now, reason: "subgraph_archived")`
 
 行为（normative）：
 
-- 写入 `lane.archived_at = at`。
+- 写入 `subgraph.archived_at = at`。
 - `mode = :finish`（默认）：仅归档，不修改节点状态；归档后仍允许同 turn 收尾（见第 2.7 节）。
 - `mode = :cancel`：
-  - 将该 lane 内 Active 的 `running → stopped`（写 `finished_at`，metadata 合并 `reason`）
-  - 将该 lane 内 Active 的 `pending → stopped`（写 `finished_at`，metadata 合并 `reason`）
+  - 将该 subgraph 内 Active 的 `running → stopped`（写 `finished_at`，metadata 合并 `reason`）
+  - 将该 subgraph 内 Active 的 `pending → stopped`（写 `finished_at`，metadata 合并 `reason`）
   - 对每个被变更节点 emit `node_state_changed`（`from`/`to`）
-- leaf repair 在 archived lane 中 **不得**创建新的 pending work；修复节点应为 terminal（建议 `agent_message(finished)` 并写入 `finished_at`），以避免归档后重新生成待执行节点。
+- leaf repair 在 archived subgraph 中 **不得**创建新的 pending work；修复节点应为 terminal（建议 `agent_message(finished)` 并写入 `finished_at`），以避免归档后重新生成待执行节点。
 
 ---
 
@@ -886,7 +913,7 @@ API（引擎层示例）：`Mutations#archive_lane!(lane:, mode: :finish|:cancel
 ### 8.2 约束（必须）
 
 - 被压缩的节点必须全部 `finished` 且为 Active
-- 被压缩的节点必须全部属于同一个 lane（禁止跨 lane 压缩；summary 必须继承该 `lane_id`）
+- 被压缩的节点必须全部属于同一个 subgraph（禁止跨 subgraph 压缩；summary 必须继承该 `subgraph_id`）
 - summary 节点 **不得成为 leaf**（必须存在至少一条 outgoing blocking edge 指向外部 Active node）
 
 ### 8.3 summary payload 约定

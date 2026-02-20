@@ -55,12 +55,12 @@ class DAG::GraphTest < ActiveSupport::TestCase
 
     body_ids = [a.body_id, b.body_id]
     graph_id = graph.id
-    lane_id = graph.main_lane.id
+    subgraph_id = graph.main_subgraph.id
     DAG::NodeVisibilityPatch.create!(graph: graph, node: b, context_excluded_at: Time.current, deleted_at: nil)
 
     assert DAG::Node.where(graph_id: graph_id).exists?
     assert DAG::Edge.where(graph_id: graph_id).exists?
-    assert DAG::Lane.where(graph_id: graph_id).exists?
+    assert DAG::Subgraph.where(graph_id: graph_id).exists?
     assert DAG::NodeVisibilityPatch.where(graph_id: graph_id).exists?
     assert DAG::NodeBody.where(id: body_ids).count == body_ids.length
 
@@ -69,10 +69,10 @@ class DAG::GraphTest < ActiveSupport::TestCase
     assert_not DAG::Graph.exists?(graph_id)
     assert_not DAG::Node.where(graph_id: graph_id).exists?
     assert_not DAG::Edge.where(graph_id: graph_id).exists?
-    assert_not DAG::Lane.where(graph_id: graph_id).exists?
+    assert_not DAG::Subgraph.where(graph_id: graph_id).exists?
     assert_not DAG::NodeVisibilityPatch.where(graph_id: graph_id).exists?
     assert_equal 0, DAG::NodeBody.where(id: body_ids).count
     assert_not DAG::Edge.exists?(edge.id)
-    assert_not DAG::Lane.exists?(lane_id)
+    assert_not DAG::Subgraph.exists?(subgraph_id)
   end
 end

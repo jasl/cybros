@@ -37,11 +37,11 @@ class Conversation < ApplicationRecord
       end
     end
 
-    lane = dag_graph.main_lane
-    if lane.attachable.nil?
-      lane.update!(attachable: topic)
-    elsif lane.attachable != topic
-      raise ArgumentError, "main lane is already attached to a different model"
+    subgraph = dag_graph.main_subgraph
+    if subgraph.attachable.nil?
+      subgraph.update!(attachable: topic)
+    elsif subgraph.attachable != topic
+      raise ArgumentError, "main subgraph is already attached to a different model"
     end
 
     topic
@@ -61,26 +61,26 @@ class Conversation < ApplicationRecord
       )
     end
 
-    root_node.lane.update!(attachable: topic)
+    root_node.subgraph.update!(attachable: topic)
     topic
   end
 
   def merge_topic_into_main(source_topic:, main_topic: ensure_main_topic, metadata: {})
-    source_lane = source_topic.dag_lane
-    raise ArgumentError, "source_topic is missing dag_lane" if source_lane.nil?
+    source_subgraph = source_topic.dag_subgraph
+    raise ArgumentError, "source_topic is missing dag_subgraph" if source_subgraph.nil?
 
-    main_lane = main_topic.dag_lane
-    raise ArgumentError, "main_topic is missing dag_lane" if main_lane.nil?
+    main_subgraph = main_topic.dag_subgraph
+    raise ArgumentError, "main_topic is missing dag_subgraph" if main_subgraph.nil?
 
-    main_head = dag_graph.leaf_nodes.where(lane_id: main_lane.id).sole
-    source_head = dag_graph.leaf_nodes.where(lane_id: source_lane.id).sole
+    main_head = dag_graph.leaf_nodes.where(subgraph_id: main_subgraph.id).sole
+    source_head = dag_graph.leaf_nodes.where(subgraph_id: source_subgraph.id).sole
 
     merge_node = nil
     dag_graph.mutate! do |m|
-      merge_node = m.merge_lanes!(
-        target_lane: main_lane,
+      merge_node = m.merge_subgraphs!(
+        target_subgraph: main_subgraph,
         target_from_node: main_head,
-        source_lanes_and_nodes: [{ lane: source_lane, from_node: source_head }],
+        source_subgraphs_and_nodes: [{ subgraph: source_subgraph, from_node: source_head }],
         node_type: Messages::AgentMessage.node_type_key,
         metadata: metadata
       )

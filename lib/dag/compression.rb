@@ -40,16 +40,16 @@ module DAG
           raise ArgumentError, "summary node must not become a leaf"
         end
 
-        lane_ids = nodes.map(&:lane_id).uniq
-        if lane_ids.length != 1
-          raise ArgumentError, "cannot compress nodes across multiple lanes"
+        subgraph_ids = nodes.map(&:subgraph_id).uniq
+        if subgraph_ids.length != 1
+          raise ArgumentError, "cannot compress nodes across multiple subgraphs"
         end
 
         now = Time.current
         summary_node = @graph.nodes.create!(
           node_type: "summary",
           state: DAG::Node::FINISHED,
-          lane_id: lane_ids.first,
+          subgraph_id: subgraph_ids.first,
           body_output: { "content" => summary_content },
           metadata: summary_metadata.merge("replaces_node_ids" => node_ids),
           finished_at: now
@@ -92,6 +92,13 @@ module DAG
             "outgoing_edge_ids" => outgoing_edges.map(&:id),
             "internal_edge_ids" => internal_edges.map(&:id),
           }
+        )
+
+        turn_ids = nodes.map(&:turn_id).map(&:to_s).uniq
+        DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+          graph: @graph,
+          subgraph_id: subgraph_ids.first,
+          turn_ids: turn_ids
         )
 
         summary_node

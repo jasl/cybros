@@ -22,26 +22,26 @@
 - `DAG::Graph#context_node_scope_for(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
 - `DAG::Graph#node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)`（bounded；keyset；用于流式/进度/UI 订阅）
 - `DAG::Graph#node_event_scope_for(node_id, kinds: nil)`（返回 ActiveRecord::Relation；无顺序保证）
-- `DAG::Graph#awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)`（bounded；keyset；用于工具授权队列）
-- `DAG::Graph#awaiting_approval_scope(lane_id: nil)`（返回 ActiveRecord::Relation；无顺序保证）
+- `DAG::Graph#awaiting_approval_page(limit: 50, after_node_id: nil, subgraph_id: nil)`（bounded；keyset；用于工具授权队列）
+- `DAG::Graph#awaiting_approval_scope(subgraph_id: nil)`（返回 ActiveRecord::Relation；无顺序保证）
 - `DAG::Graph#transcript_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_recent_turns(limit_turns:, mode: :preview|:full, include_deleted:)`
-- `DAG::Graph#transcript_page(lane_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
+- `DAG::Graph#transcript_page(subgraph_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#to_mermaid(include_compressed: false, max_label_chars: 80)`
 
-### Lane-level（面向真实产品分页）
+### Subgraph-level（面向真实产品分页）
 
-对 “ChatGPT-like 聊天记录 / SillyTavern-like 子话题 / Codex-like 多线程” 的 UI，推荐优先使用 lane-scoped 的分页原语，避免把不同 lane 的 turns 混在一个列表里：
+对 “ChatGPT-like 聊天记录 / SillyTavern-like 子话题 / Codex-like 多线程” 的 UI，推荐优先使用 subgraph-scoped 的分页原语，避免把不同 subgraph 的 turns 混在一个列表里：
 
-- `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
+- `DAG::Subgraph#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
   - 返回 `{ turn_ids:, before_turn_id:, after_turn_id:, transcript: }`
-  - `before_turn_id` / `after_turn_id` 为 keyset cursor，避免 OFFSET
-- `DAG::Lane#turns`（ActiveRecord 关联：返回该 lane 的 `DAG::Turn` records；包含未 anchor 的 turns）
-- `DAG::Lane#anchored_turns(include_deleted: true|false)`（面向 UI 的 turn 列表/计数；允许 seq gap）
-- `DAG::Lane#anchored_turn_count(include_deleted: true|false)`
-- `DAG::Lane#anchored_turn_ids(include_deleted: true|false)`
-- `DAG::Lane#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
-- `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+  - `before_turn_id` / `after_turn_id` 为 keyset cursor（按 `turn_id`），避免 OFFSET
+  - 说明：turn 的“代表锚点”由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页只按 `turn_id`（UUIDv7）进行
+- `DAG::Subgraph#turns`（ActiveRecord 关联：返回该 subgraph 的 `DAG::Turn` records；包含未 anchor 的 turns）
+- `DAG::Subgraph#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（bounded；按 `anchored_seq` keyset）
+- `DAG::Subgraph#anchored_turn_count(include_deleted: true|false)`（`include_deleted: true` 为 O(1) 读取 `next_anchored_seq`）
+- `DAG::Subgraph#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
+- `DAG::Subgraph#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
 ## 3) 写 API（Mutations / Commands）
 
@@ -65,8 +65,8 @@ end
 - `DAG::Mutations#create_node(...)`
 - `DAG::Mutations#create_edge(from_node:, to_node:, edge_type:, metadata: {})`
 - `DAG::Mutations#fork_from!(...)`
-- `DAG::Mutations#merge_lanes!(...)`
-- `DAG::Mutations#archive_lane!(...)`
+- `DAG::Mutations#merge_subgraphs!(...)`
+- `DAG::Mutations#archive_subgraph!(...)`
 
 ### 3.3 Node commands（版本 / 可见性 / 重试）
 

@@ -1,6 +1,6 @@
 module DAG
-  class Lane < ApplicationRecord
-    self.table_name = "dag_lanes"
+  class Subgraph < ApplicationRecord
+    self.table_name = "dag_subgraphs"
 
     MAIN = "main"
     BRANCH = "branch"
@@ -9,89 +9,96 @@ module DAG
 
     enum :role, ROLES.index_by(&:itself)
 
-    belongs_to :graph, class_name: "DAG::Graph", inverse_of: :lanes
-    belongs_to :parent_lane, class_name: "DAG::Lane", optional: true
-    has_many :child_lanes,
-             class_name: "DAG::Lane",
-             foreign_key: :parent_lane_id,
+    belongs_to :graph, class_name: "DAG::Graph", inverse_of: :subgraphs
+
+    belongs_to :parent_subgraph, class_name: "DAG::Subgraph", optional: true
+    has_many :child_subgraphs,
+             class_name: "DAG::Subgraph",
+             foreign_key: :parent_subgraph_id,
              dependent: :nullify,
-             inverse_of: :parent_lane
+             inverse_of: :parent_subgraph
 
     belongs_to :forked_from_node, class_name: "DAG::Node", optional: true
     belongs_to :root_node, class_name: "DAG::Node", optional: true
-    belongs_to :merged_into_lane, class_name: "DAG::Lane", optional: true
+    belongs_to :merged_into_subgraph, class_name: "DAG::Subgraph", optional: true
 
     belongs_to :attachable, polymorphic: true, optional: true
 
     has_many :nodes,
              class_name: "DAG::Node",
-             inverse_of: :lane
+             inverse_of: :subgraph
     has_many :turns,
              class_name: "DAG::Turn",
-             inverse_of: :lane
+             inverse_of: :subgraph
 
     validates :role, inclusion: { in: ROLES }
-    validate :lane_relationships_must_match_graph
+    validate :subgraph_relationships_must_match_graph
 
     def archived?
       archived_at.present?
     end
 
-    def anchored_turns(include_deleted: true)
-      anchor_rows =
-        graph.turns
-          .where(lane_id: id)
-          .where.not(anchor_node_id: nil)
-          .joins(<<~SQL.squish)
-            JOIN dag_nodes anchors
-              ON anchors.id = dag_turns.anchor_node_id
-             AND anchors.graph_id = dag_turns.graph_id
-             AND anchors.lane_id = dag_turns.lane_id
-          SQL
-          .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
-          .pluck(
-            Arel.sql("dag_turns.id"),
-            Arel.sql("dag_turns.anchor_created_at"),
-            Arel.sql("anchors.deleted_at IS NOT NULL")
-          )
+    def anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
+      limit = Integer(limit)
+      return { turns: [], before_seq: nil, after_seq: nil } if limit <= 0
 
-      turns =
-        anchor_rows.each_with_index.map do |(turn_id, anchor_created_at, anchor_deleted), index|
+      before_seq = before_seq&.to_i
+      after_seq = after_seq&.to_i
+
+      if before_seq.present? && after_seq.present?
+        raise ArgumentError, "before_seq and after_seq are mutually exclusive"
+      end
+
+      scope = turns.where.not(anchored_seq: nil)
+      scope = scope.where.not(anchor_node_id: nil) unless include_deleted
+
+      if before_seq.present?
+        scope = scope.where("anchored_seq < ?", before_seq).order(anchored_seq: :desc)
+        rows = scope.limit(limit).pluck(:id, :anchored_seq).reverse
+      elsif after_seq.present?
+        scope = scope.where("anchored_seq > ?", after_seq).order(anchored_seq: :asc)
+        rows = scope.limit(limit).pluck(:id, :anchored_seq)
+      else
+        scope = scope.order(anchored_seq: :desc)
+        rows = scope.limit(limit).pluck(:id, :anchored_seq).reverse
+      end
+
+      turns_payload =
+        rows.map do |turn_id, anchored_seq|
           {
-            turn_id: turn_id,
-            seq: index + 1,
-            anchor_created_at: anchor_created_at,
-            anchor_deleted: anchor_deleted == true,
+            turn_id: turn_id.to_s,
+            anchored_seq: anchored_seq.to_i,
           }
         end
 
-      if include_deleted
-        turns
-      else
-        turns.reject { |turn| turn.fetch(:anchor_deleted) }
-      end
-    end
-
-    def visible_anchored_turns
-      anchored_turns(include_deleted: false)
+      {
+        turns: turns_payload,
+        before_seq: turns_payload.first&.fetch(:anchored_seq, nil),
+        after_seq: turns_payload.last&.fetch(:anchored_seq, nil),
+      }
     end
 
     def anchored_turn_count(include_deleted: true)
-      anchored_turns(include_deleted: include_deleted).length
-    end
-
-    def anchored_turn_ids(include_deleted: true)
-      anchored_turns(include_deleted: include_deleted).map { |turn| turn.fetch(:turn_id) }
+      if include_deleted
+        self.class.where(graph_id: graph_id, id: id).pick(:next_anchored_seq).to_i
+      else
+        turns.where.not(anchored_seq: nil).where.not(anchor_node_id: nil).count
+      end
     end
 
     def anchored_turn_seq_for(turn_id, include_deleted: true)
       turn_id = turn_id.to_s
+      row =
+        turns
+          .where(id: turn_id)
+          .select(:anchored_seq, :anchor_node_id)
+          .first
 
-      turn = anchored_turns(include_deleted: include_deleted).find { |row| row.fetch(:turn_id).to_s == turn_id }
+      return nil if row.nil?
+      return nil if row.anchored_seq.nil?
+      return nil if !include_deleted && row.anchor_node_id.nil?
 
-      if turn
-        turn.fetch(:seq)
-      end
+      row.anchored_seq.to_i
     end
 
     def turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)
@@ -159,9 +166,11 @@ module DAG
       end
 
       turn_ids =
-        anchored_turns(include_deleted: true)
-          .select { |row| row.fetch(:seq).between?(start_seq, end_seq) }
-          .map { |row| row.fetch(:turn_id) }
+        turns
+          .where.not(anchored_seq: nil)
+          .where(anchored_seq: start_seq..end_seq)
+          .order(:anchored_seq)
+          .pluck(:id)
 
       node_ids_for_turn_ids(
         turn_ids: turn_ids,
@@ -204,7 +213,7 @@ module DAG
         turn_node_ids = turn_nodes.map { |node| node.id.to_s }
         unexpected_keep_ids = keep_node_ids - turn_node_ids
         if unexpected_keep_ids.any?
-          raise ArgumentError, "keep_node_ids must belong to this lane and turn"
+          raise ArgumentError, "keep_node_ids must belong to this subgraph and turn"
         end
 
         keep_nodes = turn_nodes.select { |node| keep_node_ids.include?(node.id.to_s) }
@@ -232,71 +241,44 @@ module DAG
           raise ArgumentError, "before_turn_id and after_turn_id are mutually exclusive"
         end
 
-        anchors =
+        visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
+
+        visible_turns =
           graph.turns
-            .where(lane_id: id)
-            .where.not(anchor_node_id: nil)
-            .joins(<<~SQL.squish)
-              JOIN dag_nodes anchors
-                ON anchors.id = dag_turns.anchor_node_id
-               AND anchors.graph_id = dag_turns.graph_id
-               AND anchors.lane_id = dag_turns.lane_id
-            SQL
-            .where(Arel.sql("anchors.compressed_at IS NULL"))
-
-        anchors = anchors.where(Arel.sql("anchors.deleted_at IS NULL")) unless include_deleted
-
-        cursor_created_at = nil
-        cursor_anchor_id = nil
-
-        if before_turn_id.present? || after_turn_id.present?
-          cursor_turn_id = before_turn_id.presence || after_turn_id
-
-          cursor_created_at, cursor_anchor_id =
-            anchors
-              .where("dag_turns.id = ?", cursor_turn_id)
-              .pick(Arel.sql("dag_turns.anchor_created_at"), Arel.sql("dag_turns.anchor_node_id"))
-
-          if cursor_created_at.nil? || cursor_anchor_id.nil?
-            raise ArgumentError, "cursor turn_id is unknown or not visible"
-          end
-        end
+            .where(subgraph_id: id)
+            .where.not(visibility_column => nil)
 
         if before_turn_id.present?
-          turn_ids =
-            anchors
-              .where(
-                "dag_turns.anchor_created_at < ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id < ?)",
-                cursor_created_at,
-                cursor_created_at,
-                cursor_anchor_id
-              )
-              .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
-              .limit(limit_turns)
-              .pluck(Arel.sql("dag_turns.id"))
-              .reverse
-        elsif after_turn_id.present?
-          turn_ids =
-            anchors
-              .where(
-                "dag_turns.anchor_created_at > ? OR (dag_turns.anchor_created_at = ? AND dag_turns.anchor_node_id > ?)",
-                cursor_created_at,
-                cursor_created_at,
-                cursor_anchor_id
-              )
-              .order(Arel.sql("dag_turns.anchor_created_at ASC"), Arel.sql("dag_turns.anchor_node_id ASC"))
-              .limit(limit_turns)
-              .pluck(Arel.sql("dag_turns.id"))
-        else
-          turn_ids =
-            anchors
-              .order(Arel.sql("dag_turns.anchor_created_at DESC"), Arel.sql("dag_turns.anchor_node_id DESC"))
-              .limit(limit_turns)
-              .pluck(Arel.sql("dag_turns.id"))
-              .reverse
-        end
+          unless visible_turns.where(id: before_turn_id).exists?
+            raise ArgumentError, "cursor turn_id is unknown or not visible"
+          end
 
-        turn_ids.map(&:to_s)
+          visible_turns
+            .where("dag_turns.id < ?", before_turn_id)
+            .order(id: :desc)
+            .limit(limit_turns)
+            .pluck(:id)
+            .reverse
+            .map(&:to_s)
+        elsif after_turn_id.present?
+          unless visible_turns.where(id: after_turn_id).exists?
+            raise ArgumentError, "cursor turn_id is unknown or not visible"
+          end
+
+          visible_turns
+            .where("dag_turns.id > ?", after_turn_id)
+            .order(id: :asc)
+            .limit(limit_turns)
+            .pluck(:id)
+            .map(&:to_s)
+        else
+          visible_turns
+            .order(id: :desc)
+            .limit(limit_turns)
+            .pluck(:id)
+            .reverse
+            .map(&:to_s)
+        end
       end
 
       def transcript_for_turn_ids(turn_ids:, mode:, include_deleted:)
@@ -306,12 +288,12 @@ module DAG
         candidate_types = graph.transcript_candidate_node_types
         return [] if candidate_types.empty?
 
-        node_scope = graph.nodes.active.where(lane_id: id, turn_id: turn_ids, node_type: candidate_types)
+        node_scope = graph.nodes.active.where(subgraph_id: id, turn_id: turn_ids, node_type: candidate_types)
         node_scope = node_scope.where(deleted_at: nil) unless include_deleted
 
         node_records =
           node_scope
-            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
+            .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id)
             .order(:id)
             .to_a
 
@@ -335,7 +317,12 @@ module DAG
           keep_nodes.each do |node|
             next unless keep_ids.include?(node.id)
 
-            emit_context_visibility_event!(node, from_context_excluded_at: node.context_excluded_at, to_context_excluded_at: nil, action: "include_in_context")
+            emit_context_visibility_event!(
+              node,
+              from_context_excluded_at: node.context_excluded_at,
+              to_context_excluded_at: nil,
+              action: "include_in_context"
+            )
           end
         end
 
@@ -351,7 +338,12 @@ module DAG
           exclude_nodes.each do |node|
             next unless exclude_ids.include?(node.id)
 
-            emit_context_visibility_event!(node, from_context_excluded_at: node.context_excluded_at, to_context_excluded_at: at, action: "exclude_from_context")
+            emit_context_visibility_event!(
+              node,
+              from_context_excluded_at: node.context_excluded_at,
+              to_context_excluded_at: at,
+              action: "exclude_from_context"
+            )
           end
         end
       end
@@ -380,15 +372,15 @@ module DAG
         }
       end
 
-      def lane_relationships_must_match_graph
+      def subgraph_relationships_must_match_graph
         return if graph_id.blank?
 
-        if parent_lane && parent_lane.graph_id != graph_id
-          errors.add(:parent_lane_id, "must belong to the same graph")
+        if parent_subgraph && parent_subgraph.graph_id != graph_id
+          errors.add(:parent_subgraph_id, "must belong to the same graph")
         end
 
-        if merged_into_lane && merged_into_lane.graph_id != graph_id
-          errors.add(:merged_into_lane_id, "must belong to the same graph")
+        if merged_into_subgraph && merged_into_subgraph.graph_id != graph_id
+          errors.add(:merged_into_subgraph_id, "must belong to the same graph")
         end
 
         if forked_from_node && forked_from_node.graph_id != graph_id
@@ -400,8 +392,8 @@ module DAG
             errors.add(:root_node_id, "must belong to the same graph")
           end
 
-          if root_node.lane_id != id
-            errors.add(:root_node_id, "must belong to this lane")
+          if root_node.subgraph_id != id
+            errors.add(:root_node_id, "must belong to this subgraph")
           end
         end
       end

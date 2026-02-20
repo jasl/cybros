@@ -73,7 +73,7 @@ end
 
 conversation = Conversation.create!(title: "bench-transcript-page")
 graph = conversation.dag_graph
-lane = graph.main_lane
+subgraph = graph.main_subgraph
 previous = nil
 
 200.times do |i|
@@ -83,7 +83,7 @@ previous = nil
     graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       body_input: { "content" => "u#{i}" },
       metadata: {}
@@ -92,7 +92,7 @@ previous = nil
     graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       body_output: { "content" => "a#{i}" },
       metadata: {}
@@ -108,5 +108,5 @@ previous = nil
 end
 
 measure("transcript_page_last_20_of_200_turns") do
-  lane.transcript_page(limit_turns: 20)
+  subgraph.transcript_page(limit_turns: 20)
 end

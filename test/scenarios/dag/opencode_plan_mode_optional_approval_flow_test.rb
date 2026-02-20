@@ -124,4 +124,3 @@ class DAG::OpencodePlanModeOptionalApprovalFlowTest < ActiveSupport::TestCase
     end
   end
 end
-

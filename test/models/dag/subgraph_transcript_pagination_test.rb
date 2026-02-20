@@ -1,10 +1,10 @@
 require "test_helper"
 
-class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
-  test "transcript_page paginates turns in a lane with before/after cursors" do
+class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
+  test "transcript_page paginates turns in a subgraph with before/after cursors" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
 
     t1 = Time.current - 4.minutes
     t2 = Time.current - 3.minutes
@@ -26,7 +26,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
         graph.nodes.create!(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          lane_id: lane.id,
+          subgraph_id: subgraph.id,
           turn_id: turn_id,
           body_input: { "content" => user_content },
           metadata: {},
@@ -37,7 +37,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::Task.node_type_key,
         state: DAG::Node::FINISHED,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
         turn_id: turn_id,
         body_input: { "name" => "t-#{turn_id}" },
         body_output: { "result" => "r-#{turn_id}" },
@@ -50,7 +50,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
         graph.nodes.create!(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          lane_id: lane.id,
+          subgraph_id: subgraph.id,
           turn_id: turn_id,
           body_output: { "content" => agent_content },
           metadata: {},
@@ -61,7 +61,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    page = lane.transcript_page(limit_turns: 2)
+    page = subgraph.transcript_page(limit_turns: 2)
     assert_equal [turn_3, turn_4], page.fetch(:turn_ids)
 
     transcript = page.fetch(:transcript)
@@ -69,42 +69,42 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key] * 2,
                  transcript.map { |n| n.fetch("node_type") }
 
-    older = lane.transcript_page(limit_turns: 2, before_turn_id: page.fetch(:before_turn_id))
+    older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch(:before_turn_id))
     assert_equal [turn_1, turn_2], older.fetch(:turn_ids)
 
-    newer = lane.transcript_page(limit_turns: 2, after_turn_id: older.fetch(:after_turn_id))
+    newer = subgraph.transcript_page(limit_turns: 2, after_turn_id: older.fetch(:after_turn_id))
     assert_equal [turn_3, turn_4], newer.fetch(:turn_ids)
   end
 
   test "transcript_page validates cursors and limit" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
 
-    empty = lane.transcript_page(limit_turns: 0)
+    empty = subgraph.transcript_page(limit_turns: 0)
     assert_equal [], empty.fetch(:turn_ids)
     assert_equal [], empty.fetch(:transcript)
 
     error =
       assert_raises(ArgumentError) do
-        lane.transcript_page(limit_turns: 10, before_turn_id: "x", after_turn_id: "y")
+        subgraph.transcript_page(limit_turns: 10, before_turn_id: "x", after_turn_id: "y")
       end
     assert_includes error.message, "mutually"
 
     error =
       assert_raises(ArgumentError) do
-        lane.transcript_page(limit_turns: 10, before_turn_id: "0194f3c0-0000-7000-8000-00000000dead")
+        subgraph.transcript_page(limit_turns: 10, before_turn_id: "0194f3c0-0000-7000-8000-00000000dead")
       end
     assert_includes error.message, "cursor"
   end
 
-  test "transcript_page orders turns by earliest anchor node (even with multiple anchors per turn)" do
+  test "transcript_page orders turns by turn_id (uuidv7), not by node created_at" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
 
-    t1 = Time.current - 2.minutes
-    t2 = Time.current - 1.minute
+    earlier = Time.current - 2.minutes
+    later = Time.current - 1.minute
 
     turn_1 = "0194f3c0-0000-7000-8000-00000000ad01"
     turn_2 = "0194f3c0-0000-7000-8000-00000000ad02"
@@ -112,47 +112,36 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_1,
-      body_input: { "content" => "late" },
+      body_input: { "content" => "turn_1" },
       metadata: {},
-      created_at: t2,
-      updated_at: t2
+      created_at: later,
+      updated_at: later
     )
 
     graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
-      turn_id: turn_1,
-      body_input: { "content" => "early" },
-      metadata: {},
-      created_at: t1,
-      updated_at: t1
-    )
-
-    graph.nodes.create!(
-      node_type: Messages::UserMessage.node_type_key,
-      state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_2,
-      body_input: { "content" => "t2" },
+      body_input: { "content" => "turn_2" },
       metadata: {},
-      created_at: t2 + 10.seconds,
-      updated_at: t2 + 10.seconds
+      created_at: earlier,
+      updated_at: earlier
     )
 
-    page = lane.transcript_page(limit_turns: 1)
+    page = subgraph.transcript_page(limit_turns: 1)
     assert_equal [turn_2], page.fetch(:turn_ids)
 
-    older = lane.transcript_page(limit_turns: 1, before_turn_id: page.fetch(:before_turn_id))
+    older = subgraph.transcript_page(limit_turns: 1, before_turn_id: page.fetch(:before_turn_id))
     assert_equal [turn_1], older.fetch(:turn_ids)
   end
 
-  test "transcript_page is lane-scoped (supports topics/subthreads)" do
+  test "transcript_page is subgraph-scoped (supports topics/subthreads)" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
     seed_turn = "0194f3c0-0000-7000-8000-00000000ab01"
 
@@ -160,7 +149,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        lane_id: main_lane.id,
+        subgraph_id: main_subgraph.id,
         turn_id: seed_turn,
         body_input: { "content" => "main-u" },
         metadata: {}
@@ -169,7 +158,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        lane_id: main_lane.id,
+        subgraph_id: main_subgraph.id,
         turn_id: seed_turn,
         body_output: { "content" => "main-a" },
         metadata: {}
@@ -195,36 +184,36 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
           content: "branch-a",
           metadata: {},
           turn_id: branch_root.turn_id,
-          lane_id: branch_root.lane_id
+          subgraph_id: branch_root.subgraph_id
         )
 
       m.create_edge(from_node: branch_root, to_node: branch_agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    branch_lane = graph.lanes.find(branch_root.lane_id)
+    branch_subgraph = graph.subgraphs.find(branch_root.subgraph_id)
 
-    main_page = main_lane.transcript_page(limit_turns: 10)
+    main_page = main_subgraph.transcript_page(limit_turns: 10)
     assert_equal [seed_turn], main_page.fetch(:turn_ids)
     assert_equal ["main-u", "main-a"],
                  main_page.fetch(:transcript).map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
 
-    branch_page = branch_lane.transcript_page(limit_turns: 10)
+    branch_page = branch_subgraph.transcript_page(limit_turns: 10)
     assert_equal [branch_root.turn_id.to_s], branch_page.fetch(:turn_ids)
     assert_equal ["branch-u", "branch-a"],
                  branch_page.fetch(:transcript).map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
   end
 
-  test "graph.transcript_page delegates to lane.transcript_page" do
+  test "graph.transcript_page delegates to subgraph.transcript_page" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
 
     turn_id = "0194f3c0-0000-7000-8000-00000000ac01"
 
     graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       body_input: { "content" => "u" },
       metadata: {}
@@ -232,13 +221,13 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       body_output: { "content" => "a" },
       metadata: {}
     )
 
-    page = graph.transcript_page(lane_id: lane.id, limit_turns: 10)
+    page = graph.transcript_page(subgraph_id: subgraph.id, limit_turns: 10)
     assert_equal [turn_id], page.fetch(:turn_ids)
   end
 end

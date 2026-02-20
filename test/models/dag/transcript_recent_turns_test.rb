@@ -145,7 +145,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     assert_equal "(structured)", agent_hash.dig("payload", "output_preview", "content")
   end
 
-  test "transcript_recent_turns excludes deleted turns by default" do
+  test "transcript_recent_turns excludes deleted nodes by default but keeps turns visible when another anchor exists" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
@@ -175,7 +175,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       deleted_at: Time.current,
       metadata: {}
     )
-    graph.nodes.create!(
+    agent_2 = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
       turn_id: turn_2,
@@ -184,7 +184,8 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
 
     recent = graph.transcript_recent_turns(limit_turns: 1)
-    assert_equal turn_1, recent.last.fetch("turn_id")
+    assert_equal [agent_2.id], recent.map { |n| n["node_id"] }
+    assert_equal turn_2, recent.last.fetch("turn_id")
 
     recent_with_deleted = graph.transcript_recent_turns(limit_turns: 1, include_deleted: true)
     assert_includes recent_with_deleted.map { |n| n["node_id"] }, deleted_user.id

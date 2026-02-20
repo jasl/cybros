@@ -1,9 +1,9 @@
 require "test_helper"
 
-class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
+class DAG::SubgraphBranchAndMergeFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
-  class LaneAwareAgentExecutor
+  class SubgraphAwareAgentExecutor
     def execute(node:, context:, stream:)
       _ = context
       _ = stream
@@ -40,12 +40,12 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
 
     main_topic = conversation.ensure_main_topic
-    main_lane = main_topic.dag_lane
-    assert main_lane.present?
-    assert_equal DAG::Lane::MAIN, main_lane.role
+    main_subgraph = main_topic.dag_subgraph
+    assert main_subgraph.present?
+    assert_equal DAG::Subgraph::MAIN, main_subgraph.role
 
     registry = DAG::ExecutorRegistry.new
-    registry.register(Messages::AgentMessage.node_type_key, LaneAwareAgentExecutor.new)
+    registry.register(Messages::AgentMessage.node_type_key, SubgraphAwareAgentExecutor.new)
 
     original_registry = DAG.executor_registry
     DAG.executor_registry = registry
@@ -59,8 +59,8 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       end
 
       main_agent = graph.nodes.active.find_by!(turn_id: turn_id, node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
-      assert_equal main_lane.id, main_user.lane_id
-      assert_equal main_lane.id, main_agent.lane_id
+      assert_equal main_subgraph.id, main_user.subgraph_id
+      assert_equal main_subgraph.id, main_agent.subgraph_id
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [main_agent.id], claimed.map(&:id)
@@ -68,21 +68,21 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, main_agent.reload.state
 
       task = graph.nodes.active.find_by!(turn_id: main_agent.turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool")
-      assert_equal main_lane.id, task.lane_id
+      assert_equal main_subgraph.id, task.subgraph_id
 
       branch_topic = conversation.fork_topic_from(from_node: main_agent, title: "Branch", user_content: "What if?")
-      branch_lane = branch_topic.dag_lane
-      assert branch_lane.present?
-      assert_equal DAG::Lane::BRANCH, branch_lane.role
-      assert_equal main_lane.id, branch_lane.parent_lane_id
-      assert_equal main_agent.id, branch_lane.forked_from_node_id
+      branch_subgraph = branch_topic.dag_subgraph
+      assert branch_subgraph.present?
+      assert_equal DAG::Subgraph::BRANCH, branch_subgraph.role
+      assert_equal main_subgraph.id, branch_subgraph.parent_subgraph_id
+      assert_equal main_agent.id, branch_subgraph.forked_from_node_id
 
-      branch_root = graph.nodes.active.find(branch_lane.root_node_id)
-      assert_equal branch_lane.id, branch_root.lane_id
+      branch_root = graph.nodes.active.find(branch_subgraph.root_node_id)
+      assert_equal branch_subgraph.id, branch_root.subgraph_id
 
       branch_agent =
         graph.nodes.active.find_by!(
-          lane_id: branch_lane.id,
+          subgraph_id: branch_subgraph.id,
           turn_id: branch_root.turn_id,
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING
@@ -100,7 +100,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, branch_agent.reload.state
 
       task = graph.nodes.active.find_by!(turn_id: branch_agent.turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool")
-      assert_equal branch_lane.id, task.lane_id
+      assert_equal branch_subgraph.id, task.subgraph_id
 
       main_user_2 = nil
       graph.mutate! do |m|
@@ -110,7 +110,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       main_agent_2 =
         graph.nodes.active.find_by!(
-          lane_id: main_lane.id,
+          subgraph_id: main_subgraph.id,
           turn_id: main_user_2.turn_id,
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING
@@ -128,7 +128,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
             node_type: Messages::UserMessage.node_type_key,
             state: DAG::Node::FINISHED,
             content: "Branch followup",
-            lane_id: branch_lane.id,
+            subgraph_id: branch_subgraph.id,
             metadata: {}
           )
         m.create_edge(from_node: branch_agent, to_node: branch_user_2, edge_type: DAG::Edge::SEQUENCE)
@@ -136,7 +136,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       branch_agent_2 =
         graph.nodes.active.find_by!(
-          lane_id: branch_lane.id,
+          subgraph_id: branch_subgraph.id,
           turn_id: branch_user_2.turn_id,
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING
@@ -148,11 +148,11 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, branch_agent_2.reload.state
 
       merge_node = conversation.merge_topic_into_main(source_topic: branch_topic, metadata: { "reason" => "test" })
-      assert_equal main_lane.id, merge_node.lane_id
+      assert_equal main_subgraph.id, merge_node.subgraph_id
       assert_equal DAG::Node::PENDING, merge_node.state
 
-      branch_lane.reload
-      assert branch_lane.archived_at.blank?
+      branch_subgraph.reload
+      assert branch_subgraph.archived_at.blank?
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [merge_node.id], claimed.map(&:id)
@@ -171,7 +171,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
             node_type: Messages::UserMessage.node_type_key,
             state: DAG::Node::FINISHED,
             content: "Branch after merge",
-            lane_id: branch_lane.id,
+            subgraph_id: branch_subgraph.id,
             metadata: {}
           )
         m.create_edge(from_node: branch_agent_2, to_node: branch_user_3, edge_type: DAG::Edge::SEQUENCE)
@@ -179,7 +179,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       branch_agent_3 =
         graph.nodes.active.find_by!(
-          lane_id: branch_lane.id,
+          subgraph_id: branch_subgraph.id,
           turn_id: branch_user_3.turn_id,
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING
@@ -197,7 +197,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
             node_type: Messages::UserMessage.node_type_key,
             state: DAG::Node::FINISHED,
             content: "Branch in-flight before archive",
-            lane_id: branch_lane.id,
+            subgraph_id: branch_subgraph.id,
             metadata: {}
           )
         m.create_edge(from_node: branch_agent_3, to_node: branch_user_4, edge_type: DAG::Edge::SEQUENCE)
@@ -205,16 +205,16 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       branch_agent_4 =
         graph.nodes.active.find_by!(
-          lane_id: branch_lane.id,
+          subgraph_id: branch_subgraph.id,
           turn_id: branch_user_4.turn_id,
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING
         )
 
       graph.mutate! do |m|
-        m.archive_lane!(lane: branch_lane, mode: :finish, reason: "archive_branch")
+        m.archive_subgraph!(subgraph: branch_subgraph, mode: :finish, reason: "archive_branch")
       end
-      assert branch_lane.reload.archived_at.present?
+      assert branch_subgraph.reload.archived_at.present?
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [branch_agent_4.id], claimed.map(&:id)
@@ -222,22 +222,22 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, branch_agent_4.reload.state
 
       task = graph.nodes.active.find_by!(turn_id: branch_agent_4.turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool")
-      assert_equal branch_lane.id, task.lane_id
+      assert_equal branch_subgraph.id, task.subgraph_id
 
       error =
         assert_raises(ActiveRecord::RecordInvalid) do
           graph.nodes.create!(
             node_type: Messages::UserMessage.node_type_key,
             state: DAG::Node::FINISHED,
-            lane_id: branch_lane.id,
+            subgraph_id: branch_subgraph.id,
             body_input: { "content" => "Branch new turn after archive" },
             metadata: {}
           )
         end
-      assert_match(/Lane is archived/, error.message)
+      assert_match(/Subgraph is archived/, error.message)
 
       merge_node_2 = conversation.merge_topic_into_main(source_topic: branch_topic, metadata: { "reason" => "merge_again" })
-      assert_equal main_lane.id, merge_node_2.lane_id
+      assert_equal main_subgraph.id, merge_node_2.subgraph_id
       assert_equal DAG::Node::PENDING, merge_node_2.state
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")

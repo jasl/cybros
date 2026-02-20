@@ -1,73 +1,79 @@
 require "test_helper"
 
-class DAG::LaneTest < ActiveSupport::TestCase
-  test "graph automatically has a unique main lane" do
+class DAG::SubgraphTest < ActiveSupport::TestCase
+  test "graph automatically has a unique main subgraph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
-    assert_equal 1, graph.lanes.where(role: DAG::Lane::MAIN).count
-    assert_equal graph.lanes.find_by!(role: DAG::Lane::MAIN), graph.main_lane
+    assert_equal 1, graph.subgraphs.where(role: DAG::Subgraph::MAIN).count
+    assert_equal graph.subgraphs.find_by!(role: DAG::Subgraph::MAIN), graph.main_subgraph
 
     assert_raises(ActiveRecord::RecordNotUnique) do
-      graph.lanes.create!(role: DAG::Lane::MAIN, metadata: {})
+      graph.subgraphs.create!(role: DAG::Subgraph::MAIN, metadata: {})
     end
   end
 
-  test "lane relationship pointers must not cross graphs" do
+  test "subgraph relationship pointers must not cross graphs" do
     conversation_a = Conversation.create!
     graph_a = conversation_a.dag_graph
-    lane_a = graph_a.main_lane
+    subgraph_a = graph_a.main_subgraph
 
     conversation_b = Conversation.create!
     graph_b = conversation_b.dag_graph
 
     assert_raises(ActiveRecord::RecordInvalid) do
-      graph_b.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: lane_a.id, metadata: {})
+      graph_b.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: subgraph_a.id, metadata: {})
     end
   end
 
-  test "root_node_id must belong to the lane" do
+  test "root_node_id must belong to the subgraph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
-    lane_a = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
-    lane_b = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    subgraph_a = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
+    subgraph_b = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
 
-    node_in_a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, lane_id: lane_a.id, metadata: {})
+    node_in_a =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        subgraph_id: subgraph_a.id,
+        metadata: {}
+      )
 
     assert_raises(ActiveRecord::RecordInvalid) do
-      lane_b.update!(root_node_id: node_in_a.id)
+      subgraph_b.update!(root_node_id: node_in_a.id)
     end
   end
 
-  test "nodes default to graph.main_lane for both direct creates and mutation creates" do
+  test "nodes default to graph.main_subgraph for both direct creates and mutation creates" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
     direct = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
-    assert_equal main_lane.id, direct.lane_id
+    assert_equal main_subgraph.id, direct.subgraph_id
 
     via_mutation = nil
     graph.mutate! do |m|
       via_mutation = m.create_node(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     end
-    assert_equal main_lane.id, via_mutation.lane_id
+    assert_equal main_subgraph.id, via_mutation.subgraph_id
   end
 
-  test "create_node inherits lane_id from existing nodes in the same turn" do
+  test "create_node inherits subgraph_id from existing nodes in the same turn" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
-    lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
     turn_id = "0194f3c0-0000-7000-8000-00000000d001"
 
     anchor = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       metadata: {}
     )
@@ -77,13 +83,13 @@ class DAG::LaneTest < ActiveSupport::TestCase
       created = m.create_node(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     end
 
-    assert_equal anchor.lane_id, created.lane_id
+    assert_equal anchor.subgraph_id, created.subgraph_id
   end
 
-  test "fork creates a new branch lane and leaf repair stays within that lane" do
+  test "fork creates a new branch subgraph and leaf repair stays within that subgraph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
     from = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
@@ -91,7 +97,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
       body_output: { "content" => "hello" },
       metadata: {}
     )
-    assert_equal main_lane.id, from.lane_id
+    assert_equal main_subgraph.id, from.subgraph_id
 
     forked_user =
       from.fork!(
@@ -101,14 +107,14 @@ class DAG::LaneTest < ActiveSupport::TestCase
         metadata: {}
       )
 
-    lane = forked_user.lane
-    assert_equal DAG::Lane::BRANCH, lane.role
-    assert_equal main_lane.id, lane.parent_lane_id
-    assert_equal from.id, lane.forked_from_node_id
-    assert_equal forked_user.id, lane.root_node_id
+    subgraph = forked_user.subgraph
+    assert_equal DAG::Subgraph::BRANCH, subgraph.role
+    assert_equal main_subgraph.id, subgraph.parent_subgraph_id
+    assert_equal from.id, subgraph.forked_from_node_id
+    assert_equal forked_user.id, subgraph.root_node_id
 
     repaired = graph.nodes.active.find_by!(
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
       metadata: { "generated_by" => "leaf_invariant" }
@@ -116,54 +122,54 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_equal forked_user.turn_id, repaired.turn_id
   end
 
-  test "archived lanes block new turns but allow existing turns" do
+  test "archived subgraphs block new turns but allow existing turns" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
-    lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
     turn_id = "0194f3c0-0000-7000-8000-00000000d002"
 
     graph.nodes.create!(
       node_type: Messages::Task.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: lane.id,
+      subgraph_id: subgraph.id,
       turn_id: turn_id,
       metadata: {}
     )
 
-    lane.update!(archived_at: Time.current)
+    subgraph.update!(archived_at: Time.current)
 
     continued =
       graph.nodes.create!(
         node_type: Messages::Task.node_type_key,
         state: DAG::Node::FINISHED,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
         turn_id: turn_id,
         metadata: {}
       )
-    assert_equal lane.id, continued.lane_id
+    assert_equal subgraph.id, continued.subgraph_id
     assert_equal turn_id, continued.turn_id
 
     error =
       assert_raises(ActiveRecord::RecordInvalid) do
-        graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, lane_id: lane.id, metadata: {})
+        graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, subgraph_id: subgraph.id, metadata: {})
       end
-    assert_match(/Lane is archived/, error.message)
+    assert_match(/Subgraph is archived/, error.message)
   end
 
-  test "archive_lane! mode cancel stops running and pending without creating new pending work" do
+  test "archive_subgraph! mode cancel stops running and pending without creating new pending work" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
-    lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
 
-    running = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, lane_id: lane.id, metadata: {})
-    pending = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, lane_id: lane.id, metadata: {})
+    running = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, subgraph_id: subgraph.id, metadata: {})
+    pending = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, subgraph_id: subgraph.id, metadata: {})
 
     graph.mutate! do |m|
-      m.archive_lane!(lane: lane, mode: :cancel, at: Time.current, reason: "stopped_by_user")
+      m.archive_subgraph!(subgraph: subgraph, mode: :cancel, at: Time.current, reason: "stopped_by_user")
     end
 
     state_events =
@@ -174,8 +180,8 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_equal({ "from" => "running", "to" => "stopped" }, state_events.fetch(running.id))
     assert_equal({ "from" => "pending", "to" => "stopped" }, state_events.fetch(pending.id))
 
-    lane.reload
-    assert lane.archived_at.present?
+    subgraph.reload
+    assert subgraph.archived_at.present?
 
     assert_equal DAG::Node::STOPPED, running.reload.state
     assert_equal "stopped_by_user", running.metadata["reason"]
@@ -185,39 +191,39 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_equal "stopped_by_user", pending.metadata["reason"]
     assert pending.finished_at.present?
 
-    assert graph.nodes.active.where(lane_id: lane.id, state: DAG::Node::PENDING).none?
+    assert graph.nodes.active.where(subgraph_id: subgraph.id, state: DAG::Node::PENDING).none?
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
-  test "merge creates a pending join node in the target lane without archiving the source lanes" do
+  test "merge creates a pending join node in the target subgraph without archiving the source subgraphs" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
     main_head = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
-    assert_equal main_lane.id, main_head.lane_id
+    assert_equal main_subgraph.id, main_head.subgraph_id
 
-    source_lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    source_subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
     source_head = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: source_lane.id,
+      subgraph_id: source_subgraph.id,
       metadata: {}
     )
 
     merge_node = nil
     graph.mutate! do |m|
       merge_node =
-        m.merge_lanes!(
-          target_lane: main_lane,
+        m.merge_subgraphs!(
+          target_subgraph: main_subgraph,
           target_from_node: main_head,
-          source_lanes_and_nodes: [{ lane: source_lane, from_node: source_head }],
+          source_subgraphs_and_nodes: [{ subgraph: source_subgraph, from_node: source_head }],
           node_type: Messages::AgentMessage.node_type_key,
           metadata: { "kind" => "test" }
         )
     end
 
-    assert_equal main_lane.id, merge_node.lane_id
+    assert_equal main_subgraph.id, merge_node.subgraph_id
     assert_equal DAG::Node::PENDING, merge_node.state
 
     assert graph.edges.active.exists?(
@@ -233,39 +239,39 @@ class DAG::LaneTest < ActiveSupport::TestCase
       edge_type: DAG::Edge::DEPENDENCY
     )
     assert_equal "merge", dependency.metadata["generated_by"]
-    assert_equal source_lane.id, dependency.metadata["source_lane_id"]
+    assert_equal source_subgraph.id, dependency.metadata["source_subgraph_id"]
 
-    source_lane.reload
-    assert source_lane.archived_at.blank?
-    assert_nil source_lane.merged_into_lane_id
+    source_subgraph.reload
+    assert source_subgraph.archived_at.blank?
+    assert_nil source_subgraph.merged_into_subgraph_id
 
     followup =
-      graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, lane_id: source_lane.id, metadata: {})
-    assert_equal source_lane.id, followup.lane_id
+      graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, subgraph_id: source_subgraph.id, metadata: {})
+    assert_equal source_subgraph.id, followup.subgraph_id
   end
 
-  test "main lane cannot be merged into another lane" do
+  test "main subgraph cannot be merged into another subgraph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    main_lane = graph.main_lane
+    main_subgraph = graph.main_subgraph
 
     main_head = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
-    assert_equal main_lane.id, main_head.lane_id
+    assert_equal main_subgraph.id, main_head.subgraph_id
 
-    branch_lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+    branch_subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: main_subgraph.id, metadata: {})
     branch_head = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      lane_id: branch_lane.id,
+      subgraph_id: branch_subgraph.id,
       metadata: {}
     )
 
     assert_raises(ArgumentError) do
       graph.mutate! do |m|
-        m.merge_lanes!(
-          target_lane: branch_lane,
+        m.merge_subgraphs!(
+          target_subgraph: branch_subgraph,
           target_from_node: branch_head,
-          source_lanes_and_nodes: [{ lane: main_lane, from_node: main_head }],
+          source_subgraphs_and_nodes: [{ subgraph: main_subgraph, from_node: main_head }],
           node_type: Messages::AgentMessage.node_type_key,
           metadata: {}
         )

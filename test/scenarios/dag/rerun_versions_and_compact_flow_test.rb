@@ -61,7 +61,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
   test "product flow: rerun versions, adopt, and compact the turn context" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    lane = graph.main_lane
+    subgraph = graph.main_subgraph
     turn_id = "0194f3c0-0000-7000-8000-00000000f010"
 
     user = nil
@@ -85,7 +85,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, v1.reload.state
 
       tool_1 = graph.nodes.active.find_by!(turn_id: turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool1")
-      assert_equal lane.id, tool_1.lane_id
+      assert_equal subgraph.id, tool_1.subgraph_id
       assert_nil graph.nodes.active.find_by(turn_id: turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool2")
 
       v2 = v1.rerun!(metadata_patch: { "rerun_intent" => "rewrite" })
@@ -106,7 +106,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, v3.reload.state
 
       tool_2 = graph.nodes.active.find_by!(turn_id: turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool2")
-      assert_equal lane.id, tool_2.lane_id
+      assert_equal subgraph.id, tool_2.subgraph_id
 
       assert_equal 3, v3.version_count
       assert_equal [v3.id], graph.nodes.active.where(version_set_id: v3.version_set_id).pluck(:id)
@@ -117,7 +117,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
 
       assert tool_2.reload.compressed_at.present?
 
-      lane.compact_turn_context!(turn_id: turn_id, keep_node_ids: [user.id, adopted.id])
+      subgraph.compact_turn_context!(turn_id: turn_id, keep_node_ids: [user.id, adopted.id])
 
       context_ids = graph.context_for(adopted.id).map { |node| node.fetch("node_id") }
       assert_equal [user.id, adopted.id], context_ids

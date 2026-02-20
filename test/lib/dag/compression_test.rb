@@ -33,7 +33,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     assert_equal Messages::Summary.node_type_key, summary.node_type
     assert_equal DAG::Node::FINISHED, summary.state
     assert_equal "summary", summary.body_output["content"]
-    assert_equal b.lane_id, summary.lane_id
+    assert_equal b.subgraph_id, summary.subgraph_id
 
     [b.reload, c.reload].each do |node|
       assert node.compressed_at.present?
@@ -74,7 +74,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     out_2 = graph.edges.create!(from_node_id: inside_b.id, to_node_id: outside_child.id, edge_type: DAG::Edge::SEQUENCE)
 
     summary = conversation.compress!(node_ids: [inside_a.id, inside_b.id], summary_content: "summary")
-    assert_equal inside_a.lane_id, summary.lane_id
+    assert_equal inside_a.subgraph_id, summary.subgraph_id
 
     assert_equal 1, graph.edges.active.where(
       from_node_id: outside_parent.id,
@@ -101,13 +101,13 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     assert_equal [out_1.id, out_2.id].sort, outgoing.metadata.fetch("replaces_edge_ids").sort
   end
 
-  test "compress! rejects compressing nodes across multiple lanes" do
+  test "compress! rejects compressing nodes across multiple subgraphs" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
 
     main = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
-    lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: graph.main_lane.id, metadata: {})
-    branch = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, lane_id: lane.id, metadata: {})
+    subgraph = graph.subgraphs.create!(role: DAG::Subgraph::BRANCH, parent_subgraph_id: graph.main_subgraph.id, metadata: {})
+    branch = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, subgraph_id: subgraph.id, metadata: {})
     outside = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     graph.edges.create!(from_node_id: main.id, to_node_id: outside.id, edge_type: DAG::Edge::SEQUENCE)
@@ -117,6 +117,6 @@ class DAG::CompressionTest < ActiveSupport::TestCase
       assert_raises(ArgumentError) do
         conversation.compress!(node_ids: [main.id, branch.id], summary_content: "summary")
       end
-    assert_match(/multiple lanes/, error.message)
+    assert_match(/multiple subgraphs/, error.message)
   end
 end

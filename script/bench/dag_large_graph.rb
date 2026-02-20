@@ -28,7 +28,7 @@ puts "BATCH_TURNS=#{batch_turns}"
 
 conversation = Conversation.create!(title: "bench-large-graph")
 graph = conversation.dag_graph
-lane = graph.main_lane
+subgraph = graph.main_subgraph
 
 base_time = Time.current - turns.seconds
 now = Time.current
@@ -60,9 +60,12 @@ measure("setup_insert") do
       turn_rows << {
         id: turn_id,
         graph_id: graph.id,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
+        anchored_seq: i + 1,
         anchor_node_id: user_node_id,
         anchor_created_at: at,
+        anchor_node_id_including_deleted: user_node_id,
+        anchor_created_at_including_deleted: at,
         metadata: {},
         created_at: at,
         updated_at: at,
@@ -90,7 +93,7 @@ measure("setup_insert") do
       node_rows << {
         id: user_node_id,
         graph_id: graph.id,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
         metadata: {},
@@ -103,7 +106,7 @@ measure("setup_insert") do
       node_rows << {
         id: agent_node_id,
         graph_id: graph.id,
-        lane_id: lane.id,
+        subgraph_id: subgraph.id,
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
         metadata: {},
@@ -147,7 +150,7 @@ measure("setup_insert") do
 end
 
 measure("transcript_page_last_20") do
-  lane.transcript_page(limit_turns: 20)
+  subgraph.transcript_page(limit_turns: 20)
 end
 
 if last_agent_node_id
@@ -155,3 +158,5 @@ if last_agent_node_id
     graph.context_for(last_agent_node_id)
   end
 end
+
+subgraph.update!(next_anchored_seq: turns)

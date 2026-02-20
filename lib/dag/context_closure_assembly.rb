@@ -45,28 +45,24 @@ module DAG
           graph_quoted = connection.quote(@graph.id)
 
           sql = <<~SQL
-            WITH RECURSIVE active_nodes AS (
+            WITH RECURSIVE ancestors(node_id) AS (
               SELECT dag_nodes.id
               FROM dag_nodes
               WHERE dag_nodes.graph_id = #{graph_quoted}
                 AND dag_nodes.compressed_at IS NULL
-            ),
-            ancestors(node_id) AS (
-              SELECT active_nodes.id
-              FROM active_nodes
-              WHERE active_nodes.id = #{target_quoted}::uuid
+                AND dag_nodes.id = #{target_quoted}::uuid
               UNION
               SELECT e.from_node_id
               FROM ancestors a
-              JOIN LATERAL (
-                SELECT dag_edges.from_node_id
-                FROM dag_edges
-                WHERE dag_edges.graph_id = #{graph_quoted}
-                  AND dag_edges.compressed_at IS NULL
-                  AND dag_edges.edge_type IN ('sequence', 'dependency')
-                  AND dag_edges.to_node_id = a.node_id
-              ) e ON true
-              JOIN active_nodes parent ON parent.id = e.from_node_id
+              JOIN dag_edges e
+                ON e.graph_id = #{graph_quoted}
+               AND e.compressed_at IS NULL
+               AND e.edge_type IN ('sequence', 'dependency')
+               AND e.to_node_id = a.node_id
+              JOIN dag_nodes parent
+                ON parent.graph_id = #{graph_quoted}
+               AND parent.compressed_at IS NULL
+               AND parent.id = e.from_node_id
             )
             SELECT node_id FROM ancestors
           SQL
@@ -78,7 +74,7 @@ module DAG
       def load_nodes(node_ids)
         @graph.nodes
           .where(id: node_ids, compressed_at: nil)
-          .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+          .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
           .index_by(&:id)
       end
 
@@ -118,7 +114,7 @@ module DAG
         {
           "node_id" => node.id,
           "turn_id" => node.turn_id,
-          "lane_id" => node.lane_id,
+          "subgraph_id" => node.subgraph_id,
           "node_type" => node.node_type,
           "state" => node.state,
           "payload" => payload_hash,

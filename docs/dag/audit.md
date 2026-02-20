@@ -15,7 +15,7 @@
 结论（当前实现与测试的落点）：
 
 - `dag_nodes.node_type` 语义增强，新增 `system_message`、`developer_message`、`character_message`，并把 `character_message` 纳入 executable 集合（与 `agent_message` 同级）。
-- 引入 Lane 分区模型：新增 `dag_lanes` 与 `dag_nodes.lane_id`（一个 node 只能属于一个 lane）；fork 创建 branch lane+root node；merge 通过在 target lane 创建 join 节点表达“汇总点”（不隐式归档 source lanes；archive 为显式产品动作）。
+- 引入 Subgraph 分区模型：新增 `dag_subgraphs` 与 `dag_nodes.subgraph_id`（一个 node 只能属于一个 subgraph）；fork 创建 branch subgraph+root node；merge 通过在 target subgraph 创建 join 节点表达“汇总点”（不隐式归档 source subgraphs；archive 为显式产品动作）。
 - Transcript 可靠性增强：当下游消息因依赖失败传播被标记为 `skipped`（或其它终态）时，仍能以“安全预览占位”的形式出现在 transcript，避免 UI 只剩用户输入的空白状态。
 - 流式/增量输出一等支持：新增 `dag_node_events`（node-scoped、append-only、keyset 分页），executor 通过 `NodeEventStream` 写 `output_delta/progress/log`；Runner 在 `finished_streamed` 时汇总 `output_delta` 并物化写回最终 output（保证 transcript/context 仍走稳定读路径）。
 - 人工审批 gate 与 user stop 一等语义：新增 `awaiting_approval`（pre-execution gate）与 terminal `stopped`；required approval-deny 下不自动 skipped 下游依赖节点，允许流程“阻塞但可恢复”（approve/retry）。
@@ -48,7 +48,7 @@
   - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
   - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
   - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
-  - `dag_nodes (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（禁止跨图 lane 引用）
+  - `dag_nodes (graph_id, subgraph_id)` → `dag_subgraphs (graph_id, id)`（禁止跨图 subgraph 引用）
 - 压缩字段一致性（check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
 
 ### 2.3 Acyclic（无环）
@@ -77,7 +77,7 @@
 - `system_message` / `developer_message`：默认进入 context，默认不进入 transcript；内容写入 `payload.input["content"]`。
 - `agent_message` / `character_message`：默认进入 context，默认进入 transcript；内容写入 `payload.output["content"]`。
 - Transcript 终态可见性强化：当 `agent_message/character_message` 进入 `errored/rejected/stopped/skipped` 等终态且具备 `metadata["reason"]`/`metadata["error"]` 时，必须允许进入 transcript，并用安全预览占位（避免 UI 空白）。
-- Context/Transcript 输出包含 `lane_id`：用于 UI 染色与对话树展示。
+- Context/Transcript 输出包含 `subgraph_id`：用于 UI 染色与对话树展示。
 
 ---
 
@@ -129,7 +129,7 @@
 - `roleplay_group_chat_flow_test.rb`：多角色群聊（同 turn 多条 `character_message` 并行执行、其中一个 rerun）；验证 turn 聚合视图与按节点锚定视图的差异。
 - `graph_surgery_and_visibility_flow_test.rb`：visibility patch defer/apply + compress + edit + retry/rerun 的交叉回归；验证“改图/隐藏节点”组合操作后 GraphAudit 仍为空。
 - `rerun_versions_and_compact_flow_test.rb`：多版本 rerun + adopt 切换版本 + turn context compaction；覆盖 ChatGPT 风格的版本切换与“单轮中间过程不入上下文”需求。
-- `lane_branch_and_merge_flow_test.rb`：分支对话（fork 创建 branch lane/topic）、merge 回 main（join 节点）、merge 后分支可继续、再显式 archive 分支并验证“禁新 turn / 允许收尾”，以及 archived lane 仍可作为 merge source。
+- `subgraph_branch_and_merge_flow_test.rb`：分支对话（fork 创建 branch subgraph/topic）、merge 回 main（join 节点）、merge 后分支可继续、再显式 archive 分支并验证“禁新 turn / 允许收尾”，以及 archived subgraph 仍可作为 merge source。
 
 ---
 
