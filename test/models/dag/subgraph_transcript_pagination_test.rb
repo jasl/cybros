@@ -62,18 +62,18 @@ class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
     end
 
     page = subgraph.transcript_page(limit_turns: 2)
-    assert_equal [turn_3, turn_4], page.fetch(:turn_ids)
+    assert_equal [turn_3, turn_4], page.fetch("turn_ids")
 
-    transcript = page.fetch(:transcript)
+    transcript = page.fetch("transcript")
     assert_equal [turn_3, turn_3, turn_4, turn_4], transcript.map { |n| n.fetch("turn_id") }
     assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key] * 2,
                  transcript.map { |n| n.fetch("node_type") }
 
-    older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch(:before_turn_id))
-    assert_equal [turn_1, turn_2], older.fetch(:turn_ids)
+    older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch("before_turn_id"))
+    assert_equal [turn_1, turn_2], older.fetch("turn_ids")
 
-    newer = subgraph.transcript_page(limit_turns: 2, after_turn_id: older.fetch(:after_turn_id))
-    assert_equal [turn_3, turn_4], newer.fetch(:turn_ids)
+    newer = subgraph.transcript_page(limit_turns: 2, after_turn_id: older.fetch("after_turn_id"))
+    assert_equal [turn_3, turn_4], newer.fetch("turn_ids")
   end
 
   test "transcript_page validates cursors and limit" do
@@ -82,8 +82,8 @@ class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
     subgraph = graph.main_subgraph
 
     empty = subgraph.transcript_page(limit_turns: 0)
-    assert_equal [], empty.fetch(:turn_ids)
-    assert_equal [], empty.fetch(:transcript)
+    assert_equal [], empty.fetch("turn_ids")
+    assert_equal [], empty.fetch("transcript")
 
     error =
       assert_raises(ArgumentError) do
@@ -132,10 +132,10 @@ class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
     )
 
     page = subgraph.transcript_page(limit_turns: 1)
-    assert_equal [turn_2], page.fetch(:turn_ids)
+    assert_equal [turn_2], page.fetch("turn_ids")
 
-    older = subgraph.transcript_page(limit_turns: 1, before_turn_id: page.fetch(:before_turn_id))
-    assert_equal [turn_1], older.fetch(:turn_ids)
+    older = subgraph.transcript_page(limit_turns: 1, before_turn_id: page.fetch("before_turn_id"))
+    assert_equal [turn_1], older.fetch("turn_ids")
   end
 
   test "transcript_page is subgraph-scoped (supports topics/subthreads)" do
@@ -193,14 +193,14 @@ class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
     branch_subgraph = graph.subgraphs.find(branch_root.subgraph_id)
 
     main_page = main_subgraph.transcript_page(limit_turns: 10)
-    assert_equal [seed_turn], main_page.fetch(:turn_ids)
+    assert_equal [seed_turn], main_page.fetch("turn_ids")
     assert_equal ["main-u", "main-a"],
-                 main_page.fetch(:transcript).map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
+                 main_page.fetch("transcript").map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
 
     branch_page = branch_subgraph.transcript_page(limit_turns: 10)
-    assert_equal [branch_root.turn_id.to_s], branch_page.fetch(:turn_ids)
+    assert_equal [branch_root.turn_id.to_s], branch_page.fetch("turn_ids")
     assert_equal ["branch-u", "branch-a"],
-                 branch_page.fetch(:transcript).map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
+                 branch_page.fetch("transcript").map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
   end
 
   test "graph.transcript_page delegates to subgraph.transcript_page" do
@@ -228,6 +228,6 @@ class DAG::SubgraphTranscriptPaginationTest < ActiveSupport::TestCase
     )
 
     page = graph.transcript_page(subgraph_id: subgraph.id, limit_turns: 10)
-    assert_equal [turn_id], page.fetch(:turn_ids)
+    assert_equal [turn_id], page.fetch("turn_ids")
   end
 end

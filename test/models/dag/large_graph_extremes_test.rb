@@ -122,8 +122,8 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
     subgraph.update!(next_anchored_seq: turns)
 
     page = subgraph.transcript_page(limit_turns: 20)
-    assert_equal turn_ids.last(20), page.fetch(:turn_ids)
-    assert_equal 40, page.fetch(:transcript).length
+    assert_equal turn_ids.last(20), page.fetch("turn_ids")
+    assert_equal 40, page.fetch("transcript").length
 
     last_agent_id = agent_node_ids.last
     default_turns = DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS

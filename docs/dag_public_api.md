@@ -37,11 +37,11 @@
 对 “ChatGPT-like 聊天记录 / SillyTavern-like 子话题 / Codex-like 多线程” 的 UI，推荐优先使用 subgraph-scoped 的分页原语，避免把不同 subgraph 的 turns 混在一个列表里：
 
 - `DAG::Subgraph#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
-  - 返回 `{ turn_ids:, before_turn_id:, after_turn_id:, transcript: }`
+  - 返回 `{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
   - `before_turn_id` / `after_turn_id` 为 keyset cursor（按 `turn_id`），避免 OFFSET
   - 说明：turn 的“代表锚点”由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页只按 `turn_id`（UUIDv7）进行
 - `DAG::Subgraph#turns`（ActiveRecord 关联：返回该 subgraph 的 `DAG::Turn` records；包含未 anchor 的 turns）
-- `DAG::Subgraph#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（bounded；按 `anchored_seq` keyset）
+- `DAG::Subgraph#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（bounded；按 `anchored_seq` keyset；返回 string keys）
 - `DAG::Subgraph#anchored_turn_count(include_deleted: true|false)`（`include_deleted: true` 为 O(1) 读取 `next_anchored_seq`）
 - `DAG::Subgraph#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
 - `DAG::Subgraph#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`

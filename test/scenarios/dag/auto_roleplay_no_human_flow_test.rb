@@ -86,15 +86,15 @@ class DAG::AutoRoleplayNoHumanFlowTest < ActiveSupport::TestCase
       assert_equal 4, subgraph.anchored_turn_count(include_deleted: true)
 
       page = subgraph.transcript_page(limit_turns: 2)
-      assert_equal 2, page.fetch(:turn_ids).length
+      assert_equal 2, page.fetch("turn_ids").length
 
-      older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch(:before_turn_id))
-      assert_equal 2, older.fetch(:turn_ids).length
+      older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch("before_turn_id"))
+      assert_equal 2, older.fetch("turn_ids").length
 
-      all_turn_ids = (older.fetch(:turn_ids) + page.fetch(:turn_ids))
+      all_turn_ids = (older.fetch("turn_ids") + page.fetch("turn_ids"))
       assert_equal all_turn_ids.uniq, all_turn_ids
 
-      transcript = (older.fetch(:transcript) + page.fetch(:transcript))
+      transcript = (older.fetch("transcript") + page.fetch("transcript"))
       transcript_contents =
         transcript.map do |n|
           if n.fetch("node_type") == Messages::UserMessage.node_type_key

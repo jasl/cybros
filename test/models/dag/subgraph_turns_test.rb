@@ -95,14 +95,14 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
     user_2.soft_delete!
     assert user_2.reload.deleted_at.present?
 
-    all_turns = subgraph.anchored_turn_page(limit: 10, include_deleted: true).fetch(:turns)
+    all_turns = subgraph.anchored_turn_page(limit: 10, include_deleted: true).fetch("turns")
     assert_equal 3, all_turns.length
-    assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch(:turn_id) }
-    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch(:anchored_seq) }
+    assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch("turn_id") }
+    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch("anchored_seq") }
 
-    visible = subgraph.anchored_turn_page(limit: 10, include_deleted: false).fetch(:turns)
-    assert_equal [turn_2, turn_3], visible.map { |row| row.fetch(:turn_id) }
-    assert_equal [2, 3], visible.map { |row| row.fetch(:anchored_seq) }
+    visible = subgraph.anchored_turn_page(limit: 10, include_deleted: false).fetch("turns")
+    assert_equal [turn_2, turn_3], visible.map { |row| row.fetch("turn_id") }
+    assert_equal [2, 3], visible.map { |row| row.fetch("anchored_seq") }
 
     assert_equal 3, subgraph.anchored_turn_count(include_deleted: true)
     assert_equal 2, subgraph.anchored_turn_count(include_deleted: false)

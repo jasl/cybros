@@ -39,7 +39,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
     assert_equal edited.id, turn.anchor_node_id
 
     page = subgraph.transcript_page(limit_turns: 10)
-    assert_includes page.fetch(:turn_ids), turn_id
+    assert_includes page.fetch("turn_ids"), turn_id
   end
 
   test "retry replaces the turn anchor_node_id when the previous anchor is archived" do

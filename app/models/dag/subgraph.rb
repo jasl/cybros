@@ -40,7 +40,7 @@ module DAG
 
     def anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
       limit = Integer(limit)
-      return { turns: [], before_seq: nil, after_seq: nil } if limit <= 0
+      return { "turns" => [], "before_seq" => nil, "after_seq" => nil } if limit <= 0
 
       before_seq = before_seq&.to_i
       after_seq = after_seq&.to_i
@@ -66,15 +66,15 @@ module DAG
       turns_payload =
         rows.map do |turn_id, anchored_seq|
           {
-            turn_id: turn_id.to_s,
-            anchored_seq: anchored_seq.to_i,
+            "turn_id" => turn_id.to_s,
+            "anchored_seq" => anchored_seq.to_i,
           }
         end
 
       {
-        turns: turns_payload,
-        before_seq: turns_payload.first&.fetch(:anchored_seq, nil),
-        after_seq: turns_payload.last&.fetch(:anchored_seq, nil),
+        "turns" => turns_payload,
+        "before_seq" => turns_payload.first&.fetch("anchored_seq", nil),
+        "after_seq" => turns_payload.last&.fetch("anchored_seq", nil),
       }
     end
 
@@ -116,7 +116,7 @@ module DAG
     end
 
     def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
-      transcript_page(limit_turns: limit_turns, mode: mode, include_deleted: include_deleted).fetch(:transcript)
+      transcript_page(limit_turns: limit_turns, mode: mode, include_deleted: include_deleted).fetch("transcript")
     end
 
     def transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
@@ -131,10 +131,10 @@ module DAG
       transcript = transcript_for_turn_ids(turn_ids: turn_ids, mode: mode, include_deleted: include_deleted)
 
       {
-        turn_ids: turn_ids,
-        before_turn_id: turn_ids.first,
-        after_turn_id: turn_ids.last,
-        transcript: transcript,
+        "turn_ids" => turn_ids,
+        "before_turn_id" => turn_ids.first,
+        "after_turn_id" => turn_ids.last,
+        "transcript" => transcript,
       }
     end
 

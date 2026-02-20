@@ -328,7 +328,7 @@ Context 可见性（视图层）：
     - 初次加载：不传 `before_turn_id/after_turn_id` → 返回该 subgraph 最近 N 轮
     - 上拉更老：传 `before_turn_id`（通常取上一页返回的 `before_turn_id`）→ 返回更早的 N 轮
     - 下拉更新：传 `after_turn_id`（通常取上一页返回的 `after_turn_id`）→ 返回更新的 N 轮
-  - 返回：`{ turn_ids:, before_turn_id:, after_turn_id:, transcript: }`（JSON 输出时 key 会序列化为 string）
+  - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
 - `graph.transcript_page(subgraph_id:, ...)`：对 `subgraph.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
 - `graph.transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview, include_deleted: false)`（安全默认：bounded window）
   - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
