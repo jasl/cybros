@@ -62,6 +62,23 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_equal main_lane.id, via_mutation.lane_id
   end
 
+  test "lane-scoped context_for rejects target nodes that belong to a different lane" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    main_lane = graph.main_lane
+
+    branch_lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
+
+    main = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, lane_id: main_lane.id, metadata: {})
+    branch = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, lane_id: branch_lane.id, metadata: {})
+
+    error = assert_raises(ArgumentError) { main_lane.context_for(branch.id) }
+    assert_match(/must belong to this lane/, error.message)
+
+    error = assert_raises(ArgumentError) { branch_lane.context_for(main.id) }
+    assert_match(/must belong to this lane/, error.message)
+  end
+
   test "create_node inherits lane_id from existing nodes in the same turn" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

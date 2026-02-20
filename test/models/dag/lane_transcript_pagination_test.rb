@@ -34,17 +34,18 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
           updated_at: at
         )
 
-      graph.nodes.create!(
-        node_type: Messages::Task.node_type_key,
-        state: DAG::Node::FINISHED,
-        lane_id: lane.id,
-        turn_id: turn_id,
-        body_input: { "name" => "t-#{turn_id}" },
-        body_output: { "result" => "r-#{turn_id}" },
-        metadata: {},
-        created_at: at + 1.second,
-        updated_at: at + 1.second
-      )
+      task =
+        graph.nodes.create!(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          turn_id: turn_id,
+          body_input: { "name" => "t-#{turn_id}" },
+          body_output: { "result" => "r-#{turn_id}" },
+          metadata: {},
+          created_at: at + 1.second,
+          updated_at: at + 1.second
+        )
 
       agent =
         graph.nodes.create!(
@@ -58,7 +59,8 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
           updated_at: at + 2.seconds
         )
 
-      graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+      graph.edges.create!(from_node_id: user.id, to_node_id: task.id, edge_type: DAG::Edge::SEQUENCE)
+      graph.edges.create!(from_node_id: task.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
     end
 
     page = lane.transcript_page(limit_turns: 2)
@@ -74,6 +76,8 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
 
     newer = lane.transcript_page(limit_turns: 2, after_turn_id: older.fetch("after_turn_id"))
     assert_equal [turn_3, turn_4], newer.fetch("turn_ids")
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_page validates cursors and limit" do
@@ -98,6 +102,53 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_includes error.message, "cursor"
   end
 
+  test "transcript_page respects include_deleted when turn has no visible anchor" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    lane = graph.main_lane
+
+    turn_id = "0194f3c0-0000-7000-8000-00000000ae01"
+
+    user =
+      graph.nodes.create!(
+        node_type: Messages::UserMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane.id,
+        turn_id: turn_id,
+        body_input: { "content" => "u" },
+        metadata: {}
+      )
+    agent =
+      graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane.id,
+        turn_id: turn_id,
+        body_output: { "content" => "a" },
+        metadata: {}
+      )
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+
+    assert_includes lane.transcript_page(limit_turns: 10).fetch("turn_ids"), turn_id
+
+    user.soft_delete!
+    agent.soft_delete!
+
+    refute_includes lane.transcript_page(limit_turns: 10).fetch("turn_ids"), turn_id
+
+    with_deleted = lane.transcript_page(limit_turns: 10, include_deleted: true)
+    assert_includes with_deleted.fetch("turn_ids"), turn_id
+
+    transcript_contents =
+      with_deleted.fetch("transcript").map do |node|
+        node.dig("payload", "input", "content").to_s.presence ||
+          node.dig("payload", "output_preview", "content").to_s
+      end
+    assert_equal %w[u a], transcript_contents
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
+  end
+
   test "transcript_page orders turns by turn_id (uuidv7), not by node created_at" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
@@ -109,7 +160,8 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     turn_1 = "0194f3c0-0000-7000-8000-00000000ad01"
     turn_2 = "0194f3c0-0000-7000-8000-00000000ad02"
 
-    graph.nodes.create!(
+    user_1 =
+      graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       lane_id: lane.id,
@@ -118,9 +170,22 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       metadata: {},
       created_at: later,
       updated_at: later
-    )
+      )
+    agent_1 =
+      graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane.id,
+        turn_id: turn_1,
+        body_output: { "content" => "a1" },
+        metadata: {},
+        created_at: later + 1.second,
+        updated_at: later + 1.second
+      )
+    graph.edges.create!(from_node_id: user_1.id, to_node_id: agent_1.id, edge_type: DAG::Edge::SEQUENCE)
 
-    graph.nodes.create!(
+    user_2 =
+      graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
       lane_id: lane.id,
@@ -129,13 +194,27 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       metadata: {},
       created_at: earlier,
       updated_at: earlier
-    )
+      )
+    agent_2 =
+      graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane.id,
+        turn_id: turn_2,
+        body_output: { "content" => "a2" },
+        metadata: {},
+        created_at: earlier + 1.second,
+        updated_at: earlier + 1.second
+      )
+    graph.edges.create!(from_node_id: user_2.id, to_node_id: agent_2.id, edge_type: DAG::Edge::SEQUENCE)
 
     page = lane.transcript_page(limit_turns: 1)
     assert_equal [turn_2], page.fetch("turn_ids")
 
     older = lane.transcript_page(limit_turns: 1, before_turn_id: page.fetch("before_turn_id"))
     assert_equal [turn_1], older.fetch("turn_ids")
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_page is lane-scoped (supports topics/subthreads)" do
@@ -201,6 +280,8 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [branch_root.turn_id.to_s], branch_page.fetch("turn_ids")
     assert_equal ["branch-u", "branch-a"],
                  branch_page.fetch("transcript").map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "graph.transcript_page delegates to lane.transcript_page" do
@@ -227,7 +308,13 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
       metadata: {}
     )
 
+    user = graph.nodes.find_by!(turn_id: turn_id, node_type: Messages::UserMessage.node_type_key)
+    agent = graph.nodes.find_by!(turn_id: turn_id, node_type: Messages::AgentMessage.node_type_key)
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+
     page = graph.transcript_page(lane_id: lane.id, limit_turns: 10)
     assert_equal [turn_id], page.fetch("turn_ids")
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 end
