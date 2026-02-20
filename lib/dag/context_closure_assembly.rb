@@ -40,35 +40,32 @@ module DAG
     private
 
       def ancestor_node_ids_for(target_node_id)
-        DAG::Node.with_connection do |connection|
-          target_quoted = connection.quote(target_node_id)
-          graph_quoted = connection.quote(@graph.id)
+        target_node_id = target_node_id.to_s
+        return [] unless @graph.nodes.active.where(id: target_node_id).exists?
 
-          sql = <<~SQL
-            WITH RECURSIVE ancestors(node_id) AS (
-              SELECT dag_nodes.id
-              FROM dag_nodes
-              WHERE dag_nodes.graph_id = #{graph_quoted}
-                AND dag_nodes.compressed_at IS NULL
-                AND dag_nodes.id = #{target_quoted}::uuid
-              UNION
-              SELECT e.from_node_id
-              FROM ancestors a
-              JOIN dag_edges e
-                ON e.graph_id = #{graph_quoted}
-               AND e.compressed_at IS NULL
-               AND e.edge_type IN ('sequence', 'dependency')
-               AND e.to_node_id = a.node_id
-              JOIN dag_nodes parent
-                ON parent.graph_id = #{graph_quoted}
-               AND parent.compressed_at IS NULL
-               AND parent.id = e.from_node_id
-            )
-            SELECT node_id FROM ancestors
-          SQL
+        edge_rows =
+          @graph.edges.active
+            .where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+            .pluck(:from_node_id, :to_node_id)
 
-          connection.select_values(sql)
+        incoming = Hash.new { |hash, key| hash[key] = [] }
+        edge_rows.each do |from_node_id, to_node_id|
+          incoming[to_node_id.to_s] << from_node_id.to_s
         end
+
+        visited = { target_node_id => true }
+        stack = [target_node_id]
+
+        while (node_id = stack.pop)
+          incoming[node_id].each do |parent_id|
+            next if visited[parent_id]
+
+            visited[parent_id] = true
+            stack << parent_id
+          end
+        end
+
+        visited.keys
       end
 
       def load_nodes(node_ids)
