@@ -43,9 +43,11 @@ module DAG
         target_node_id = target_node_id.to_s
         return [] unless @graph.nodes.active.where(id: target_node_id).exists?
 
+        active_node_ids = @graph.nodes.active.select(:id)
         edge_rows =
           @graph.edges.active
             .where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+            .where(from_node_id: active_node_ids, to_node_id: active_node_ids)
             .pluck(:from_node_id, :to_node_id)
 
         incoming = Hash.new { |hash, key| hash[key] = [] }
