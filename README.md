@@ -29,8 +29,8 @@ bin/ci
 
 Design/spec docs:
 
-- `docs/dag/dag_workflow_engine.md`
-- `docs/dag/dag_behavior_spec.md`
+- `docs/dag/workflow_engine.md`
+- `docs/dag/behavior_spec.md`
 
 ## Multi-DB + Jobs (Solid Queue)
 

@@ -4,10 +4,10 @@ This directory contains Cybros architecture/design notes intended for humans and
 
 ## DAG engine
 
-- Public API boundary: `docs/dag/dag_public_api.md`
-- Workflow engine (scheduler/runner/jobs/hooks): `docs/dag/dag_workflow_engine.md`
-- Normative behavior spec (nodes/edges/states/invariants/streaming): `docs/dag/dag_behavior_spec.md`
-- Sub-agent patterns: `docs/dag/dag_subagent_patterns.md`
+- Public API boundary: `docs/dag/public_api.md`
+- Workflow engine (scheduler/runner/jobs/hooks): `docs/dag/workflow_engine.md`
+- Normative behavior spec (nodes/edges/states/invariants/streaming): `docs/dag/behavior_spec.md`
+- Sub-agent patterns: `docs/dag/subagent_patterns.md`
 - Audit history: `docs/dag/audit.md`
 
 ## AgentCore (DAG-first)
@@ -19,4 +19,3 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Context management + auto-compaction: `docs/agent_core/context_management.md`
 - Security: `docs/agent_core/security.md`
 - Migration parity notes: `docs/agent_core/parity.md`
-
