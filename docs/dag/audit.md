@@ -22,6 +22,7 @@
 - 类型系统松绑：移除 `DAG::Node` 对 node_type 的硬编码 enum/允许列表，并把“可执行/转写/安全预览”等语义下沉到 NodeBody；对 conversation graphs，未知 node_type 通过 `dag_node_body_namespace` 的约定映射默认严格失败。
 - 进一步下沉类型语义：引入 NodeBody semantic hooks（turn anchor / transcript candidates / leaf terminal / 默认 leaf repair / content 落点 / mermaid snippet），并删除 `DAG::Node` 的 node_type 常量，使 DAG 核心几乎不需要显式分支判断 node_type。
 - Audit 能力补强：`DAG::GraphAudit` 新增 `misconfigured_graph`，用于提前暴露 `dag_node_body_namespace` 与 NodeBody hooks 的结构性配置错误（无自动修复，仅诊断）。
+- Audit 能力补强：`DAG::GraphAudit` 新增 `turn_anchor_drift`，用于检测/修复 `dag_turns.anchor_*` 漂移（修复：调用 `DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）。
 - 结构正确性进一步加固：DB 层补齐 graph-scoped 自引用外键（`retry_of_id` / `compressed_by_id`）与压缩字段一致性约束；GraphAudit 新增 cycle/toposort 与 node_type↔NodeBody drift/unknown 检查（均无自动修复，仅诊断）。
 - 覆盖率链路修复：修复 Rails 并行测试下 SimpleCov 汇总为 0% 的问题，并设置整体覆盖率门槛 `minimum_coverage = 85`。
 - 新增场景级测试集，作为未来正式接入时的示例与回归保障；每个场景都以 `DAG::GraphAudit.scan(graph: graph)` 断言图不变量成立。
@@ -137,5 +138,6 @@
 
 - **Turn 建模与群聊**：已引入 `dag_turns`（Turn 一等公民）并以 NodeBody hooks `turn_anchor?` 维护 turn anchor（conversation graphs 默认 `user_message/agent_message/character_message` 为 true），从而支持“无用户回合的纯角色互聊 / 只有 assistant 消息的 turn（例如 merge/join）”的 transcript 分页与 recent turns 查询。
 - **CTE 性能与索引**：Acyclicity（新建 edge 环检测）与部分改图操作（例如 descendants 扫描）依赖 recursive CTE；`context_closure_for`（祖先闭包）当前改为 “加载 active blocking edges 后在 Ruby 中做反向遍历”，避免 recursive CTE 在不同数据分布/统计信息下出现 plan 波动导致的性能雪崩；`context_for`（bounded window）与 leaf 判定不依赖。后续可基于真实数据量做 profiling，并按查询形态补齐索引与物化策略。
+- **Context window 安全带**：`context_for` 的 bounded window 仍可能被“单个异常 turn 内 nodes/edges 数量过大”拖垮；引擎已加内部 hard cap（超限 raise `DAG::SafetyLimits::Exceeded`），并支持通过 ENV `DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES` 调整。
 - **Node events retention 与实时订阅**：`dag_node_events` 是 append-only（便于审计与回放），但产品侧需要明确保留/裁剪策略（按时间/大小/按 node 终态后压缩等），并补齐 UI 订阅层（例如 SolidCable/Turbo stream/SSE）把 events 推到前端。
 - **全局 prompt 机制**：`system_message/developer_message` 目前作为 node_type 存在；若产品侧需要“全局 prompt + per-branch override”，建议明确注入点与冲突合并规则，并用专门场景测试固化。

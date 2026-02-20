@@ -1,28 +1,30 @@
-module DAG
-  class GraphAudit
-    ISSUE_MISCONFIGURED_GRAPH = "misconfigured_graph"
-    ISSUE_CYCLE_DETECTED = "cycle_detected"
-    ISSUE_TOPOLOGICAL_SORT_FAILED = "toposort_failed"
-    ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE = "active_edge_to_inactive_node"
-    ISSUE_STALE_VISIBILITY_PATCH = "stale_visibility_patch"
-    ISSUE_LEAF_INVARIANT_VIOLATION = "leaf_invariant_violation"
-    ISSUE_STALE_RUNNING_NODE = "stale_running_node"
-    ISSUE_UNKNOWN_NODE_TYPE = "unknown_node_type"
-    ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY = "node_type_maps_to_non_node_body"
-    ISSUE_NODE_BODY_DRIFT = "node_body_drift"
+  module DAG
+    class GraphAudit
+      ISSUE_MISCONFIGURED_GRAPH = "misconfigured_graph"
+      ISSUE_CYCLE_DETECTED = "cycle_detected"
+      ISSUE_TOPOLOGICAL_SORT_FAILED = "toposort_failed"
+      ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE = "active_edge_to_inactive_node"
+      ISSUE_STALE_VISIBILITY_PATCH = "stale_visibility_patch"
+      ISSUE_LEAF_INVARIANT_VIOLATION = "leaf_invariant_violation"
+      ISSUE_TURN_ANCHOR_DRIFT = "turn_anchor_drift"
+      ISSUE_STALE_RUNNING_NODE = "stale_running_node"
+      ISSUE_UNKNOWN_NODE_TYPE = "unknown_node_type"
+      ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY = "node_type_maps_to_non_node_body"
+      ISSUE_NODE_BODY_DRIFT = "node_body_drift"
 
-    DEFAULT_TYPES = [
-      ISSUE_MISCONFIGURED_GRAPH,
-      ISSUE_CYCLE_DETECTED,
-      ISSUE_TOPOLOGICAL_SORT_FAILED,
-      ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE,
-      ISSUE_STALE_VISIBILITY_PATCH,
-      ISSUE_LEAF_INVARIANT_VIOLATION,
-      ISSUE_STALE_RUNNING_NODE,
-      ISSUE_UNKNOWN_NODE_TYPE,
-      ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY,
-      ISSUE_NODE_BODY_DRIFT,
-    ].freeze
+      DEFAULT_TYPES = [
+        ISSUE_MISCONFIGURED_GRAPH,
+        ISSUE_CYCLE_DETECTED,
+        ISSUE_TOPOLOGICAL_SORT_FAILED,
+        ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE,
+        ISSUE_STALE_VISIBILITY_PATCH,
+        ISSUE_LEAF_INVARIANT_VIOLATION,
+        ISSUE_TURN_ANCHOR_DRIFT,
+        ISSUE_STALE_RUNNING_NODE,
+        ISSUE_UNKNOWN_NODE_TYPE,
+        ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY,
+        ISSUE_NODE_BODY_DRIFT,
+      ].freeze
 
     def self.scan(graph:, types: DEFAULT_TYPES, now: Time.current)
       new(graph: graph, types: Array(types).map(&:to_s), now: now).scan
@@ -75,29 +77,47 @@ module DAG
         end
       end
 
-      if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
-        leaf_invariant_violations.each do |node_id|
-          issues << issue_hash(
-            type: ISSUE_LEAF_INVARIANT_VIOLATION,
-            severity: "error",
-            subject_type: "DAG::Node",
-            subject_id: node_id,
-            details: {}
-          )
+        if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
+          leaf_invariant_violations.each do |node_id|
+            issues << issue_hash(
+              type: ISSUE_LEAF_INVARIANT_VIOLATION,
+              severity: "error",
+              subject_type: "DAG::Node",
+              subject_id: node_id,
+              details: {}
+            )
+          end
         end
-      end
 
-      if @types.include?(ISSUE_STALE_RUNNING_NODE)
-        stale_running_node_ids.each do |node_id|
-          issues << issue_hash(
-            type: ISSUE_STALE_RUNNING_NODE,
+        if @types.include?(ISSUE_TURN_ANCHOR_DRIFT)
+          turn_anchor_drift_rows.each do |row|
+            issues << issue_hash(
+              type: ISSUE_TURN_ANCHOR_DRIFT,
+              severity: "error",
+              subject_type: "DAG::Turn",
+              subject_id: row.fetch("turn_id"),
+              details: {
+                lane_id: row.fetch("lane_id"),
+                anchor_node_id: row.fetch("anchor_node_id"),
+                expected_anchor_node_id: row.fetch("expected_anchor_node_id"),
+                anchor_node_id_including_deleted: row.fetch("anchor_node_id_including_deleted"),
+                expected_anchor_node_id_including_deleted: row.fetch("expected_anchor_node_id_including_deleted"),
+              }
+            )
+          end
+        end
+
+        if @types.include?(ISSUE_STALE_RUNNING_NODE)
+          stale_running_node_ids.each do |node_id|
+            issues << issue_hash(
+              type: ISSUE_STALE_RUNNING_NODE,
             severity: "error",
             subject_type: "DAG::Node",
             subject_id: node_id,
             details: {}
           )
         end
-      end
+        end
 
       if @types.include?(ISSUE_UNKNOWN_NODE_TYPE) ||
           @types.include?(ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY) ||
@@ -152,14 +172,31 @@ module DAG
           repaired[ISSUE_STALE_RUNNING_NODE] = node_ids.length
         end
 
-        if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
-          created = @graph.validate_leaf_invariant!
-          repaired[ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
-        end
+          if @types.include?(ISSUE_LEAF_INVARIANT_VIOLATION)
+            created = @graph.validate_leaf_invariant!
+            repaired[ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
+          end
 
-        if @types.include?(ISSUE_UNKNOWN_NODE_TYPE)
-          repaired[ISSUE_UNKNOWN_NODE_TYPE] = 0
-        end
+          if @types.include?(ISSUE_TURN_ANCHOR_DRIFT)
+            rows = turn_anchor_drift_rows
+            refresh_by_lane = rows.group_by { |row| row.fetch("lane_id") }
+
+            refresh_by_lane.each do |lane_id, lane_rows|
+              turn_ids = lane_rows.map { |row| row.fetch("turn_id") }
+              DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+                graph: @graph,
+                lane_id: lane_id,
+                turn_ids: turn_ids,
+                now: @now
+              )
+            end
+
+            repaired[ISSUE_TURN_ANCHOR_DRIFT] = rows.length
+          end
+
+          if @types.include?(ISSUE_UNKNOWN_NODE_TYPE)
+            repaired[ISSUE_UNKNOWN_NODE_TYPE] = 0
+          end
 
         if @types.include?(ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY)
           repaired[ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY] = 0
@@ -579,12 +616,82 @@ module DAG
         )
       end
 
-      def stale_visibility_patch_ids
-        DAG::NodeVisibilityPatch.where(graph_id: @graph.id)
-          .joins("JOIN dag_nodes n ON n.id = dag_node_visibility_patches.node_id")
-          .where("n.compressed_at IS NOT NULL")
-          .pluck(:id)
-      end
+        def stale_visibility_patch_ids
+          DAG::NodeVisibilityPatch.where(graph_id: @graph.id)
+            .joins("JOIN dag_nodes n ON n.id = dag_node_visibility_patches.node_id")
+            .where("n.compressed_at IS NOT NULL")
+            .pluck(:id)
+        end
+
+        def turn_anchor_drift_rows
+          anchor_types = @graph.turn_anchor_node_types.map(&:to_s)
+          return [] if anchor_types.empty?
+
+          DAG::Turn.with_connection do |connection|
+            graph_quoted = connection.quote(@graph.id)
+            type_list =
+              anchor_types.map do |type|
+                connection.quote(type.to_s)
+              end.join(",")
+
+            sql = <<~SQL
+	            WITH expected_visible AS (
+	              SELECT DISTINCT ON (t.id)
+	                t.id AS turn_id,
+	                n.id AS expected_anchor_node_id,
+	                n.created_at AS expected_anchor_created_at
+	              FROM dag_turns t
+	              LEFT JOIN dag_nodes n
+	                ON n.graph_id = t.graph_id
+	               AND n.lane_id = t.lane_id
+	               AND n.turn_id = t.id
+	               AND n.compressed_at IS NULL
+	               AND n.deleted_at IS NULL
+	               AND n.node_type IN (#{type_list})
+	              WHERE t.graph_id = #{graph_quoted}
+	              ORDER BY t.id, n.created_at ASC, n.id ASC
+	            ),
+	            expected_including_deleted AS (
+	              SELECT DISTINCT ON (t.id)
+	                t.id AS turn_id,
+	                n.id AS expected_anchor_node_id,
+	                n.created_at AS expected_anchor_created_at
+	              FROM dag_turns t
+	              LEFT JOIN dag_nodes n
+	                ON n.graph_id = t.graph_id
+	               AND n.lane_id = t.lane_id
+	               AND n.turn_id = t.id
+	               AND n.compressed_at IS NULL
+	               AND n.node_type IN (#{type_list})
+	              WHERE t.graph_id = #{graph_quoted}
+	              ORDER BY t.id, n.created_at ASC, n.id ASC
+	            )
+	            SELECT
+	              t.id AS turn_id,
+	              t.lane_id AS lane_id,
+	              t.anchor_node_id AS anchor_node_id,
+	              t.anchor_created_at AS anchor_created_at,
+	              ev.expected_anchor_node_id AS expected_anchor_node_id,
+	              ev.expected_anchor_created_at AS expected_anchor_created_at,
+	              t.anchor_node_id_including_deleted AS anchor_node_id_including_deleted,
+	              t.anchor_created_at_including_deleted AS anchor_created_at_including_deleted,
+	              ed.expected_anchor_node_id AS expected_anchor_node_id_including_deleted,
+	              ed.expected_anchor_created_at AS expected_anchor_created_at_including_deleted
+	            FROM dag_turns t
+	            JOIN expected_visible ev ON ev.turn_id = t.id
+	            JOIN expected_including_deleted ed ON ed.turn_id = t.id
+	            WHERE t.graph_id = #{graph_quoted}
+	              AND (
+	                t.anchor_node_id IS DISTINCT FROM ev.expected_anchor_node_id OR
+	                t.anchor_created_at IS DISTINCT FROM ev.expected_anchor_created_at OR
+	                t.anchor_node_id_including_deleted IS DISTINCT FROM ed.expected_anchor_node_id OR
+	                t.anchor_created_at_including_deleted IS DISTINCT FROM ed.expected_anchor_created_at
+	              )
+            SQL
+
+            connection.select_all(sql).to_a
+          end
+        end
 
       def leaf_invariant_violations
         leaves =
@@ -676,5 +783,5 @@ module DAG
           end
         end
       end
+    end
   end
-end

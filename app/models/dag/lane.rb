@@ -238,11 +238,11 @@ module DAG
       messages = []
       scanned = 0
 
-      order = after_message_id.present? ? :asc : :desc
-      batch_size = [limit * 3, 200].min
-      max_scanned_nodes = 2000
+        order = after_message_id.present? ? :asc : :desc
+        batch_size = [limit * 3, 200].min
+        max_scanned_nodes = DAG::SafetyLimits.max_message_page_scanned_nodes
 
-      while messages.length < limit && scanned < max_scanned_nodes
+        while messages.length < limit && scanned < max_scanned_nodes
         page =
           if cursor_message_id.present?
             if order == :asc
@@ -271,7 +271,7 @@ module DAG
           messages.concat(batch_messages)
           messages = messages.first(limit) if messages.length > limit
         end
-      end
+        end
 
       messages.reverse! if order == :desc
 

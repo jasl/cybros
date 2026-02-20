@@ -475,6 +475,8 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 - 入口：`graph.context_for(target_node_id, limit_turns: 50, ...)`
 - 目标：给 executor/LLM 一个“最近上下文窗口”，同时 pin 关键节点（system/developer/summary 与 fork/merge cutoff）。
 - 重要：`context_for` **不做祖先闭包**；若需要闭包请用 `context_closure_for`（4.1）。
+- 实现细节（安全带）：引擎会对 window 内候选 **nodes/edges** 做内部 hard cap，超限时 raise `DAG::SafetyLimits::Exceeded`（避免单个 turn/脏数据导致爆炸扫描）。
+  - 可选：通过 ENV 调整（仅引擎内部）：`DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES`
 
 节点选择（normative）：
 
@@ -1009,6 +1011,7 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `active_edge_to_inactive_node`：active edge 指向 inactive node（修复：压缩该 edge）
 - `stale_visibility_patch`：patch 指向 inactive node（修复：删除 patch）
 - `leaf_invariant_violation`：Active 图 leaf 不合法（修复：调用 `validate_leaf_invariant!`）
+- `turn_anchor_drift`：`dag_turns.anchor_*` 与“按规则计算出的可见 anchor”不一致（修复：调用 `DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）
 - `stale_running_node`：running lease 过期（修复：running→errored，见 2.3.1）
 - `unknown_node_type`：Active node 的 `node_type` 无法映射到 NodeBody class（修复：无自动修复，仅用于诊断）
 - `node_type_maps_to_non_node_body`：`node_type` 映射到了非 NodeBody 的常量（修复：无自动修复，仅用于诊断）

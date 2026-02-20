@@ -52,6 +52,8 @@ Executor 组装上下文（bounded window；Lane 入口避免 App 直接持有 G
 - `DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded: false, include_deleted: false)`
 - `DAG::Lane#context_for_full(...)`
 - `DAG::Lane#context_node_scope_for(...)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
+  - 实现细节（重要）：引擎会对 context window 的候选 **nodes/edges** 做内部 hard cap（安全带），超限时 raise `DAG::SafetyLimits::Exceeded`（避免单个 turn 或脏数据导致爆炸扫描）。
+  - 可选：通过 ENV 调整（仅引擎内部）：`DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES`
 
 ### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
 

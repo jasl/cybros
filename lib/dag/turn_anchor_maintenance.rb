@@ -1,14 +1,14 @@
 module DAG
   class TurnAnchorMaintenance
-    def self.refresh_for_turn_ids!(graph:, lane_id:, turn_ids:)
-      new(graph: graph).refresh_for_turn_ids!(lane_id: lane_id, turn_ids: turn_ids)
+    def self.refresh_for_turn_ids!(graph:, lane_id:, turn_ids:, now: Time.current)
+      new(graph: graph).refresh_for_turn_ids!(lane_id: lane_id, turn_ids: turn_ids, now: now)
     end
 
     def initialize(graph:)
       @graph = graph
     end
 
-    def refresh_for_turn_ids!(lane_id:, turn_ids:)
+    def refresh_for_turn_ids!(lane_id:, turn_ids:, now: Time.current)
       turn_ids = Array(turn_ids).map(&:to_s).uniq
       return if turn_ids.empty?
 
@@ -18,7 +18,7 @@ module DAG
       DAG::Turn.with_connection do |connection|
         graph_quoted = connection.quote(@graph.id)
         lane_quoted = connection.quote(lane_id)
-        now_quoted = connection.quote(Time.current)
+        now_quoted = connection.quote(now)
 
         turn_id_values =
           turn_ids.map do |turn_id|
