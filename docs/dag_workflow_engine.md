@@ -162,7 +162,7 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 
 #### Branch metadata 约定
 
-`branch` 边使用 `metadata["branch_kinds"]`（数组）表达 lineage（例如 `["fork"]`、`["retry"]`）。在压缩边界去重合并时，`branch_kinds` 可能包含多个值（并集）。
+`branch` 边使用 `metadata["branch_kinds"]`（数组）表达 lineage（例如 `["fork"]`、`["retry"]`）。里程碑 1 的压缩（`DAG::Compression`）只会重连 blocking edges（`sequence/dependency`），`branch` 边不会被重连（只会被标记为 `compressed_at`），因此不会发生 “压缩边界去重合并导致 `branch_kinds` 并集” 的行为。
 
 ### Hooks（可选）：`DAG::GraphHooks`
 
@@ -214,7 +214,9 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 > claim lease 时长由 `graph.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
 
-> 依赖失败传播：对 `dependency` 的父节点若进入 terminal 但非 finished，下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
+> 依赖失败传播：对 `dependency` 的父节点若进入失败终态（`errored/rejected/skipped/stopped`），下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
+>
+> 例外（与实现一致）：若父节点为 `rejected` 且 `metadata["reason"] == "approval_denied"` 且 `metadata["approval"]["required"] == true`，FailurePropagation **不会**自动把下游 pending 标记为 skipped（此时图会保持“被拒绝的必需审批阻塞”，需要 App/管理员显式处理该分支）。
 
 > 可观测（hooks）：Scheduler claim 会尝试 emit `node_state_changed`（`pending → running`）。
 
@@ -253,7 +255,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 - `DAG::ExecuteNodeJob`
   - 调用 Runner 执行单节点
   - 会把自身 `job_id` 透传给 Runner（写入 `metadata["worker"]["execute_job_id"]`）
-  - finally 再 enqueue tick 以推进后继
+  - 不负责再 enqueue tick：推进后继由 Runner 在 `ensure` 中统一 `DAG::TickGraphJob.perform_later(node.graph_id)`（避免 job 层遗漏/重复）
 
 相关代码：
 - `app/jobs/dag/tick_graph_job.rb`
@@ -263,8 +265,9 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 入口：
 
-- 默认（安全）：`DAG::Graph#context_for(target_node_id, limit_turns: 50, ...)`（`Conversation#context_for` delegate）
-- 显式危险（闭包）：`DAG::Graph#context_closure_for(target_node_id, ...)`（`Conversation#context_closure_for` delegate）
+- App-safe（Lane-first）：`DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded: false, include_deleted: false)`（会校验 target 属于 lane；内部调用 `DAG::Graph#context_for`）
+- 引擎内部（安全 bounded window）：`DAG::Graph#context_for(target_node_id, limit_turns: 50, ...)`（Runner 使用）
+- 显式危险（闭包）：`DAG::Graph#context_closure_for(target_node_id, ...)`（ancestor closure；只用于后台/诊断/离线任务）
 
 实现：
 
@@ -364,18 +367,21 @@ Context 可见性（视图层）：
 
 约束（事务内校验）：
 
-- 所选节点必须同一 graph、且均 `finished`
+- 所选节点必须同一 graph、同一 lane，且均 `finished`
 - 节点/相关边必须尚未压缩
-- summary **不得成为 leaf**（必须存在至少一条 outgoing 边到外部）
+- summary **不得成为 leaf**：inside 子图必须存在至少一条 outgoing **blocking edge**（`sequence/dependency`）指向 outside（否则压缩后 summary 会成为 leaf）
 
 操作：
 
-1. 创建 summary 节点（`node_type=summary,state=finished`），`metadata["replaces_node_ids"]`
-2. 标记 inside 节点 `compressed_at/compressed_by_id`；标记 inside 相关边 `compressed_at`
-3. 识别边界边并重连：
-   - outside → summary（复制 edge_type/metadata）
-   - summary → outside（复制 edge_type/metadata）
-4. **边界去重合并**：若多个边界边重连后会坍缩为同一条边（触发 `dag_edges` 唯一索引冲突），会合并为一条，并在 `metadata["replaces_edge_ids"]` 记录被合并的边集合。
+1. 创建 summary 节点（`node_type=summary,state=finished`），写入 `metadata["replaces_node_ids"]`
+2. 标记 inside 节点 `compressed_at/compressed_by_id`；标记 inside 相关边 `compressed_at`（incoming/outgoing/internal；**所有 edge_type**）
+3. 识别边界 **blocking edges** 并重连（只处理 `sequence/dependency`）：
+   - incoming blocking boundary：outside → inside ⟶ outside → summary
+   - outgoing blocking boundary：inside → outside ⟶ summary → outside
+   - 去重：按 `(from_node_id, edge_type)`（incoming）与 `(to_node_id, edge_type)`（outgoing）分组，每组只创建 1 条边
+   - metadata：保留被分组边的“公共键值”（intersection），并写入 `metadata["replaces_edge_ids"]`（被合并的边 id 列表，排序后字符串化）
+4. emit hooks：`LANE_COMPRESSED`（`subject=summary_node`），particulars 中包含 `summary_node_id/replaces_node_ids/*_edge_ids`
+5. 刷新受影响 turns 的锚点（`DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）
 
 ## 可视化（Mermaid）
 

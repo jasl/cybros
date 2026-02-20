@@ -23,19 +23,22 @@
 
 推荐 UI 优先使用 Lane-scoped 的分页原语，避免把不同 Lane 的内容混在一个列表里。
 
-- `DAG::Lane#message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview|:full, include_deleted:)`
+- `DAG::Lane#message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview|:full, include_deleted: false)`
   - **用途**：按“消息节点（transcript candidates）”分页，满足“取最近 X 条消息”的 UI 需求。
   - 返回：`{"message_ids"=>[], "before_message_id"=>..., "after_message_id"=>..., "messages"=>[...]}`（string keys）
   - cursor：按 `message_id == dag_nodes.id`（UUIDv7）keyset
   - 实现细节（重要）：引擎会对“扫描候选节点数”做内部 hard cap（安全带），因此当大量候选节点被 transcript 规则过滤时，页可能 **少于 limit**（极端情况下为空）。
-- `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
+- `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted: false)`
   - **用途**：按 turn 分页（ChatGPT-like 一轮交互展示/滚动加载）。
   - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
   - turn 的可见锚点由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页按 `turn_id`（UUIDv7）
-- Turn 索引/计数（面向压缩/定位）：
+- Turn 索引/计数（面向压缩/定位；**不等价于 transcript 可见性**）：
   - `DAG::Lane#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（按 `anchored_seq` keyset）
   - `DAG::Lane#anchored_turn_count(include_deleted: true|false)`
   - `DAG::Lane#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
+  - 说明（与实现一致）：
+    - `anchored_seq` 一旦分配就不会回填/重算；即使某个 turn 的所有 anchor nodes 都被压缩，turn 仍可能出现在 `anchored_turn_*` 的索引里。
+    - `transcript_page` 的 turn 可见性取决于 `dag_turns.anchor_node_id(_including_deleted)`；当可见锚点变为 `NULL`（例如该 turn 的所有 anchor nodes 都被压缩）时，该 turn 会从 `transcript_page` 中消失。
 - Turn/节点定位（面向 debug/压缩策略）：
   - `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
@@ -46,15 +49,15 @@
 
 Executor 组装上下文（bounded window；Lane 入口避免 App 直接持有 Graph）：
 
-- `DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded:, include_deleted:)`
+- `DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded: false, include_deleted: false)`
 - `DAG::Lane#context_for_full(...)`
 - `DAG::Lane#context_node_scope_for(...)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
 
 ### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
 
-- `DAG::Turn#start_message_node_id(include_deleted: true|false)`（turn anchor：通常为 `user_message`，也可能是 `agent_message/character_message`）
-- `DAG::Turn#end_message_node_id(include_deleted: true|false)`（按 `message_nodes` 投影后的最后一条 message；用于“运行中用 start、结束后用 end”的 UI 表示）
-- `DAG::Turn#message_nodes(mode: :preview|:full, include_deleted:)`（只返回 transcript candidates + projection）
+- `DAG::Turn#start_message_node_id(include_deleted: false)`（turn anchor：通常为 `user_message`，也可能是 `agent_message/character_message`）
+- `DAG::Turn#end_message_node_id(include_deleted: false)`（按 `message_nodes` 投影后的最后一条 message；用于“运行中用 start、结束后用 end”的 UI 表示）
+- `DAG::Turn#message_nodes(mode: :preview|:full, include_deleted: false)`（只返回 transcript candidates + projection）
 
 ### 2.3 Graph-level（Dangerous / Internal）
 
