@@ -33,6 +33,21 @@ module DAG
       end
       graph.with_graph_lock! do
         apply_result(node, result, streamed_output: streamed_output)
+        if node.terminal?
+          output_delta_scope =
+            DAG::NodeEvent.where(
+              graph_id: node.graph_id,
+              node_id: node.id,
+              kind: DAG::NodeEvent::OUTPUT_DELTA
+            )
+
+          if output_delta_scope.exists?
+            content = streamed_output
+            content = streamed_output_for(node) if content.nil?
+
+            DAG::NodeEventRetention.compact_output_deltas!(node: node, content: content)
+          end
+        end
         DAG::FailurePropagation.propagate!(graph: graph)
         graph.validate_leaf_invariant!
       end

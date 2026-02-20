@@ -198,6 +198,15 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     assert_equal "hel", node.body_output["content"]
     assert_equal "hel", node.body_output_preview["content"]
 
+    deltas = graph.node_event_page_for(node.id, kinds: [DAG::NodeEvent::OUTPUT_DELTA])
+    assert_equal [], deltas
+
+    compacted = graph.node_event_page_for(node.id, kinds: [DAG::NodeEvent::OUTPUT_COMPACTED])
+    assert_equal 1, compacted.length
+    assert_equal 1, compacted.first.dig("payload", "chunks")
+    assert_equal "hel".bytesize, compacted.first.dig("payload", "bytes")
+    assert_equal Digest::SHA256.hexdigest("hel"), compacted.first.dig("payload", "sha256")
+
     assert_enqueued_with(job: DAG::TickGraphJob, args: [graph.id])
   ensure
     DAG.executor_registry = original_registry

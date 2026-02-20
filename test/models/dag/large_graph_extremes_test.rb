@@ -133,6 +133,12 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
 
     closure = graph.context_closure_for(last_agent_id)
     assert_equal turns * 2, closure.length
+
+    transcript = graph.transcript_for(last_agent_id)
+    assert_equal default_turns * 2, transcript.length
+
+    transcript_closure = graph.transcript_closure_for(last_agent_id)
+    assert_equal turns * 2, transcript_closure.length
   end
 
   private

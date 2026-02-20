@@ -331,7 +331,10 @@ module DAG
           )
 
         if transitioned
-          materialize_output_deltas_for_stop!
+          content = materialize_output_deltas_for_stop!
+          if !content.nil?
+            DAG::NodeEventRetention.compact_output_deltas!(node: self, content: content)
+          end
           graph.validate_leaf_invariant!
 
           graph.emit_event(
@@ -911,7 +914,7 @@ module DAG
             kind: DAG::NodeEvent::OUTPUT_DELTA
           )
 
-        return unless deltas.exists?
+        return nil unless deltas.exists?
 
         content =
           DAG::NodeEvent.with_connection do |connection|
@@ -930,10 +933,12 @@ module DAG
             connection.select_value(sql).to_s
           end
 
-        return if content.blank?
+        if content.present?
+          body.apply_finished_content!(content)
+          body.save!
+        end
 
-        body.apply_finished_content!(content)
-        body.save!
+        content
       end
 
       def normalize_hook_metadata(metadata)

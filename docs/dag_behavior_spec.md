@@ -269,6 +269,14 @@ Active 视图内必须保持一致（不允许 drift）：
 
 - `output_delta`：增量输出片段
   - `text` 必须为 String（chunk 级别；不建议 token 级别）
+- `output_compacted`：输出增量压缩标记（终态后）
+  - `text` 必须为 NULL
+  - payload 必须包含：
+    - `chunks`：被压缩删除的 `output_delta` 条数
+    - `bytes`：压缩前拼接的输出字节数
+    - `sha256`：压缩前拼接输出的 SHA256（hex string）
+    - `source_kind`：固定为 `"output_delta"`
+    - `compacted_at`：ISO8601 string
 - `progress`：结构化进度
   - 建议 payload：`{phase:, message:, percent:, data:}`（keys 为 string）
 - `log`：执行日志（tool log / debug log）
@@ -285,6 +293,11 @@ Active 视图内必须保持一致（不允许 drift）：
 物化规则（normative）：
 
 - 当 executor 返回 `finished_streamed` 时，Runner 必须按 `id ASC` 汇总该 node 的 `output_delta.text` 并拼接为最终字符串，然后再调用 `node.mark_finished!(content: ...)` 写入 NodeBody 的最终 output（同时 output_preview 从 output 派生）。
+
+retention 规则（normative；硬规则）：
+
+- `output_delta` 只保证 “执行中可订阅/可分页”；当 node 进入终态后，引擎必须清理该 node 的所有 `output_delta` 事件，并写入单条 `output_compacted`（见上方 payload 约定）。
+- terminal 后 UI/下游应以 `NodeBody.output/output_preview` 为最终输出来源，而不是依赖 `output_delta` 的长期存在。
 
 ### 2.7 `subgraph_id`（分区 / Thread-like Subgraph）
 
@@ -616,8 +629,13 @@ Context 输出过滤（对 `context_for` 与 `context_closure_for` 均适用）�
 
 #### 4.5.2 Transcript 视图（不受 exclude 影响）
 
-`graph.transcript_for(target_node_id)` 提供“取对话记录”的稳定入口，默认规则：
+`graph.transcript_for(target_node_id, limit_turns: 50, ...)` 提供“取对话记录”的稳定入口（安全默认：bounded window），默认规则：
 
+- transcript 默认使用 bounded window（与 `context_for` 的 turn window 语义一致），避免在大图上意外触发全量祖先闭包：
+  - 取候选 nodes：`context_for(..., limit_turns:, include_excluded: true, include_deleted:)`
+  - 在候选 nodes 内，仅保留 target 的因果祖先闭包（只走 `sequence/dependency`）+ target（避免把同 turn 的无关 sibling/并行分支混进 thread view）
+  - 再做 transcript 投影：`TranscriptProjection.apply_rules`
+  - `limit_turns <= 0` 时返回空数组
 - transcript 不受 `context_excluded_at` 影响（exclude 是 context-only 语义）
 - transcript 默认不包含：
   - `system_message` / `developer_message`（默认不暴露 prompt）
@@ -641,11 +659,14 @@ Context 输出过滤（对 `context_for` 与 `context_closure_for` 均适用）�
 
 > transcript 的目标是支持 “取最近 X 条对话记录” 等产品需求；它是一种视图层投影，不影响引擎正确性。
 
+显式危险 API（normative）：
+
+- 引擎必须提供 `graph.transcript_closure_for*`，其语义等价于 “祖先闭包 + topo sort 后再做 transcript 投影”。
+- `transcript_closure_for*` 仅用于审计/调试/离线任务；其 `limit:` 仅裁剪输出数组，**不降低**闭包计算成本。
+
 非规范（产品建议）：
 
 - 对 “子话题/多 subgraph 的聊天记录” 与 “游标分页” 场景，推荐使用 subgraph-scoped 的分页原语（例如 `subgraph.transcript_page(limit_turns:, before_turn_id:, after_turn_id:)`），避免把不同 subgraph 的 turns 混在同一个列表里。
-
-> 后续（不在里程碑 1）：当图很大时，`transcript_for` 可能不应依赖 `context_closure_for` 的祖先闭包；建议引入更明确的分页/索引原语（例如 subgraph-scoped paging）来避免全量闭包。
 
 ---
 

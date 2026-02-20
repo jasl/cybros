@@ -206,7 +206,85 @@ module DAG
       scope
     end
 
-    def transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)
+    def transcript_for(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      limit: nil,
+      mode: :preview,
+      include_deleted: false
+    )
+      limit_turns = Integer(limit_turns)
+      return [] if limit_turns <= 0
+
+      unless include_deleted
+        deleted_at = nodes.where(id: target_node_id).pick(:deleted_at)
+        return [] if deleted_at.present?
+      end
+
+      transcript = context_for(
+        target_node_id,
+        limit_turns: limit_turns,
+        mode: mode,
+        include_excluded: true,
+        include_deleted: include_deleted
+      )
+
+      target_node_id = target_node_id.to_s
+      candidate_node_ids = transcript.map { |context_node| context_node.fetch("node_id") }
+
+      if candidate_node_ids.any?
+        edges =
+          self.edges.active
+            .where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+            .where(from_node_id: candidate_node_ids, to_node_id: candidate_node_ids)
+            .pluck(:from_node_id, :to_node_id)
+
+        parents_by_child = Hash.new { |hash, key| hash[key] = [] }
+        edges.each do |from_node_id, to_node_id|
+          parents_by_child[to_node_id] << from_node_id
+        end
+
+        closure_ids = {}
+        stack = [target_node_id]
+
+        while (node_id = stack.pop)
+          next if closure_ids[node_id]
+
+          closure_ids[node_id] = true
+          parents_by_child.fetch(node_id, []).each do |parent_id|
+            stack << parent_id
+          end
+        end
+
+        transcript = transcript.select { |context_node| closure_ids[context_node.fetch("node_id")] }
+      end
+
+      projection = DAG::TranscriptProjection.new(graph: self)
+      transcript = projection.apply_rules(context_nodes: transcript)
+
+      if limit
+        transcript = transcript.last(Integer(limit))
+      end
+
+      transcript
+    end
+
+    def transcript_for_full(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      limit: nil,
+      include_deleted: false
+    )
+      transcript_for(
+        target_node_id,
+        limit_turns: limit_turns,
+        limit: limit,
+        mode: :full,
+        include_deleted: include_deleted
+      )
+    end
+
+    def transcript_closure_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)
       unless include_deleted
         deleted_at = nodes.where(id: target_node_id).pick(:deleted_at)
         return [] if deleted_at.present?
@@ -229,8 +307,8 @@ module DAG
       transcript
     end
 
-    def transcript_for_full(target_node_id, limit: nil, include_deleted: false)
-      transcript_for(
+    def transcript_closure_for_full(target_node_id, limit: nil, include_deleted: false)
+      transcript_closure_for(
         target_node_id,
         limit: limit,
         mode: :full,

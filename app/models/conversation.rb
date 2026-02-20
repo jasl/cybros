@@ -8,6 +8,7 @@ class Conversation < ApplicationRecord
            :context_node_scope_for, :to_mermaid,
            to: :dag_graph, allow_nil: false
   delegate :transcript_for, :transcript_for_full,
+           :transcript_closure_for, :transcript_closure_for_full,
            to: :dag_graph, allow_nil: false
   delegate :transcript_recent_turns, :transcript_recent_turns_full,
            to: :dag_graph, allow_nil: false

@@ -9,7 +9,7 @@
 
 - **写入必须在图锁内**：所有会改变图结构/状态的动作，都必须走 `DAG::Graph#mutate!`（引擎负责 advisory lock + 行锁 + 事务边界 + leaf invariant 修复 + kick）。
 - **Active view 语义**：默认 API 只看 Active（`compressed_at IS NULL`）；审计/回放场景才显式使用 `include_compressed: true`。
-- **JSON 一律 string keys**：所有持久化到 JSONB 的字段（`metadata/payload/particulars` 等）约定使用 string keys；Ruby 层返回的“纯 API struct/hash”优先使用 symbol keys（不影响性能且更 Ruby）。
+- **JSON 一律 string keys**：所有持久化到 JSONB 的字段（`metadata/payload/particulars` 等）约定使用 string keys；Public API 返回的 Hash 也使用 string keys（便于直接 JSON 序列化与跨语言一致）。
 
 ## 2) 读 API（Read-only）
 
@@ -24,7 +24,10 @@
 - `DAG::Graph#node_event_scope_for(node_id, kinds: nil)`（返回 ActiveRecord::Relation；无顺序保证）
 - `DAG::Graph#awaiting_approval_page(limit: 50, after_node_id: nil, subgraph_id: nil)`（bounded；keyset；用于工具授权队列）
 - `DAG::Graph#awaiting_approval_scope(subgraph_id: nil)`（返回 ActiveRecord::Relation；无顺序保证）
-- `DAG::Graph#transcript_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`
+- `DAG::Graph#transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview|:full, include_deleted:)`（安全默认：bounded window）
+- `DAG::Graph#transcript_for_full(target_node_id, limit_turns: 50, limit: nil, include_deleted:)`
+- `DAG::Graph#transcript_closure_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`（危险：祖先闭包）
+- `DAG::Graph#transcript_closure_for_full(target_node_id, limit: nil, include_deleted:)`
 - `DAG::Graph#transcript_recent_turns(limit_turns:, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#transcript_page(subgraph_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
 - `DAG::Graph#to_mermaid(include_compressed: false, max_label_chars: 80)`
@@ -42,6 +45,10 @@
 - `DAG::Subgraph#anchored_turn_count(include_deleted: true|false)`（`include_deleted: true` 为 O(1) 读取 `next_anchored_seq`）
 - `DAG::Subgraph#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
 - `DAG::Subgraph#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+
+Subagent（子代理/子会话）模式（v1）：
+
+- 参考：`docs/dag_subagent_patterns.md`（推荐用多 Conversation/Graph 在 App 域组合，而不是在 DAG 层引入跨图调度语义）
 
 ## 3) 写 API（Mutations / Commands）
 
@@ -101,6 +108,10 @@ end
 - **流式**：executor 通过 `stream.output_delta(...)` 写入增量输出，并返回 `DAG::ExecutionResult.finished_streamed(...)`
   - 约束：`finished_streamed` 不允许同时携带 `payload` 或 `content`（避免语义漂移）
 - **停止**（可选）：executor 返回 `DAG::ExecutionResult.stopped(reason: ...)`（Runner 会落库为 `stopped`；若有 streaming output 会物化 partial output）
+
+node events retention（规范性约定）：
+
+- `output_delta` 只保证 “执行中可订阅/可分页”；当 node 进入终态后，`output_delta` 可能被清理并写入单条 `output_compacted`（payload 含 `chunks/bytes/sha256`），UI 应改读 `NodeBody.output/output_preview` 作为最终输出来源。
 
 ## 4) 审计 / 诊断 API
 

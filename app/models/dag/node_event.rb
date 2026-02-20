@@ -3,6 +3,7 @@ module DAG
     self.table_name = "dag_node_events"
 
     OUTPUT_DELTA = "output_delta"
+    OUTPUT_COMPACTED = "output_compacted"
     PROGRESS = "progress"
     LOG = "log"
 

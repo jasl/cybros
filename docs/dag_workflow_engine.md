@@ -230,6 +230,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
      - `stream` 为 `DAG::NodeEventStream`：把增量输出/进度/log 以 append-only 的方式写入 `dag_node_events`
   3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
      - 若 executor 返回 `ExecutionResult.finished_streamed`：Runner 会汇总该 node 的 `output_delta` events 并物化写回 NodeBody.output（最终 output_preview 仍由 output 派生）
+     - node 进入终态后：引擎会清理该 node 的 `output_delta` events 并写入单条 `output_compacted`（用于 retention/审计；避免事件表长期膨胀）
      - 观测信息：
        - `dag_nodes.metadata["usage"]`：executor 回传的 tokens/cost usage（一次执行/一次调用）
        - `dag_nodes.metadata["output_stats"]`：输出体积/结构统计（含 `pg_column_size` 的 DB 侧字节大小；仅 finished 写入）
@@ -329,18 +330,27 @@ Context 可见性（视图层）：
     - 下拉更新：传 `after_turn_id`（通常取上一页返回的 `after_turn_id`）→ 返回更新的 N 轮
   - 返回：`{ turn_ids:, before_turn_id:, after_turn_id:, transcript: }`（JSON 输出时 key 会序列化为 string）
 - `graph.transcript_page(subgraph_id:, ...)`：对 `subgraph.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
-- `graph.transcript_for(target_node_id, limit: nil, mode: :preview, include_deleted: false)`
+- `graph.transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview, include_deleted: false)`（安全默认：bounded window）
   - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
   - 默认不包含 `system_message/developer_message/task/summary`，不暴露 prompt 与 tool chain 细节
   - `context_excluded_at` 不影响 transcript（exclude 是 context-only）
+  - 默认使用 bounded window，并在候选 nodes 内只保留 target 的因果祖先闭包（`sequence/dependency`）+ target，避免把同 turn 的无关 sibling/并行分支混进 thread view
   - `agent_message/character_message` 可通过 metadata 显式进入 transcript：
     - `metadata["transcript_visible"] == true`
     - `metadata["transcript_preview"]`（可选 String，作为展示文本）
   - 终态可见性强化：当 `agent_message/character_message` 进入终态且 `metadata["reason"]` 或 `metadata["error"]` 存在时，即使没有 content 也应进入 transcript，并以安全预览文本展示（避免 “依赖失败导致下游 skipped 而 UI 空白”）
   - 决策权：transcript 的过滤/预览覆写由 `graph.transcript_include?` / `graph.transcript_preview_override` 提供（默认实现与行为规范一致；attachable 可覆写）
+- `graph.transcript_closure_for*`（危险）
+  - 祖先闭包 + topo sort 后再做 transcript 投影；仅用于审计/调试/离线任务
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
 > 推荐用法：UI 取最近记录优先用 `transcript_recent_turns`；需要 “锚定某个节点的精确视图” 再用 `transcript_for(target)`.
+
+## Subagent（App-level 组合）
+
+里程碑 1 不在 DAG 层引入跨图 edges/嵌套子图调度语义；推荐由 App 域用 “多 Conversation/Graph” 组合出 subagent（子代理/子会话）：
+
+- 见：`docs/dag_subagent_patterns.md`
 
 ## 子图压缩（Manual）
 

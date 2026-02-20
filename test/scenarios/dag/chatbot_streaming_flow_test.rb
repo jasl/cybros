@@ -59,10 +59,17 @@ class DAG::ChatbotStreamingFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, agent.state
       assert_equal "你好", agent.body_output["content"]
 
-      events = graph.node_event_page_for(agent.id)
-      output_deltas = events.select { |event| event.fetch("kind") == DAG::NodeEvent::OUTPUT_DELTA }
-      assert_equal ["你", "好"], output_deltas.map { |event| event.fetch("text") }
-      assert events.any? { |event| event.fetch("kind") == DAG::NodeEvent::PROGRESS }
+      output_deltas = graph.node_event_page_for(agent.id, kinds: [DAG::NodeEvent::OUTPUT_DELTA])
+      assert_equal [], output_deltas
+
+      compacted = graph.node_event_page_for(agent.id, kinds: [DAG::NodeEvent::OUTPUT_COMPACTED])
+      assert_equal 1, compacted.length
+      assert_equal 2, compacted.first.dig("payload", "chunks")
+      assert_equal "你好".bytesize, compacted.first.dig("payload", "bytes")
+      assert_equal Digest::SHA256.hexdigest("你好"), compacted.first.dig("payload", "sha256")
+
+      progress = graph.node_event_page_for(agent.id, kinds: [DAG::NodeEvent::PROGRESS])
+      assert progress.any?
 
       context = conversation.context_for(agent.id)
       context_ids = context.map { |node| node.fetch("node_id") }
