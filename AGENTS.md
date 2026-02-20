@@ -147,6 +147,23 @@ If you need a capability for the App, extend the **Public API** + add tests/docs
 #### Context Assembly
 When building context for an LLM call, the system walks from the target leaf node back to the root, collecting all nodes on the path. Summary nodes substitute for the lanes they represent.
 
+#### Turn semantics (current default)
+
+- Treat a user↔LLM exchange as a single `turn_id`: the `user_message`, the assistant loop/tool/task nodes, and the final `agent_message/character_message` share the same turn (do not split into separate user-turn + assistant-turn).
+- When executing a node and creating downstream nodes for that exchange, prefer `graph.mutate!(turn_id: node.turn_id) { |m| ... }` so the new nodes inherit the same turn.
+- UI primitives:
+  - “Messages list / fetch last N messages” → `lane.message_page(limit: ...)` (message-level keyset paging; does not guarantee turn alignment).
+  - “Transcript / scroll by turns” → `lane.transcript_page(limit_turns: ...)` (turn-level keyset paging).
+
+#### Safety limits (hard caps)
+
+- `lane.message_page(...)` has an internal “max scanned candidate nodes” safety belt, so a page may contain fewer than `limit` (extreme case: empty). ENV: `DAG_MAX_MESSAGE_PAGE_SCANNED_NODES`.
+- `lane.context_for(...)` / `graph.context_for(...)` have internal hard caps on candidate window size (nodes/edges); when exceeded they raise `DAG::SafetyLimits::Exceeded`. ENV: `DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES`.
+
+#### Change policy
+
+This is the current Milestone 1 design. If real product requirements make it hard to land features, destructive changes are allowed after discussion (keep code/tests/docs aligned; avoid long-lived compatibility layers).
+
 ### UUID Primary Keys
 
 All tables use UUIDs (UUIDv7 format, base36-encoded as 25-char strings):
