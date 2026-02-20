@@ -21,10 +21,10 @@ bin/ci
 ## DAG Engine Notes
 
 - Core DAG models live under `app/models/dag/*`.
-- Branch partitioning is modeled via `DAG::Lane`:
-  - Each node belongs to exactly one lane (`dag_nodes.lane_id`).
-  - `fork` creates a new `branch` lane + the first root node for that lane.
-  - `merge` creates a pending join `agent_message` node in the target lane (source lanes are not auto-archived).
+- Branch partitioning is modeled via `DAG::Subgraph`:
+  - Each node belongs to exactly one subgraph (`dag_nodes.subgraph_id`).
+  - `fork` creates a new `branch` subgraph + the first root node for that subgraph.
+  - `merge` creates a pending join `agent_message` node in the target subgraph (source subgraphs are not auto-archived).
 
 Design/spec docs:
 
