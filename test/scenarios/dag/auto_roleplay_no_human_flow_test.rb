@@ -44,7 +44,7 @@ class DAG::AutoRoleplayNoHumanFlowTest < ActiveSupport::TestCase
   test "auto without human: alternating character messages across multiple turns with transcript pagination" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    subgraph = graph.main_subgraph
+    lane = graph.main_lane
 
     turn_id = "0194f3c0-0000-7000-8000-00000000d100"
     user = nil
@@ -83,12 +83,12 @@ class DAG::AutoRoleplayNoHumanFlowTest < ActiveSupport::TestCase
       assert_equal 4, characters.length
       assert characters.all?(&:finished?)
 
-      assert_equal 4, subgraph.anchored_turn_count(include_deleted: true)
+      assert_equal 4, lane.anchored_turn_count(include_deleted: true)
 
-      page = subgraph.transcript_page(limit_turns: 2)
+      page = lane.transcript_page(limit_turns: 2)
       assert_equal 2, page.fetch("turn_ids").length
 
-      older = subgraph.transcript_page(limit_turns: 2, before_turn_id: page.fetch("before_turn_id"))
+      older = lane.transcript_page(limit_turns: 2, before_turn_id: page.fetch("before_turn_id"))
       assert_equal 2, older.fetch("turn_ids").length
 
       all_turn_ids = (older.fetch("turn_ids") + page.fetch("turn_ids"))

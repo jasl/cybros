@@ -17,7 +17,7 @@ module DAG
     enum :state, STATES.index_by(&:itself)
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :nodes
-    belongs_to :subgraph, class_name: "DAG::Subgraph", inverse_of: :nodes
+    belongs_to :lane, class_name: "DAG::Lane", inverse_of: :nodes
     belongs_to :turn,
                class_name: "DAG::Turn",
                foreign_key: :turn_id,
@@ -49,12 +49,12 @@ module DAG
     validates :state, inclusion: { in: STATES }
     validate :body_type_matches_node_type
     validate :pending_or_running_requires_executable_body
-    validate :turn_subgraph_must_be_consistent
-    validate :subgraph_must_be_writable, on: :create
+    validate :turn_lane_must_be_consistent
+    validate :lane_must_be_writable, on: :create
 
     scope :active, -> { where(compressed_at: nil) }
 
-    before_validation :ensure_subgraph
+    before_validation :ensure_lane
     before_validation :ensure_body
     after_create :ensure_turn_record!
 
@@ -121,7 +121,7 @@ module DAG
         if body&.class&.turn_anchor?
           DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
             graph: graph,
-            subgraph_id: subgraph_id,
+            lane_id: lane_id,
             turn_ids: [turn_id]
           )
         end
@@ -143,7 +143,7 @@ module DAG
         if body&.class&.turn_anchor?
           DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
             graph: graph,
-            subgraph_id: subgraph_id,
+            lane_id: lane_id,
             turn_ids: [turn_id]
           )
         end
@@ -526,20 +526,20 @@ module DAG
         end
       end
 
-      def ensure_subgraph
-        return if subgraph_id.present?
+      def ensure_lane
+        return if lane_id.present?
         return if graph.blank?
 
         if turn_id.present?
-          existing_subgraph_id =
-            graph.nodes.active.where(turn_id: turn_id).pick(:subgraph_id)
-          if existing_subgraph_id.present?
-            self.subgraph_id = existing_subgraph_id
+          existing_lane_id =
+            graph.nodes.active.where(turn_id: turn_id).pick(:lane_id)
+          if existing_lane_id.present?
+            self.lane_id = existing_lane_id
             return
           end
         end
 
-        self.subgraph_id = graph.main_subgraph.id
+        self.lane_id = graph.main_lane.id
       end
 
       def ensure_body
@@ -578,20 +578,20 @@ module DAG
         errors.add(:state, "can only be pending/awaiting_approval/running for executable nodes")
       end
 
-      def turn_subgraph_must_be_consistent
+      def turn_lane_must_be_consistent
         return if graph.blank?
         return if turn_id.blank?
-        return if subgraph_id.blank?
+        return if lane_id.blank?
 
         mismatch =
           graph.nodes.active
             .where(turn_id: turn_id)
             .where.not(id: id)
-            .where.not(subgraph_id: subgraph_id)
+            .where.not(lane_id: lane_id)
             .exists?
         return unless mismatch
 
-        errors.add(:subgraph_id, "must match existing nodes for this turn")
+        errors.add(:lane_id, "must match existing nodes for this turn")
       end
 
       def ensure_turn_record!
@@ -602,7 +602,7 @@ module DAG
             turn =
               graph.turns.create!(
                 id: turn_id,
-                subgraph_id: subgraph_id,
+                lane_id: lane_id,
                 anchored_seq: nil,
                 anchor_node_id: nil,
                 anchor_created_at: nil,
@@ -616,8 +616,8 @@ module DAG
         end
 
         raise "turn record is missing after create" if turn.nil?
-        if turn.subgraph_id.to_s != subgraph_id.to_s
-          raise "turn.subgraph_id mismatch turn_id=#{turn_id} expected=#{subgraph_id} actual=#{turn.subgraph_id}"
+        if turn.lane_id.to_s != lane_id.to_s
+          raise "turn.lane_id mismatch turn_id=#{turn_id} expected=#{lane_id} actual=#{turn.lane_id}"
         end
 
         return unless body&.class&.turn_anchor?
@@ -666,15 +666,15 @@ module DAG
       end
 
       def allocate_anchored_seq!
-        DAG::Subgraph.with_connection do |connection|
+        DAG::Lane.with_connection do |connection|
           graph_quoted = connection.quote(graph_id)
-          subgraph_quoted = connection.quote(subgraph_id)
+          lane_quoted = connection.quote(lane_id)
 
           sql = <<~SQL
-            UPDATE dag_subgraphs
+            UPDATE dag_lanes
                SET next_anchored_seq = next_anchored_seq + 1
              WHERE graph_id = #{graph_quoted}
-               AND id = #{subgraph_quoted}
+               AND id = #{lane_quoted}
             RETURNING next_anchored_seq
           SQL
 
@@ -682,15 +682,15 @@ module DAG
         end
       end
 
-      def subgraph_must_be_writable
-        return if subgraph.blank?
-        return if subgraph.archived_at.blank?
+      def lane_must_be_writable
+        return if lane.blank?
+        return if lane.archived_at.blank?
 
-        if turn_id.present? && subgraph.nodes.active.where(turn_id: turn_id).exists?
+        if turn_id.present? && lane.nodes.active.where(turn_id: turn_id).exists?
           return
         end
 
-        errors.add(:subgraph, "is archived")
+        errors.add(:lane, "is archived")
       end
 
       def visibility_mutation_allowed_now?

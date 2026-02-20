@@ -4,7 +4,7 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
   test "transcript_page and context_for handle 1000-turn linear chat without loading full graph" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    subgraph = graph.main_subgraph
+    lane = graph.main_lane
 
     turns = 1000
     base_time = Time.current - turns.seconds
@@ -34,7 +34,7 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
       turn_rows << {
         id: turn_id,
         graph_id: graph.id,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         anchored_seq: i + 1,
         anchor_node_id: user_node_id,
         anchor_created_at: at,
@@ -67,7 +67,7 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
       node_rows << {
         id: user_node_id,
         graph_id: graph.id,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
         metadata: {},
@@ -80,7 +80,7 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
       node_rows << {
         id: agent_node_id,
         graph_id: graph.id,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
         metadata: {},
@@ -119,9 +119,9 @@ class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
     DAG::Node.insert_all!(node_rows)
     DAG::Edge.insert_all!(edge_rows)
 
-    subgraph.update!(next_anchored_seq: turns)
+    lane.update!(next_anchored_seq: turns)
 
-    page = subgraph.transcript_page(limit_turns: 20)
+    page = lane.transcript_page(limit_turns: 20)
     assert_equal turn_ids.last(20), page.fetch("turn_ids")
     assert_equal 40, page.fetch("transcript").length
 

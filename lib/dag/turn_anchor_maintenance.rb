@@ -1,14 +1,14 @@
 module DAG
   class TurnAnchorMaintenance
-    def self.refresh_for_turn_ids!(graph:, subgraph_id:, turn_ids:)
-      new(graph: graph).refresh_for_turn_ids!(subgraph_id: subgraph_id, turn_ids: turn_ids)
+    def self.refresh_for_turn_ids!(graph:, lane_id:, turn_ids:)
+      new(graph: graph).refresh_for_turn_ids!(lane_id: lane_id, turn_ids: turn_ids)
     end
 
     def initialize(graph:)
       @graph = graph
     end
 
-    def refresh_for_turn_ids!(subgraph_id:, turn_ids:)
+    def refresh_for_turn_ids!(lane_id:, turn_ids:)
       turn_ids = Array(turn_ids).map(&:to_s).uniq
       return if turn_ids.empty?
 
@@ -17,7 +17,7 @@ module DAG
 
       DAG::Turn.with_connection do |connection|
         graph_quoted = connection.quote(@graph.id)
-        subgraph_quoted = connection.quote(subgraph_id)
+        lane_quoted = connection.quote(lane_id)
         now_quoted = connection.quote(Time.current)
 
         turn_id_values =
@@ -41,7 +41,7 @@ module DAG
               n.created_at AS anchor_created_at
             FROM dag_nodes n
             WHERE n.graph_id = #{graph_quoted}
-              AND n.subgraph_id = #{subgraph_quoted}
+              AND n.lane_id = #{lane_quoted}
               AND n.turn_id IN (SELECT turn_id FROM input_turn_ids)
               AND n.compressed_at IS NULL
               AND n.deleted_at IS NULL
@@ -55,7 +55,7 @@ module DAG
               n.created_at AS anchor_created_at
             FROM dag_nodes n
             WHERE n.graph_id = #{graph_quoted}
-              AND n.subgraph_id = #{subgraph_quoted}
+              AND n.lane_id = #{lane_quoted}
               AND n.turn_id IN (SELECT turn_id FROM input_turn_ids)
               AND n.compressed_at IS NULL
               AND n.node_type IN (#{type_list})
@@ -78,9 +78,9 @@ module DAG
                  anchor_node_id_including_deleted = updates.including_deleted_anchor_node_id,
                  anchor_created_at_including_deleted = updates.including_deleted_anchor_created_at,
                  updated_at = #{now_quoted}
-            FROM updates
+           FROM updates
            WHERE dag_turns.graph_id = #{graph_quoted}
-             AND dag_turns.subgraph_id = #{subgraph_quoted}
+             AND dag_turns.lane_id = #{lane_quoted}
              AND dag_turns.id = updates.turn_id
         SQL
 

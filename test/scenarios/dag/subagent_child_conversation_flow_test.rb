@@ -57,7 +57,7 @@ class DAG::SubagentChildConversationFlowTest < ActiveSupport::TestCase
       child_conversation_id = subagent.fetch("child_conversation_id")
 
       child = Conversation.find(child_conversation_id)
-      child_transcript = child.transcript_recent_turns(limit_turns: 10)
+      child_transcript = child.dag_graph.main_lane.transcript_recent_turns(limit_turns: 10)
 
       rendered =
         child_transcript.map do |context_node|
@@ -124,7 +124,7 @@ class DAG::SubagentChildConversationFlowTest < ActiveSupport::TestCase
       assert_includes agent.body_output.fetch("content"), "child: hello"
       assert_includes agent.body_output.fetch("content"), "child: world"
 
-      transcript = conversation.transcript_for(agent.id)
+      transcript = graph.transcript_for(agent.id)
       assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
 
       child_ids = task.reload.metadata.fetch("subagent")

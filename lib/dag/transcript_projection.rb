@@ -56,7 +56,7 @@ module DAG
         {
           "node_id" => node.id,
           "turn_id" => node.turn_id,
-          "subgraph_id" => node.subgraph_id,
+          "lane_id" => node.lane_id,
           "node_type" => node.node_type,
           "state" => node.state,
           "payload" => payload_hash,

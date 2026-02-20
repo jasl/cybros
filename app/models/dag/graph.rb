@@ -6,8 +6,8 @@ module DAG
 
     belongs_to :attachable, polymorphic: true, optional: true
 
-    has_many :subgraphs,
-             class_name: "DAG::Subgraph",
+    has_many :lanes,
+             class_name: "DAG::Lane",
              inverse_of: :graph
     has_many :turns,
              class_name: "DAG::Turn",
@@ -22,7 +22,7 @@ module DAG
              class_name: "DAG::Edge",
              inverse_of: :graph
 
-    after_create :ensure_main_subgraph
+    after_create :ensure_main_lane
     before_destroy :purge_graph_records
 
     def mutate!(turn_id: nil)
@@ -43,14 +43,14 @@ module DAG
       end
     end
 
-    def main_subgraph
-      subgraph = subgraphs.find_by(role: DAG::Subgraph::MAIN)
-      return subgraph if subgraph
+    def main_lane
+      lane = lanes.find_by(role: DAG::Lane::MAIN)
+      return lane if lane
 
       begin
-        subgraphs.create!(role: DAG::Subgraph::MAIN, metadata: {})
+        lanes.create!(role: DAG::Lane::MAIN, metadata: {})
       rescue ActiveRecord::RecordNotUnique
-        subgraphs.find_by!(role: DAG::Subgraph::MAIN)
+        lanes.find_by!(role: DAG::Lane::MAIN)
       end
     end
 
@@ -155,13 +155,13 @@ module DAG
       scope
     end
 
-    def awaiting_approval_page(limit: 50, after_node_id: nil, subgraph_id: nil)
+    def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
       limit = Integer(limit)
       raise ArgumentError, "limit must be > 0" if limit <= 0
 
       limit = [limit, 1000].min
 
-      scope = awaiting_approval_scope(subgraph_id: subgraph_id).order(:id)
+      scope = awaiting_approval_scope(lane_id: lane_id).order(:id)
 
       if after_node_id.present?
         scope = scope.where("dag_nodes.id > ?", after_node_id)
@@ -174,7 +174,7 @@ module DAG
           .pluck(
             Arel.sql("dag_nodes.id"),
             Arel.sql("dag_nodes.turn_id"),
-            Arel.sql("dag_nodes.subgraph_id"),
+            Arel.sql("dag_nodes.lane_id"),
             Arel.sql("dag_nodes.node_type"),
             Arel.sql("dag_nodes.state"),
             Arel.sql("dag_nodes.metadata"),
@@ -183,11 +183,11 @@ module DAG
             Arel.sql("dag_node_bodies.output_preview")
           )
 
-      rows.map do |(id, turn_id, subgraph_id, node_type, state, metadata, created_at, input, output_preview)|
+      rows.map do |(id, turn_id, lane_id, node_type, state, metadata, created_at, input, output_preview)|
         {
           "node_id" => id,
           "turn_id" => turn_id,
-          "subgraph_id" => subgraph_id,
+          "lane_id" => lane_id,
           "node_type" => node_type,
           "state" => state,
           "payload" => {
@@ -200,9 +200,9 @@ module DAG
       end
     end
 
-    def awaiting_approval_scope(subgraph_id: nil)
+    def awaiting_approval_scope(lane_id: nil)
       scope = nodes.active.where(state: DAG::Node::AWAITING_APPROVAL)
-      scope = scope.where(subgraph_id: subgraph_id) if subgraph_id.present?
+      scope = scope.where(lane_id: lane_id) if lane_id.present?
       scope
     end
 
@@ -342,7 +342,7 @@ module DAG
 
       node_records =
         node_scope
-          .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id)
+          .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
           .order(:id)
           .to_a
 
@@ -357,9 +357,9 @@ module DAG
       transcript_recent_turns(limit_turns: limit_turns, mode: :full, include_deleted: include_deleted)
     end
 
-    def transcript_page(subgraph_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
-      subgraph = subgraphs.find(subgraph_id)
-      subgraph.transcript_page(
+    def transcript_page(lane_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
+      lane = lanes.find(lane_id)
+      lane.transcript_page(
         limit_turns: limit_turns,
         before_turn_id: before_turn_id,
         after_turn_id: after_turn_id,
@@ -399,7 +399,7 @@ module DAG
     def apply_visibility_patches_if_idle!
       applied = 0
       now = Time.current
-      refresh_turn_ids_by_subgraph = Hash.new { |hash, key| hash[key] = [] }
+      refresh_turn_ids_by_lane = Hash.new { |hash, key| hash[key] = [] }
       turn_anchor_types = turn_anchor_node_types.map(&:to_s)
 
       DAG::NodeVisibilityPatch.where(graph_id: id).order(:updated_at, :id).lock.find_each do |patch|
@@ -438,7 +438,7 @@ module DAG
           )
 
           if turn_anchor_types.include?(node.node_type.to_s) && from["deleted_at"] != to["deleted_at"]
-            refresh_turn_ids_by_subgraph[node.subgraph_id.to_s] << node.turn_id.to_s
+            refresh_turn_ids_by_lane[node.lane_id.to_s] << node.turn_id.to_s
           end
 
           emit_event(
@@ -457,10 +457,10 @@ module DAG
         applied += 1
       end
 
-      refresh_turn_ids_by_subgraph.each do |subgraph_id, turn_ids|
+      refresh_turn_ids_by_lane.each do |lane_id, turn_ids|
         DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
           graph: self,
-          subgraph_id: subgraph_id,
+          lane_id: lane_id,
           turn_ids: turn_ids.uniq
         )
       end
@@ -527,19 +527,19 @@ module DAG
 
     def leaf_repair_node_attributes(leaf)
       node_type = default_leaf_repair_node_type
-      subgraph_archived = leaf.subgraph&.archived?
+      lane_archived = leaf.lane&.archived?
 
       metadata = { "generated_by" => "leaf_invariant" }
 
-      if subgraph_archived
+      if lane_archived
         now = Time.current
-        metadata["reason"] = "subgraph_archived"
+        metadata["reason"] = "lane_archived"
         metadata["transcript_preview"] = "Archived"
 
         {
           node_type: node_type,
           state: DAG::Node::FINISHED,
-          subgraph_id: leaf.subgraph_id,
+          lane_id: leaf.lane_id,
           finished_at: now,
           metadata: metadata,
         }
@@ -553,7 +553,7 @@ module DAG
         {
           node_type: node_type,
           state: DAG::Node::FINISHED,
-          subgraph_id: leaf.subgraph_id,
+          lane_id: leaf.lane_id,
           finished_at: now,
           metadata: metadata,
         }
@@ -561,7 +561,7 @@ module DAG
         {
           node_type: node_type,
           state: DAG::Node::PENDING,
-          subgraph_id: leaf.subgraph_id,
+          lane_id: leaf.lane_id,
           metadata: metadata,
         }
       end
@@ -807,14 +807,14 @@ module DAG
             WHERE dag_node_bodies.id = deleted_nodes.body_id
           SQL
 
-          connection.delete(<<~SQL.squish, "purge_dag_subgraphs")
-            DELETE FROM dag_subgraphs WHERE graph_id = #{graph_id_quoted}
+          connection.delete(<<~SQL.squish, "purge_dag_lanes")
+            DELETE FROM dag_lanes WHERE graph_id = #{graph_id_quoted}
           SQL
         end
       end
 
-      def ensure_main_subgraph
-        main_subgraph
+      def ensure_main_lane
+        main_lane
       end
   end
 end

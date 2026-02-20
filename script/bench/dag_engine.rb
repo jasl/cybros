@@ -58,7 +58,7 @@ measure("fanout_context_for") do
     graph.edges.create!(from_node_id: task.id, to_node_id: join.id, edge_type: DAG::Edge::DEPENDENCY)
   end
 
-  conversation.context_for(join.id)
+  graph.main_lane.context_for(join.id)
 end
 
 measure("scheduler_claim_100") do
@@ -73,7 +73,7 @@ end
 
 conversation = Conversation.create!(title: "bench-transcript-page")
 graph = conversation.dag_graph
-subgraph = graph.main_subgraph
+lane = graph.main_lane
 previous = nil
 
 200.times do |i|
@@ -83,7 +83,7 @@ previous = nil
     graph.nodes.create!(
       node_type: Messages::UserMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      subgraph_id: subgraph.id,
+      lane_id: lane.id,
       turn_id: turn_id,
       body_input: { "content" => "u#{i}" },
       metadata: {}
@@ -92,7 +92,7 @@ previous = nil
     graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::FINISHED,
-      subgraph_id: subgraph.id,
+      lane_id: lane.id,
       turn_id: turn_id,
       body_output: { "content" => "a#{i}" },
       metadata: {}
@@ -108,5 +108,5 @@ previous = nil
 end
 
 measure("transcript_page_last_20_of_200_turns") do
-  subgraph.transcript_page(limit_turns: 20)
+  lane.transcript_page(limit_turns: 20)
 end

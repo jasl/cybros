@@ -3,7 +3,7 @@ class AddDAGTurns < ActiveRecord::Migration[8.2]
     create_table :dag_turns, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
-      t.uuid :subgraph_id, null: false
+      t.uuid :lane_id, null: false
 
       t.bigint :anchored_seq
       t.check_constraint(
@@ -29,32 +29,32 @@ class AddDAGTurns < ActiveRecord::Migration[8.2]
 
       t.timestamps
 
-      t.index %i[graph_id subgraph_id], name: "index_dag_turns_graph_subgraph"
-      t.index %i[graph_id subgraph_id id], unique: true, name: "index_dag_turns_graph_subgraph_id_unique"
+      t.index %i[graph_id lane_id], name: "index_dag_turns_graph_lane"
+      t.index %i[graph_id lane_id id], unique: true, name: "index_dag_turns_graph_lane_id_unique"
 
-      t.index %i[graph_id subgraph_id anchored_seq],
+      t.index %i[graph_id lane_id anchored_seq],
               unique: true,
               where: "anchored_seq IS NOT NULL",
-              name: "index_dag_turns_graph_subgraph_anchored_seq_unique"
+              name: "index_dag_turns_graph_lane_anchored_seq_unique"
 
-      t.index %i[graph_id subgraph_id id],
+      t.index %i[graph_id lane_id id],
               where: "anchor_node_id IS NOT NULL",
-              name: "index_dag_turns_graph_subgraph_visible"
+              name: "index_dag_turns_graph_lane_visible"
 
       t.index %i[graph_id id],
               where: "anchor_node_id IS NOT NULL",
               name: "index_dag_turns_graph_visible"
     end
 
-    add_foreign_key :dag_turns, :dag_subgraphs,
-                    column: %i[graph_id subgraph_id],
+    add_foreign_key :dag_turns, :dag_lanes,
+                    column: %i[graph_id lane_id],
                     primary_key: %i[graph_id id],
-                    name: "fk_dag_turns_subgraph_graph_scoped",
+                    name: "fk_dag_turns_lane_graph_scoped",
                     on_delete: :cascade
 
     add_foreign_key :dag_nodes, :dag_turns,
-                    column: %i[graph_id subgraph_id turn_id],
-                    primary_key: %i[graph_id subgraph_id id],
+                    column: %i[graph_id lane_id turn_id],
+                    primary_key: %i[graph_id lane_id id],
                     name: "fk_dag_nodes_turn_graph_scoped",
                     deferrable: :deferred
   end

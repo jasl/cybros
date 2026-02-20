@@ -22,9 +22,9 @@
   - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
   - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
   - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
-  - `dag_nodes (graph_id, subgraph_id)` → `dag_subgraphs (graph_id, id)`（Subgraph 分区一致性；禁止跨图 subgraph 引用）
-  - `dag_turns (graph_id, subgraph_id)` → `dag_subgraphs (graph_id, id)`（Turn 必须属于同一 graph 的某条 subgraph）
-  - `dag_nodes (graph_id, subgraph_id, turn_id)` → `dag_turns (graph_id, subgraph_id, id)`（Turn 一等公民；保证 node 的 turn/subgraph 一致性）
+  - `dag_nodes (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Lane 分区一致性；禁止跨图 lane 引用）
+  - `dag_turns (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Turn 必须属于同一 graph 的某条 lane）
+  - `dag_nodes (graph_id, lane_id, turn_id)` → `dag_turns (graph_id, lane_id, id)`（Turn 一等公民；保证 node 的 turn/lane 一致性）
 - 压缩字段一致性（DB check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
 
 ## 领域模型与存储
@@ -44,22 +44,22 @@
 - `dag_node_body_namespace`：返回 NodeBody 命名空间（Module，例如 `Messages`），用于按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`
 - `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
 
-### 分区：`DAG::Subgraph`
+### 分区：`DAG::Lane`
 
-- 模型：`app/models/dag/subgraph.rb`
-- 表：`dag_subgraphs`
+- 模型：`app/models/dag/lane.rb`
+- 表：`dag_lanes`
 - 目的：为同一张图中的所有分支提供“分区/染色”能力（Thread-like）。
 - 关键规则：
-  - **一个 node 只能属于一个 subgraph**（`dag_nodes.subgraph_id NOT NULL`）。
-  - 每个 graph 自动拥有且仅拥有一个 `main` subgraph（用于主线对话）。
-  - `branch` subgraph 通过 fork 创建：在创建分支的同时创建 subgraph，并记录分支锚点与子图根节点。
-  - subgraph 可归档（`archived_at`）：归档后**禁止开启新 turn**（新回合的新节点），但允许同一 turn 的在途执行/工具链继续补节点并跑完（用于“归档但允许收尾”的产品语义）。
+  - **一个 node 只能属于一个 lane**（`dag_nodes.lane_id NOT NULL`）。
+  - 每个 graph 自动拥有且仅拥有一个 `main` lane（用于主线对话）。
+  - `branch` lane 通过 fork 创建：在创建分支的同时创建 lane，并记录分支锚点与子图根节点。
+  - lane 可归档（`archived_at`）：归档后**禁止开启新 turn**（新回合的新节点），但允许同一 turn 的在途执行/工具链继续补节点并跑完（用于“归档但允许收尾”的产品语义）。
 - 结构/索引字段（引擎层）：
   - `role`：`main|branch`
-  - `parent_subgraph_id`：subgraph 树结构（用于 UI 展示对话树；不影响因果语义）
+  - `parent_lane_id`：lane 树结构（用于 UI 展示对话树；不影响因果语义）
   - `forked_from_node_id`：该 branch 从哪个 node fork 出来（分支锚点）
   - `root_node_id`：fork 创建的第一条新 node（子图头）
-  - `merged_into_subgraph_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source subgraph 时，用于记录“归档并合并进哪个 subgraph”）
+  - `merged_into_lane_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source lane 时，用于记录“归档并合并进哪个 lane”）
   - `next_anchored_seq`：单调计数器（为 turn 的 `anchored_seq` 分配序号）
   - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Topic`）
   - `metadata`：JSONB 扩展点
@@ -73,8 +73,8 @@
   - 支持“无 user 回合的纯角色互聊 / 系统自动消息 / merge/join 等只有 assistant 消息的回合”
 - 关键字段：
   - `id`：turn_id（UUIDv7）
-  - `graph_id` / `subgraph_id`：turn 归属（一个 turn 必须属于某条 subgraph）
-  - `anchored_seq`：该 subgraph 内的 1-based 序号（物化；只写一次；不回填不重算）
+  - `graph_id` / `lane_id`：turn 归属（一个 turn 必须属于某条 lane）
+  - `anchored_seq`：该 lane 内的 1-based 序号（物化；只写一次；不回填不重算）
   - `anchor_node_id` / `anchor_created_at`：该 turn 的“可见锚点”（Active + 非 deleted；由 NodeBody hooks `turn_anchor?` 决定；用于 turn 可见性判定）
   - `anchor_node_id_including_deleted` / `anchor_created_at_including_deleted`：包含 soft-delete 的锚点（仍不含 compressed）
   - `metadata`：JSONB 扩展点
@@ -87,7 +87,7 @@
   - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
   - `state`：`pending | awaiting_approval | running | finished | errored | rejected | skipped | stopped`
   - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享；DB 层外键引用 `dag_turns`）
-  - `subgraph_id`：Subgraph 分区（用于 UI 染色、分支索引、只读门禁）
+  - `lane_id`：Lane 分区（用于 UI 染色、分支索引、只读门禁）
   - `metadata`：JSONB
   - `retry_of_id`：重试 lineage
   - `compressed_at / compressed_by_id`：压缩标记
@@ -273,10 +273,10 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 
 ### context_for（bounded window）
 
-- 选择与 target 相关的 subgraphs（target subgraph 的 parent chain + incoming blocking source nodes（`sequence/dependency`）所在 subgraphs 的 parent chain），并为每段 subgraph 计算 cutoff turn
-- 从每段 subgraph 中取 `turn_id <= cutoff_turn_id` 的 anchored turns（按 `dag_turns.id` keyset；可见性依赖 `dag_turns.anchor_node_id`），合并后取最近 `limit_turns`
+- 选择与 target 相关的 lanes（target lane 的 parent chain + incoming blocking source nodes（`sequence/dependency`）所在 lanes 的 parent chain），并为每段 lane 计算 cutoff turn
+- 从每段 lane 中取 `turn_id <= cutoff_turn_id` 的 anchored turns（按 `dag_turns.id` keyset；可见性依赖 `dag_turns.anchor_node_id`），合并后取最近 `limit_turns`
 - 强制 pin：
-  - `target.turn_id` 与各 subgraph 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）
+  - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）
   - 全图 Active 的 `system_message/developer_message` 与最近 3 个 `summary`
 - 在选中的 nodes 子图内对 `sequence/dependency` 做稳定 topo sort，然后做输出过滤（见下）
 
@@ -288,7 +288,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
    - 实现：先加载该 graph 的 active blocking edges，然后从 target 反向遍历得到 ancestor closure（避免 recursive CTE 的 plan 波动）
 2. 过滤已压缩节点：默认只包含 Active nodes（`compressed_at IS NULL`）
 3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
-4. 输出结构（默认 preview）：`[{node_id, turn_id, subgraph_id, node_type, state, payload:{input,output_preview}, metadata}]`
+4. 输出结构（默认 preview）：`[{node_id, turn_id, lane_id, node_type, state, payload:{input,output_preview}, metadata}]`
 
 `context_for_full` / `context_closure_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
 
@@ -315,21 +315,25 @@ Context 可见性（视图层）：
 
 ## Transcript（对话记录视图）
 
-为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（subgraph）” 等需求，DAG 提供 transcript 投影：
+为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（lane）” 等需求，DAG 提供 transcript 投影：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
+  - **graph-level**：会跨 lane 混合可见 turns；Lane-first 的产品 UI 通常不应直接使用（除非明确需要“全图最近记录”）。
   - 读取 `dag_turns` 的 “可见 turn” 索引（`anchor_node_id` / `anchor_node_id_including_deleted`）
   - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
   - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
   - 不依赖 `context_closure_for` 的祖先闭包（适合大图场景的 “最近记录” UI）
-- `subgraph.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
-  - **subgraph-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 subgraph 的 turn 混在一起）
+- `lane.message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview, include_deleted: false)`
+  - **lane-scoped**：按 message（transcript candidates）keyset 分页，满足 “取最近 X 条消息” 的经典消息列表体验。
+  - 同样受 transcript 投影规则影响（默认不包含 `system/developer/task/summary`，以及“不可读的中间 agent_message”）。
+- `lane.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
+  - **lane-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 lane 的 turn 混在一起）
   - keyset pagination：
-    - 初次加载：不传 `before_turn_id/after_turn_id` → 返回该 subgraph 最近 N 轮
+    - 初次加载：不传 `before_turn_id/after_turn_id` → 返回该 lane 最近 N 轮
     - 上拉更老：传 `before_turn_id`（通常取上一页返回的 `before_turn_id`）→ 返回更早的 N 轮
     - 下拉更新：传 `after_turn_id`（通常取上一页返回的 `after_turn_id`）→ 返回更新的 N 轮
   - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
-- `graph.transcript_page(subgraph_id:, ...)`：对 `subgraph.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
+- `graph.transcript_page(lane_id:, ...)`：对 `lane.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
 - `graph.transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview, include_deleted: false)`（安全默认：bounded window）
   - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
   - 默认不包含 `system_message/developer_message/task/summary`，不暴露 prompt 与 tool chain 细节
@@ -344,7 +348,7 @@ Context 可见性（视图层）：
   - 祖先闭包 + topo sort 后再做 transcript 投影；仅用于审计/调试/离线任务
 
 > transcript 是视图层 API，不改变 DAG 结构与调度语义。
-> 推荐用法：UI 取最近记录优先用 `transcript_recent_turns`；需要 “锚定某个节点的精确视图” 再用 `transcript_for(target)`.
+> 推荐用法（Lane-first）：UI 取最近记录优先用 `lane.message_page` 或 `lane.transcript_page`；需要 “锚定某个节点的精确视图” 再用 `graph.transcript_for(target)`。
 
 ## Subagent（App-level 组合）
 
@@ -375,7 +379,7 @@ Context 可见性（视图层）：
 
 ## 可视化（Mermaid）
 
-入口：`DAG::Graph#to_mermaid`（`Conversation#to_mermaid` delegate）
+入口：`DAG::Graph#to_mermaid`（危险操作；仅用于后台/诊断/离线任务）
 
 实现：`lib/dag/visualization/mermaid_exporter.rb`
 
@@ -403,4 +407,4 @@ bin/rails runner script/bench/dag_engine.rb
 ## 当前已知限制（里程碑 1 范围内）
 
 - executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
-- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf。分支合并通过在 target subgraph 创建 `dependency/sequence` join 节点表达；是否归档 source subgraphs 属于产品选择（见 `DAG::Mutations#merge_subgraphs!`、`DAG::Mutations#archive_subgraph!` 与场景测试）。
+- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf。分支合并通过在 target lane 创建 `dependency/sequence` join 节点表达；是否归档 source lanes 属于产品选择（见 `DAG::Mutations#merge_lanes!`、`DAG::Mutations#archive_lane!` 与场景测试）。

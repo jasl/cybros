@@ -4,7 +4,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
   test "edit replaces the turn anchor_node_id to point at the new visible anchor" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    subgraph = graph.main_subgraph
+    lane = graph.main_lane
 
     turn_id = "0194f3c0-0000-7000-8000-00000000fa01"
 
@@ -12,7 +12,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_id,
         body_input: { "content" => "u1" },
         metadata: {}
@@ -21,7 +21,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_id,
         body_output: { "content" => "a1" },
         metadata: {}
@@ -38,14 +38,14 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
     turn = graph.turns.find(turn_id)
     assert_equal edited.id, turn.anchor_node_id
 
-    page = subgraph.transcript_page(limit_turns: 10)
+    page = lane.transcript_page(limit_turns: 10)
     assert_includes page.fetch("turn_ids"), turn_id
   end
 
   test "retry replaces the turn anchor_node_id when the previous anchor is archived" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    subgraph = graph.main_subgraph
+    lane = graph.main_lane
 
     turn_id = "0194f3c0-0000-7000-8000-00000000fa02"
 
@@ -53,7 +53,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::ERRORED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_id,
         body_output: {},
         metadata: { "error" => "boom" }

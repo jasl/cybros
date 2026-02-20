@@ -19,9 +19,9 @@
 
 典型读 API 选择：
 
-- `child_conversation.transcript_recent_turns(limit_turns: N)`（最常用）
-- `child_conversation.dag_graph.main_subgraph.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
-- 若要“锚定某个节点做审计”：`child_conversation.transcript_for(target_node_id, limit_turns: N)`
+- `child_conversation.dag_graph.main_lane.transcript_recent_turns(limit_turns: N)`（最常用）
+- `child_conversation.dag_graph.main_lane.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
+- 若要“锚定某个节点做审计”：`child_conversation.dag_graph.transcript_for(target_node_id, limit_turns: N)`
 
 ## 2) 父子图之间如何等待/同步？
 
@@ -48,4 +48,3 @@ v1 不提供跨图 edges；推荐由 App executor 定义同步策略：
 - 父图 `task` 创建 child Conversation/Graph
 - 父图 `agent_message` 用 bounded API 读取子图 transcript 并输出总结
 - 父/子两张图的 `GraphAudit.scan` 均为空
-

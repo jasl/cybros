@@ -4,7 +4,7 @@ This file provides guidance to AI coding agents working with this repository.
 
 ## What is Cybros?
 
-Cybros is an experimental AI Agent platform that models agent conversations as dynamic Directed Acyclic Graphs (DAGs). Instead of treating agent interactions as linear chat logs, Cybros represents every action — user messages, agent responses, tool calls, sub-agent tasks, and context summaries — as typed nodes in a DAG. A workflow engine schedules agent execution based on graph topology, enabling parallel task execution, dependency tracking, conversation branching, and subgraph compression for context management.
+Cybros is an experimental AI Agent platform that models agent conversations as dynamic Directed Acyclic Graphs (DAGs). Instead of treating agent interactions as linear chat logs, Cybros represents every action — user messages, agent responses, tool calls, sub-agent tasks, and context summaries — as typed nodes in a DAG. A workflow engine schedules agent execution based on graph topology, enabling parallel task execution, dependency tracking, conversation branching, and lane compression for context management.
 
 The platform is multi-tenant (URL path-based) and designed for observability: the DAG structure makes it possible to visualize, monitor, and audit every step of an agent's reasoning and actions.
 
@@ -98,6 +98,19 @@ When working on DAG-related code (engine, app integration, tests, scripts):
 
 Doc: `docs/dag_public_api.md`
 
+### DAG API safety tiers（very important）
+
+When building App features (controllers/views/services), treat the DAG engine as **Lane-first**:
+
+- **App-safe (user sync requests)**: only use `DAG::Lane` / `DAG::Turn` primitives (keyset paging + bounded limits), plus bounded mutations (`fork/merge/archive`, node commands).
+- **Dangerous/internal (admin/job/diagnostics only)**: graph-wide closure/export/visualization/audit/repair. Do not call these from user-facing request paths:
+  - `DAG::Graph#context_closure_for*`
+  - `DAG::Graph#transcript_closure_for*`
+  - `DAG::Graph#to_mermaid(...)`
+  - `DAG::GraphAudit.scan(...)` on large graphs
+
+If you need a capability for the App, extend the **Public API** + add tests/docs, instead of reaching into internal tables/SQL.
+
 #### Node Types
 - `system_message` — System prompt / global rules (not executable)
 - `developer_message` — Developer prompt / product constraints (not executable)
@@ -105,7 +118,7 @@ Doc: `docs/dag_public_api.md`
 - `agent_message` — Agent's response to the user
 - `character_message` — Roleplay / multi-actor message (executable)
 - `task` — An executable action (tool call, MCP request, skill invocation)
-- `summary` — Compressed representation of a subgraph (for context economy)
+- `summary` — Compressed representation of a lane (for context economy)
 
 #### Node States
 - `pending` — Created but not yet processed
@@ -126,13 +139,13 @@ Doc: `docs/dag_public_api.md`
 1. **Dynamic**: Nodes are added as the conversation progresses; no predefined end state
 2. **Valid at all times**: Every leaf node must be an `agent_message`/`character_message` or be in a `pending`/`awaiting_approval`/`running` state
 3. **Parallel execution**: Independent sibling nodes (same dependencies) execute concurrently
-4. **Subgraph compression**: Completed branches can be replaced with a `summary` node to save context
+4. **Lane compression**: Completed branches can be replaced with a `summary` node to save context
 5. **Non-destructive compression**: Original nodes are marked `compressed`, not deleted (audit trail)
 6. **Branching**: Users can fork from any node, creating a new path with inherited context
 7. **Retry**: Failed agent nodes can be retried, creating new attempt nodes
 
 #### Context Assembly
-When building context for an LLM call, the system walks from the target leaf node back to the root, collecting all nodes on the path. Summary nodes substitute for the subgraphs they represent.
+When building context for an LLM call, the system walks from the target leaf node back to the root, collecting all nodes on the path. Summary nodes substitute for the lanes they represent.
 
 ### UUID Primary Keys
 

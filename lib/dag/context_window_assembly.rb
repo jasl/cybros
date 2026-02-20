@@ -7,13 +7,14 @@ module DAG
 
     def initialize(graph:)
       @graph = graph
-      @subgraph_cache = {}
+      @lane_cache = {}
       @node_cache = {}
     end
 
     def call(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, mode: :preview, include_excluded: false, include_deleted: false)
       limit_turns = Integer(limit_turns)
       raise ArgumentError, "limit_turns must be > 0" if limit_turns <= 0
+      limit_turns = [limit_turns, 1000].min
 
       target = load_target_node(target_node_id)
       return [] if target.nil?
@@ -58,6 +59,7 @@ module DAG
     def node_scope_for(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, include_excluded: false, include_deleted: false)
       limit_turns = Integer(limit_turns)
       raise ArgumentError, "limit_turns must be > 0" if limit_turns <= 0
+      limit_turns = [limit_turns, 1000].min
 
       target = load_target_node(target_node_id)
       return @graph.nodes.none if target.nil?
@@ -85,26 +87,26 @@ module DAG
 
     private
 
-      Segment = Data.define(:subgraph_id, :cutoff_turn_id)
+      Segment = Data.define(:lane_id, :cutoff_turn_id)
 
       def load_target_node(target_node_id)
         @graph.nodes.active
           .where(id: target_node_id)
-          .select(:id, :subgraph_id, :turn_id)
+          .select(:id, :lane_id, :turn_id)
           .first
       end
 
       def segments_for_target(target)
         segments = []
 
-        segments.concat(subgraph_chain_segments(cutoff_node: target))
+        segments.concat(lane_chain_segments(cutoff_node: target))
 
         blocking_sources = incoming_blocking_source_nodes(target_id: target.id)
         blocking_sources.each do |source|
-          segments.concat(subgraph_chain_segments(cutoff_node: source))
+          segments.concat(lane_chain_segments(cutoff_node: source))
         end
 
-        segments.uniq { |segment| [segment.subgraph_id.to_s, segment.cutoff_turn_id.to_s] }
+        segments.uniq { |segment| [segment.lane_id.to_s, segment.cutoff_turn_id.to_s] }
       end
 
       def incoming_blocking_source_nodes(target_id:)
@@ -118,46 +120,46 @@ module DAG
 
         @graph.nodes.active
           .where(id: from_ids)
-          .select(:id, :subgraph_id, :turn_id)
+          .select(:id, :lane_id, :turn_id)
           .to_a
       end
 
-      def subgraph_chain_segments(cutoff_node:)
-        subgraph_id = cutoff_node.subgraph_id
-        subgraph = subgraph_record(subgraph_id)
-        return [] if subgraph.nil?
+      def lane_chain_segments(cutoff_node:)
+        lane_id = cutoff_node.lane_id
+        lane = lane_record(lane_id)
+        return [] if lane.nil?
 
         segments = []
         visited = {}
 
-        current_subgraph = subgraph
+        current_lane = lane
         current_cutoff_node = cutoff_node
 
         loop do
-          break if current_subgraph.nil?
-          break if visited[current_subgraph.id]
+          break if current_lane.nil?
+          break if visited[current_lane.id]
 
-          visited[current_subgraph.id] = true
+          visited[current_lane.id] = true
 
           segments << Segment.new(
-            subgraph_id: current_subgraph.id,
+            lane_id: current_lane.id,
             cutoff_turn_id: current_cutoff_node.turn_id
           )
 
-          parent_subgraph_id = current_subgraph.parent_subgraph_id
-          break if parent_subgraph_id.blank?
+          parent_lane_id = current_lane.parent_lane_id
+          break if parent_lane_id.blank?
 
-          fork_node_id = current_subgraph.forked_from_node_id
+          fork_node_id = current_lane.forked_from_node_id
           break if fork_node_id.blank?
 
-          parent_subgraph = subgraph_record(parent_subgraph_id)
-          break if parent_subgraph.nil?
+          parent_lane = lane_record(parent_lane_id)
+          break if parent_lane.nil?
 
           fork_node = node_record(fork_node_id)
           break if fork_node.nil?
-          break if fork_node.subgraph_id.to_s != parent_subgraph.id.to_s
+          break if fork_node.lane_id.to_s != parent_lane.id.to_s
 
-          current_subgraph = parent_subgraph
+          current_lane = parent_lane
           current_cutoff_node = fork_node
         end
 
@@ -180,10 +182,10 @@ module DAG
       def window_turn_ids_for_segments(segments, limit_turns:, include_deleted:)
         segments =
           segments
-            .group_by(&:subgraph_id)
+            .group_by(&:lane_id)
             .values
-            .map do |subgraph_segments|
-              subgraph_segments.max_by { |segment| segment.cutoff_turn_id.to_s }
+            .map do |lane_segments|
+              lane_segments.max_by { |segment| segment.cutoff_turn_id.to_s }
             end
 
         turn_ids =
@@ -210,7 +212,7 @@ module DAG
         visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
 
         @graph.turns
-          .where(subgraph_id: segment.subgraph_id)
+          .where(lane_id: segment.lane_id)
           .where.not(visibility_column => nil)
           .where("dag_turns.id <= ?", cutoff_turn_id)
           .order(id: :desc)
@@ -238,7 +240,7 @@ module DAG
         node_records.concat(
           @graph.nodes.active
             .where(turn_id: turn_ids)
-            .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
             .to_a
         )
 
@@ -246,7 +248,7 @@ module DAG
           node_records.concat(
             @graph.nodes.active
               .where(id: pinned_node_ids)
-              .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+              .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
               .to_a
           )
         end
@@ -301,7 +303,7 @@ module DAG
         {
           "node_id" => node.id,
           "turn_id" => node.turn_id,
-          "subgraph_id" => node.subgraph_id,
+          "lane_id" => node.lane_id,
           "node_type" => node.node_type,
           "state" => node.state,
           "payload" => payload_hash,
@@ -309,12 +311,12 @@ module DAG
         }
       end
 
-      def subgraph_record(subgraph_id)
-        subgraph_id = subgraph_id.to_s
-        @subgraph_cache[subgraph_id] ||=
-          @graph.subgraphs
-            .where(id: subgraph_id)
-            .select(:id, :parent_subgraph_id, :forked_from_node_id)
+      def lane_record(lane_id)
+        lane_id = lane_id.to_s
+        @lane_cache[lane_id] ||=
+          @graph.lanes
+            .where(id: lane_id)
+            .select(:id, :parent_lane_id, :forked_from_node_id)
             .first
       end
 
@@ -323,7 +325,7 @@ module DAG
         @node_cache[node_id] ||=
           @graph.nodes
             .where(id: node_id)
-            .select(:id, :subgraph_id, :turn_id)
+            .select(:id, :lane_id, :turn_id)
             .first
       end
   end

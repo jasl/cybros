@@ -20,7 +20,7 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
 
     graph.edges.create!(from_node_id: system.id, to_node_id: developer.id, edge_type: DAG::Edge::SEQUENCE)
 
-    mermaid = conversation.to_mermaid
+    mermaid = graph.to_mermaid
 
     assert_includes mermaid, "system: be helpful"
     assert_includes mermaid, "developer: answer in Chinese"
@@ -47,7 +47,7 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
       metadata: { "branch_kinds" => ["fork", "retry"] }
     )
 
-    mermaid = conversation.to_mermaid
+    mermaid = graph.to_mermaid
 
     assert_includes mermaid, "flowchart TD"
     assert_includes mermaid, "branch:fork"

@@ -1,10 +1,10 @@
 require "test_helper"
 
-class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
+class DAG::LaneTurnsTest < ActiveSupport::TestCase
   test "anchored_turn_count and anchored_turn_seq include compressed and soft-deleted turns" do
     conversation = Conversation.create!
     graph = conversation.dag_graph
-    subgraph = graph.main_subgraph
+    lane = graph.main_lane
 
     t1 = Time.current - 3.minutes
     t2 = Time.current - 2.minutes
@@ -18,7 +18,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_1,
         body_input: { "content" => "u1" },
         metadata: {},
@@ -29,7 +29,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_1,
         body_output: { "content" => "a1" },
         metadata: {},
@@ -41,7 +41,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_2,
         body_input: { "content" => "u2" },
         metadata: {},
@@ -52,7 +52,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_2,
         body_output: { "content" => "a2" },
         metadata: {},
@@ -64,7 +64,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::UserMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_3,
         body_input: { "content" => "u3" },
         metadata: {},
@@ -75,7 +75,7 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
       graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
         state: DAG::Node::FINISHED,
-        subgraph_id: subgraph.id,
+        lane_id: lane.id,
         turn_id: turn_3,
         body_output: { "content" => "a3" },
         metadata: {},
@@ -95,20 +95,20 @@ class DAG::SubgraphTurnsTest < ActiveSupport::TestCase
     user_2.soft_delete!
     assert user_2.reload.deleted_at.present?
 
-    all_turns = subgraph.anchored_turn_page(limit: 10, include_deleted: true).fetch("turns")
+    all_turns = lane.anchored_turn_page(limit: 10, include_deleted: true).fetch("turns")
     assert_equal 3, all_turns.length
     assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch("turn_id") }
     assert_equal [1, 2, 3], all_turns.map { |row| row.fetch("anchored_seq") }
 
-    visible = subgraph.anchored_turn_page(limit: 10, include_deleted: false).fetch("turns")
+    visible = lane.anchored_turn_page(limit: 10, include_deleted: false).fetch("turns")
     assert_equal [turn_2, turn_3], visible.map { |row| row.fetch("turn_id") }
     assert_equal [2, 3], visible.map { |row| row.fetch("anchored_seq") }
 
-    assert_equal 3, subgraph.anchored_turn_count(include_deleted: true)
-    assert_equal 2, subgraph.anchored_turn_count(include_deleted: false)
+    assert_equal 3, lane.anchored_turn_count(include_deleted: true)
+    assert_equal 2, lane.anchored_turn_count(include_deleted: false)
 
-    assert_equal 1, subgraph.anchored_turn_seq_for(turn_1, include_deleted: true)
-    assert_nil subgraph.anchored_turn_seq_for(turn_1, include_deleted: false)
-    assert_equal 2, subgraph.anchored_turn_seq_for(turn_2, include_deleted: false)
+    assert_equal 1, lane.anchored_turn_seq_for(turn_1, include_deleted: true)
+    assert_nil lane.anchored_turn_seq_for(turn_1, include_deleted: false)
+    assert_equal 2, lane.anchored_turn_seq_for(turn_2, include_deleted: false)
   end
 end

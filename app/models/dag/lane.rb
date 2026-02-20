@@ -1,6 +1,6 @@
 module DAG
-  class Subgraph < ApplicationRecord
-    self.table_name = "dag_subgraphs"
+  class Lane < ApplicationRecord
+    self.table_name = "dag_lanes"
 
     MAIN = "main"
     BRANCH = "branch"
@@ -9,38 +9,105 @@ module DAG
 
     enum :role, ROLES.index_by(&:itself)
 
-    belongs_to :graph, class_name: "DAG::Graph", inverse_of: :subgraphs
+    belongs_to :graph, class_name: "DAG::Graph", inverse_of: :lanes
 
-    belongs_to :parent_subgraph, class_name: "DAG::Subgraph", optional: true
-    has_many :child_subgraphs,
-             class_name: "DAG::Subgraph",
-             foreign_key: :parent_subgraph_id,
+    belongs_to :parent_lane, class_name: "DAG::Lane", optional: true
+    has_many :child_lanes,
+             class_name: "DAG::Lane",
+             foreign_key: :parent_lane_id,
              dependent: :nullify,
-             inverse_of: :parent_subgraph
+             inverse_of: :parent_lane
 
     belongs_to :forked_from_node, class_name: "DAG::Node", optional: true
     belongs_to :root_node, class_name: "DAG::Node", optional: true
-    belongs_to :merged_into_subgraph, class_name: "DAG::Subgraph", optional: true
+    belongs_to :merged_into_lane, class_name: "DAG::Lane", optional: true
 
     belongs_to :attachable, polymorphic: true, optional: true
 
     has_many :nodes,
              class_name: "DAG::Node",
-             inverse_of: :subgraph
+             inverse_of: :lane
     has_many :turns,
              class_name: "DAG::Turn",
-             inverse_of: :subgraph
+             inverse_of: :lane
 
     validates :role, inclusion: { in: ROLES }
-    validate :subgraph_relationships_must_match_graph
+    validate :lane_relationships_must_match_graph
 
     def archived?
       archived_at.present?
     end
 
+    def awaiting_approval_page(limit: 50, after_node_id: nil)
+      graph.awaiting_approval_page(limit: limit, after_node_id: after_node_id, lane_id: id)
+    end
+
+    def awaiting_approval_scope
+      graph.awaiting_approval_scope(lane_id: id)
+    end
+
+    def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
+      graph.node_event_page_for(node_id, after_event_id: after_event_id, limit: limit, kinds: kinds)
+    end
+
+    def node_event_scope_for(node_id, kinds: nil)
+      graph.node_event_scope_for(node_id, kinds: kinds)
+    end
+
+    def context_for(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      mode: :preview,
+      include_excluded: false,
+      include_deleted: false
+    )
+      assert_target_node_belongs_to_lane!(target_node_id)
+
+      DAG::ContextWindowAssembly.new(graph: graph).call(
+        target_node_id,
+        limit_turns: limit_turns,
+        mode: mode,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def context_for_full(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      include_excluded: false,
+      include_deleted: false
+    )
+      context_for(
+        target_node_id,
+        limit_turns: limit_turns,
+        mode: :full,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
+    def context_node_scope_for(
+      target_node_id,
+      limit_turns: DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+      include_excluded: false,
+      include_deleted: false
+    )
+      assert_target_node_belongs_to_lane!(target_node_id)
+
+      DAG::ContextWindowAssembly.new(graph: graph).node_scope_for(
+        target_node_id,
+        limit_turns: limit_turns,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted
+      )
+    end
+
     def anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
       limit = Integer(limit)
       return { "turns" => [], "before_seq" => nil, "after_seq" => nil } if limit <= 0
+
+      limit = [limit, 1000].min
 
       before_seq = before_seq&.to_i
       after_seq = after_seq&.to_i
@@ -138,6 +205,84 @@ module DAG
       }
     end
 
+    def message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview, include_deleted: false)
+      limit = Integer(limit)
+      return empty_message_page if limit <= 0
+
+      limit = [limit, 1000].min
+
+      before_message_id = before_message_id&.to_s
+      after_message_id = after_message_id&.to_s
+
+      if before_message_id.present? && after_message_id.present?
+        raise ArgumentError, "before_message_id and after_message_id are mutually exclusive"
+      end
+
+      candidate_types = graph.transcript_candidate_node_types
+      return empty_message_page if candidate_types.empty?
+
+      scope = nodes.active.where(node_type: candidate_types)
+      scope = scope.where(deleted_at: nil) unless include_deleted
+
+      cursor_message_id = before_message_id || after_message_id
+      if cursor_message_id.present?
+        unless scope.where(id: cursor_message_id).exists?
+          raise ArgumentError, "cursor message_id is unknown or not visible"
+        end
+      end
+
+      projection = DAG::TranscriptProjection.new(graph: graph)
+
+      messages = []
+      scanned = 0
+
+      order = after_message_id.present? ? :asc : :desc
+      batch_size = [limit * 3, 200].min
+      max_scanned_nodes = 2000
+
+      while messages.length < limit && scanned < max_scanned_nodes
+        page =
+          if cursor_message_id.present?
+            if order == :asc
+              scope.where("dag_nodes.id > ?", cursor_message_id)
+            else
+              scope.where("dag_nodes.id < ?", cursor_message_id)
+            end
+          else
+            scope
+          end
+
+        node_records =
+          page
+            .order(id: order)
+            .limit(batch_size)
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
+            .to_a
+
+        break if node_records.empty?
+
+        scanned += node_records.length
+        cursor_message_id = node_records.last.id
+
+        batch_messages = projection.project(node_records: node_records, mode: mode)
+        if batch_messages.any?
+          messages.concat(batch_messages)
+          messages = messages.first(limit) if messages.length > limit
+        end
+      end
+
+      messages.reverse! if order == :desc
+
+      message_ids = messages.map { |message| message.fetch("node_id") }
+
+      {
+        "message_ids" => message_ids,
+        "before_message_id" => message_ids.first,
+        "after_message_id" => message_ids.last,
+        "messages" => messages,
+      }
+    end
+
     def turn_node_ids(turn_id, include_compressed: false, include_deleted: true)
       scope = include_compressed ? nodes : nodes.active
       scope = scope.where(turn_id: turn_id)
@@ -213,7 +358,7 @@ module DAG
         turn_node_ids = turn_nodes.map { |node| node.id.to_s }
         unexpected_keep_ids = keep_node_ids - turn_node_ids
         if unexpected_keep_ids.any?
-          raise ArgumentError, "keep_node_ids must belong to this subgraph and turn"
+          raise ArgumentError, "keep_node_ids must belong to this lane and turn"
         end
 
         keep_nodes = turn_nodes.select { |node| keep_node_ids.include?(node.id.to_s) }
@@ -230,9 +375,30 @@ module DAG
 
     private
 
+      def empty_message_page
+        {
+          "message_ids" => [],
+          "before_message_id" => nil,
+          "after_message_id" => nil,
+          "messages" => [],
+        }
+      end
+
+      def assert_target_node_belongs_to_lane!(node_id)
+        node_id = node_id.to_s
+
+        target_lane_id = graph.nodes.active.where(id: node_id).pick(:lane_id)
+        return if target_lane_id.nil?
+        return if target_lane_id.to_s == id.to_s
+
+        raise ArgumentError, "target_node_id must belong to this lane"
+      end
+
       def transcript_turn_ids_page(limit_turns:, before_turn_id:, after_turn_id:, include_deleted:)
         limit_turns = Integer(limit_turns)
         return [] if limit_turns <= 0
+
+        limit_turns = [limit_turns, 1000].min
 
         before_turn_id = before_turn_id&.to_s
         after_turn_id = after_turn_id&.to_s
@@ -245,7 +411,7 @@ module DAG
 
         visible_turns =
           graph.turns
-            .where(subgraph_id: id)
+            .where(lane_id: id)
             .where.not(visibility_column => nil)
 
         if before_turn_id.present?
@@ -288,12 +454,12 @@ module DAG
         candidate_types = graph.transcript_candidate_node_types
         return [] if candidate_types.empty?
 
-        node_scope = graph.nodes.active.where(subgraph_id: id, turn_id: turn_ids, node_type: candidate_types)
+        node_scope = graph.nodes.active.where(lane_id: id, turn_id: turn_ids, node_type: candidate_types)
         node_scope = node_scope.where(deleted_at: nil) unless include_deleted
 
         node_records =
           node_scope
-            .select(:id, :turn_id, :subgraph_id, :node_type, :state, :metadata, :body_id)
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id)
             .order(:id)
             .to_a
 
@@ -372,15 +538,15 @@ module DAG
         }
       end
 
-      def subgraph_relationships_must_match_graph
+      def lane_relationships_must_match_graph
         return if graph_id.blank?
 
-        if parent_subgraph && parent_subgraph.graph_id != graph_id
-          errors.add(:parent_subgraph_id, "must belong to the same graph")
+        if parent_lane && parent_lane.graph_id != graph_id
+          errors.add(:parent_lane_id, "must belong to the same graph")
         end
 
-        if merged_into_subgraph && merged_into_subgraph.graph_id != graph_id
-          errors.add(:merged_into_subgraph_id, "must belong to the same graph")
+        if merged_into_lane && merged_into_lane.graph_id != graph_id
+          errors.add(:merged_into_lane_id, "must belong to the same graph")
         end
 
         if forked_from_node && forked_from_node.graph_id != graph_id
@@ -392,8 +558,8 @@ module DAG
             errors.add(:root_node_id, "must belong to the same graph")
           end
 
-          if root_node.subgraph_id != id
-            errors.add(:root_node_id, "must belong to this subgraph")
+          if root_node.lane_id != id
+            errors.add(:root_node_id, "must belong to this lane")
           end
         end
       end

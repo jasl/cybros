@@ -6,21 +6,21 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.timestamps
     end
 
-    create_table :dag_subgraphs, id: :uuid, default: -> { "uuidv7()" } do |t|
+    create_table :dag_lanes, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
-      t.index %i[graph_id role], name: "index_dag_subgraphs_graph_role"
+      t.index %i[graph_id role], name: "index_dag_lanes_graph_role"
 
       t.string :role, null: false
       t.check_constraint(
         "role IN ('main','branch')",
-        name: "check_dag_subgraphs_role_enum"
+        name: "check_dag_lanes_role_enum"
       )
 
-      t.uuid :parent_subgraph_id
+      t.uuid :parent_lane_id
       t.check_constraint(
-        "parent_subgraph_id IS NULL OR parent_subgraph_id <> id",
-        name: "check_dag_subgraphs_no_self_parent"
+        "parent_lane_id IS NULL OR parent_lane_id <> id",
+        name: "check_dag_lanes_no_self_parent"
       )
 
       t.uuid :forked_from_node_id
@@ -29,10 +29,10 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.datetime :archived_at
 
-      t.uuid :merged_into_subgraph_id
+      t.uuid :merged_into_lane_id
       t.check_constraint(
-        "merged_into_subgraph_id IS NULL OR merged_into_subgraph_id <> id",
-        name: "check_dag_subgraphs_no_self_merge"
+        "merged_into_lane_id IS NULL OR merged_into_lane_id <> id",
+        name: "check_dag_lanes_no_self_merge"
       )
 
       t.datetime :merged_at
@@ -45,9 +45,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.timestamps
 
-      t.index %i[graph_id parent_subgraph_id], name: "index_dag_subgraphs_graph_parent"
-      t.index %i[graph_id forked_from_node_id], name: "index_dag_subgraphs_graph_forked_from"
-      t.index %i[graph_id merged_into_subgraph_id], name: "index_dag_subgraphs_graph_merged_into"
+      t.index %i[graph_id parent_lane_id], name: "index_dag_lanes_graph_parent"
+      t.index %i[graph_id forked_from_node_id], name: "index_dag_lanes_graph_forked_from"
+      t.index %i[graph_id merged_into_lane_id], name: "index_dag_lanes_graph_merged_into"
     end
 
     create_table :dag_node_bodies, id: :uuid, default: -> { "uuidv7()" } do |t|
@@ -66,13 +66,13 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.index %i[graph_id compressed_at], name: "index_dag_nodes_compressed_at"
       t.index %i[graph_id retry_of_id], name: "index_dag_nodes_retry_of"
 
-      t.uuid :subgraph_id, null: false
-      t.index %i[graph_id subgraph_id], name: "index_dag_nodes_subgraph"
+      t.uuid :lane_id, null: false
+      t.index %i[graph_id lane_id], name: "index_dag_nodes_lane"
 
       t.string :node_type, null: false
-      t.index %i[graph_id subgraph_id node_type created_at id],
+      t.index %i[graph_id lane_id node_type created_at id],
               where: "compressed_at IS NULL",
-              name: "index_dag_nodes_active_subgraph_type_created"
+              name: "index_dag_nodes_active_lane_type_created"
 
       t.string :state, null: false
       t.check_constraint(
@@ -84,9 +84,9 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.uuid :turn_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id turn_id], name: "index_dag_nodes_turn"
-      t.index %i[graph_id subgraph_id turn_id node_type id],
+      t.index %i[graph_id lane_id turn_id node_type id],
               where: "compressed_at IS NULL",
-              name: "index_dag_nodes_active_subgraph_turn_type"
+              name: "index_dag_nodes_active_lane_turn_type"
 
       t.uuid :version_set_id, null: false, default: -> { "uuidv7()" }
       t.index %i[graph_id version_set_id], name: "index_dag_nodes_version_set"
@@ -190,11 +190,11 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.timestamps
     end
 
-    add_index :dag_subgraphs, %i[graph_id id], unique: true, name: "index_dag_subgraphs_graph_id_id_unique"
-    add_index :dag_subgraphs, :graph_id,
+    add_index :dag_lanes, %i[graph_id id], unique: true, name: "index_dag_lanes_graph_id_id_unique"
+    add_index :dag_lanes, :graph_id,
               unique: true,
               where: "role = 'main'",
-              name: "index_dag_subgraphs_main_per_graph"
+              name: "index_dag_lanes_main_per_graph"
 
     add_index :dag_nodes, %i[graph_id id], unique: true, name: "index_dag_nodes_graph_id_id_unique"
 
@@ -208,10 +208,10 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                     primary_key: %i[graph_id id],
                     name: "fk_dag_nodes_compressed_by_graph_scoped"
 
-    add_foreign_key :dag_nodes, :dag_subgraphs,
-                    column: %i[graph_id subgraph_id],
+    add_foreign_key :dag_nodes, :dag_lanes,
+                    column: %i[graph_id lane_id],
                     primary_key: %i[graph_id id],
-                    name: "fk_dag_nodes_subgraph_graph_scoped"
+                    name: "fk_dag_nodes_lane_graph_scoped"
 
     add_foreign_key :dag_edges, :dag_nodes,
                     column: %i[graph_id from_node_id],
@@ -237,10 +237,10 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                     name: "fk_dag_node_events_node_graph_scoped",
                     on_delete: :cascade
 
-    add_foreign_key :dag_subgraphs, :dag_subgraphs, column: :parent_subgraph_id, on_delete: :nullify
-    add_foreign_key :dag_subgraphs, :dag_subgraphs, column: :merged_into_subgraph_id, on_delete: :nullify
+    add_foreign_key :dag_lanes, :dag_lanes, column: :parent_lane_id, on_delete: :nullify
+    add_foreign_key :dag_lanes, :dag_lanes, column: :merged_into_lane_id, on_delete: :nullify
 
-    add_foreign_key :dag_subgraphs, :dag_nodes, column: :forked_from_node_id, on_delete: :nullify
-    add_foreign_key :dag_subgraphs, :dag_nodes, column: :root_node_id, on_delete: :nullify
+    add_foreign_key :dag_lanes, :dag_nodes, column: :forked_from_node_id, on_delete: :nullify
+    add_foreign_key :dag_lanes, :dag_nodes, column: :root_node_id, on_delete: :nullify
   end
 end

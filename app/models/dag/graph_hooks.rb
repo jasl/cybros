@@ -4,7 +4,7 @@ module DAG
       NODE_CREATED = "node_created"
       EDGE_CREATED = "edge_created"
       NODE_REPLACED = "node_replaced"
-      SUBGRAPH_COMPRESSED = "subgraph_compressed"
+      LANE_COMPRESSED = "lane_compressed"
       LEAF_INVARIANT_REPAIRED = "leaf_invariant_repaired"
       NODE_STATE_CHANGED = "node_state_changed"
       NODE_VISIBILITY_CHANGE_REQUESTED = "node_visibility_change_requested"
@@ -15,7 +15,7 @@ module DAG
         NODE_CREATED,
         EDGE_CREATED,
         NODE_REPLACED,
-        SUBGRAPH_COMPRESSED,
+        LANE_COMPRESSED,
         LEAF_INVARIANT_REPAIRED,
         NODE_STATE_CHANGED,
         NODE_VISIBILITY_CHANGE_REQUESTED,

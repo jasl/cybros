@@ -71,15 +71,15 @@ class DAG::ChatbotStreamingFlowTest < ActiveSupport::TestCase
       progress = graph.node_event_page_for(agent.id, kinds: [DAG::NodeEvent::PROGRESS])
       assert progress.any?
 
-      context = conversation.context_for(agent.id)
+      context = agent.lane.context_for(agent.id)
       context_ids = context.map { |node| node.fetch("node_id") }
       assert_equal [system.id, developer.id, user.id, agent.id], context_ids
 
-      full = conversation.context_for_full(agent.id)
+      full = agent.lane.context_for_full(agent.id)
       agent_full = full.find { |node| node.fetch("node_id") == agent.id }
       assert_equal "你好", agent_full.dig("payload", "output", "content")
 
-      transcript = conversation.transcript_for(agent.id)
+      transcript = graph.transcript_for(agent.id)
       assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
       assert_equal "你好", transcript.last.dig("payload", "output_preview", "content")
 

@@ -23,7 +23,7 @@ class ConversationContextTest < ActiveSupport::TestCase
 
     graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
 
-    preview = conversation.context_for(agent.id)
+    preview = agent.lane.context_for(agent.id)
     agent_preview = preview.find { |node| node.fetch("node_id") == agent.id }
 
     assert agent_preview.key?("turn_id")
@@ -32,7 +32,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     assert agent_preview.dig("payload", "output_preview", "content").length <= Messages::AgentMessage.new.preview_max_chars
     assert_not agent_preview.fetch("payload").key?("output")
 
-    full = conversation.context_for_full(agent.id)
+    full = agent.lane.context_for_full(agent.id)
     agent_full = full.find { |node| node.fetch("node_id") == agent.id }
 
     assert_equal long_content, agent_full.dig("payload", "output", "content")
@@ -73,10 +73,10 @@ class ConversationContextTest < ActiveSupport::TestCase
     agent1.exclude_from_context!
     task.exclude_from_context!
 
-    filtered = conversation.context_for(agent2.id)
+    filtered = agent2.lane.context_for(agent2.id)
     assert_equal [user.id, agent2.id], filtered.map { |node| node.fetch("node_id") }
 
-    included = conversation.context_for(agent2.id, include_excluded: true)
+    included = agent2.lane.context_for(agent2.id, include_excluded: true)
     assert_equal [user.id, agent1.id, task.id, agent2.id], included.map { |node| node.fetch("node_id") }
   end
 
@@ -94,7 +94,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     agent.exclude_from_context!
     agent.soft_delete!
 
-    context = conversation.context_for(agent.id)
+    context = agent.lane.context_for(agent.id)
     assert_equal [agent.id], context.map { |node| node.fetch("node_id") }
   end
 
@@ -152,7 +152,7 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
     user.soft_delete!
 
-    context = conversation.context_for(agent.id)
+    context = agent.lane.context_for(agent.id)
     ids = context.map { |node| node.fetch("node_id") }
 
     assert_equal [agent.id], ids
@@ -190,10 +190,10 @@ class ConversationContextTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: agent1.id, to_node_id: task.id, edge_type: DAG::Edge::DEPENDENCY)
     graph.edges.create!(from_node_id: task.id, to_node_id: agent2.id, edge_type: DAG::Edge::SEQUENCE)
 
-    transcript = conversation.transcript_for(agent2.id)
+    transcript = graph.transcript_for(agent2.id)
     assert_equal [user.id, agent2.id], transcript.map { |node| node.fetch("node_id") }
 
-    limited = conversation.transcript_for(agent2.id, limit: 1)
+    limited = graph.transcript_for(agent2.id, limit: 1)
     assert_equal [agent2.id], limited.map { |node| node.fetch("node_id") }
   end
 
@@ -210,8 +210,8 @@ class ConversationContextTest < ActiveSupport::TestCase
 
     agent.soft_delete!
 
-    assert_equal [], conversation.transcript_for(agent.id)
-    assert_equal [agent.id], conversation.transcript_for(agent.id, include_deleted: true).map { |node| node.fetch("node_id") }
+    assert_equal [], graph.transcript_for(agent.id)
+    assert_equal [agent.id], graph.transcript_for(agent.id, include_deleted: true).map { |node| node.fetch("node_id") }
   end
 
   test "transcript_for includes agent_message when transcript_visible metadata is true and injects transcript_preview content" do
@@ -225,7 +225,7 @@ class ConversationContextTest < ActiveSupport::TestCase
       metadata: { "transcript_visible" => true, "transcript_preview" => "(structured)" }
     )
 
-    transcript = conversation.transcript_for(agent.id)
+    transcript = graph.transcript_for(agent.id)
 
     assert_equal [agent.id], transcript.map { |node| node.fetch("node_id") }
     assert_equal "(structured)", transcript.first.dig("payload", "output_preview", "content")

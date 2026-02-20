@@ -56,11 +56,11 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
 
       DAG::Runner.run_node!(agent.id)
 
-      context = conversation.context_for(agent.id)
+      context = agent.lane.context_for(agent.id)
       context_ids = context.map { |node| node.fetch("node_id") }
       assert_equal [system.id, developer.id, user.id, agent.id], context_ids
 
-      transcript = conversation.transcript_for(agent.id)
+      transcript = graph.transcript_for(agent.id)
       assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |node| node.fetch("node_type") }
       assert_equal "你好", transcript.last.dig("payload", "output_preview", "content")
 

@@ -2,53 +2,71 @@
 
 本文件定义 **DAG 引擎对 App 域暴露的稳定 Public API**（鼓励开发者/Agent 只通过这些 API 操作图），以减少对内部实现细节（表结构、具体 SQL、内部类）的耦合。
 
-> 目标：API 正交（orthogonal）+ 可组合（composable）+ 可测试（testable）。  
-> 约定：若 Public API 不够用，应先 **补齐/重构 Public API**，而不是从 App 域直接 `graph.nodes.create!` / `update_columns` “硬改图”。
+> 重要约定（Lane-first）：**App 侧默认只操作 Lane / Turn / Message（Node）视图**。  
+> `DAG::Graph` 仍存在，但其“全图语义”读 API（closure / mermaid / audit-like）必须被视为 **危险操作**，只用于后台/诊断/离线任务，不应出现在用户同步请求路径。
+
+---
 
 ## 1) 基本约束
 
 - **写入必须在图锁内**：所有会改变图结构/状态的动作，都必须走 `DAG::Graph#mutate!`（引擎负责 advisory lock + 行锁 + 事务边界 + leaf invariant 修复 + kick）。
 - **Active view 语义**：默认 API 只看 Active（`compressed_at IS NULL`）；审计/回放场景才显式使用 `include_compressed: true`。
-- **JSON 一律 string keys**：所有持久化到 JSONB 的字段（`metadata/payload/particulars` 等）约定使用 string keys；Public API 返回的 Hash 也使用 string keys（便于直接 JSON 序列化与跨语言一致）。
+- **JSON 一律 string keys**：所有持久化到 JSONB 的字段（`metadata/payload/particulars` 等）约定使用 string keys；Public API 返回的 Hash 也使用 string keys。
+- **分页一律 keyset**：所有面向产品 UI 的分页 API 禁止 OFFSET；统一使用 `before_* / after_*` cursor。
+- **limit 强约束**：所有分页 API 的 `limit` 会被 clamp 到 `<= 1000`（避免误用造成不必要的全量扫描）。
+
+---
 
 ## 2) 读 API（Read-only）
 
-### Graph-level
+### 2.1 Lane-level（App-safe；面向真实产品 UI）
 
-- `DAG::Graph#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded:, include_deleted:)`（安全默认：bounded window）
-- `DAG::Graph#context_for_full(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`
-- `DAG::Graph#context_closure_for(target_node_id, mode: :preview|:full, include_excluded:, include_deleted:)`（危险：祖先闭包 + topo sort）
-- `DAG::Graph#context_closure_for_full(target_node_id, include_excluded:, include_deleted:)`
-- `DAG::Graph#context_node_scope_for(target_node_id, limit_turns: 50, include_excluded:, include_deleted:)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
-- `DAG::Graph#node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)`（bounded；keyset；用于流式/进度/UI 订阅）
-- `DAG::Graph#node_event_scope_for(node_id, kinds: nil)`（返回 ActiveRecord::Relation；无顺序保证）
-- `DAG::Graph#awaiting_approval_page(limit: 50, after_node_id: nil, subgraph_id: nil)`（bounded；keyset；用于工具授权队列）
-- `DAG::Graph#awaiting_approval_scope(subgraph_id: nil)`（返回 ActiveRecord::Relation；无顺序保证）
-- `DAG::Graph#transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview|:full, include_deleted:)`（安全默认：bounded window）
-- `DAG::Graph#transcript_for_full(target_node_id, limit_turns: 50, limit: nil, include_deleted:)`
-- `DAG::Graph#transcript_closure_for(target_node_id, limit: nil, mode: :preview|:full, include_deleted:)`（危险：祖先闭包）
-- `DAG::Graph#transcript_closure_for_full(target_node_id, limit: nil, include_deleted:)`
-- `DAG::Graph#transcript_recent_turns(limit_turns:, mode: :preview|:full, include_deleted:)`
-- `DAG::Graph#transcript_page(subgraph_id:, limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
-- `DAG::Graph#to_mermaid(include_compressed: false, max_label_chars: 80)`
+推荐 UI 优先使用 Lane-scoped 的分页原语，避免把不同 Lane 的内容混在一个列表里。
 
-### Subgraph-level（面向真实产品分页）
+- `DAG::Lane#message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview|:full, include_deleted:)`
+  - **用途**：按“消息节点（transcript candidates）”分页，满足“取最近 X 条消息”的 UI 需求。
+  - 返回：`{"message_ids"=>[], "before_message_id"=>..., "after_message_id"=>..., "messages"=>[...]}`（string keys）
+  - cursor：按 `message_id == dag_nodes.id`（UUIDv7）keyset
+  - 实现细节（重要）：引擎会对“扫描候选节点数”做内部 hard cap（安全带），因此当大量候选节点被 transcript 规则过滤时，页可能 **少于 limit**（极端情况下为空）。
+- `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
+  - **用途**：按 turn 分页（ChatGPT-like 一轮交互展示/滚动加载）。
+  - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
+  - turn 的可见锚点由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页按 `turn_id`（UUIDv7）
+- Turn 索引/计数（面向压缩/定位）：
+  - `DAG::Lane#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（按 `anchored_seq` keyset）
+  - `DAG::Lane#anchored_turn_count(include_deleted: true|false)`
+  - `DAG::Lane#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
+- Turn/节点定位（面向 debug/压缩策略）：
+  - `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
-对 “ChatGPT-like 聊天记录 / SillyTavern-like 子话题 / Codex-like 多线程” 的 UI，推荐优先使用 subgraph-scoped 的分页原语，避免把不同 subgraph 的 turns 混在一个列表里：
+流式/审批队列（Lane-first wrapper；仍为 bounded read）：
 
-- `DAG::Subgraph#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted:)`
-  - 返回 `{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
-  - `before_turn_id` / `after_turn_id` 为 keyset cursor（按 `turn_id`），避免 OFFSET
-  - 说明：turn 的“代表锚点”由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页只按 `turn_id`（UUIDv7）进行
-- `DAG::Subgraph#turns`（ActiveRecord 关联：返回该 subgraph 的 `DAG::Turn` records；包含未 anchor 的 turns）
-- `DAG::Subgraph#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（bounded；按 `anchored_seq` keyset；返回 string keys）
-- `DAG::Subgraph#anchored_turn_count(include_deleted: true|false)`（`include_deleted: true` 为 O(1) 读取 `next_anchored_seq`）
-- `DAG::Subgraph#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
-- `DAG::Subgraph#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `DAG::Lane#node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)`
+- `DAG::Lane#awaiting_approval_page(limit: 50, after_node_id: nil)`
 
-Subagent（子代理/子会话）模式（v1）：
+Executor 组装上下文（bounded window；Lane 入口避免 App 直接持有 Graph）：
 
-- 参考：`docs/dag_subagent_patterns.md`（推荐用多 Conversation/Graph 在 App 域组合，而不是在 DAG 层引入跨图调度语义）
+- `DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded:, include_deleted:)`
+- `DAG::Lane#context_for_full(...)`
+- `DAG::Lane#context_node_scope_for(...)`（返回 ActiveRecord::Relation；无 topo 顺序保证）
+
+### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
+
+- `DAG::Turn#start_message_node_id(include_deleted: true|false)`（turn anchor：通常为 `user_message`，也可能是 `agent_message/character_message`）
+- `DAG::Turn#end_message_node_id(include_deleted: true|false)`（按 `message_nodes` 投影后的最后一条 message；用于“运行中用 start、结束后用 end”的 UI 表示）
+- `DAG::Turn#message_nodes(mode: :preview|:full, include_deleted:)`（只返回 transcript candidates + projection）
+
+### 2.3 Graph-level（Dangerous / Internal）
+
+Graph 是引擎聚合根（锁/事务边界），但 **全图语义** 的读 API 必须被视为危险操作：
+
+- `DAG::Graph#context_closure_for*`（危险：祖先闭包 + topo sort）
+- `DAG::Graph#transcript_closure_for*`（危险：祖先闭包）
+- `DAG::Graph#to_mermaid(...)`（危险：可能扫全图）
+
+> 说明：Graph 仍提供若干 bounded window 的读 API（例如 `context_for`），但产品层推荐从 `DAG::Lane` 入口调用，以避免“无意间把 Graph 当作 App 的常用入口”。
+
+---
 
 ## 3) 写 API（Mutations / Commands）
 
@@ -69,11 +87,11 @@ end
 
 > 以下方法被视为 Public API（v1）。
 
-- `DAG::Mutations#create_node(...)`
+- `DAG::Mutations#create_node(...)`（支持 `lane:` / `lane_id:`；若提供 `turn_id` 会强制 lane 与该 turn 一致）
 - `DAG::Mutations#create_edge(from_node:, to_node:, edge_type:, metadata: {})`
-- `DAG::Mutations#fork_from!(...)`
-- `DAG::Mutations#merge_subgraphs!(...)`
-- `DAG::Mutations#archive_subgraph!(...)`
+- `DAG::Mutations#fork_from!(...)`（fork 会创建 branch lane，并把 fork 创建的第一条新 node 作为该 lane 的 root）
+- `DAG::Mutations#merge_lanes!(...)`
+- `DAG::Mutations#archive_lane!(...)`
 
 ### 3.3 Node commands（版本 / 可见性 / 重试）
 
@@ -91,42 +109,12 @@ end
   - `request_soft_delete!` / `request_restore!`
 - 审批 / stop：
   - `DAG::Node#approve!`（`awaiting_approval → pending`）
-  - `DAG::Node#deny_approval!`（`awaiting_approval → rejected`，默认 `metadata["reason"]="approval_denied"`）
+  - `DAG::Node#deny_approval!`（`awaiting_approval → rejected`）
   - `DAG::Node#stop!`（`pending|awaiting_approval|running → stopped`）
 
-### 3.4 Executor interface（流式/增量输出）
+---
 
-执行器（executor）是 App 域注入的能力，但其接口也被视为 v1 Public API 的一部分：
-
-- `DAG.executor_registry.execute(node:, context:, stream:)`
-  - `context`：来自 `graph.context_for(node.id)` 的 bounded 上下文
-  - `stream`：`DAG::NodeEventStream`，用于写入 `dag_node_events`（流式输出/进度/log）
-
-完成模式（严格二选一）：
-
-- **非流式**：executor 返回 `DAG::ExecutionResult.finished(payload: ...)` 或 `finished(content: ...)`
-- **流式**：executor 通过 `stream.output_delta(...)` 写入增量输出，并返回 `DAG::ExecutionResult.finished_streamed(...)`
-  - 约束：`finished_streamed` 不允许同时携带 `payload` 或 `content`（避免语义漂移）
-- **停止**（可选）：executor 返回 `DAG::ExecutionResult.stopped(reason: ...)`（Runner 会落库为 `stopped`；若有 streaming output 会物化 partial output）
-
-node events retention（规范性约定）：
-
-- `output_delta` 只保证 “执行中可订阅/可分页”；当 node 进入终态后，`output_delta` 可能被清理并写入单条 `output_compacted`（payload 含 `chunks/bytes/sha256`），UI 应改读 `NodeBody.output/output_preview` 作为最终输出来源。
-
-## 4) 审计 / 诊断 API
-
-- `DAG::GraphAudit.scan(graph:)`：只诊断，不修复（默认 types）
-- `DAG::GraphAudit.repair!(graph:)`：只做极小范围自动修复（例如 stale running reclaim / leaf repair / stale patch 清理）
-
-## 5) 明确的非 Public API（尽量不要直接用）
-
-以下属于内部实现细节，App 域不应直接依赖（否则会导致未来重构困难）：
-
-- 直接 `graph.nodes.create! / graph.edges.create!`（除非在引擎内部/测试中明确需要）
-- 直接 `update_all / update_columns` 修改节点状态（应走 Runner/FailurePropagation/commands）
-- 直接依赖某个 SQL/索引形态（应依赖 Public query 方法）
-
-## 6) 当 Public API 不够用时怎么办？
+## 4) 当 Public API 不够用时怎么办？
 
 优先顺序：
 
