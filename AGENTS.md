@@ -96,7 +96,7 @@ When working on DAG-related code (engine, app integration, tests, scripts):
 - Prefer **Public API** over touching internal tables/associations directly.
 - If the Public API is missing a capability, add/adjust the Public API + tests/doc, then use it (avoid “hacky” direct SQL/`update_columns` from the App domain).
 
-Doc: `docs/dag_public_api.md`
+Doc: `docs/dag/dag_public_api.md`
 
 ### DAG API safety tiers（very important）
 

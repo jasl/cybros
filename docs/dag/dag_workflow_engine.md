@@ -174,7 +174,7 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 - 默认：`DAG::GraphHooks::Noop`（不做任何事）
 - 约束：引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`），建议只使用常量（避免 typo）。
 
-hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compress、leaf repair、node state 迁移，以及可见性 defer/apply（`node_visibility_*`）。完整列表见 `docs/dag_behavior_spec.md` 的第 9 节。
+hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compress、leaf repair、node state 迁移，以及可见性 defer/apply（`node_visibility_*`）。完整列表见 `docs/dag/dag_behavior_spec.md` 的第 9 节。
 
 ## 图不变量（Invariants）
 
@@ -314,7 +314,7 @@ Context 可见性（视图层）：
 
 > 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
 
-更完整的 DAG 行为规范见：`docs/dag_behavior_spec.md`。
+更完整的 DAG 行为规范见：`docs/dag/dag_behavior_spec.md`。
 
 ## Transcript（对话记录视图）
 
@@ -357,7 +357,7 @@ Context 可见性（视图层）：
 
 里程碑 1 不在 DAG 层引入跨图 edges/嵌套子图调度语义；推荐由 App 域用 “多 Conversation/Graph” 组合出 subagent（子代理/子会话）：
 
-- 见：`docs/dag_subagent_patterns.md`
+- 见：`docs/dag/dag_subagent_patterns.md`
 
 ## 子图压缩（Manual）
 
