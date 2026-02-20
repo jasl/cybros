@@ -761,6 +761,8 @@ module DAG
         node_type_keys_for_hook(:leaf_terminal?)
       end
 
+      public :leaf_terminal_node_types
+
       def default_leaf_repair_node_type
         bodies = node_body_classes.select(&:default_leaf_repair?)
         if bodies.length != 1

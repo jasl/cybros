@@ -775,7 +775,7 @@ module DAG
       end
 
       def cleanup_invalid_leaves_in_turn!(lane_id:, turn_id:, compressed_by_id:, now:)
-        leaf_terminal_types = @graph.send(:leaf_terminal_node_types)
+        leaf_terminal_types = @graph.leaf_terminal_node_types
         turn_anchor_types = @graph.turn_anchor_node_types
 
         loop do
@@ -787,7 +787,10 @@ module DAG
 
           invalid_leaves =
             leaves.select do |leaf|
-              !leaf_terminal_types.include?(leaf.node_type.to_s) && !leaf.pending? && !leaf.running?
+              !leaf_terminal_types.include?(leaf.node_type.to_s) &&
+                !leaf.pending? &&
+                !leaf.awaiting_approval? &&
+                !leaf.running?
             end
 
           break if invalid_leaves.empty?

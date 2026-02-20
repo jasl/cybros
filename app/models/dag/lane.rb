@@ -47,10 +47,12 @@ module DAG
     end
 
     def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
+      assert_target_node_belongs_to_lane!(node_id, include_compressed: true)
       graph.node_event_page_for(node_id, after_event_id: after_event_id, limit: limit, kinds: kinds)
     end
 
     def node_event_scope_for(node_id, kinds: nil)
+      assert_target_node_belongs_to_lane!(node_id, include_compressed: true)
       graph.node_event_scope_for(node_id, kinds: kinds)
     end
 
@@ -384,14 +386,15 @@ module DAG
         }
       end
 
-      def assert_target_node_belongs_to_lane!(node_id)
+      def assert_target_node_belongs_to_lane!(node_id, include_compressed: false)
         node_id = node_id.to_s
 
-        target_lane_id = graph.nodes.active.where(id: node_id).pick(:lane_id)
+        scope = include_compressed ? graph.nodes : graph.nodes.active
+        target_lane_id = scope.where(id: node_id).pick(:lane_id)
         return if target_lane_id.nil?
         return if target_lane_id.to_s == id.to_s
 
-        raise ArgumentError, "target_node_id must belong to this lane"
+        raise ArgumentError, "node_id must belong to this lane"
       end
 
       def transcript_turn_ids_page(limit_turns:, before_turn_id:, after_turn_id:, include_deleted:)

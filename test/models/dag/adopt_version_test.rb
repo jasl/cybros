@@ -52,4 +52,58 @@ class DAG::AdoptVersionTest < ActiveSupport::TestCase
 
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
+
+  test "adopt_version! does not archive awaiting_approval leaves in the same turn" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000f020"
+
+    user = nil
+    v1 = nil
+    approval_task = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "hi",
+          metadata: {}
+        )
+
+      v1 =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          body_output: { "content" => "v1" },
+          metadata: {}
+        )
+
+      approval_task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::AWAITING_APPROVAL,
+          body_input: { "name" => "needs_approval" },
+          metadata: { "approval" => { "required" => true } }
+        )
+
+      m.create_edge(from_node: user, to_node: v1, edge_type: DAG::Edge::SEQUENCE, metadata: {})
+    end
+
+    v2 = v1.rerun!
+    v2.mark_running!
+    v2.mark_finished!(content: "v2")
+
+    v3 = v2.rerun!
+    v3.mark_running!
+    v3.mark_finished!(content: "v3")
+
+    adopted = v1.reload.adopt_version!
+    assert_equal v1.id, adopted.id
+
+    assert_equal DAG::Node::AWAITING_APPROVAL, approval_task.reload.state
+    assert_includes graph.awaiting_approval_scope.pluck(:id), approval_task.id
+
+    assert_equal [], DAG::GraphAudit.scan(graph: graph)
+  end
 end

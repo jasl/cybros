@@ -587,9 +587,13 @@ module DAG
       end
 
       def leaf_invariant_violations
-        @graph.leaf_nodes.where(compressed_at: nil).pluck(:id).select do |node_id|
-          node = @graph.nodes.find(node_id)
-          !@graph.leaf_valid?(node)
+        leaves =
+          @graph.leaf_nodes
+            .select(:id, :node_type, :state)
+            .to_a
+
+        leaves.filter_map do |node|
+          node.id if !@graph.leaf_valid?(node)
         end
       end
 
