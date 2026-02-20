@@ -56,6 +56,12 @@ gem "thruster", require: false
 # Deploy this application anywhere as a Docker container [https://kamal-deploy.org]
 gem "kamal", require: false
 
+gem "httpx"
+gem "simple_inference", path: "vendor/simple_inference"
+
+gem "tokenizers"
+gem "tiktoken_ruby"
+
 group :development, :test do
   gem "benchmark", require: false
 

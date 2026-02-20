@@ -83,8 +83,19 @@
 !/app/assets/builds/.keep
 /public/assets
 
+# Ignore key files for decrypting credentials and more.
+/config/*.key
+
 # Local references
 /references
 
-# Ignore key files for decrypting credentials and more.
-/config/*.key
+# Vendored gems
+/vendor/simple_inference/.bundle/
+/vendor/simple_inference/.yardoc
+/vendor/simple_inference/_yardoc/
+/vendor/simple_inference/coverage/
+/vendor/simple_inference/doc/
+/vendor/simple_inference/pkg/
+/vendor/simple_inference/spec/reports/
+/vendor/simple_inference/tmp/
+/vendor/simple_inference/*.gem
