@@ -84,7 +84,7 @@
 
 - `Decision.confirm(reason:, required:, deny_effect:)` 已存在；补“规则引擎”与“规则存储”即可
 - 规则维度至少包含：
-  - tool name（支持别名映射）
+  - tool name（支持 alias + 可选 normalize fallback；启用 normalize 时需做碰撞预检，避免歧义）
   - path（read/write/edit/apply_patch/exec 的 cwd/path）
   - network domain（web_fetch/curl 等）
   - channel/session key（如果接入多渠道）

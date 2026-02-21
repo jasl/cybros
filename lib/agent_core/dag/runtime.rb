@@ -100,6 +100,13 @@ module AgentCore
 
           tool_name_normalize_fallback = tool_name_normalize_fallback == true
 
+          merged_tool_name_aliases = AgentCore::Resources::Tools::ToolNameResolver.merge_aliases(tool_name_aliases)
+          validate_tool_name_aliases!(tools_registry, merged_tool_name_aliases)
+
+          if tool_name_normalize_fallback
+            AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tools_registry.tool_names)
+          end
+
           token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
 
           context_turns = Integer(context_turns)
@@ -192,6 +199,24 @@ module AgentCore
             prompt_mode: prompt_mode,
             tool_error_mode: tool_error_mode,
           )
+        end
+
+        private
+
+        def validate_tool_name_aliases!(tools_registry, merged_aliases)
+          return unless tools_registry.respond_to?(:include?)
+
+          merged_aliases.each do |from, to|
+            next unless tools_registry.include?(from)
+            next if from.to_s == to.to_s
+
+            raise ArgumentError,
+                  "tool_name_aliases contains a key that is shadowed by an existing tool name: " \
+                  "#{from.inspect} (maps to #{to.inspect}). " \
+                  "Remove the alias or rename the tool."
+          end
+        rescue StandardError => e
+          raise e if e.is_a?(ArgumentError)
         end
       end
   end

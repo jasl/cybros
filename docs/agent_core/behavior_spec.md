@@ -56,7 +56,7 @@
 
 1) exact：registry 包含原名（LLM 输出）→ 直接使用
 2) alias 表：若配置了 alias（默认 alias + `runtime.tool_name_aliases`）→ 解析到 canonical name
-3) normalize fallback（可选）：当 `runtime.tool_name_normalize_fallback=true` 时，尝试启发式 normalize（当前仅 `.`→`_`）
+3) normalize fallback（可选）：当 `runtime.tool_name_normalize_fallback=true` 时，尝试启发式 normalize（大小写 / 驼峰 / 分隔符漂移等），并通过“normalize key → canonical tool name”的索引映射回 registry 中的真实工具名
 
 可观测性与审计：
 
@@ -70,6 +70,12 @@
 
 - `memory.search`/`memory.store`/`memory.forget` → `memory_search`/`memory_store`/`memory_forget`
 - `skills.list`/`skills.load`/`skills.read_file` → `skills_list`/`skills_load`/`skills_read_file`
+
+normalize fallback 的安全约束（hard fail）：
+
+- registry 的工具名必须全局唯一（native/MCP 不允许重名）
+- 当启用 normalize fallback 时，所有工具名在 normalize-key 维度也必须无歧义（例如 `foo-bar` 与 `foo_bar` 同时存在会直接报错）
+- alias key 不能被真实工具名遮蔽（例如 registry 已有 `echo` 工具时，配置 `tool_name_aliases["echo"]="..."` 会直接报错；自映射 `echo→echo` 会被忽略/视为无效）
 
 完整列表与扩展方式见：`AgentCore::Resources::Tools::ToolNameResolver::DEFAULT_ALIASES` 与 `docs/agent_core/public_api.md`。
 

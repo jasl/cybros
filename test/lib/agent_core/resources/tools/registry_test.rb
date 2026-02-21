@@ -47,6 +47,15 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     assert_equal @echo_tool, @registry.find("echo")
   end
 
+  def test_register_raises_on_native_tool_name_collision
+    @registry.register(@echo_tool)
+    dup = AgentCore::Resources::Tools::Tool.new(name: "echo", description: "dup") { }
+
+    assert_raises(ArgumentError) do
+      @registry.register(dup)
+    end
+  end
+
   def test_register_many
     tool2 = AgentCore::Resources::Tools::Tool.new(name: "noop", description: "no-op") { }
     @registry.register_many([@echo_tool, tool2])
@@ -85,6 +94,21 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     assert @registry.include?("mcp_tool_a")
     assert @registry.include?("mcp_tool_b")
     assert_equal [nil, "page2"], client.list_calls
+  end
+
+  def test_register_mcp_client_raises_on_name_collision_with_native
+    @registry.register(@echo_tool)
+
+    client = FakeMcpClient.new(
+      pages: {
+        nil => { "tools" => [{ "name" => "echo", "description" => "Echo MCP", "inputSchema" => {} }] },
+      },
+      call_result: { "content" => [{ "type" => "text", "text" => "ok" }], "isError" => false },
+    )
+
+    assert_raises(ArgumentError) do
+      @registry.register_mcp_client(client)
+    end
   end
 
   def test_register_mcp_client_with_server_id_uses_safe_names_and_forwards_execute
@@ -144,6 +168,23 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
       end
 
     assert_match(/MCP tool name collision/, err.message)
+  end
+
+  def test_register_raises_on_native_name_collision_with_existing_mcp_tool
+    client = FakeMcpClient.new(
+      pages: {
+        nil => { "tools" => [{ "name" => "echo", "description" => "Echo MCP", "inputSchema" => {} }] },
+      },
+      call_result: { "content" => [{ "type" => "text", "text" => "ok" }], "isError" => false },
+    )
+
+    @registry.register_mcp_client(client)
+
+    dup = AgentCore::Resources::Tools::Tool.new(name: "echo", description: "native") { }
+
+    assert_raises(ArgumentError) do
+      @registry.register(dup)
+    end
   end
 
   def test_register_skills_store_registers_skills_tools

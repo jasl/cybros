@@ -280,6 +280,10 @@ module AgentCore
             tool_loop_metadata = {}
             name_resolution_events = []
             tool_name_aliases = runtime.tool_name_aliases
+            normalize_index =
+              if runtime.tool_name_normalize_fallback
+                AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(runtime.tools_registry.tool_names)
+              end
 
             if should_repair_tool_calls?(tool_calls, runtime: runtime)
               repair_result =
@@ -328,6 +332,7 @@ module AgentCore
                     requested_name,
                     aliases: tool_name_aliases,
                     enable_normalize_fallback: runtime.tool_name_normalize_fallback,
+                    normalize_index: normalize_index,
                   )
                 resolved_name = resolved.name
                 source = resolved.source
@@ -582,13 +587,14 @@ module AgentCore
 
           ResolvedTool = Data.define(:name, :source, :exists, :resolution_method)
 
-          def resolve_tool(registry, requested_name, aliases:, enable_normalize_fallback:)
+          def resolve_tool(registry, requested_name, aliases:, enable_normalize_fallback:, normalize_index:)
             resolution =
               AgentCore::Resources::Tools::ToolNameResolver.resolve(
                 requested_name,
                 include_check: ->(name) { registry.include?(name) },
                 aliases: aliases,
                 enable_normalize_fallback: enable_normalize_fallback,
+                normalize_index: normalize_index,
               )
 
             resolved_name = resolution.resolved_name

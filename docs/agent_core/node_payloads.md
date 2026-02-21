@@ -159,6 +159,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 - `requested_name`：LLM 输出（用于审计）
 - `name`：真实执行名（经过 alias/normalize 解析）
 - `name_resolution`：工具名解析方式（用于审计/定位模型偏差）
+  - `normalized` 覆盖大小写 / 驼峰 / 分隔符漂移（并映射回 registry 中的 canonical tool name）
 - `source`：来源分类（用于可观测/安全策略）
 
 ### 2.2 output（`body.output`）

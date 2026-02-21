@@ -36,9 +36,14 @@ module AgentCore
         # @return [self]
         def register(tool)
           @mutex.synchronize do
-            if @mcp_tools.key?(tool.name)
-              warn "[AgentCore::Registry] Native tool '#{tool.name}' shadows existing MCP tool"
+            if @native_tools.key?(tool.name)
+              raise ArgumentError, "Native tool name collision: #{tool.name.inspect}"
             end
+
+            if @mcp_tools.key?(tool.name)
+              raise ArgumentError, "Native tool name collision with existing MCP tool: #{tool.name.inspect}"
+            end
+
             @native_tools[tool.name] = tool
           end
           self
@@ -127,7 +132,7 @@ module AgentCore
               end
 
               if @native_tools.key?(tool_name)
-                warn "[AgentCore::Registry] MCP tool '#{tool_name}' conflicts with existing native tool (native takes priority)"
+                raise ArgumentError, "MCP tool name collision with existing native tool: #{tool_name.inspect}"
               end
               @mcp_tools[tool_name] = {
                 client: client,

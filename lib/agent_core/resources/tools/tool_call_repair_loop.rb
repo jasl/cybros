@@ -58,6 +58,10 @@ module AgentCore
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
 
           tool_map = index_visible_tools(@visible_tools)
+          normalize_index =
+            if @tool_name_normalize_fallback
+              AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tool_map.keys)
+            end
 
           candidates = []
           skipped = 0
@@ -91,6 +95,7 @@ module AgentCore
                 include_check: ->(name) { tool_map.key?(name) },
                 aliases: @tool_name_aliases,
                 enable_normalize_fallback: @tool_name_normalize_fallback,
+                normalize_index: normalize_index,
               )
 
             tool = tool_map[resolution.resolved_name]

@@ -33,7 +33,7 @@
 - `fallback_models`：Provider failover 模型列表（同 provider；默认 `[]`，空数组表示不启用 failover）
 - `tool_policy`：`AgentCore::Resources::Tools::Policy::*`（默认 `DenyAll`）
 - `tool_name_aliases`：工具名 alias 表（Hash；用于把模型输出名解析到 registry 中的 canonical name）
-- `tool_name_normalize_fallback`：是否启用启发式工具名 normalize fallback（默认 `false`；当前仅 `.`→`_`）
+- `tool_name_normalize_fallback`：是否启用启发式工具名 normalize fallback（默认 `false`；覆盖大小写 / 驼峰 / 分隔符漂移，并映射回 registry 中的 canonical tool name；启用后会对工具名做碰撞预检，存在歧义会直接报错）
 - `skills_store`：`AgentCore::Resources::Skills::Store`（用于 `<available_skills>` 注入）
 - `memory_store`：`AgentCore::Resources::Memory::Base`（用于 `<relevant_context>` 注入）
 - `memory_search_limit`：memory 注入条数上限（默认 5；设为 0 可禁用注入但保留 store）
@@ -84,7 +84,11 @@ Tool calling 稳定性（Runner 级自愈）：
 
 - AgentCore 内置少量默认 alias（例如 `memory.search`→`memory_search`、`skills.list`→`skills_list`），用于缓解部分模型的工具名漂移。
 - `tool_name_aliases` 可用于追加/覆盖 alias（例如把 `math.add` 映射到 `math_add`）。
-- `tool_name_normalize_fallback` 默认关闭；开启后会在 alias 解析失败时尝试 `.`→`_` 的 fallback。
+- `tool_name_normalize_fallback` 默认关闭；开启后会在 alias 解析失败时尝试 normalize fallback：
+  - 大小写漂移：`Skills_List`/`SKILLS_LIST` → `skills_list`
+  - camelCase/PascalCase：`memorySearch`/`MemorySearch` → `memory_search`
+  - 分隔符漂移：`.`/`-`/空格等 → `_`
+  - 注意：启用后会做碰撞预检（例如 `foo-bar` 与 `foo_bar` 同时存在会直接报错），避免“误路由工具”风险。
 
 ---
 
