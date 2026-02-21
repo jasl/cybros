@@ -89,6 +89,11 @@
   - network domain（web_fetch/curl 等）
   - channel/session key（如果接入多渠道）
 
+当前状态（2026-02-21）：
+
+- ✅ 已落地：`AgentCore::Resources::Tools::Policy::Profiled`（工具可见性分层；exact / prefix* / regexp / `*`）
+- ⏳ 未落地：`Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`、以及 app 层“已批准规则”的持久化与注入
+
 ### P0：Memory 工具化 + 分层写入策略（长期助手必需）
 
 参考项目触发点：
@@ -121,6 +126,11 @@
 - Mem0 的 ADD/UPDATE/DELETE 决策链（可在 P1/P2 做）
 - BM25/hybrid 检索（pgvector 先跑起来，之后再补）
 
+当前状态（2026-02-21）：
+
+- ✅ 已落地：`memory_search` / `memory_store` / `memory_forget`（native tools + size cap）与 `Registry#register_memory_store`
+- ⏳ 未落地：`memory_get`、citations 契约、pre-compaction memory flush（auto_compact 前的 silent flush step）、分层写入策略（conversation/user/account scope 的 guardrails）
+
 ### P0：Context pruning（减少长会话工具结果膨胀）
 
 参考项目触发点：
@@ -144,6 +154,11 @@
   - allow/deny tool name glob（跳过图像类等）
 - 强约束：裁剪不写回历史，只影响本次调用 context
 
+当前状态（2026-02-21）：
+
+- ✅ 已落地：`ToolOutputPruner`（仅超预算时启用；只裁剪旧 `tool_result` 与 system-tool 兜底消息；不写回 DAG；决策写入 `metadata["context_cost"]`）
+- ⏳ 未落地：按 tool name 的 allow/deny glob、head+tail（soft_trim）策略、hard_clear 策略、以及更细粒度的“保护边界”（keep_last_assistant_turns 等）
+
 ### P0：Strict schema + tool call repair（提升 tool calling 稳定性）
 
 参考项目触发点：
@@ -155,10 +170,16 @@
 建议实现位置：
 
 - **AgentCore**：
-  - `StrictSchemaNormalizer`：工具注册时对 schema 做规整（尤其 MCP schemas）
-  - `ToolCallRepairLoop`：工具参数校验失败 → 结构化错误 → 限定次数重试（避免死循环）
+  - `StrictJsonSchema`：在 prompt build 阶段对 tools schema 做规整（尤其 MCP schemas）
+  - `ToolCallRepairLoop`：工具参数解析失败（invalid_json/too_large）→ 发起一次“仅修参数”的修复调用（限定次数，避免死循环；后续可扩展到 schema 校验失败）
 - **Provider adapter**：
   - `ProviderFailover`：可配置 fallback model 列表；把工具协议错误也计入可切换条件（并记录可观测事件）
+
+当前状态（2026-02-21）：
+
+- ✅ 已落地：`StrictJsonSchema`（在 prompt build 阶段对 tools schema 做保守 strict 化）
+- ✅ 已落地：`ToolCallRepairLoop`（仅修 `arguments_parse_error`：`invalid_json/too_large`；批量一次修复；允许部分修复；仅写 metadata、不写回 DAG 历史）
+- ✅ 已落地：`ProviderFailover`（同 provider 多模型重试；触发：404 + 400/422 工具/协议关键词；streaming 仅覆盖 `provider.chat(...)` 直接 raise 的场景）
 
 ### P1：Subagent Tool（把跨图模式“变成原语”）
 

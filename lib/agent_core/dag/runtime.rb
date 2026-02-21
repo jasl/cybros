@@ -6,11 +6,15 @@ module AgentCore
       Data.define(
         :provider,
         :model,
+        :fallback_models,
         :tools_registry,
         :tool_policy,
+        :tool_name_aliases,
+        :tool_name_normalize_fallback,
         :skills_store,
         :memory_store,
         :memory_search_limit,
+        :tool_output_pruner,
         :prompt_injection_sources,
         :token_counter,
         :context_turns,
@@ -20,6 +24,9 @@ module AgentCore
         :summary_model,
         :summary_max_tokens,
         :llm_options,
+        :tool_call_repair_attempts,
+        :tool_call_repair_fallback_models,
+        :tool_call_repair_max_output_tokens,
         :instrumenter,
         :max_tool_calls_per_turn,
         :max_steps_per_turn,
@@ -35,11 +42,15 @@ module AgentCore
         def initialize(
           provider:,
           model:,
+          fallback_models: [],
           tools_registry:,
           tool_policy: nil,
+          tool_name_aliases: {},
+          tool_name_normalize_fallback: false,
           skills_store: nil,
           memory_store: nil,
           memory_search_limit: DEFAULT_MEMORY_SEARCH_LIMIT,
+          tool_output_pruner: AgentCore::ContextManagement::ToolOutputPruner.new,
           prompt_injection_sources: [],
           token_counter: nil,
           context_turns: DEFAULT_CONTEXT_TURNS,
@@ -49,6 +60,9 @@ module AgentCore
           summary_model: nil,
           summary_max_tokens: AgentCore::ContextManagement::Summarizer::DEFAULT_MAX_OUTPUT_TOKENS,
           llm_options: {},
+          tool_call_repair_attempts: 1,
+          tool_call_repair_fallback_models: [],
+          tool_call_repair_max_output_tokens: 300,
           instrumenter: nil,
           max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
@@ -60,6 +74,31 @@ module AgentCore
           raise ArgumentError, "model is required" if model.empty?
           raise ArgumentError, "provider is required" if provider.nil?
           raise ArgumentError, "tools_registry is required" if tools_registry.nil?
+
+          fallback_models =
+            Array(fallback_models)
+              .map { |m| m.to_s.strip }
+              .reject(&:empty?)
+              .freeze
+
+          tool_name_aliases =
+            if tool_name_aliases.nil?
+              {}
+            elsif tool_name_aliases.is_a?(Hash)
+              tool_name_aliases
+                .each_with_object({}) do |(k, v), out|
+                  key = k.to_s.strip
+                  val = v.to_s.strip
+                  next if key.empty? || val.empty?
+
+                  out[key] = val
+                end
+            else
+              {}
+            end
+          tool_name_aliases = tool_name_aliases.freeze
+
+          tool_name_normalize_fallback = tool_name_normalize_fallback == true
 
           token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
 
@@ -92,6 +131,18 @@ module AgentCore
 
           llm_options = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
 
+          tool_call_repair_attempts = Integer(tool_call_repair_attempts)
+          raise ArgumentError, "tool_call_repair_attempts must be >= 0" if tool_call_repair_attempts.negative?
+
+          tool_call_repair_fallback_models =
+            Array(tool_call_repair_fallback_models)
+              .map { |m| m.to_s.strip }
+              .reject(&:empty?)
+              .freeze
+
+          tool_call_repair_max_output_tokens = Integer(tool_call_repair_max_output_tokens)
+          raise ArgumentError, "tool_call_repair_max_output_tokens must be > 0" if tool_call_repair_max_output_tokens <= 0
+
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
           tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
@@ -113,11 +164,15 @@ module AgentCore
           super(
             provider: provider,
             model: model,
+            fallback_models: fallback_models,
             tools_registry: tools_registry,
             tool_policy: tool_policy,
+            tool_name_aliases: tool_name_aliases,
+            tool_name_normalize_fallback: tool_name_normalize_fallback,
             skills_store: skills_store,
             memory_store: memory_store,
             memory_search_limit: memory_search_limit,
+            tool_output_pruner: tool_output_pruner,
             prompt_injection_sources: prompt_injection_sources.freeze,
             token_counter: token_counter,
             context_turns: context_turns,
@@ -127,6 +182,9 @@ module AgentCore
             summary_model: summary_model,
             summary_max_tokens: Integer(summary_max_tokens),
             llm_options: llm_options.freeze,
+            tool_call_repair_attempts: tool_call_repair_attempts,
+            tool_call_repair_fallback_models: tool_call_repair_fallback_models,
+            tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens,
             instrumenter: instrumenter,
             max_tool_calls_per_turn: max_tool_calls_per_turn,
             max_steps_per_turn: max_steps_per_turn,

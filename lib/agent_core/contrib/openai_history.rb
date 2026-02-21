@@ -83,7 +83,9 @@ module AgentCore
         name = fn.fetch(:name, "").to_s.strip
         raise ArgumentError, "tool_call.function.name is required" if name.empty?
 
-        args_hash, parse_error = AgentCore::Utils.parse_tool_arguments(fn.fetch(:arguments, nil))
+        raw_args = fn.fetch(:arguments, nil)
+        args_hash, parse_error = AgentCore::Utils.parse_tool_arguments(raw_args)
+        raw = parse_error ? raw_args.to_s : nil
 
         id = h.fetch(:id, nil).to_s.strip
         id = fallback_id if id.empty?
@@ -93,6 +95,7 @@ module AgentCore
           name: name,
           arguments: args_hash,
           arguments_parse_error: parse_error,
+          arguments_raw: raw,
         )
       end
       private_class_method :coerce_tool_call

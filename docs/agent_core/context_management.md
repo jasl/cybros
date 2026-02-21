@@ -1,10 +1,10 @@
 # AgentCore（DAG-first）上下文管理与自动压缩
 
-本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 token budget 行为，以及 auto_compact 如何把历史 turns 压缩为 DAG `summary` 节点。
+本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 token budget 行为、tool outputs pruning，以及 auto_compact 如何把历史 turns 压缩为 DAG `summary` 节点。
 
 实现落点：`lib/agent_core/dag/context_budget_manager.rb`。
 
-如果你在设计“更完整的上下文治理”（tool outputs pruning、tools schema 治理、ContextCostReport 等），另见：
+更完整的 KM（Knowledge/Memory）方案与路线图，另见：
 
 - `docs/agent_core/knowledge_context_memory_design.md`
 - `docs/agent_core/knowledge_context_memory_implementation_plan.md`
@@ -41,14 +41,22 @@
 当超预算时，依次执行：
 
 1) **丢弃 memory_results**（保留 prompt injections 与 history）
-2) **缩小历史窗口**：递减 `limit_turns`，重取 `graph.context_for_full(node.id, limit_turns:)`
-3) 若 `auto_compact=true`：在首次“缩窗后刚好 fit”的时刻尝试压缩（见第 3 节）
+2) **裁剪旧 tool outputs**（只影响本次 prompt view，不写回 DAG）：
+   - 保护最近 `N` 个 user turns（默认 2）
+   - 仅裁剪 `tool_result` 消息与 `"[tool:"` 前缀的 system-tool 兜底消息
+   - 若在 shrink-loop 中多次尝试 pruning，`context_cost.decisions` 会出现多个 `prune_tool_outputs`，并用 `attempt` 标注次序
+3) **缩小历史窗口**：递减 `limit_turns`，重取 `graph.context_for_full(node.id, limit_turns:)`（每次 shrink 后若仍超预算，会再次尝试 pruning）
+4) 若 `auto_compact=true`：在首次“缩窗后刚好 fit”的时刻尝试压缩（见第 3 节；压缩后会重新 estimate，必要时再 pruning）
 
 若缩到 `limit_turns=1` 仍超预算：
 
 - 抛出 `AgentCore::ContextWindowExceededError`
 - executor 将 `agent_message` 标记为 `errored`
-- metadata 写入 `context_budget`（含估算 breakdown）
+- metadata 写入 `context_cost`（至少包含 limit 与最后一次估算 tokens）
+
+每次调用（含成功与 `ContextWindowExceededError` 失败路径）都会写入：
+
+- `agent_message.metadata["context_cost"]`：预算、估算 tokens（final prompt），以及发生过的降级决策（drop memory / prune tool outputs / shrink turns / auto_compact）。
 
 ---
 

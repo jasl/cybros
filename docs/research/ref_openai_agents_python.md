@@ -77,7 +77,7 @@ OpenAI Agents SDK 把 tracing 作为核心能力，并提供外部 processor 生
   - run/turn span（一次 user exchange）
   - llm.call span
   - tool.call span（含 policy decision）
-  - memory.search span
+  - memory_search span
 
 并把“默认不记录 raw args/results（安全）”作为默认策略（我们已有类似约束）。
 

@@ -12,13 +12,13 @@ class AgentCore::Resources::Skills::ToolsTest < Minitest::Test
 
   def test_build_returns_three_tools
     names = @tools.map(&:name)
-    assert_includes names, "skills.list"
-    assert_includes names, "skills.load"
-    assert_includes names, "skills.read_file"
+    assert_includes names, "skills_list"
+    assert_includes names, "skills_load"
+    assert_includes names, "skills_read_file"
   end
 
   def test_skills_list_returns_json
-    tool = @tools.find { |t| t.name == "skills.list" }
+    tool = @tools.find { |t| t.name == "skills_list" }
     result = tool.call({})
 
     require "json"
@@ -29,7 +29,7 @@ class AgentCore::Resources::Skills::ToolsTest < Minitest::Test
   end
 
   def test_skills_load_returns_body_and_files_index
-    tool = @tools.find { |t| t.name == "skills.load" }
+    tool = @tools.find { |t| t.name == "skills_load" }
     result = tool.call({ "name" => "example-skill" })
 
     require "json"
@@ -41,7 +41,7 @@ class AgentCore::Resources::Skills::ToolsTest < Minitest::Test
   end
 
   def test_skills_read_file_returns_text_for_markdown
-    tool = @tools.find { |t| t.name == "skills.read_file" }
+    tool = @tools.find { |t| t.name == "skills_read_file" }
     result = tool.call({ "name" => "another-skill", "rel_path" => "references/guide.md" })
 
     refute result.error?
@@ -76,7 +76,7 @@ class AgentCore::Resources::Skills::ToolsTest < Minitest::Test
 
       store = AgentCore::Resources::Skills::FileSystemStore.new(dirs: [skills_root])
       tools = AgentCore::Resources::Skills::Tools.build(store: store)
-      read = tools.find { |t| t.name == "skills.read_file" }
+      read = tools.find { |t| t.name == "skills_read_file" }
 
       result = read.call({ "name" => "bin-skill", "rel_path" => "assets/logo.png" })
 

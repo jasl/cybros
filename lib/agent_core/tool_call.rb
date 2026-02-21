@@ -3,13 +3,16 @@
 module AgentCore
   # A tool call requested by the assistant.
   class ToolCall
-    attr_reader :id, :name, :arguments, :arguments_parse_error
+    MAX_ARGUMENTS_RAW_BYTES = 4_000
 
-    def initialize(id:, name:, arguments:, arguments_parse_error: nil)
+    attr_reader :id, :name, :arguments, :arguments_parse_error, :arguments_raw
+
+    def initialize(id:, name:, arguments:, arguments_parse_error: nil, arguments_raw: nil)
       @id = id
       @name = name
       @arguments = Utils.deep_stringify_keys(arguments || {}).freeze
       @arguments_parse_error = arguments_parse_error
+      @arguments_raw = coerce_arguments_raw(arguments_raw)
     end
 
     def arguments_valid?
@@ -19,6 +22,9 @@ module AgentCore
     def to_h
       h = { id: id, name: name, arguments: arguments }
       h[:arguments_parse_error] = arguments_parse_error if arguments_parse_error
+      if arguments_parse_error && arguments_raw
+        h[:arguments_raw] = arguments_raw
+      end
       h
     end
 
@@ -27,7 +33,8 @@ module AgentCore
         id == other.id &&
         name == other.name &&
         arguments == other.arguments &&
-        arguments_parse_error == other.arguments_parse_error
+        arguments_parse_error == other.arguments_parse_error &&
+        arguments_raw == other.arguments_raw
     end
 
     def self.from_h(hash)
@@ -36,8 +43,19 @@ module AgentCore
         id: h[:id],
         name: h[:name],
         arguments: h[:arguments] || {},
-        arguments_parse_error: h[:arguments_parse_error]
+        arguments_parse_error: h[:arguments_parse_error],
+        arguments_raw: h[:arguments_raw],
       )
+    end
+
+    private
+
+    def coerce_arguments_raw(value)
+      raw = value.to_s
+      raw = Utils.truncate_utf8_bytes(raw, max_bytes: MAX_ARGUMENTS_RAW_BYTES)
+      raw.strip.empty? ? nil : raw
+    rescue StandardError
+      nil
     end
   end
 end

@@ -226,4 +226,3 @@ Risuai/TavernKit 的 lorebook 证明：知识管理不一定是“搜索 top-k�
 - 你需要“多版本算法并行、重度 RAG/重度长记忆、成本可控” → 再上 Ultimate（微服务化 + hybrid + rerank）
 
 关键是：两者必须共享同一套 **稳定的内部接口**（ports/adapters），否则无法平滑切换与对比评估。
-

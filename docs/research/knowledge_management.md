@@ -84,7 +84,7 @@ Memoh 把“长期记忆管理”当作一条流水线：
 
 4) **Budgets & observability（预算与可观测）**
    - PromptAssembly 产出 “context cost report”（system/injections/tools schema/tool results/memory snippets），并落 metadata
-   - tracing spans：memory.search / docs.search / lorebook.build
+   - tracing spans：memory_search / docs_search / lorebook_build
 
 ## 5) 最小落地顺序（覆盖面最大）
 
@@ -95,4 +95,3 @@ Memoh 把“长期记忆管理”当作一条流水线：
 3. Pre-compaction memory flush（避免 summary 丢耐久信息）  
 4. Lorebook engine（规则触发 + 预算 + 去重 + 解释性报告，偏 roleplay/知识域实验）  
 5. Hybrid retrieval（vector + sparse）+ time decay（减少陈旧/重复注入）
-

@@ -12,12 +12,22 @@ module AgentCore
           :metadata,
         )
 
-      def initialize(node:, runtime:, execution_context:, stream: nil)
+      Build =
+        Data.define(
+          :built_prompt,
+          :context_nodes,
+          :estimate,
+          :memory_dropped,
+          :decisions,
+          :limit_turns,
+          :auto_compacted,
+        )
+
+      def initialize(node:, runtime:, execution_context:)
         @node = node
         @graph = node.graph
         @runtime = runtime
         @execution_context = ExecutionContext.from(execution_context, instrumenter: runtime.instrumenter)
-        @stream = stream
       end
 
       def build_prompt(context_nodes:)
@@ -26,16 +36,16 @@ module AgentCore
         context_nodes = without_target_node(normalize_initial_context(context_nodes))
         prepared = prompt_assembly.prepare(context_nodes: context_nodes)
 
-        built_prompt, estimate, memory_dropped =
+        build =
           build_until_within_budget(
             prompt_assembly: prompt_assembly,
             prepared: prepared,
             context_nodes: context_nodes,
           )
 
-        metadata = budget_metadata(estimate, memory_dropped: memory_dropped, limit_turns: current_limit_turns(context_nodes))
+        metadata = budget_metadata(build, prepared: prepared)
 
-        Result.new(built_prompt: built_prompt, context_nodes: context_nodes, metadata: metadata)
+        Result.new(built_prompt: build.built_prompt, context_nodes: build.context_nodes, metadata: metadata)
       end
 
       private
@@ -51,27 +61,72 @@ module AgentCore
 
         def build_until_within_budget(prompt_assembly:, prepared:, context_nodes:)
           limit = effective_token_limit
+          decisions = []
+
           return build_without_budget(prompt_assembly: prompt_assembly, prepared: prepared, context_nodes: context_nodes) if limit.nil?
 
-          estimate = nil
-
-          built_prompt = prompt_assembly.build(
-            context_nodes: context_nodes,
-            memory_results: prepared.memory_results,
-            prompt_injection_items: prepared.prompt_injection_items,
-          )
+          built_prompt =
+            prompt_assembly.build(
+              context_nodes: context_nodes,
+              memory_results: prepared.memory_results,
+              prompt_injection_items: prepared.prompt_injection_items,
+            )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-          return [built_prompt, estimate, false] if within_budget?(estimate, limit: limit)
 
-          built_prompt = prompt_assembly.build(
-            context_nodes: context_nodes,
-            memory_results: [],
-            prompt_injection_items: prepared.prompt_injection_items,
-          )
+          if within_budget?(estimate, limit: limit)
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: false,
+              decisions: decisions,
+              limit_turns: current_limit_turns(context_nodes),
+              auto_compacted: false,
+            )
+          end
+
+          memory_dropped = Array(prepared.memory_results).any?
+          decisions << { "type" => "drop_memory_results" } if memory_dropped
+
+          built_prompt =
+            prompt_assembly.build(
+              context_nodes: context_nodes,
+              memory_results: [],
+              prompt_injection_items: prepared.prompt_injection_items,
+            )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-          memory_dropped = true
 
-          return [built_prompt, estimate, memory_dropped] if within_budget?(estimate, limit: limit)
+          if within_budget?(estimate, limit: limit)
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: memory_dropped,
+              decisions: decisions,
+              limit_turns: current_limit_turns(context_nodes),
+              auto_compacted: false,
+            )
+          end
+
+          built_prompt, estimate =
+            maybe_prune_tool_outputs(
+              built_prompt,
+              estimate,
+              limit: limit,
+              decisions: decisions,
+            )
+
+          if within_budget?(estimate, limit: limit)
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: memory_dropped,
+              decisions: decisions,
+              limit_turns: current_limit_turns(context_nodes),
+              auto_compacted: false,
+            )
+          end
 
           shrink_turns_until_fit(
             prompt_assembly: prompt_assembly,
@@ -79,6 +134,7 @@ module AgentCore
             initial_context_nodes: context_nodes,
             limit: limit,
             memory_dropped: memory_dropped,
+            decisions: decisions,
           )
         end
 
@@ -89,14 +145,24 @@ module AgentCore
             prompt_injection_items: prepared.prompt_injection_items,
           )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-          [built_prompt, estimate, false]
+
+          Build.new(
+            built_prompt: built_prompt,
+            context_nodes: context_nodes,
+            estimate: estimate,
+            memory_dropped: false,
+            decisions: [],
+            limit_turns: current_limit_turns(context_nodes),
+            auto_compacted: false,
+          )
         end
 
-        def shrink_turns_until_fit(prompt_assembly:, prepared:, initial_context_nodes:, limit:, memory_dropped:)
+        def shrink_turns_until_fit(prompt_assembly:, prepared:, initial_context_nodes:, limit:, memory_dropped:, decisions:)
           auto_compact = @runtime.auto_compact
           auto_compacted = false
 
           limit_turns = current_limit_turns(initial_context_nodes)
+          initial_limit_turns = limit_turns
 
           while limit_turns > 1
             limit_turns -= 1
@@ -110,7 +176,17 @@ module AgentCore
 
             estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
 
-            next unless within_budget?(estimate, limit: limit)
+            unless within_budget?(estimate, limit: limit)
+              built_prompt, estimate =
+                maybe_prune_tool_outputs(
+                  built_prompt,
+                  estimate,
+                  limit: limit,
+                  decisions: decisions,
+                )
+
+              next unless within_budget?(estimate, limit: limit)
+            end
 
             if auto_compact && !auto_compacted
               auto_compacted = try_auto_compact!(from_context_nodes: initial_context_nodes, to_context_nodes: context_nodes)
@@ -123,19 +199,66 @@ module AgentCore
                 )
                 estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
 
-                next unless within_budget?(estimate, limit: limit)
+                unless within_budget?(estimate, limit: limit)
+                  built_prompt, estimate =
+                    maybe_prune_tool_outputs(
+                      built_prompt,
+                      estimate,
+                      limit: limit,
+                      decisions: decisions,
+                    )
+
+                  next unless within_budget?(estimate, limit: limit)
+                end
               end
             end
 
-            return [built_prompt, estimate, memory_dropped]
+            decisions << { "type" => "shrink_turns", "limit_turns" => limit_turns } if limit_turns != initial_limit_turns
+            decisions << { "type" => "auto_compact", "triggered" => auto_compacted } if auto_compact
+
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: memory_dropped,
+              decisions: decisions,
+              limit_turns: limit_turns,
+              auto_compacted: auto_compacted,
+            )
           end
 
+          context_nodes = without_target_node(@graph.context_for_full(@node.id, limit_turns: 1))
           built_prompt = prompt_assembly.build(
-            context_nodes: without_target_node(@graph.context_for_full(@node.id, limit_turns: 1)),
+            context_nodes: context_nodes,
             memory_results: [],
             prompt_injection_items: prepared.prompt_injection_items,
           )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
+
+          unless within_budget?(estimate, limit: limit)
+            built_prompt, estimate =
+              maybe_prune_tool_outputs(
+                built_prompt,
+                estimate,
+                limit: limit,
+                decisions: decisions,
+              )
+          end
+
+          if within_budget?(estimate, limit: limit)
+            decisions << { "type" => "shrink_turns", "limit_turns" => 1 } if 1 != initial_limit_turns
+            decisions << { "type" => "auto_compact", "triggered" => auto_compacted } if auto_compact
+
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: memory_dropped,
+              decisions: decisions,
+              limit_turns: 1,
+              auto_compacted: auto_compacted,
+            )
+          end
 
           raise ContextWindowExceededError.new(
             "prompt exceeds context window even after trimming",
@@ -168,23 +291,189 @@ module AgentCore
           limit.negative? ? 0 : limit
         end
 
-        def budget_metadata(estimate, memory_dropped:, limit_turns:)
+        def budget_metadata(build, prepared:)
           limit = effective_token_limit
 
           {
-            context_budget: {
-              context_window_tokens: @runtime.context_window_tokens,
-              reserved_output_tokens: @runtime.reserved_output_tokens,
-              limit: limit,
-              estimated_prompt_tokens: estimate.fetch(:total),
-              estimated_prompt_tokens_breakdown: estimate,
-              memory_dropped: memory_dropped,
-              limit_turns: limit_turns,
-              auto_compact: @runtime.auto_compact,
-            }.compact,
+            "context_cost" => context_cost_report(build, prepared: prepared, limit: limit),
           }
         rescue StandardError
           {}
+        end
+
+        def context_cost_report(build, prepared:, limit:)
+          estimate = build.estimate.is_a?(Hash) ? build.estimate : {}
+          token_counter = @runtime.token_counter
+
+          memory_results = build.memory_dropped ? [] : Array(prepared.memory_results)
+          memory_knowledge_tokens =
+            if memory_results.any?
+              memory_text = memory_results.map { |e| e.respond_to?(:content) ? e.content.to_s : e.to_s }.join("\n\n")
+              token_counter.count_text("<relevant_context>\n#{memory_text}\n</relevant_context>")
+            else
+              0
+            end
+
+          base_system_prompt =
+            begin
+              ContextAdapter.new(context_nodes: build.context_nodes).call.system_prompt.to_s
+            rescue StandardError
+              ""
+            end
+
+          system_prompt_tokens =
+            begin
+              token_counter.count_text(build.built_prompt.system_prompt.to_s)
+            rescue StandardError
+              0
+            end
+
+          base_system_prompt_tokens =
+            begin
+              token_counter.count_text(base_system_prompt)
+            rescue StandardError
+              0
+            end
+
+          system_injections_tokens = system_prompt_tokens - base_system_prompt_tokens - memory_knowledge_tokens
+          system_injections_tokens = 0 if system_injections_tokens.negative?
+
+          preamble_count = preamble_injection_message_count(prepared.prompt_injection_items)
+          prompt_messages = Array(build.built_prompt.messages)
+          preamble_messages = preamble_count.positive? ? prompt_messages.first(preamble_count) : []
+
+          tool_result_messages = prompt_messages.select { |m| tool_result_message?(m) }
+          history_messages = prompt_messages.drop(preamble_messages.length).reject { |m| tool_result_message?(m) }
+
+          injections_tokens =
+            begin
+              token_counter.count_messages(preamble_messages) + system_injections_tokens
+            rescue StandardError
+              system_injections_tokens
+            end
+
+          {
+            "context_window_tokens" => @runtime.context_window_tokens,
+            "reserved_output_tokens" => @runtime.reserved_output_tokens,
+            "limit" => limit,
+            "memory_dropped" => build.memory_dropped,
+            "limit_turns" => build.limit_turns,
+            "auto_compact" => @runtime.auto_compact,
+            "estimated_tokens" => {
+              "total" => estimate.fetch(:total, nil),
+              "messages" => estimate.fetch(:messages, nil),
+              "tools" => estimate.fetch(:tools, nil),
+            }.compact,
+            "estimated_tokens_coarse" => {
+              "tools_schema" => estimate.fetch(:tools, nil),
+              "tool_results" => token_counter.count_messages(tool_result_messages),
+              "history" => token_counter.count_messages(history_messages),
+              "injections" => injections_tokens,
+              "memory_knowledge" => memory_knowledge_tokens,
+            }.compact,
+            "decisions" => Array(build.decisions).map { |d| d.is_a?(Hash) ? d : { "type" => d.to_s } },
+          }.compact
+        rescue StandardError
+          {
+            "context_window_tokens" => @runtime.context_window_tokens,
+            "reserved_output_tokens" => @runtime.reserved_output_tokens,
+            "limit" => limit,
+            "estimated_tokens" => {
+              "total" => estimate.fetch(:total, nil),
+              "messages" => estimate.fetch(:messages, nil),
+              "tools" => estimate.fetch(:tools, nil),
+            }.compact,
+            "decisions" => Array(build.decisions),
+          }.compact
+        end
+
+        def preamble_injection_message_count(prompt_injection_items)
+          count = 0
+
+          Array(prompt_injection_items)
+            .select { |item| item.respond_to?(:preamble_message?) && item.preamble_message? }
+            .each_with_index
+            .sort_by { |(item, idx)| [item.order.to_i, idx] }
+            .each do |(item, _)|
+              if item.respond_to?(:allowed_in_prompt_mode?) && !item.allowed_in_prompt_mode?(@runtime.prompt_mode)
+                next
+              end
+
+              role = item.role.to_sym
+              next unless role == :user || role == :assistant
+
+              content = item.content.to_s
+              next if content.strip.empty?
+
+              count += 1
+            end
+
+          count
+        rescue StandardError
+          0
+        end
+
+        def tool_result_message?(msg)
+          return true if msg.respond_to?(:tool_result?) && msg.tool_result?
+
+          return false unless msg.respond_to?(:system?) && msg.system?
+
+          text = msg.respond_to?(:text) ? msg.text.to_s : ""
+          text.start_with?("[tool:")
+        rescue StandardError
+          false
+        end
+
+        def maybe_prune_tool_outputs(built_prompt, estimate, limit:, decisions:)
+          return [built_prompt, estimate] if within_budget?(estimate, limit: limit)
+
+          pruner = @runtime.tool_output_pruner
+          return [built_prompt, estimate] if pruner.nil?
+
+          pruned_messages, stats = pruner.call(messages: built_prompt.messages)
+          stats = stats.is_a?(Hash) ? stats : {}
+
+          trimmed_count =
+            Integer(
+              stats.fetch(:trimmed_count, stats.fetch("trimmed_count", 0)),
+              exception: false
+            ) || 0
+          return [built_prompt, estimate] if trimmed_count <= 0
+
+          chars_saved =
+            Integer(
+              stats.fetch(:chars_saved, stats.fetch("chars_saved", 0)),
+              exception: false
+            ) || 0
+
+          attempt =
+            Array(decisions).count { |d|
+              d.is_a?(Hash) && d.fetch("type", nil).to_s == "prune_tool_outputs"
+            } + 1
+
+          decisions << {
+            "type" => "prune_tool_outputs",
+            "attempt" => attempt,
+            "recent_turns" => (pruner.respond_to?(:recent_turns) ? pruner.recent_turns : nil),
+            "max_output_chars" => (pruner.respond_to?(:max_output_chars) ? pruner.max_output_chars : nil),
+            "preview_chars" => (pruner.respond_to?(:preview_chars) ? pruner.preview_chars : nil),
+            "trimmed_count" => trimmed_count,
+            "chars_saved" => chars_saved,
+          }.compact
+
+          pruned_prompt =
+            PromptBuilder::BuiltPrompt.new(
+              system_prompt: built_prompt.system_prompt,
+              messages: pruned_messages,
+              tools: built_prompt.tools,
+              options: built_prompt.options,
+            )
+
+          pruned_estimate = pruned_prompt.estimate_tokens(token_counter: @runtime.token_counter)
+
+          [pruned_prompt, pruned_estimate]
+        rescue StandardError
+          [built_prompt, estimate]
         end
 
         def current_limit_turns(context_nodes)

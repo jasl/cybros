@@ -23,7 +23,15 @@
 {
   "content": "final display text",
   "message": { "role": "assistant", "content": "...", "tool_calls": [ ... ] },
-  "tool_calls": [ { "id": "...", "name": "...", "arguments": { ... } } ],
+  "tool_calls": [
+    {
+      "id": "...",
+      "name": "...",
+      "arguments": { "...": "..." },
+      "arguments_parse_error": "invalid_json|too_large (optional)",
+      "arguments_raw": "raw string preview (optional; only when parse_error exists)"
+    }
+  ],
   "stop_reason": "end_turn|tool_use|max_tokens|...",
   "model": "actual-model",
   "provider": "provider-name"
@@ -35,6 +43,96 @@
 - `content`：用于 UI 展示的纯文本（`AgentCore::Message#text`）。
 - `message`：完整 message roundtrip（multimodal / tool_calls 等）。
 - `tool_calls`：冗余字段，便于 query/debug（同 `message.tool_calls`）。
+
+### 1.3 metadata（`node.metadata`）
+
+AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `ContextWindowExceededError` 失败路径都有）：
+
+```json
+{
+  "context_cost": {
+    "context_window_tokens": 8192,
+    "reserved_output_tokens": 0,
+    "limit": 8192,
+    "memory_dropped": false,
+    "limit_turns": 12,
+    "auto_compact": true,
+    "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
+    "estimated_tokens_coarse": {
+      "tools_schema": 334,
+      "tool_results": 120,
+      "history": 700,
+      "injections": 50,
+      "memory_knowledge": 30
+    },
+    "decisions": [
+      { "type": "drop_memory_results" },
+      { "type": "prune_tool_outputs", "attempt": 1, "trimmed_count": 3, "chars_saved": 12000 },
+      { "type": "shrink_turns", "limit_turns": 5 },
+      { "type": "auto_compact", "triggered": false }
+    ]
+  }
+}
+```
+
+说明：
+
+- `estimated_tokens` 是最终 prompt 的估算（messages + tools）。
+- `estimated_tokens_coarse` 是粗粒度拆分（不要求与 total 严格相加一致）。
+- `decisions` 记录本轮为满足预算做过的降级决策（按发生顺序）。
+  - `prune_tool_outputs.attempt`：同一轮内若多次 pruning（例如 shrink-loop 中反复尝试），attempt 递增。
+
+当 LLM 调用触发 model failover（同 provider 多模型重试）时，会写入：
+
+```json
+{
+  "llm": {
+    "failover": {
+      "requested_model": "primary-model",
+      "used_model": "fallback-model",
+      "attempts": [
+        { "model": "primary-model", "ok": false, "status": 400, "error_class": "AgentCore::ProviderError", "error_message": "...", "elapsed_ms": 12.3 },
+        { "model": "fallback-model", "ok": true, "elapsed_ms": 45.6 }
+      ]
+    }
+  }
+}
+```
+
+当 tool loop 触发工具参数修复（仅修 `arguments_parse_error`：`invalid_json/too_large`）时，会写入：
+
+```json
+{
+  "tool_loop": {
+    "repair": {
+      "attempts": 1,
+      "candidates": 2,
+      "repaired": 1,
+      "failed": 1,
+      "skipped": 0,
+      "failures_sample": [ { "tool_call_id": "tc_2", "reason": "missing_repair" } ],
+      "model": "model-used-for-repair"
+    }
+  }
+}
+```
+
+当 tool loop 发生工具名 alias/normalize 解析时（例如模型输出 `skills.list`，但 registry 中是 `skills_list`），会写入：
+
+```json
+{
+  "tool_loop": {
+    "tool_name_resolution": [
+      {
+        "tool_call_id": "tc_2",
+        "requested_name": "skills.list",
+        "resolved_name": "skills_list",
+        "method": "alias"
+      }
+    ]
+  }
+}
+```
 
 ---
 
@@ -49,6 +147,7 @@
   "tool_call_id": "tc_...",
   "requested_name": "llm_output_name",
   "name": "resolved_tool_name",
+  "name_resolution": "exact|alias|normalized|unknown|missing",
   "arguments": { "string": "keys" },
   "arguments_summary": "safe json preview",
   "source": "native|mcp|skills|policy|invalid_args"
@@ -58,7 +157,8 @@
 说明：
 
 - `requested_name`：LLM 输出（用于审计）
-- `name`：真实执行名（包含 `.`→`_` fallback 解析）
+- `name`：真实执行名（经过 alias/normalize 解析）
+- `name_resolution`：工具名解析方式（用于审计/定位模型偏差）
 - `source`：来源分类（用于可观测/安全策略）
 
 ### 2.2 output（`body.output`）

@@ -19,7 +19,7 @@ module AgentCore
             run_id: execution_context.run_id,
             dag: { graph_id: node.graph_id.to_s, node_id: node.id.to_s, turn_id: node.turn_id.to_s },
           ) do
-            budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context, stream: stream)
+            budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context)
 
             llm = call_llm(runtime, budget.built_prompt, stream: stream, execution_context: execution_context)
 
@@ -27,28 +27,40 @@ module AgentCore
             stop_reason = llm.fetch(:stop_reason)
             usage = llm.fetch(:usage)
             streamed_output = llm.fetch(:streamed_output)
+            used_model = llm.fetch(:used_model)
+            llm_metadata = llm.fetch(:metadata, {})
 
             message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
 
-            output_payload = build_agent_output_payload(message, runtime: runtime, stop_reason: stop_reason)
+            output_payload = build_agent_output_payload(message, runtime: runtime, stop_reason: stop_reason, model: used_model)
 
             if message.has_tool_calls? && !can_expand_tool_loop?(node, runtime: runtime)
               content = "Stopped: exceeded max_steps_per_turn."
               override_message = Message.new(role: :assistant, content: content)
 
-              output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn)
+              output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn, model: used_model)
               output_payload["tool_calls"] = message.tool_calls.map(&:to_h)
 
               metadata =
                 deep_merge_metadata(
                   budget.metadata,
-                  deep_merge_metadata(tool_call_limit_metadata, { reason: "max_steps_exceeded" })
+                  deep_merge_metadata(
+                    llm_metadata,
+                    deep_merge_metadata(tool_call_limit_metadata, { reason: "max_steps_exceeded" })
+                  )
                 )
 
               ::DAG::ExecutionResult.finished(content: content, payload: output_payload, metadata: metadata, usage: usage)
             else
               if message.has_tool_calls?
-                tool_loop_metadata = expand_tool_loop!(node, message, runtime: runtime, execution_context: execution_context)
+                tool_loop_metadata =
+                  expand_tool_loop!(
+                    node,
+                    message,
+                    visible_tools: budget.built_prompt.tools,
+                    runtime: runtime,
+                    execution_context: execution_context,
+                  )
               else
                 tool_loop_metadata = {}
               end
@@ -56,7 +68,10 @@ module AgentCore
               metadata =
                 deep_merge_metadata(
                   budget.metadata,
-                  deep_merge_metadata(tool_call_limit_metadata, tool_loop_metadata)
+                  deep_merge_metadata(
+                    llm_metadata,
+                    deep_merge_metadata(tool_call_limit_metadata, tool_loop_metadata)
+                  )
                 )
 
               if streamed_output
@@ -70,15 +85,14 @@ module AgentCore
           ::DAG::ExecutionResult.errored(
             error: "ContextWindowExceededError: #{e.message}",
             metadata: {
-              context_budget: {
-                context_window_tokens: e.context_window,
-                reserved_output_tokens: e.reserved_output,
-                limit: e.limit,
-                estimated_prompt_tokens: e.estimated_tokens,
-                estimated_prompt_tokens_breakdown: {
-                  messages: e.message_tokens,
-                  tools: e.tool_tokens,
-                  total: e.estimated_tokens,
+              "context_cost" => {
+                "context_window_tokens" => e.context_window,
+                "reserved_output_tokens" => e.reserved_output,
+                "limit" => e.limit,
+                "estimated_tokens" => {
+                  "total" => e.estimated_tokens,
+                  "messages" => e.message_tokens,
+                  "tools" => e.tool_tokens,
                 }.compact,
               }.compact,
             }
@@ -112,20 +126,15 @@ module AgentCore
             )
           end
 
-          def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:, stream:)
-            _ = stream
-
+          def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:)
             ContextBudgetManager.new(
               node: node,
               runtime: runtime,
               execution_context: execution_context,
-              stream: stream,
             ).build_prompt(context_nodes: context_nodes)
           end
 
           def call_llm(runtime, built_prompt, stream:, execution_context:)
-            _ = stream
-
             messages = []
 
             system_prompt = built_prompt.system_prompt.to_s
@@ -148,36 +157,49 @@ module AgentCore
 
             instrumenter = execution_context.instrumenter
 
-            instrumenter.instrument(
-              "agent_core.llm.call",
+            payload = {
               run_id: execution_context.run_id,
               provider: runtime_name(runtime),
               model: runtime.model,
               stream: use_stream,
-            ) do
+            }
+
+            instrumenter.instrument("agent_core.llm.call", payload) do
+              failover =
+                AgentCore::Resources::Provider::ProviderFailover.call(
+                  provider: runtime.provider,
+                  requested_model: runtime.model,
+                  fallback_models: runtime.fallback_models,
+                  messages: messages,
+                  tools: built_prompt.tools,
+                  stream: use_stream,
+                  options: options,
+                  instrumenter: instrumenter,
+                  run_id: execution_context.run_id,
+                )
+
+              used_model = failover.fetch(:used_model)
+              attempts = failover.fetch(:attempts)
+
+              payload[:used_model] = used_model if used_model && used_model != runtime.model
+              payload[:failover_attempts] = attempts.length if attempts.is_a?(Array) && attempts.length > 1
+
+              llm_metadata = build_failover_metadata(requested_model: runtime.model, used_model: used_model, attempts: attempts)
+
               if use_stream
-                stream_chat(runtime, messages: messages, tools: built_prompt.tools, options: options, stream: stream)
+                stream_chat(enum: failover.fetch(:response), stream: stream).merge(used_model: used_model, metadata: llm_metadata)
               else
-                sync_chat(runtime, messages: messages, tools: built_prompt.tools, options: options)
+                sync_chat(failover.fetch(:response)).merge(used_model: used_model, metadata: llm_metadata)
               end
             end
           end
 
-          def stream_chat(runtime, messages:, tools:, options:, stream:)
+          def stream_chat(enum:, stream:)
             final_message = nil
             stop_reason = nil
             usage = nil
             content = +""
             wrote_output_deltas = false
-
-            enum =
-              runtime.provider.chat(
-                messages: messages,
-                model: runtime.model,
-                tools: tools,
-                stream: true,
-                **options
-              )
 
             enum.each do |event|
               case event
@@ -211,16 +233,7 @@ module AgentCore
             }
           end
 
-          def sync_chat(runtime, messages:, tools:, options:)
-            resp =
-              runtime.provider.chat(
-                messages: messages,
-                model: runtime.model,
-                tools: tools,
-                stream: false,
-                **options
-              )
-
+          def sync_chat(resp)
             {
               message: resp.message,
               stop_reason: resp.stop_reason,
@@ -229,7 +242,7 @@ module AgentCore
             }
           end
 
-          def build_agent_output_payload(message, runtime:, stop_reason:)
+          def build_agent_output_payload(message, runtime:, stop_reason:, model:)
             tool_calls = message.has_tool_calls? ? message.tool_calls.map(&:to_h) : []
 
             {
@@ -237,7 +250,7 @@ module AgentCore
               "message" => message.to_h,
               "tool_calls" => tool_calls,
               "stop_reason" => stop_reason.to_s,
-              "model" => runtime.model,
+              "model" => model.to_s,
               "provider" => runtime_name(runtime),
             }
           end
@@ -259,9 +272,35 @@ module AgentCore
             true
           end
 
-          def expand_tool_loop!(node, message, runtime:, execution_context:)
+          def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:)
             graph = node.graph
             tool_policy = runtime.tool_policy
+
+            tool_calls = message.tool_calls
+            tool_loop_metadata = {}
+            name_resolution_events = []
+            tool_name_aliases = runtime.tool_name_aliases
+
+            if should_repair_tool_calls?(tool_calls, runtime: runtime)
+              repair_result =
+                AgentCore::Resources::Tools::ToolCallRepairLoop.call(
+                  provider: runtime.provider,
+                  requested_model: runtime.model,
+                  fallback_models: runtime.tool_call_repair_fallback_models,
+                  tool_calls: tool_calls,
+                  visible_tools: visible_tools,
+                  max_output_tokens: runtime.tool_call_repair_max_output_tokens,
+                  max_attempts: runtime.tool_call_repair_attempts,
+                  tool_name_aliases: runtime.tool_name_aliases,
+                  tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
+                  options: runtime.llm_options,
+                  instrumenter: execution_context.instrumenter,
+                  run_id: execution_context.run_id,
+                )
+
+              tool_calls = repair_result.fetch(:tool_calls, tool_calls)
+              tool_loop_metadata = deep_merge_metadata(tool_loop_metadata, repair_result.fetch(:metadata, {}))
+            end
 
             tasks_created = 0
             awaiting_approval = false
@@ -279,13 +318,29 @@ module AgentCore
                   lane_id: node.lane_id,
                 )
 
-              message.tool_calls.each do |tool_call|
+              tool_calls.each do |tool_call|
                 tool_call_id = tool_call.id.to_s
                 requested_name = tool_call.name.to_s
 
-                resolved = resolve_tool(runtime.tools_registry, requested_name)
+                resolved =
+                  resolve_tool(
+                    runtime.tools_registry,
+                    requested_name,
+                    aliases: tool_name_aliases,
+                    enable_normalize_fallback: runtime.tool_name_normalize_fallback,
+                  )
                 resolved_name = resolved.name
                 source = resolved.source
+
+                if resolved.exists && resolved.resolution_method != :exact && name_resolution_events.length < 20
+                  name_resolution_events <<
+                    {
+                      "tool_call_id" => tool_call_id,
+                      "requested_name" => requested_name.to_s,
+                      "resolved_name" => resolved_name.to_s,
+                      "method" => resolved.resolution_method.to_s,
+                    }
+                end
 
                 arguments = tool_call.arguments || {}
                 parse_error = tool_call.arguments_parse_error
@@ -305,6 +360,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
+                        name_resolution: resolved.resolution_method,
                         arguments: arguments,
                         source: "invalid_args",
                       ),
@@ -335,6 +391,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
+                        name_resolution: resolved.resolution_method,
                         arguments: arguments,
                         source: "policy",
                       ),
@@ -368,6 +425,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
+                        name_resolution: resolved.resolution_method,
                         arguments: arguments,
                         source: source,
                       ),
@@ -399,6 +457,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
+                        name_resolution: resolved.resolution_method,
                         arguments: arguments,
                         source: source,
                       ),
@@ -429,6 +488,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
+                        name_resolution: resolved.resolution_method,
                         arguments: arguments,
                         source: "policy",
                       ),
@@ -449,15 +509,30 @@ module AgentCore
               )
             end
 
-            {
-              tool_loop: {
-                tasks_created: tasks_created,
-                awaiting_approval: awaiting_approval,
-                required_approvals: required_approvals,
-                denied: denied,
-                invalid: invalid,
-              }.compact,
-            }
+            if name_resolution_events.any?
+              tool_loop_metadata =
+                deep_merge_metadata(
+                  tool_loop_metadata,
+                  {
+                    tool_loop: {
+                      tool_name_resolution: name_resolution_events,
+                    },
+                  }
+                )
+            end
+
+            deep_merge_metadata(
+              tool_loop_metadata,
+              {
+                tool_loop: {
+                  tasks_created: tasks_created,
+                  awaiting_approval: awaiting_approval,
+                  required_approvals: required_approvals,
+                  denied: denied,
+                  invalid: invalid,
+                }.compact,
+              }
+            )
           end
 
           def apply_tool_call_limit(message, runtime:)
@@ -505,16 +580,18 @@ module AgentCore
             [message, {}]
           end
 
-          ResolvedTool = Data.define(:name, :source, :exists)
+          ResolvedTool = Data.define(:name, :source, :exists, :resolution_method)
 
-          def resolve_tool(registry, requested_name)
-            requested = requested_name.to_s.strip
-            resolved_name = requested
+          def resolve_tool(registry, requested_name, aliases:, enable_normalize_fallback:)
+            resolution =
+              AgentCore::Resources::Tools::ToolNameResolver.resolve(
+                requested_name,
+                include_check: ->(name) { registry.include?(name) },
+                aliases: aliases,
+                enable_normalize_fallback: enable_normalize_fallback,
+              )
 
-            if !requested.empty? && !registry.include?(requested)
-              underscored = requested.tr(".", "_")
-              resolved_name = underscored if requested != underscored && registry.include?(underscored)
-            end
+            resolved_name = resolution.resolved_name
 
             tool_info = registry.find(resolved_name)
             source =
@@ -531,18 +608,19 @@ module AgentCore
                 "policy"
               end
 
-            ResolvedTool.new(name: resolved_name, source: source, exists: !tool_info.nil?)
+            ResolvedTool.new(name: resolved_name, source: source, exists: !tool_info.nil?, resolution_method: resolution.method)
           rescue StandardError
-            ResolvedTool.new(name: requested_name.to_s, source: "policy", exists: false)
+            ResolvedTool.new(name: requested_name.to_s, source: "policy", exists: false, resolution_method: :unknown)
           end
 
-          def task_input_hash(tool_call_id:, requested_name:, name:, arguments:, source:)
+          def task_input_hash(tool_call_id:, requested_name:, name:, name_resolution:, arguments:, source:)
             arguments = arguments.is_a?(Hash) ? arguments : {}
 
             {
               "tool_call_id" => tool_call_id.to_s,
               "requested_name" => requested_name.to_s,
               "name" => name.to_s,
+              "name_resolution" => name_resolution.to_s,
               "arguments" => AgentCore::Utils.deep_stringify_keys(arguments),
               "arguments_summary" => summarize_arguments(arguments),
               "source" => source.to_s,
@@ -569,8 +647,8 @@ module AgentCore
           end
 
           def deep_merge_metadata(a, b)
-            a = a.is_a?(Hash) ? a : {}
-            b = b.is_a?(Hash) ? b : {}
+            a = a.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(a) : {}
+            b = b.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(b) : {}
             a.deep_merge(b)
           rescue StandardError
             a.merge(b)
@@ -591,6 +669,38 @@ module AgentCore
             runtime_name(runtime)
           rescue StandardError
             nil
+          end
+
+          def build_failover_metadata(requested_model:, used_model:, attempts:)
+            requested = requested_model.to_s
+            used = used_model.to_s
+
+            return {} if used.empty? || used == requested || !attempts.is_a?(Array) || attempts.length <= 1
+
+            {
+              "llm" => {
+                "failover" => {
+                  "requested_model" => requested,
+                  "used_model" => used,
+                  "attempts" => attempts,
+                },
+              },
+            }
+          rescue StandardError
+            {}
+          end
+
+          def should_repair_tool_calls?(tool_calls, runtime:)
+            attempts = Integer(runtime.tool_call_repair_attempts)
+            return false if attempts <= 0
+
+            Array(tool_calls).any? do |tc|
+              err = tc.respond_to?(:arguments_parse_error) ? tc.arguments_parse_error : nil
+              err_str = err.to_s
+              err_str == "invalid_json" || err_str == "too_large"
+            end
+          rescue StandardError
+            false
           end
       end
     end

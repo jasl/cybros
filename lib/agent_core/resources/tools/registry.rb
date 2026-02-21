@@ -55,9 +55,9 @@ module AgentCore
         # Register a Skills::Store as native tools.
         #
         # @param store [Resources::Skills::Store] Skills store
-        # @param max_body_bytes [Integer] Max bytes for skills.list / skills.load responses
-        # @param max_file_bytes [Integer] Max bytes for skills.read_file responses
-        # @param tool_name_prefix [String] Tool name prefix (default: "skills.")
+        # @param max_body_bytes [Integer] Max bytes for skills_list / skills_load responses
+        # @param max_file_bytes [Integer] Max bytes for skills_read_file responses
+        # @param tool_name_prefix [String] Tool name prefix (default: "skills_")
         # @return [self]
         def register_skills_store(store,
                                   max_body_bytes: Resources::Skills::Tools::DEFAULT_MAX_BODY_BYTES,
@@ -68,6 +68,23 @@ module AgentCore
               store: store,
               max_body_bytes: max_body_bytes,
               max_file_bytes: max_file_bytes,
+              tool_name_prefix: tool_name_prefix,
+            )
+
+          register_many(tools)
+        end
+
+        # Register a Memory::Base store as native tools.
+        #
+        # @param store [Resources::Memory::Base] Memory store
+        # @param tool_name_prefix [String] Tool name prefix (default: "memory_")
+        # @param max_body_bytes [Integer] Max bytes for memory_search / memory_store responses
+        # @return [self]
+        def register_memory_store(store, tool_name_prefix: Resources::Memory::Tools::DEFAULT_TOOL_NAME_PREFIX, max_body_bytes: Resources::Memory::Tools::DEFAULT_MAX_BODY_BYTES)
+          tools =
+            Resources::Memory::Tools.build(
+              store: store,
+              max_body_bytes: max_body_bytes,
               tool_name_prefix: tool_name_prefix,
             )
 

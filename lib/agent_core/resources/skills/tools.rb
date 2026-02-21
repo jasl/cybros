@@ -10,7 +10,7 @@ module AgentCore
       module Tools
         DEFAULT_MAX_BODY_BYTES = 200_000
         DEFAULT_MAX_FILE_BYTES = 200_000
-        DEFAULT_TOOL_NAME_PREFIX = "skills."
+        DEFAULT_TOOL_NAME_PREFIX = "skills_"
 
         module_function
 
@@ -25,7 +25,8 @@ module AgentCore
           raise ArgumentError, "max_file_bytes must be positive" if max_file_bytes <= 0
 
           prefix = tool_name_prefix.to_s
-          prefix = "#{prefix}." unless prefix.empty? || prefix.end_with?(".")
+          prefix = prefix.tr(".", "_").gsub(/[^A-Za-z0-9_-]/, "_")
+          prefix = "#{prefix}_" unless prefix.empty? || prefix.end_with?("_")
 
           [
             build_list_tool(store: store, prefix: prefix, max_bytes: max_body_bytes),
@@ -76,7 +77,7 @@ module AgentCore
 
             Resources::Tools::ToolResult.success(text: json)
           rescue StandardError => e
-            Resources::Tools::ToolResult.error(text: "skills.list failed: #{e.message}")
+            Resources::Tools::ToolResult.error(text: "skills_list failed: #{e.message}")
           end
         end
         private_class_method :build_list_tool
@@ -124,9 +125,9 @@ module AgentCore
 
             Resources::Tools::ToolResult.success(text: json)
           rescue KeyError => e
-            Resources::Tools::ToolResult.error(text: "skills.load missing argument: #{e.message}")
+            Resources::Tools::ToolResult.error(text: "skills_load missing argument: #{e.message}")
           rescue StandardError => e
-            Resources::Tools::ToolResult.error(text: "skills.load failed: #{e.message}")
+            Resources::Tools::ToolResult.error(text: "skills_load failed: #{e.message}")
           end
         end
         private_class_method :build_load_tool
@@ -175,9 +176,9 @@ module AgentCore
               )
             end
           rescue KeyError => e
-            Resources::Tools::ToolResult.error(text: "skills.read_file missing argument: #{e.message}")
+            Resources::Tools::ToolResult.error(text: "skills_read_file missing argument: #{e.message}")
           rescue StandardError => e
-            Resources::Tools::ToolResult.error(text: "skills.read_file failed: #{e.message}")
+            Resources::Tools::ToolResult.error(text: "skills_read_file failed: #{e.message}")
           end
         end
         private_class_method :build_read_file_tool

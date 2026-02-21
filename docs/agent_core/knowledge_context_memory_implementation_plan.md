@@ -16,8 +16,8 @@
 
 - `ContextCostReport`（每次调用落 node metadata）
 - `ToolOutputPruner`（只影响本次 prompt，保护最近 N turns）
-- `ToolProfiles + StrictSchemaNormalizer`（工具可见性分层 + schema 规整）
-- `MemoryTools`（memory_search/store/forget/get 可选）
+- `ToolProfiles + StrictJsonSchema`（工具可见性分层 + schema 规整）
+- `MemoryTools`（`memory_search/memory_store/memory_forget`；`memory_get` 可选）
 
 ### 0.2 App 层（L2，Rails 产品层）
 
@@ -82,8 +82,8 @@
 
 验收标准：
 
-- 模型能按需调用 memory_search/store
-- tool result 带 citations（至少能定位到 memory_entry id）
+- 模型能按需调用 `memory_search/memory_store`
+- tool result 至少返回 `memory_entry id`（metadata 可携带 scope/citations；输出受 size cap 控制）
 
 ---
 
@@ -100,7 +100,7 @@
 
 验收标准：
 
-- 压缩后仍能保留关键偏好/事实（通过 memory_search 可召回）
+- 压缩后仍能保留关键偏好/事实（通过 `memory_search` 可召回）
 
 ### P1-2：Memory scopes（conversation/user/account）与隔离
 
@@ -207,4 +207,3 @@
    - 安全：跨租户召回 0 容忍、注入片段触发危险工具的拦截率
 
 没有评估体系，Ultimate 会不可控地变成黑盒。
-

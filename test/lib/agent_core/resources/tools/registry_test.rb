@@ -150,11 +150,11 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     store = AgentCore::Resources::Skills::FileSystemStore.new(dirs: [FIXTURES_DIR])
     @registry.register_skills_store(store)
 
-    assert @registry.include?("skills.list")
-    assert @registry.include?("skills.load")
-    assert @registry.include?("skills.read_file")
+    assert @registry.include?("skills_list")
+    assert @registry.include?("skills_load")
+    assert @registry.include?("skills_read_file")
 
-    result = @registry.execute(name: "skills.list", arguments: {})
+    result = @registry.execute(name: "skills_list", arguments: {})
     refute result.error?
 
     require "json"

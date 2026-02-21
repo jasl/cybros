@@ -261,13 +261,16 @@ module AgentCore
             name = fn.fetch(:name, nil).to_s.strip
             next if name.empty?
 
-            args_hash, parse_error = Utils.parse_tool_arguments(fn.fetch(:arguments, nil))
+            raw_args = fn.fetch(:arguments, nil)
+            args_hash, parse_error = Utils.parse_tool_arguments(raw_args)
+            raw = parse_error ? raw_args.to_s : nil
 
             parsed << {
               id: tc.fetch(:id, nil).to_s.strip,
               name: name,
               arguments: args_hash,
               arguments_parse_error: parse_error,
+              arguments_raw: raw,
             }
           end
 
@@ -277,8 +280,10 @@ module AgentCore
               fc = Utils.symbolize_keys(fc_raw)
               name = fc.fetch(:name, nil).to_s.strip
               unless name.empty?
-                args_hash, parse_error = Utils.parse_tool_arguments(fc.fetch(:arguments, nil))
-                parsed << { id: "", name: name, arguments: args_hash, arguments_parse_error: parse_error }
+                raw_args = fc.fetch(:arguments, nil)
+                args_hash, parse_error = Utils.parse_tool_arguments(raw_args)
+                raw = parse_error ? raw_args.to_s : nil
+                parsed << { id: "", name: name, arguments: args_hash, arguments_parse_error: parse_error, arguments_raw: raw }
               end
             end
           end
@@ -298,6 +303,7 @@ module AgentCore
               name: data.fetch(:name),
               arguments: data.fetch(:arguments),
               arguments_parse_error: data.fetch(:arguments_parse_error),
+              arguments_raw: data.fetch(:arguments_raw, nil),
             )
           end
         end
@@ -498,7 +504,8 @@ module AgentCore
               id = "tc_#{idx + 1}" if id.empty?
 
               args_hash, parse_error = Utils.parse_tool_arguments(args)
-              ToolCall.new(id: id, name: name, arguments: args_hash, arguments_parse_error: parse_error)
+              raw = parse_error ? args : nil
+              ToolCall.new(id: id, name: name, arguments: args_hash, arguments_parse_error: parse_error, arguments_raw: raw)
             end
         end
       end

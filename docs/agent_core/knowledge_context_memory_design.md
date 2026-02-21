@@ -137,7 +137,7 @@ Lite 与 Ultimate 的差异主要在 **Retrieve**（本地 vs 服务化）与 **
 1) **Tool profiles（可见性分层）**  
 `minimal/coding/web/full` + groups（fs/memory/web/devtools…）。
 
-2) **StrictSchemaNormalizer（规整 schema）**  
+2) **StrictJsonSchema（规整 schema）**  
 对 native/MCP tools 做 best-effort strict 化（additionalProperties=false、补 properties、展开 $ref、oneOf→anyOf 等），降低 tool args 失败率（参考 OpenAI Agents SDK）。
 
 ### 2.4 Context report：必须可落库、可回放
@@ -173,10 +173,10 @@ Lite 与 Ultimate 的差异主要在 **Retrieve**（本地 vs 服务化）与 **
 
 建议把 Memory 变成 AgentCore 内建工具（或由 app 统一注册），至少包括：
 
-- `memory_search(query, limit, filter?) -> [RetrievedSnippet]`
-- `memory_store(text, metadata) -> {id}`
+- `memory_search(query, limit, metadata_filter?) -> [RetrievedSnippet]`
+- `memory_store(content, metadata?) -> {id}`
 - `memory_forget(id) -> {ok}`（可选）
-- `memory_get(id|citation) -> {text, citations}`（可选，若 search 已返回足够 text 可不做）
+- `memory_get(id_or_citation) -> {text, citations}`（可选，若 search 已返回足够 text 可不做）
 
 这允许：
 

@@ -30,6 +30,7 @@
 
 - `Messages::Task` 节点的 `arguments_summary` 是 **截断后的 JSON 预览**（避免落库/日志中出现超大参数）
 - `TaskExecutor` 对 tool result 做 bytesize 限制（默认约 200KB），超限会截断并在 result.metadata 标记 `truncated=true`
+- `ContextBudgetManager` 在超预算路径下可对“旧 tool outputs”做 prompt-view 裁剪（`ToolOutputPruner`），不写回 DAG 历史
 - `tool_error_mode`：
   - `:safe`（默认）：错误文本不包含异常 message/堆栈细节
   - `:debug`：错误文本包含异常类型与 message（仅建议在受控环境开启）
@@ -44,7 +45,7 @@
 - rel_path 白名单（仅允许 `scripts/`、`references/`、`assets/` 且单层文件）
 - size cap（读取字节上限）
 
-Skills tools（`skills.read_file`）在任何异常时返回 `ToolResult.error`，不会抛出未捕获异常导致 worker 崩溃。
+Skills tools（`skills_read_file`）在任何异常时返回 `ToolResult.error`，不会抛出未捕获异常导致 worker 崩溃。
 
 ---
 

@@ -15,9 +15,17 @@ Rails.application.config.to_prepare do
     instrumenter =
       AgentCore::Observability::Adapters::ActiveSupportNotificationsInstrumenter.new
 
+    fallback_models =
+      ENV
+        .fetch("AGENT_CORE_FALLBACK_MODELS", "")
+        .split(",")
+        .map(&:strip)
+        .reject(&:empty?)
+
     AgentCore::DAG::Runtime.new(
       provider: provider,
       model: ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini"),
+      fallback_models: fallback_models,
       tools_registry: tools_registry,
       tool_policy: AgentCore::Resources::Tools::Policy::DenyAll.new,
       instrumenter: instrumenter,

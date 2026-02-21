@@ -24,14 +24,14 @@
 跨项目最有效的模式是：
 
 - **只注入可检索的 skills 索引**（name/description/location），而不是技能正文（OpenClaw 的 `<available_skills>`；OpenCode 也倾向只在需要时读取 SKILL.md）。
-- 模型需要某个技能时，用 `read`/`skills.get` **按需加载**，并且加载后只把“必要片段”进入本轮上下文。
+- 模型需要某个技能时，通过 Cybros 的 `skills_load` / `skills_read_file` **按需加载**，并且加载后只把“必要片段”进入本轮上下文。
 - 对“很长的技能/大量参考资料”，把详情外置到 `references/` 或本地 docs，并用“检索工具 + 引用”取回（Bub 的 skill-creator、OpenClaw 的 docs search 工具链）。
 
 反例（用于提醒）：Memoh 的 enabled skills 把正文直接拼进 system prompt，命中率更高但扩张性差；适合“少量固定技能”的产品，不适合作为可扩张 SDK 默认。
 
 对 Cybros 的建议（落地到 AgentCore/PromptAssembly）：
 
-- skills 注入固定为“元信息清单 + 路径/ID”，并提供一个原生 tool：`skills.read(name|id)`（内部走文件/DB，支持截断与缓存）。
+- skills 注入固定为“元信息清单 + 路径/ID”，并提供原生 tools：`skills_list` / `skills_load` / `skills_read_file`（支持截断与缓存）。
 - 对 skills store 建立治理规范（类似 Bub 的 500 行以内 + references 外置）：避免单技能变成“prompt 巨石”。
 
 ## 3) MCP 工具治理：工具很多时必须“分层暴露”
@@ -85,7 +85,6 @@
 2. `SkillIndexOnly`：skills 默认只注入索引，正文通过 tool 按需加载（避免 Memoh 式全文注入）。
 3. `ToolProfiles`：minimal/coding/web-only/full + groups，默认 minimal，需要时升级（并走审批）。
 4. `ToolOutputPruner`：旧 tool results 的 soft-trim/hard-clear（只影响本次 prompt），并保护最近 N turns（参考 ToolOutputTrimmer）。
-5. `StrictSchemaNormalizer`：对 MCP/tools 的 schema 做 strict 化与兼容转换（减少 tool args 失败）。
+5. `StrictJsonSchema`：对 MCP/tools 的 schema 做 strict 化与兼容转换（减少 tool args 失败）。
 
 以上 5 项能把“prompt 膨胀”从一种玄学问题，变成可观测、可治理、可渐进演进的工程问题。
-

@@ -62,9 +62,8 @@ Playground 常见的“破限”需求，很多其实是想突破**产品默认�
 
 结合 Cybros 已有的 DAG 审计与 tool_policy，优先补齐的 workaround 能力：
 
-1. `StrictSchemaNormalizer`（tools/MCP）：规整 schema，提高 tool args 命中率  
+1. `StrictJsonSchema`（tools/MCP）：规整 schema，提高 tool args 命中率  
 2. `ToolOutputPruner`：只影响本次 prompt 的 tool outputs 裁剪（保护最近 N turns）  
 3. `ToolCallRepairLoop`：工具参数校验失败→结构化错误→有限次重试  
 4. `ProviderFailover`：把 tool 协议错误纳入可 failover 的错误域，并记录可观测事件  
 5. `ProtocolSanitizer`：机器协议块与 UI 文本分离（必要时）
-
