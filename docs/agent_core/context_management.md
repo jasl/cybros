@@ -4,6 +4,11 @@
 
 实现落点：`lib/agent_core/dag/context_budget_manager.rb`。
 
+如果你在设计“更完整的上下文治理”（tool outputs pruning、tools schema 治理、ContextCostReport 等），另见：
+
+- `docs/agent_core/knowledge_context_memory_design.md`
+- `docs/agent_core/knowledge_context_memory_implementation_plan.md`
+
 ---
 
 ## 1) Context 组装（DAG → Prompt）

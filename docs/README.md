@@ -17,5 +17,9 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Public API / injection points: `docs/agent_core/public_api.md`
 - Node payload schemas: `docs/agent_core/node_payloads.md`
 - Context management + auto-compaction: `docs/agent_core/context_management.md`
+- Knowledge / Context / Memory design:
+  - Considerations: `docs/agent_core/knowledge_context_memory_considerations.md`
+  - Design (Lite vs Ultimate): `docs/agent_core/knowledge_context_memory_design.md`
+  - Implementation plan: `docs/agent_core/knowledge_context_memory_implementation_plan.md`
 - Security: `docs/agent_core/security.md`
 - Migration parity notes: `docs/agent_core/parity.md`
