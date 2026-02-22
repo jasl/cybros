@@ -27,6 +27,10 @@ module AgentCore
         :tool_call_repair_attempts,
         :tool_call_repair_fallback_models,
         :tool_call_repair_max_output_tokens,
+        :tool_call_repair_validate_schema,
+        :tool_call_repair_schema_max_depth,
+        :tool_call_repair_max_schema_bytes,
+        :tool_call_repair_max_candidates,
         :instrumenter,
         :max_tool_calls_per_turn,
         :max_steps_per_turn,
@@ -63,6 +67,10 @@ module AgentCore
           tool_call_repair_attempts: 1,
           tool_call_repair_fallback_models: [],
           tool_call_repair_max_output_tokens: 300,
+          tool_call_repair_validate_schema: true,
+          tool_call_repair_schema_max_depth: 2,
+          tool_call_repair_max_schema_bytes: 8_000,
+          tool_call_repair_max_candidates: 10,
           instrumenter: nil,
           max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
@@ -187,6 +195,29 @@ module AgentCore
             details: { tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens },
           ) if tool_call_repair_max_output_tokens <= 0
 
+          tool_call_repair_validate_schema = tool_call_repair_validate_schema == true
+
+          tool_call_repair_schema_max_depth = Integer(tool_call_repair_schema_max_depth)
+          ValidationError.raise!(
+            "tool_call_repair_schema_max_depth must be >= 0",
+            code: "agent_core.dag.runtime.tool_call_repair_schema_max_depth_must_be_0",
+            details: { tool_call_repair_schema_max_depth: tool_call_repair_schema_max_depth },
+          ) if tool_call_repair_schema_max_depth.negative?
+
+          tool_call_repair_max_schema_bytes = Integer(tool_call_repair_max_schema_bytes)
+          ValidationError.raise!(
+            "tool_call_repair_max_schema_bytes must be > 0",
+            code: "agent_core.dag.runtime.tool_call_repair_max_schema_bytes_must_be_0",
+            details: { tool_call_repair_max_schema_bytes: tool_call_repair_max_schema_bytes },
+          ) if tool_call_repair_max_schema_bytes <= 0
+
+          tool_call_repair_max_candidates = Integer(tool_call_repair_max_candidates)
+          ValidationError.raise!(
+            "tool_call_repair_max_candidates must be > 0",
+            code: "agent_core.dag.runtime.tool_call_repair_max_candidates_must_be_0",
+            details: { tool_call_repair_max_candidates: tool_call_repair_max_candidates },
+          ) if tool_call_repair_max_candidates <= 0
+
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
           tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
@@ -233,6 +264,10 @@ module AgentCore
             tool_call_repair_attempts: tool_call_repair_attempts,
             tool_call_repair_fallback_models: tool_call_repair_fallback_models,
             tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens,
+            tool_call_repair_validate_schema: tool_call_repair_validate_schema,
+            tool_call_repair_schema_max_depth: tool_call_repair_schema_max_depth,
+            tool_call_repair_max_schema_bytes: tool_call_repair_max_schema_bytes,
+            tool_call_repair_max_candidates: tool_call_repair_max_candidates,
             instrumenter: instrumenter,
             max_tool_calls_per_turn: max_tool_calls_per_turn,
             max_steps_per_turn: max_steps_per_turn,

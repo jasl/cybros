@@ -8,6 +8,8 @@ module AgentCore
       class ToolCallRepairLoop
         DEFAULT_TEMPERATURE = 0
         DEFAULT_ARGUMENTS_RAW_PREVIEW_BYTES = 1_000
+        DEFAULT_MAX_SCHEMA_BYTES = 8_000
+        DEFAULT_MAX_CANDIDATES = 10
 
         def self.call(
           provider:,
@@ -17,6 +19,10 @@ module AgentCore
           visible_tools:,
           max_output_tokens:,
           max_attempts:,
+          validate_schema: false,
+          schema_max_depth: 2,
+          max_schema_bytes: DEFAULT_MAX_SCHEMA_BYTES,
+          max_candidates: DEFAULT_MAX_CANDIDATES,
           tool_name_aliases: {},
           tool_name_normalize_fallback: false,
           options:,
@@ -31,6 +37,10 @@ module AgentCore
             visible_tools: visible_tools,
             max_output_tokens: max_output_tokens,
             max_attempts: max_attempts,
+            validate_schema: validate_schema,
+            schema_max_depth: schema_max_depth,
+            max_schema_bytes: max_schema_bytes,
+            max_candidates: max_candidates,
             tool_name_aliases: tool_name_aliases,
             tool_name_normalize_fallback: tool_name_normalize_fallback,
             options: options,
@@ -39,7 +49,7 @@ module AgentCore
           ).call
         end
 
-        def initialize(provider:, requested_model:, fallback_models:, tool_calls:, visible_tools:, max_output_tokens:, max_attempts:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
+        def initialize(provider:, requested_model:, fallback_models:, tool_calls:, visible_tools:, max_output_tokens:, max_attempts:, validate_schema:, schema_max_depth:, max_schema_bytes:, max_candidates:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
           @provider = provider
           @requested_model = requested_model.to_s
           @fallback_models = Array(fallback_models)
@@ -47,6 +57,13 @@ module AgentCore
           @visible_tools = Array(visible_tools)
           @max_output_tokens = Integer(max_output_tokens)
           @max_attempts = Integer(max_attempts)
+          @validate_schema = validate_schema == true
+          @schema_max_depth = Integer(schema_max_depth)
+          @schema_max_depth = 0 if @schema_max_depth.negative?
+          @max_schema_bytes = Integer(max_schema_bytes)
+          @max_schema_bytes = DEFAULT_MAX_SCHEMA_BYTES if @max_schema_bytes <= 0
+          @max_candidates = Integer(max_candidates)
+          @max_candidates = DEFAULT_MAX_CANDIDATES if @max_candidates <= 0
           @tool_name_aliases = tool_name_aliases
           @tool_name_normalize_fallback = tool_name_normalize_fallback == true
           @options = options.is_a?(Hash) ? options : {}
@@ -63,16 +80,13 @@ module AgentCore
               AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tool_map.keys)
             end
 
-          candidates = []
+          candidates_all = []
           skipped = 0
           failures_sample = []
 
           @tool_calls.each do |tc|
             parse_error = tc.respond_to?(:arguments_parse_error) ? tc.arguments_parse_error : nil
-            reason = targeted_parse_error_reason(parse_error)
-            unless reason
-              next
-            end
+            parse_reason = targeted_parse_error_reason(parse_error)
 
             tool_call_id = safe_tool_call_id(tc)
             if tool_call_id == "unknown"
@@ -106,39 +120,101 @@ module AgentCore
             end
 
             schema = tool.fetch(:schema, {})
-            schema = StrictJsonSchema.normalize(schema)
 
-            raw = tc.respond_to?(:arguments_raw) ? tc.arguments_raw : nil
-            raw_preview =
-              if raw
-                AgentCore::Utils.truncate_utf8_bytes(raw, max_bytes: DEFAULT_ARGUMENTS_RAW_PREVIEW_BYTES)
-              else
-                ""
+            if parse_reason
+              strict_schema = StrictJsonSchema.normalize(schema)
+              schema_for_prompt, schema_truncated = prepare_schema_for_prompt(strict_schema)
+
+              raw = tc.respond_to?(:arguments_raw) ? tc.arguments_raw : nil
+              raw_preview =
+                if raw
+                  AgentCore::Utils.truncate_utf8_bytes(raw, max_bytes: DEFAULT_ARGUMENTS_RAW_PREVIEW_BYTES)
+                else
+                  ""
+                end
+
+              if raw_preview.strip.empty?
+                skipped += 1
+                failures_sample << { "tool_call_id" => tool_call_id, "reason" => "missing_arguments_raw" }
+                next
               end
 
-            if raw_preview.strip.empty?
-              skipped += 1
-              failures_sample << { "tool_call_id" => tool_call_id, "reason" => "missing_arguments_raw" }
+              candidates_all << {
+                tool_call_id: tool_call_id,
+                tool_name: tool.fetch(:name),
+                parse_error: parse_error.to_s,
+                arguments_raw_preview: raw_preview,
+                schema: schema_for_prompt,
+                schema_truncated: schema_truncated,
+                validation_errors_summary: "",
+              }
               next
             end
 
-            candidates << {
+            next unless @validate_schema
+
+            strict_schema = StrictJsonSchema.normalize(schema)
+
+            args = tc.respond_to?(:arguments) ? tc.arguments : {}
+            args = {} unless args.is_a?(Hash)
+
+            errors = AgentCore::Resources::Tools::JsonSchemaLiteValidator.validate(arguments: args, schema: strict_schema, max_depth: @schema_max_depth)
+            next if errors.empty?
+
+            schema_for_prompt, schema_truncated = prepare_schema_for_prompt(strict_schema)
+
+            args_preview =
+              begin
+                json = JSON.generate(args)
+                AgentCore::Utils.truncate_utf8_bytes(json, max_bytes: DEFAULT_ARGUMENTS_RAW_PREVIEW_BYTES)
+              rescue StandardError
+                ""
+              end
+
+            if args_preview.strip.empty?
+              skipped += 1
+              failures_sample << { "tool_call_id" => tool_call_id, "reason" => "missing_arguments_preview" }
+              next
+            end
+
+            candidates_all << {
               tool_call_id: tool_call_id,
               tool_name: tool.fetch(:name),
-              parse_error: parse_error.to_s,
-              arguments_raw_preview: raw_preview,
-              schema: schema,
+              parse_error: "schema_invalid",
+              arguments_raw_preview: args_preview,
+              schema: schema_for_prompt,
+              schema_truncated: schema_truncated,
+              validation_errors_summary: AgentCore::Resources::Tools::JsonSchemaLiteValidator.summarize(errors),
             }
           end
 
-          if candidates.empty? || @max_attempts <= 0
+          candidates_total = candidates_all.length
+          candidates_sent =
+            if candidates_total > @max_candidates
+              overflow = candidates_all.drop(@max_candidates)
+              overflow.each do |c|
+                failures_sample << { "tool_call_id" => c.fetch(:tool_call_id).to_s, "reason" => "skipped_by_max_candidates" }
+              rescue StandardError
+                next
+              end
+              candidates_all.first(@max_candidates)
+            else
+              candidates_all
+            end
+          schema_truncated_candidates = candidates_sent.count { |c| c[:schema_truncated] == true }
+
+          if candidates_sent.empty? || @max_attempts <= 0
             metadata =
               build_metadata(
                 attempts: 0,
-                candidates: candidates.length,
+                candidates: candidates_total,
+                candidates_total: candidates_total,
+                candidates_sent: candidates_sent.length,
                 repaired: 0,
-                failed: 0,
+                failed: candidates_total,
                 skipped: skipped,
+                max_schema_bytes: @max_schema_bytes,
+                schema_truncated_candidates: schema_truncated_candidates,
                 failures_sample: failures_sample,
                 model: nil,
               )
@@ -153,7 +229,7 @@ module AgentCore
           repairs_payload = nil
 
           system = repair_system_prompt
-          user = repair_user_prompt(candidates)
+          user = repair_user_prompt(candidates_sent)
           prompt_messages = [
             AgentCore::Message.new(role: :system, content: system),
             AgentCore::Message.new(role: :user, content: user),
@@ -197,17 +273,17 @@ module AgentCore
             break
           end
 
-          repaired_tool_calls, repaired_count, failed_count, apply_failures =
-            apply_repairs(@tool_calls, repairs_payload, candidates: candidates)
+          repaired_tool_calls, repaired_count, _failed_count, apply_failures =
+            apply_repairs(@tool_calls, repairs_payload, candidates: candidates_sent)
 
           failures_sample.concat(apply_failures)
 
           elapsed_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started) * 1000.0
 
           publish_event(
-            candidates: candidates.length,
+            candidates: candidates_total,
             repaired: repaired_count,
-            failed: failed_count,
+            failed: candidates_total - repaired_count,
             model: used_model,
             elapsed_ms: elapsed_ms,
           )
@@ -215,10 +291,14 @@ module AgentCore
           metadata =
             build_metadata(
               attempts: attempts,
-              candidates: candidates.length,
+              candidates: candidates_total,
+              candidates_total: candidates_total,
+              candidates_sent: candidates_sent.length,
               repaired: repaired_count,
-              failed: failed_count,
+              failed: candidates_total - repaired_count,
               skipped: skipped,
+              max_schema_bytes: @max_schema_bytes,
+              schema_truncated_candidates: schema_truncated_candidates,
               failures_sample: failures_sample,
               model: used_model,
             )
@@ -230,9 +310,13 @@ module AgentCore
             build_metadata(
               attempts: 0,
               candidates: 0,
+              candidates_total: 0,
+              candidates_sent: 0,
               repaired: 0,
               failed: 0,
               skipped: 0,
+              max_schema_bytes: @max_schema_bytes,
+              schema_truncated_candidates: 0,
               failures_sample: failures_sample,
               model: nil,
             )
@@ -243,7 +327,7 @@ module AgentCore
 
         def repair_system_prompt
           <<~TEXT
-            You fix tool call arguments that failed to parse as JSON.
+            You fix tool call arguments that are invalid (either they failed to parse as JSON, or they failed schema validation).
 
             Output MUST be a single JSON object (no markdown, no code fences), with this exact shape:
             {"repairs":[{"tool_call_id":"...","arguments":{}}]}
@@ -267,6 +351,7 @@ module AgentCore
             "tool_call_id" => candidate.fetch(:tool_call_id).to_s,
             "tool_name" => candidate.fetch(:tool_name).to_s,
             "parse_error" => candidate.fetch(:parse_error).to_s,
+            "validation_errors_summary" => candidate.fetch(:validation_errors_summary).to_s,
             "arguments_raw_preview" => candidate.fetch(:arguments_raw_preview).to_s,
             "schema" => candidate.fetch(:schema),
           }
@@ -355,9 +440,7 @@ module AgentCore
               )
             end
 
-          failed = candidate_ids.length - repaired
-
-          [repaired_tool_calls, repaired, failed, failures.first(10)]
+          [repaired_tool_calls, repaired, candidate_ids.length - repaired, failures.first(10)]
         rescue StandardError
           [tool_calls, 0, Array(candidates).length, [{ "tool_call_id" => "", "reason" => "apply_repairs_error" }]]
         end
@@ -465,7 +548,7 @@ module AgentCore
           nil
         end
 
-        def build_metadata(attempts:, candidates:, repaired:, failed:, skipped:, failures_sample:, model:)
+        def build_metadata(attempts:, candidates:, candidates_total:, candidates_sent:, repaired:, failed:, skipped:, max_schema_bytes:, schema_truncated_candidates:, failures_sample:, model:)
           model_name = model.to_s.strip
           model_name = nil if model_name.empty?
 
@@ -477,16 +560,130 @@ module AgentCore
               "repair" => {
                 "attempts" => attempts,
                 "candidates" => candidates,
+                "candidates_total" => candidates_total,
+                "candidates_sent" => candidates_sent,
                 "repaired" => repaired,
                 "failed" => failed,
                 "skipped" => skipped,
                 "failures_sample" => sample,
                 "model" => model_name,
+                "max_schema_bytes" => max_schema_bytes,
+                "schema_truncated_candidates" => schema_truncated_candidates,
               }.compact,
             },
           }
         rescue StandardError
           {}
+        end
+
+        def prepare_schema_for_prompt(schema)
+          excerpt = schema_excerpt(schema, depth_left: @schema_max_depth)
+          bytes = json_bytesize(excerpt)
+          return [excerpt, false] if bytes && bytes <= @max_schema_bytes
+
+          degraded = schema_properties_keys_only(schema)
+          degraded_bytes = json_bytesize(degraded)
+          return [degraded, true] if degraded_bytes && degraded_bytes <= @max_schema_bytes
+
+          [{}, true]
+        rescue StandardError
+          [{}, true]
+        end
+
+        def json_bytesize(value)
+          JSON.generate(value).bytesize
+        rescue StandardError
+          nil
+        end
+
+        def schema_excerpt(schema, depth_left:)
+          s = schema.is_a?(Hash) ? schema : {}
+
+          out = {}
+
+          type = s.fetch("type", s.fetch(:type, nil))
+          out["type"] = type if type
+
+          ap = s.fetch("additionalProperties", s.fetch(:additionalProperties, nil))
+          out["additionalProperties"] = ap if ap == true || ap == false
+
+          req = s.fetch("required", s.fetch(:required, nil))
+          out["required"] = Array(req).map { |v| v.to_s }.reject(&:empty?) if req.is_a?(Array)
+
+          enum = s.fetch("enum", s.fetch(:enum, nil))
+          out["enum"] = enum if enum.is_a?(Array)
+
+          props = s.fetch("properties", s.fetch(:properties, nil))
+          if props.is_a?(Hash)
+            out["properties"] = {}
+            props.each do |k, v|
+              key = k.to_s
+              next if key.empty?
+
+              out["properties"][key] =
+                if depth_left <= 0
+                  {}
+                else
+                  schema_excerpt(v, depth_left: depth_left - 1)
+                end
+            end
+          end
+
+          items = s.fetch("items", s.fetch(:items, nil))
+          if items.is_a?(Hash)
+            out["items"] =
+              if depth_left <= 0
+                {}
+              else
+                schema_excerpt(items, depth_left: depth_left - 1)
+              end
+          end
+
+          out
+        rescue StandardError
+          {}
+        end
+
+        def schema_properties_keys_only(schema)
+          s = schema.is_a?(Hash) ? schema : {}
+          return {} unless object_schema?(s)
+
+          out = {}
+
+          type = s.fetch("type", s.fetch(:type, nil))
+          out["type"] = type if type
+
+          ap = s.fetch("additionalProperties", s.fetch(:additionalProperties, nil))
+          out["additionalProperties"] = ap if ap == true || ap == false
+
+          req = s.fetch("required", s.fetch(:required, nil))
+          out["required"] = Array(req).map { |v| v.to_s }.reject(&:empty?) if req.is_a?(Array)
+
+          props = s.fetch("properties", s.fetch(:properties, nil))
+          if props.is_a?(Hash)
+            out["properties"] = props.keys.each_with_object({}) do |k, h|
+              key = k.to_s
+              next if key.empty?
+
+              h[key] = {}
+            end
+          end
+
+          out
+        rescue StandardError
+          {}
+        end
+
+        def object_schema?(schema)
+          t = schema.fetch("type", schema.fetch(:type, nil))
+          case t
+          when Array
+            t.map { |v| v.to_s }.include?("object")
+          else
+            t.to_s == "object"
+          end
+        rescue StandardError
+          false
         end
       end
     end

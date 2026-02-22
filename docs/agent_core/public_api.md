@@ -75,6 +75,10 @@ Tool calling 稳定性（Runner 级自愈）：
 - `tool_call_repair_attempts`：工具参数 parse_error 修复次数（默认 `1`；设为 `0` 可禁用 repair）
 - `tool_call_repair_fallback_models`：repair 失败时可升级的模型列表（同 provider；默认 `[]`）
 - `tool_call_repair_max_output_tokens`：repair 调用输出上限（默认 `300`；prompt-only JSON）
+- `tool_call_repair_validate_schema`：是否启用 schema 语义校验（默认 `true`；当 args 能 parse 但不满足 schema 时也会触发 repair；若仍失败则不执行工具、直接产出 `invalid_args` task）
+- `tool_call_repair_schema_max_depth`：schema 校验/repair prompt schema excerpt 的最大深度（默认 `2`）
+- `tool_call_repair_max_schema_bytes`：repair prompt 中单个候选 schema 的最大 JSON bytes（默认 `8000`；超限会降级/截断）
+- `tool_call_repair_max_candidates`：单次 repair 最多发送的候选数（默认 `10`；超过部分会记录失败原因并保留原 tool_call）
 
 工具错误模式：
 

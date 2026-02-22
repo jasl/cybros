@@ -39,7 +39,7 @@
 
 当 `agent_message/character_message` 的 LLM 响应包含 `tool_calls`：
 
-0) 若发现 tool_call `arguments_parse_error`（`invalid_json/too_large`），会先触发一次参数修复（ToolCallRepairLoop，见 2.2）
+0) 若启用工具参数自愈（`runtime.tool_call_repair_attempts > 0`），会先触发一次参数修复（ToolCallRepairLoop，见 2.2）
 1) 在同一 `turn_id` 下创建一个 **next agent node**（pending）
 2) 对每个 tool_call 创建一个 `task` 节点，并连边：
    - `agent_message -> task`：`sequence`
@@ -79,17 +79,23 @@ normalize fallback 的安全约束（hard fail）：
 
 完整列表与扩展方式见：`AgentCore::Resources::Tools::ToolNameResolver::DEFAULT_ALIASES` 与 `docs/agent_core/public_api.md`。
 
-### 2.2 ToolCallRepairLoop（仅修 arguments_parse_error）
+### 2.2 ToolCallRepairLoop（修 `arguments_parse_error` + schema invalid）
 
-当 tool_calls 中存在 `arguments_parse_error` 且 `runtime.tool_call_repair_attempts > 0` 时：
+当 `runtime.tool_call_repair_attempts > 0` 且本轮 tool_calls 中存在“可修复候选”时：
 
 - executor 会对本轮 tool_calls 发起一次“仅修参数”的 LLM 修复调用：
-  - 仅覆盖 `invalid_json/too_large`（不做 schema 语义校验）
+  - 覆盖两类候选：
+    - `arguments_parse_error`：`invalid_json/too_large`
+    - `schema_invalid`：当 `runtime.tool_call_repair_validate_schema=true` 且 tool args 不满足 schema（漏 required / 类型明显不对 / `additionalProperties:false` 下出现未知 key）
   - 可见工具范围：仅对“本轮 prompt 可见的 tool”（`budget.built_prompt.tools`）尝试修复
-  - 批量修复一次（允许部分成功；修不了的保留原 parse_error）
+  - 批量修复一次（允许部分成功；修不了的保留原 tool_call（含原 arguments / parse_error））
 - 修复调用约束：
   - `tools: nil`、`stream: false`、`temperature: 0`（若未指定）
   - 输出必须为纯 JSON：`{"repairs":[{"tool_call_id":"...","arguments":{}}]}`
+- Prompt 体积治理（避免 repair 自己超预算/注意力稀释）：
+  - 对每个候选的 schema 做 excerpt/truncate（仅保留必要字段与有限深度）
+  - `runtime.tool_call_repair_max_schema_bytes`：单个候选 schema 的最大 JSON bytes
+  - `runtime.tool_call_repair_max_candidates`：单次 repair 最多发送的候选数
 - 审计：
   - `agent_message.metadata["tool_loop"]["repair"]` 记录 attempts/candidates/repaired/failed 等
 
@@ -102,9 +108,9 @@ normalize fallback 的安全约束（hard fail）：
 1) 参数解析错误（arguments_parse_error）→ 直接创建 `task(state=finished)`，output 为 `ToolResult.error`
 2) 工具不存在 → 创建 `task(state=finished)`，output 为 `ToolResult.error`
 3) 调用 `tool_policy.authorize(...)`：
-   - `allow` → `task(state=pending)`，等待执行
+   - `allow` →（若启用 schema 校验且仍不满足 schema，则创建 `task(state=finished, source=invalid_args)`；否则）`task(state=pending)`，等待执行
    - `deny` → `task(state=finished)`，output 为 `ToolResult.error`
-   - `confirm` → `task(state=awaiting_approval)`，等待人工审批（见第 3 节）
+   - `confirm` →（若启用 schema 校验且仍不满足 schema，则创建 `task(state=finished, source=invalid_args)`；否则）`task(state=awaiting_approval)`，等待人工审批（见第 3 节）
 
 ---
 
@@ -235,7 +241,5 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 
 以下能力**不属于当前实现的行为规范**，但对“tool calling 稳态成功率”提升很有效，建议按需进入 P1：
 
-- schema 语义校验触发 repair：当 args 能 parse 但不满足 schema（漏 required / 类型明显不对 / unknown keys）时，走一次“仅修参数”修复回路（限制次数，避免死循环）
 - tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修工具名”的修复调用（限定在 visible_tools 范围内）
-- repair prompt 体积治理：对传入 repair 的 schema 做裁剪（max_schema_bytes / 只传相关 properties 子树），避免工具多时 repair prompt 自身超预算
 - failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置

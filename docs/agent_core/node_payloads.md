@@ -99,7 +99,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 }
 ```
 
-当 tool loop 触发工具参数修复（仅修 `arguments_parse_error`：`invalid_json/too_large`）时，会写入：
+当 tool loop 触发工具参数修复（ToolCallRepairLoop）时，会写入：
 
 ```json
 {
@@ -107,15 +107,25 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
     "repair": {
       "attempts": 1,
       "candidates": 2,
+      "candidates_total": 2,
+      "candidates_sent": 2,
       "repaired": 1,
       "failed": 1,
       "skipped": 0,
       "failures_sample": [ { "tool_call_id": "tc_2", "reason": "missing_repair" } ],
-      "model": "model-used-for-repair"
+      "model": "model-used-for-repair",
+      "max_schema_bytes": 8000,
+      "schema_truncated_candidates": 0
     }
   }
 }
 ```
+
+说明：
+
+- `candidates` / `candidates_total`：本轮识别到的 repair 候选数量（包括 `arguments_parse_error` 与（可选）schema invalid 候选）
+- `candidates_sent`：实际发送给 repair LLM 的候选数（受 `tool_call_repair_max_candidates` 限制）
+- `max_schema_bytes` / `schema_truncated_candidates`：repair prompt 的 schema 体积治理统计
 
 当 tool loop 发生工具名 alias/normalize 解析时（例如模型输出 `skills.list`，但 registry 中是 `skills_list`），会写入：
 
@@ -130,6 +140,26 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
         "method": "alias"
       }
     ]
+  }
+}
+```
+
+当 tool args 能 parse 但不满足 schema（schema invalid），且修复未生效/被禁用时，会写入：
+
+```json
+{
+  "tool_loop": {
+    "invalid_schema_args": {
+      "count": 1,
+      "sample": [
+        {
+          "tool_call_id": "tc_1",
+          "requested_name": "echo",
+          "resolved_name": "echo",
+          "errors_summary": "missing_required path=text expected=present"
+        }
+      ]
+    }
   }
 }
 ```

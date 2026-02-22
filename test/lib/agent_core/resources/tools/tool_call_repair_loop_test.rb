@@ -141,6 +141,63 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
     assert_equal 1, repair.fetch("failed")
   end
 
+  def test_repairs_schema_invalid_arguments
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"arguments\":{\"text\":\"hi\"}}]}"),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tool_calls = [
+      AgentCore::ToolCall.new(
+        id: "tc_1",
+        name: "echo",
+        arguments: {},
+      ),
+    ]
+
+    visible_tools = [
+      {
+        name: "echo",
+        description: "Echo",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "text" => { type: "string" } },
+          required: ["text"],
+        },
+      },
+    ]
+
+    result =
+      AgentCore::Resources::Tools::ToolCallRepairLoop.call(
+        provider: provider,
+        requested_model: "primary",
+        fallback_models: [],
+        tool_calls: tool_calls,
+        visible_tools: visible_tools,
+        max_output_tokens: 300,
+        max_attempts: 1,
+        validate_schema: true,
+        schema_max_depth: 2,
+        options: {},
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        run_id: "rid",
+      )
+
+    repaired = result.fetch(:tool_calls).first
+    assert_nil repaired.arguments_parse_error
+    assert_equal({ "text" => "hi" }, repaired.arguments)
+
+    repair = result.fetch(:metadata).dig("tool_loop", "repair")
+    assert_equal 1, repair.fetch("candidates")
+    assert_equal 1, repair.fetch("repaired")
+  end
+
   def test_partial_repair_is_allowed
     provider =
       StubProvider.new(

@@ -1,6 +1,6 @@
 # 差距分析与补能力路线图（面向“可持续做实验”的底座）
 
-更新时间：2026-02-21
+更新时间：2026-02-22
 
 本文把 `docs/research/*` 的单项目调研收敛成一份“平台能力 Backlog”。目标不是一次性复刻某个项目，而是让 Cybros 的 **DAG 引擎 + AgentCore** 能以最少增量覆盖更多实验形态。
 
@@ -89,7 +89,7 @@
   - network domain（web_fetch/curl 等）
   - channel/session key（如果接入多渠道）
 
-当前状态（2026-02-21）：
+当前状态（2026-02-22）：
 
 - ✅ 已落地：`AgentCore::Resources::Tools::Policy::Profiled`（工具可见性分层；exact / prefix* / regexp / `*`）
 - ⏳ 未落地：`Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`、以及 app 层“已批准规则”的持久化与注入
@@ -126,7 +126,7 @@
 - Mem0 的 ADD/UPDATE/DELETE 决策链（可在 P1/P2 做）
 - BM25/hybrid 检索（pgvector 先跑起来，之后再补）
 
-当前状态（2026-02-21）：
+当前状态（2026-02-22）：
 
 - ✅ 已落地：`memory_search` / `memory_store` / `memory_forget`（native tools + size cap）与 `Registry#register_memory_store`
 - ⏳ 未落地：`memory_get`、citations 契约、pre-compaction memory flush（auto_compact 前的 silent flush step）、分层写入策略（conversation/user/account scope 的 guardrails）
@@ -154,7 +154,7 @@
   - allow/deny tool name glob（跳过图像类等）
 - 强约束：裁剪不写回历史，只影响本次调用 context
 
-当前状态（2026-02-21）：
+当前状态（2026-02-22）：
 
 - ✅ 已落地：`ToolOutputPruner`（仅超预算时启用；只裁剪旧 `tool_result` 与 system-tool 兜底消息；不写回 DAG；决策写入 `metadata["context_cost"]`）
 - ⏳ 未落地：按 tool name 的 allow/deny glob、head+tail（soft_trim）策略、hard_clear 策略、以及更细粒度的“保护边界”（keep_last_assistant_turns 等）
@@ -171,21 +171,19 @@
 
 - **AgentCore**：
   - `StrictJsonSchema`：在 prompt build 阶段对 tools schema 做规整（尤其 MCP schemas）
-  - `ToolCallRepairLoop`：工具参数解析失败（invalid_json/too_large）→ 发起一次“仅修参数”的修复调用（限定次数，避免死循环；后续可扩展到 schema 校验失败）
+  - `ToolCallRepairLoop`：工具参数无效（`invalid_json/too_large` 或 schema invalid）→ 发起一次“仅修参数”的修复调用（限定次数，避免死循环）
 - **Provider adapter**：
   - `ProviderFailover`：可配置 fallback model 列表；把工具协议错误也计入可切换条件（并记录可观测事件）
 
-当前状态（2026-02-21）：
+当前状态（2026-02-22）：
 
 - ✅ 已落地：`StrictJsonSchema`（在 prompt build 阶段对 tools schema 做保守 strict 化）
-- ✅ 已落地：`ToolCallRepairLoop`（仅修 `arguments_parse_error`：`invalid_json/too_large`；批量一次修复；允许部分修复；仅写 metadata、不写回 DAG 历史）
+- ✅ 已落地：`ToolCallRepairLoop`（覆盖 `arguments_parse_error`：`invalid_json/too_large` 与 schema invalid；批量一次修复；允许部分修复；repair prompt 支持候选数上限与 schema excerpt/truncate；若仍不满足 schema 则不执行工具、直接产出 `invalid_args` task；仅写 metadata、不写回 DAG 历史）
 - ✅ 已落地：`ProviderFailover`（同 provider 多模型重试；触发：404 + 400/422 工具/协议关键词；streaming 仅覆盖 `provider.chat(...)` 直接 raise 的场景）
 
 下一步（建议，P1+）：
 
-- ⏳ schema 语义校验触发 repair：当 args 能 parse 但不满足 schema（漏 required / 类型明显不对 / additionalProperties=false 下出现未知 key）时，走一次“仅修参数”修复回路（仍限制次数，避免死循环）
 - ⏳ tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内）
-- ⏳ repair prompt 体积治理：对传入 repair 的 schema 做裁剪（max_schema_bytes / 只传相关 properties 子树），避免工具多时 repair prompt 自身超预算
 - ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
 
 ### P1：Subagent Tool（把跨图模式“变成原语”）

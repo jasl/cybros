@@ -283,11 +283,15 @@ module AgentCore
             tool_calls = message.tool_calls
             tool_loop_metadata = {}
             name_resolution_events = []
+            invalid_schema_count = 0
+            invalid_schema_sample = []
             tool_name_aliases = runtime.tool_name_aliases
             normalize_index =
               if runtime.tool_name_normalize_fallback
                 AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(runtime.tools_registry.tool_names)
               end
+
+            visible_tool_schemas = index_visible_tool_schemas(visible_tools)
 
             if should_repair_tool_calls?(tool_calls, runtime: runtime)
               repair_result =
@@ -299,6 +303,10 @@ module AgentCore
                   visible_tools: visible_tools,
                   max_output_tokens: runtime.tool_call_repair_max_output_tokens,
                   max_attempts: runtime.tool_call_repair_attempts,
+                  validate_schema: runtime.tool_call_repair_validate_schema,
+                  schema_max_depth: runtime.tool_call_repair_schema_max_depth,
+                  max_schema_bytes: runtime.tool_call_repair_max_schema_bytes,
+                  max_candidates: runtime.tool_call_repair_max_candidates,
                   tool_name_aliases: runtime.tool_name_aliases,
                   tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
                   options: runtime.llm_options,
@@ -423,6 +431,59 @@ module AgentCore
 
                 case decision.outcome
                 when :allow
+                  if runtime.tool_call_repair_validate_schema
+                    schema = visible_tool_schemas[resolved_name] || schema_from_registry(runtime.tools_registry.find(resolved_name))
+                    schema = AgentCore::Resources::Tools::StrictJsonSchema.normalize(schema.is_a?(Hash) ? schema : {})
+
+                    errors =
+                      AgentCore::Resources::Tools::JsonSchemaLiteValidator.validate(
+                        arguments: arguments,
+                        schema: schema,
+                        max_depth: runtime.tool_call_repair_schema_max_depth,
+                      )
+
+                    if errors.any?
+                      invalid += 1
+                      invalid_schema_count += 1
+
+                      if invalid_schema_sample.length < 10
+                        invalid_schema_sample << {
+                          "tool_call_id" => tool_call_id,
+                          "requested_name" => requested_name.to_s,
+                          "resolved_name" => resolved_name.to_s,
+                          "errors_summary" => AgentCore::Resources::Tools::JsonSchemaLiteValidator.summarize(errors),
+                        }
+                      end
+
+                      tool_error =
+                        AgentCore::Resources::Tools::ToolResult.error(
+                          text: "Invalid tool arguments (schema_invalid): #{AgentCore::Resources::Tools::JsonSchemaLiteValidator.summarize(errors)}"
+                        )
+
+                      task =
+                        m.create_node(
+                          node_type: Messages::Task.node_type_key,
+                          state: ::DAG::Node::FINISHED,
+                          idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
+                          lane_id: node.lane_id,
+                          metadata: { "generated_by" => "agent_core", "source" => "invalid_args" },
+                          body_input: task_input_hash(
+                            tool_call_id: tool_call_id,
+                            requested_name: requested_name,
+                            name: resolved_name,
+                            name_resolution: resolved.resolution_method,
+                            arguments: arguments,
+                            source: "invalid_args",
+                          ),
+                          body_output: { "result" => tool_error.to_h },
+                        )
+
+                      m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                      m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      next
+                    end
+                  end
+
                   task =
                     m.create_node(
                       node_type: Messages::Task.node_type_key,
@@ -445,6 +506,59 @@ module AgentCore
 
                   tasks_created += 1
                 when :confirm
+                  if runtime.tool_call_repair_validate_schema
+                    schema = visible_tool_schemas[resolved_name] || schema_from_registry(runtime.tools_registry.find(resolved_name))
+                    schema = AgentCore::Resources::Tools::StrictJsonSchema.normalize(schema.is_a?(Hash) ? schema : {})
+
+                    errors =
+                      AgentCore::Resources::Tools::JsonSchemaLiteValidator.validate(
+                        arguments: arguments,
+                        schema: schema,
+                        max_depth: runtime.tool_call_repair_schema_max_depth,
+                      )
+
+                    if errors.any?
+                      invalid += 1
+                      invalid_schema_count += 1
+
+                      if invalid_schema_sample.length < 10
+                        invalid_schema_sample << {
+                          "tool_call_id" => tool_call_id,
+                          "requested_name" => requested_name.to_s,
+                          "resolved_name" => resolved_name.to_s,
+                          "errors_summary" => AgentCore::Resources::Tools::JsonSchemaLiteValidator.summarize(errors),
+                        }
+                      end
+
+                      tool_error =
+                        AgentCore::Resources::Tools::ToolResult.error(
+                          text: "Invalid tool arguments (schema_invalid): #{AgentCore::Resources::Tools::JsonSchemaLiteValidator.summarize(errors)}"
+                        )
+
+                      task =
+                        m.create_node(
+                          node_type: Messages::Task.node_type_key,
+                          state: ::DAG::Node::FINISHED,
+                          idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
+                          lane_id: node.lane_id,
+                          metadata: { "generated_by" => "agent_core", "source" => "invalid_args" },
+                          body_input: task_input_hash(
+                            tool_call_id: tool_call_id,
+                            requested_name: requested_name,
+                            name: resolved_name,
+                            name_resolution: resolved.resolution_method,
+                            arguments: arguments,
+                            source: "invalid_args",
+                          ),
+                          body_output: { "result" => tool_error.to_h },
+                        )
+
+                      m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                      m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      next
+                    end
+                  end
+
                   awaiting_approval = true
 
                   approval = {
@@ -530,6 +644,21 @@ module AgentCore
                 )
             end
 
+            if invalid_schema_sample.any?
+              tool_loop_metadata =
+                deep_merge_metadata(
+                  tool_loop_metadata,
+                  {
+                    tool_loop: {
+                      invalid_schema_args: {
+                        count: invalid_schema_count,
+                        sample: invalid_schema_sample,
+                      },
+                    },
+                  }
+                )
+            end
+
             deep_merge_metadata(
               tool_loop_metadata,
               {
@@ -587,6 +716,56 @@ module AgentCore
             [truncated_message, metadata]
           rescue StandardError
             [message, {}]
+          end
+
+          def index_visible_tool_schemas(tools)
+            out = {}
+
+            Array(tools).each do |tool|
+              next unless tool.is_a?(Hash)
+
+              h = AgentCore::Utils.symbolize_keys(tool)
+
+              name = h.fetch(:name, nil)
+              schema = h.fetch(:parameters, nil)
+
+              if name.nil? || name.to_s.strip.empty?
+                type = h.fetch(:type, nil).to_s
+                if type == "function" && h.fetch(:function, nil).is_a?(Hash)
+                  fn = AgentCore::Utils.symbolize_keys(h.fetch(:function))
+                  name = fn.fetch(:name, nil)
+                  schema = fn.fetch(:parameters, nil)
+                end
+              end
+
+              schema ||= h.fetch(:input_schema, nil)
+
+              name = name.to_s.strip
+              next if name.empty?
+
+              out[name] ||= schema.is_a?(Hash) ? schema : {}
+            rescue StandardError
+              next
+            end
+
+            out
+          end
+
+          def schema_from_registry(tool_info)
+            case tool_info
+            when AgentCore::Resources::Tools::Tool
+              tool_info.parameters
+            when Hash
+              defn = tool_info.fetch(:definition, nil)
+              defn = {} unless defn.is_a?(Hash)
+
+              params = defn.fetch(:input_schema) { defn.fetch(:parameters, {}) }
+              params.is_a?(Hash) ? params : {}
+            else
+              {}
+            end
+          rescue StandardError
+            {}
           end
 
           ResolvedTool = Data.define(:name, :source, :exists, :resolution_method)
@@ -704,11 +883,7 @@ module AgentCore
             attempts = Integer(runtime.tool_call_repair_attempts)
             return false if attempts <= 0
 
-            Array(tool_calls).any? do |tc|
-              err = tc.respond_to?(:arguments_parse_error) ? tc.arguments_parse_error : nil
-              err_str = err.to_s
-              err_str == "invalid_json" || err_str == "too_large"
-            end
+            Array(tool_calls).any?
           rescue StandardError
             false
           end

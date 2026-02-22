@@ -1,6 +1,6 @@
 # 模型 workaround 总结（tool calling / 指令跟随 / Playground“破限”）
 
-更新时间：2026-02-21  
+更新时间：2026-02-22  
 调研来源：`docs/research/ref_*.md`（OpenAI Agents SDK、OpenCode、OpenClaw、Claude Agent SDK、Codex、Memoh、Risuai 等）
 
 本篇总结“模型天生不稳定”时，业界常用的工程 workaround。重点是**提升可靠性与可控性**，不是绕过系统安全策略。
@@ -43,7 +43,8 @@
 当模型/Provider 不稳定时，单纯加提示词往往不够；需要 Runner 层兜底：
 
 - **解析-校验-纠错回路**：tool args 校验失败时，生成结构化错误并要求模型“仅修正参数”重试（限制重试次数，避免死循环）。
-  - P1 建议：从“仅 parse_error（invalid_json/too_large）”扩展到“schema 语义校验失败”（漏必填/类型明显不对/未知 key 等）也触发同一修复回路。
+  - 已落地（AgentCore）：覆盖 `invalid_json/too_large` 与 schema invalid（漏 required / 类型明显不对 / unknown key 等）两类失败；修复仍保持“仅修参数 + 批量一次 + 允许部分成功”；若仍不满足 schema 则不执行工具、直接产出 `invalid_args` task。
+  - 已落地（AgentCore）：repair prompt 体积治理（候选数上限 + schema excerpt/truncate + `max_schema_bytes`），避免工具多/enum 大时“修复本身”成为失败源。
 - **call_id/事件去重与归一**：兼容 `call_id||id`，并对重复 item/call 去重合并（OpenAI Agents SDK 的 run_state 思路）。
 - **工具失败可降级**：将非致命异常转换为模型可见的 tool_result（而不是直接 raise 终止），并写入 tracing（OpenAI Agents SDK 的 failure_error_function）。
 - **模型/鉴权 failover**：把 tool 协议错误/invalid-request 也纳入可 failover 的错误类型（OpenClaw 的 model failover 处理思路），在 tool calling 不稳定时自动切换到更可靠的模型。
@@ -72,7 +73,5 @@ Playground 常见的“破限”需求，很多其实是想突破**产品默认�
 
 下一步（P1 建议，提升“稳态成功率”）：
 
-- schema 语义校验触发 repair（不要只修 parse_error）
 - tool name 修复（tool_not_found / tool_not_in_profile → visible_tools 范围内重写）
-- repair prompt 体积治理（max_schema_bytes / 只传必要 schema 子树）
 - failover 错误域扩展（谨慎：timeout/5xx/429；mid-stream 后置）
