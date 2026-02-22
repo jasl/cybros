@@ -121,7 +121,7 @@ module DAG
     end
 
     def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
-      limit = Integer(limit)
+      limit = coerce_integer_param(limit, field: "limit", code: "dag.graph.limit_must_be_an_integer")
       PaginationError.raise!(
         "limit must be > 0",
         code: "dag.graph.limit_must_be_0",
@@ -163,7 +163,7 @@ module DAG
     end
 
     def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
-      limit = Integer(limit)
+      limit = coerce_integer_param(limit, field: "limit", code: "dag.graph.limit_must_be_an_integer")
       PaginationError.raise!(
         "limit must be > 0",
         code: "dag.graph.limit_must_be_0",
@@ -731,6 +731,22 @@ module DAG
     end
 
     private
+
+      def coerce_integer_param(value, field:, code:)
+        i = Integer(value, exception: false)
+        return i unless i.nil?
+
+        PaginationError.raise!(
+          "#{field} must be an Integer",
+          code: code,
+          details: { field: field.to_s, value_class: value.class.name, value_preview: value_preview(value) },
+        )
+      end
+
+      def value_preview(value, max_bytes: 200)
+        s = value.to_s
+        s.bytesize > max_bytes ? s.byteslice(0, max_bytes).to_s : s
+      end
 
       def body_class_for_context_node_hash(context_node_hash)
         node_type = context_node_hash["node_type"].to_s

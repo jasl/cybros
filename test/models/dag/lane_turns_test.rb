@@ -202,4 +202,18 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
 
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
+
+  test "anchored_turn_page validates limit and cursor types" do
+    conversation = Conversation.create!
+    lane = conversation.dag_graph.main_lane
+
+    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: "nope") }
+    assert_equal "dag.lane.limit_must_be_an_integer", error.code
+
+    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: 1, before_seq: "nope") }
+    assert_equal "dag.lane.before_seq_must_be_an_integer", error.code
+
+    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: 1, after_seq: "nope") }
+    assert_equal "dag.lane.after_seq_must_be_an_integer", error.code
+  end
 end

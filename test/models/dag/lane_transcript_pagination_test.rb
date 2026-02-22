@@ -91,6 +91,12 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
 
     error =
       assert_raises(DAG::PaginationError) do
+        lane.transcript_page(limit_turns: "nope")
+      end
+    assert_equal "dag.lane.limit_turns_must_be_an_integer", error.code
+
+    error =
+      assert_raises(DAG::PaginationError) do
         lane.transcript_page(limit_turns: 10, before_turn_id: "x", after_turn_id: "y")
       end
     assert_includes error.message, "mutually"

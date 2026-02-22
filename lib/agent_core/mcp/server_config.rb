@@ -193,18 +193,18 @@ module AgentCore
             details: { value_class: value.class.name },
           ) unless value.is_a?(Hash)
 
-          begin
-            AgentCore::Utils.assert_symbol_keys!(value, path: "mcp server config")
-          rescue AgentCore::ValidationError => e
+          value.each_key do |key|
+            next if key.is_a?(Symbol)
+
             ServerConfigError.raise!(
-              e.message,
-              code: e.code,
-              details: e.details,
+              "mcp server config keys must be Symbols (got #{key.class})",
+              code: "agent_core.mcp.server_config.keys_must_be_symbols_got",
+              details: { key_class: key.class.name, key_preview: value_preview(key) },
             )
           end
 
           new(
-            id: value.fetch(:id),
+            id: value.fetch(:id, nil),
             transport: value.fetch(:transport, nil),
             command: value.fetch(:command, nil),
             args: value.fetch(:args, nil),
@@ -290,7 +290,13 @@ module AgentCore
         end
 
         def normalize_timeout_s(value)
-          timeout_s = Float(value.nil? ? AgentCore::MCP::DEFAULT_TIMEOUT_S : value)
+          raw = blank?(value) ? AgentCore::MCP::DEFAULT_TIMEOUT_S : value
+          timeout_s = Float(raw, exception: false)
+          ServerConfigError.raise!(
+            "timeout_s must be a number",
+            code: "agent_core.mcp.server_config.timeout_s_must_be_a_number",
+            details: { value_class: raw.class.name, value_preview: self.class.value_preview(raw) },
+          ) if timeout_s.nil?
           ServerConfigError.raise!(
             "timeout_s must be positive",
             code: "agent_core.mcp.server_config.timeout_s_must_be_positive",
@@ -301,9 +307,14 @@ module AgentCore
         end
 
         def normalize_optional_timeout_s(value, field:)
-          return nil if value.nil?
+          return nil if blank?(value)
 
-          timeout_s = Float(value)
+          timeout_s = Float(value, exception: false)
+          ServerConfigError.raise!(
+            "#{field} must be a number",
+            code: "agent_core.mcp.server_config.field_must_be_a_number",
+            details: { field: field.to_s, value_class: value.class.name, value_preview: self.class.value_preview(value) },
+          ) if timeout_s.nil?
           ServerConfigError.raise!(
             "#{field} must be positive",
             code: "agent_core.mcp.server_config.field_must_be_positive",
@@ -314,9 +325,14 @@ module AgentCore
         end
 
         def normalize_optional_positive_integer(value, field:)
-          return nil if value.nil?
+          return nil if blank?(value)
 
-          i = Integer(value)
+          i = Integer(value, exception: false)
+          ServerConfigError.raise!(
+            "#{field} must be an Integer",
+            code: "agent_core.mcp.server_config.field_must_be_an_integer",
+            details: { field: field.to_s, value_class: value.class.name, value_preview: self.class.value_preview(value) },
+          ) if i.nil?
           ServerConfigError.raise!(
             "#{field} must be positive",
             code: "agent_core.mcp.server_config.field_must_be_positive",
@@ -335,6 +351,11 @@ module AgentCore
             code: "agent_core.mcp.server_config.field_must_respond_to_call",
             details: { field: field.to_s, value_class: value.class.name },
           )
+        end
+
+        def self.value_preview(value, max_bytes: 200)
+          s = value.to_s
+          s.bytesize > max_bytes ? s.byteslice(0, max_bytes).to_s : s
         end
       end
   end

@@ -326,6 +326,12 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
 
     error =
       assert_raises(DAG::PaginationError) do
+        lane.message_page(limit: "nope")
+      end
+    assert_equal "dag.lane.limit_must_be_an_integer", error.code
+
+    error =
+      assert_raises(DAG::PaginationError) do
         lane.message_page(limit: 10, before_message_id: "x", after_message_id: "y")
       end
     assert_includes error.message, "mutually"

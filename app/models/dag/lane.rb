@@ -106,13 +106,23 @@ module DAG
     end
 
     def anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
-      limit = Integer(limit)
+      limit = coerce_integer_param(limit, field: "limit", code: "dag.lane.limit_must_be_an_integer")
       return { "turns" => [], "before_seq" => nil, "after_seq" => nil } if limit <= 0
 
       limit = [limit, 1000].min
 
-      before_seq = before_seq&.to_i
-      after_seq = after_seq&.to_i
+      before_seq =
+        coerce_optional_integer_param(
+          before_seq,
+          field: "before_seq",
+          code: "dag.lane.before_seq_must_be_an_integer",
+        )
+      after_seq =
+        coerce_optional_integer_param(
+          after_seq,
+          field: "after_seq",
+          code: "dag.lane.after_seq_must_be_an_integer",
+        )
 
       if before_seq.present? && after_seq.present?
         PaginationError.raise!(
@@ -212,7 +222,7 @@ module DAG
     end
 
     def message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview, include_deleted: false)
-      limit = Integer(limit)
+      limit = coerce_integer_param(limit, field: "limit", code: "dag.lane.limit_must_be_an_integer")
       return empty_message_page if limit <= 0
 
       limit = [limit, 1000].min
@@ -317,8 +327,8 @@ module DAG
     end
 
     def node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)
-      start_seq = Integer(start_seq)
-      end_seq = Integer(end_seq)
+      start_seq = coerce_integer_param(start_seq, field: "start_seq", code: "dag.lane.start_seq_must_be_an_integer")
+      end_seq = coerce_integer_param(end_seq, field: "end_seq", code: "dag.lane.end_seq_must_be_an_integer")
 
       if start_seq > end_seq
         ValidationError.raise!(
@@ -412,6 +422,28 @@ module DAG
         }
       end
 
+      def coerce_integer_param(value, field:, code:)
+        i = Integer(value, exception: false)
+        return i unless i.nil?
+
+        PaginationError.raise!(
+          "#{field} must be an Integer",
+          code: code,
+          details: { field: field.to_s, value_class: value.class.name, value_preview: value_preview(value) },
+        )
+      end
+
+      def coerce_optional_integer_param(value, field:, code:)
+        return nil unless value.present?
+
+        coerce_integer_param(value, field: field, code: code)
+      end
+
+      def value_preview(value, max_bytes: 200)
+        s = value.to_s
+        s.bytesize > max_bytes ? s.byteslice(0, max_bytes).to_s : s
+      end
+
       def assert_target_node_belongs_to_lane!(node_id, include_compressed: false)
         node_id = node_id.to_s
 
@@ -428,7 +460,7 @@ module DAG
       end
 
       def transcript_turn_ids_page(limit_turns:, before_turn_id:, after_turn_id:, include_deleted:)
-        limit_turns = Integer(limit_turns)
+        limit_turns = coerce_integer_param(limit_turns, field: "limit_turns", code: "dag.lane.limit_turns_must_be_an_integer")
         return [] if limit_turns <= 0
 
         limit_turns = [limit_turns, 1000].min

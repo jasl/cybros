@@ -229,6 +229,14 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
     assert_equal "test", config.id
   end
 
+  def test_coerce_missing_id_raises_a_validation_error
+    error =
+      assert_raises(AgentCore::MCP::ServerConfigError) do
+        AgentCore::MCP::ServerConfig.coerce(command: "echo")
+      end
+    assert_equal "agent_core.mcp.server_config.id_is_required", error.code
+  end
+
   def test_coerce_passthrough
     original = AgentCore::MCP::ServerConfig.new(id: "test", command: "echo")
     result = AgentCore::MCP::ServerConfig.coerce(original)
@@ -243,9 +251,54 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
   end
 
   def test_coerce_rejects_string_keys
-    assert_raises(AgentCore::MCP::ServerConfigError) do
-      AgentCore::MCP::ServerConfig.coerce("id" => "test", "command" => "echo")
-    end
+    error =
+      assert_raises(AgentCore::MCP::ServerConfigError) do
+        AgentCore::MCP::ServerConfig.coerce("id" => "test", "command" => "echo")
+      end
+    assert_equal "agent_core.mcp.server_config.keys_must_be_symbols_got", error.code
+    assert_equal "String", error.details.fetch(:key_class)
+  end
+
+  def test_streamable_http_rejects_non_numeric_timeout_fields
+    error =
+      assert_raises(AgentCore::MCP::ServerConfigError) do
+        AgentCore::MCP::ServerConfig.new(
+          id: "remote",
+          transport: :streamable_http,
+          url: "https://example.com",
+          open_timeout_s: "nope"
+        )
+      end
+
+    assert_equal "agent_core.mcp.server_config.field_must_be_a_number", error.code
+    assert_equal "open_timeout_s", error.details.fetch(:field)
+  end
+
+  def test_streamable_http_rejects_non_integer_positive_integer_fields
+    error =
+      assert_raises(AgentCore::MCP::ServerConfigError) do
+        AgentCore::MCP::ServerConfig.new(
+          id: "remote",
+          transport: :streamable_http,
+          url: "https://example.com",
+          sse_max_reconnects: "nope"
+        )
+      end
+
+    assert_equal "agent_core.mcp.server_config.field_must_be_an_integer", error.code
+    assert_equal "sse_max_reconnects", error.details.fetch(:field)
+  end
+
+  def test_streamable_http_treats_blank_timeout_values_as_nil
+    config =
+      AgentCore::MCP::ServerConfig.new(
+        id: "remote",
+        transport: :streamable_http,
+        url: "https://example.com",
+        open_timeout_s: " "
+      )
+
+    assert_nil config.open_timeout_s
   end
 
   def test_data_define_frozen

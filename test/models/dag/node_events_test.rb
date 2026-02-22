@@ -40,6 +40,9 @@ class DAG::NodeEventsTest < ActiveSupport::TestCase
 
     assert_raises(DAG::PaginationError) { graph.node_event_page_for(node.id, limit: 0) }
 
+    error = assert_raises(DAG::PaginationError) { graph.node_event_page_for(node.id, limit: "nope") }
+    assert_equal "dag.graph.limit_must_be_an_integer", error.code
+
     scope = graph.node_event_scope_for(node.id)
     assert scope.is_a?(ActiveRecord::Relation)
   end
