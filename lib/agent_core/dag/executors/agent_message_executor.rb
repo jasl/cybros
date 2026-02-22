@@ -282,6 +282,7 @@ module AgentCore
 
             tool_calls = message.tool_calls
             tool_loop_metadata = {}
+            tool_name_repairs = {}
             name_resolution_events = []
             invalid_schema_count = 0
             invalid_schema_sample = []
@@ -292,6 +293,30 @@ module AgentCore
               end
 
             visible_tool_schemas = index_visible_tool_schemas(visible_tools)
+
+            if Integer(runtime.tool_name_repair_attempts, exception: false).to_i > 0 && Array(visible_tools).any? && Array(tool_calls).any?
+              name_repair_result =
+                AgentCore::Resources::Tools::ToolNameRepairLoop.call(
+                  provider: runtime.provider,
+                  requested_model: runtime.model,
+                  fallback_models: runtime.tool_name_repair_fallback_models,
+                  tool_calls: tool_calls,
+                  visible_tools: visible_tools,
+                  tools_registry: runtime.tools_registry,
+                  max_attempts: runtime.tool_name_repair_attempts,
+                  max_output_tokens: runtime.tool_name_repair_max_output_tokens,
+                  max_candidates: runtime.tool_name_repair_max_candidates,
+                  max_visible_tool_names: runtime.tool_name_repair_max_visible_tool_names,
+                  tool_name_aliases: runtime.tool_name_aliases,
+                  tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
+                  options: runtime.llm_options,
+                  instrumenter: execution_context.instrumenter,
+                  run_id: execution_context.run_id,
+                )
+
+              tool_name_repairs = name_repair_result.fetch(:tool_name_repairs, {})
+              tool_loop_metadata = deep_merge_metadata(tool_loop_metadata, name_repair_result.fetch(:metadata, {}))
+            end
 
             if should_repair_tool_calls?(tool_calls, runtime: runtime)
               repair_result =
@@ -307,6 +332,7 @@ module AgentCore
                   schema_max_depth: runtime.tool_call_repair_schema_max_depth,
                   max_schema_bytes: runtime.tool_call_repair_max_schema_bytes,
                   max_candidates: runtime.tool_call_repair_max_candidates,
+                  tool_name_repairs: tool_name_repairs,
                   tool_name_aliases: runtime.tool_name_aliases,
                   tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
                   options: runtime.llm_options,
@@ -337,19 +363,27 @@ module AgentCore
               tool_calls.each do |tool_call|
                 tool_call_id = tool_call.id.to_s
                 requested_name = tool_call.name.to_s
+                name_repaired = tool_name_repairs.is_a?(Hash) && tool_name_repairs.key?(tool_call_id)
+                effective_name =
+                  if name_repaired
+                    tool_name_repairs.fetch(tool_call_id).to_s
+                  else
+                    requested_name
+                  end
 
                 resolved =
                   resolve_tool(
                     runtime.tools_registry,
-                    requested_name,
+                    effective_name,
                     aliases: tool_name_aliases,
                     enable_normalize_fallback: runtime.tool_name_normalize_fallback,
                     normalize_index: normalize_index,
                   )
                 resolved_name = resolved.name
                 source = resolved.source
+                name_resolution = name_repaired ? :repaired : resolved.resolution_method
 
-                if resolved.exists && resolved.resolution_method != :exact && name_resolution_events.length < 20
+                if resolved.exists && !name_repaired && resolved.resolution_method != :exact && name_resolution_events.length < 20
                   name_resolution_events <<
                     {
                       "tool_call_id" => tool_call_id,
@@ -377,7 +411,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
-                        name_resolution: resolved.resolution_method,
+                        name_resolution: name_resolution,
                         arguments: arguments,
                         source: "invalid_args",
                       ),
@@ -408,7 +442,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
-                        name_resolution: resolved.resolution_method,
+                        name_resolution: name_resolution,
                         arguments: arguments,
                         source: "policy",
                       ),
@@ -471,7 +505,7 @@ module AgentCore
                             tool_call_id: tool_call_id,
                             requested_name: requested_name,
                             name: resolved_name,
-                            name_resolution: resolved.resolution_method,
+                            name_resolution: name_resolution,
                             arguments: arguments,
                             source: "invalid_args",
                           ),
@@ -495,7 +529,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
-                        name_resolution: resolved.resolution_method,
+                        name_resolution: name_resolution,
                         arguments: arguments,
                         source: source,
                       ),
@@ -546,7 +580,7 @@ module AgentCore
                             tool_call_id: tool_call_id,
                             requested_name: requested_name,
                             name: resolved_name,
-                            name_resolution: resolved.resolution_method,
+                            name_resolution: name_resolution,
                             arguments: arguments,
                             source: "invalid_args",
                           ),
@@ -580,7 +614,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
-                        name_resolution: resolved.resolution_method,
+                        name_resolution: name_resolution,
                         arguments: arguments,
                         source: source,
                       ),
@@ -611,7 +645,7 @@ module AgentCore
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
                         name: resolved_name,
-                        name_resolution: resolved.resolution_method,
+                        name_resolution: name_resolution,
                         arguments: arguments,
                         source: "policy",
                       ),

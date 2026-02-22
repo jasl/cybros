@@ -39,9 +39,10 @@
 
 当 `agent_message/character_message` 的 LLM 响应包含 `tool_calls`：
 
-0) 若启用工具参数自愈（`runtime.tool_call_repair_attempts > 0`），会先触发一次参数修复（ToolCallRepairLoop，见 2.2）
-1) 在同一 `turn_id` 下创建一个 **next agent node**（pending）
-2) 对每个 tool_call 创建一个 `task` 节点，并连边：
+0) 若启用工具名自愈（`runtime.tool_name_repair_attempts > 0`），且 tool name 无法解析到本轮可见工具（visible_tools），会先触发一次工具名修复（ToolNameRepairLoop，见 2.2）
+1) 若启用工具参数自愈（`runtime.tool_call_repair_attempts > 0`），会再触发一次参数修复（ToolCallRepairLoop，见 2.3）
+2) 在同一 `turn_id` 下创建一个 **next agent node**（pending）
+3) 对每个 tool_call 创建一个 `task` 节点，并连边：
    - `agent_message -> task`：`sequence`
    - `task -> next_agent_message`：默认 `sequence`
 
@@ -62,7 +63,10 @@
 
 - 当发生 alias/normalize 且成功解析到存在的工具时：
   - `agent_message.metadata["tool_loop"]["tool_name_resolution"]` 记录变更（最多 20 条）
-  - 每个 `task.body.input` 都会写入 `name_resolution`（`exact|alias|normalized|unknown|missing`）
+  - 每个 `task.body.input` 都会写入 `name_resolution`（`exact|alias|normalized|repaired|unknown|missing`）
+- 当发生 tool name repair 且成功解析到本轮可见工具时：
+  - `agent_message.metadata["tool_loop"]["tool_name_repair"]` 记录修复过程（attempts/candidates/repaired/failed 等）
+  - 受影响的 `task.body.input` 中 `requested_name` 保留原始模型输出，而 `name` 会写入修复后的可执行工具名（`name_resolution="repaired"`）
 
 > 注：ToolCallRepairLoop 也复用同一套 tool name 解析规则，以便用“可见工具（visible_tools）”匹配 schema。
 
@@ -79,7 +83,29 @@ normalize fallback 的安全约束（hard fail）：
 
 完整列表与扩展方式见：`AgentCore::Resources::Tools::ToolNameResolver::DEFAULT_ALIASES` 与 `docs/agent_core/public_api.md`。
 
-### 2.2 ToolCallRepairLoop（修 `arguments_parse_error` + schema invalid）
+### 2.2 ToolNameRepairLoop（修 tool name：tool_not_found / tool_not_in_profile）
+
+当 `runtime.tool_name_repair_attempts > 0` 且本轮 tool_calls 中存在“不可见工具名候选”（无法解析到本轮 `visible_tools`）时：
+
+- executor 会对本轮 tool_calls 发起一次“仅修工具名”的 LLM 修复调用：
+  - 候选原因：
+    - `tool_not_found`：registry 中不存在（或无法解析到）该工具名
+    - `tool_not_in_profile`：registry 存在该工具，但不在本轮 `visible_tools`（profile/visibility 过滤掉）
+  - 可修复范围：只能把 tool name 映射到“本轮 prompt 可见的工具名列表”（不会扩权）
+  - 批量修复一次（允许部分成功；修不了的保留原 tool_call name）
+- 修复调用约束：
+  - `tools: nil`、`stream: false`、`temperature: 0`（若未指定）
+  - 输出必须为纯 JSON：`{"repairs":[{"tool_call_id":"...","name":"..."}]}`
+  - `name` 必须是 visible 工具名列表中的 **exact match**
+- Prompt 体积治理：
+  - `runtime.tool_name_repair_max_visible_tool_names`：visible 工具名列表上限（超限会截断并在 metadata 标记）
+  - `runtime.tool_name_repair_max_candidates`：单次最多发送的候选数
+- 审计：
+  - `agent_message.metadata["tool_loop"]["tool_name_repair"]` 记录 attempts/candidates/repaired/failed 等
+
+> 说明：ToolNameRepairLoop 只影响本次 tool loop 的“执行视图”（用于创建 task），不会回写/覆盖本次 `agent_message.body.output.tool_calls`（后者保留原始模型输出，便于审计）。
+
+### 2.3 ToolCallRepairLoop（修 `arguments_parse_error` + schema invalid）
 
 当 `runtime.tool_call_repair_attempts > 0` 且本轮 tool_calls 中存在“可修复候选”时：
 
@@ -101,7 +127,7 @@ normalize fallback 的安全约束（hard fail）：
 
 > 说明：RepairLoop 只影响本次 tool loop 的“执行视图”（用于创建 task），不会回写/覆盖本次 `agent_message.body.output.tool_calls`（后者保留原始模型输出，便于审计）。
 
-### 2.3 policy 决策映射
+### 2.4 policy 决策映射
 
 对每个 tool_call，按以下顺序处理：
 

@@ -127,6 +127,31 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 - `candidates_sent`：实际发送给 repair LLM 的候选数（受 `tool_call_repair_max_candidates` 限制）
 - `max_schema_bytes` / `schema_truncated_candidates`：repair prompt 的 schema 体积治理统计
 
+当 tool loop 触发工具名修复（ToolNameRepairLoop）时，会写入：
+
+```json
+{
+  "tool_loop": {
+    "tool_name_repair": {
+      "attempts": 1,
+      "candidates_total": 3,
+      "candidates_sent": 2,
+      "repaired": 1,
+      "failed": 2,
+      "skipped": 0,
+      "model": "model-used-for-repair",
+      "visible_tools_total": 250,
+      "visible_tools_sent": 200,
+      "visible_tools_truncated": true,
+      "repairs_sample": [
+        { "tool_call_id": "tc_1", "requested_name": "math_add", "repaired_name": "math_add_safe", "reason": "tool_not_in_profile" }
+      ],
+      "failures_sample": [ { "tool_call_id": "tc_2", "reason": "name_not_in_visible_tools" } ]
+    }
+  }
+}
+```
+
 当 tool loop 发生工具名 alias/normalize 解析时（例如模型输出 `skills.list`，但 registry 中是 `skills_list`），会写入：
 
 ```json
@@ -177,7 +202,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
   "tool_call_id": "tc_...",
   "requested_name": "llm_output_name",
   "name": "resolved_tool_name",
-  "name_resolution": "exact|alias|normalized|unknown|missing",
+  "name_resolution": "exact|alias|normalized|repaired|unknown|missing",
   "arguments": { "string": "keys" },
   "arguments_summary": "safe json preview",
   "source": "native|mcp|skills|policy|invalid_args"
@@ -187,9 +212,10 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 说明：
 
 - `requested_name`：LLM 输出（用于审计）
-- `name`：真实执行名（经过 alias/normalize 解析）
+- `name`：真实执行名（经过 alias/normalize 或 tool name repair 解析）
 - `name_resolution`：工具名解析方式（用于审计/定位模型偏差）
   - `normalized` 覆盖大小写 / 驼峰 / 分隔符漂移（并映射回 registry 中的 canonical tool name）
+  - `repaired` 表示发生了 ToolNameRepairLoop（只允许修到本轮可见工具名列表）
 - `source`：来源分类（用于可观测/安全策略）
 
 ### 2.2 output（`body.output`）

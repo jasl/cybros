@@ -325,6 +325,145 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "tool_name_repair_loop: repairs tool_not_in_profile to visible tool and continues" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d120"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Do tools", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Calling tools",
+                tool_calls: [
+                  AgentCore::ToolCall.new(id: "tc_1", name: "math_add", arguments: { "a" => 1, "b" => 2 }),
+                ],
+              ),
+            stop_reason: :tool_use,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"name\":\"math_add_safe\"}]}"),
+            stop_reason: :end_turn,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "All done."),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "math_add",
+        description: "Add numbers (unsafe)",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "a" => { "type" => "number" }, "b" => { "type" => "number" } },
+          required: ["a", "b"],
+        },
+      ) do |args, **|
+        a = args.fetch("a").to_i
+        b = args.fetch("b").to_i
+        AgentCore::Resources::Tools::ToolResult.success(text: (a + b).to_s)
+      end
+    )
+    tools_registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "math_add_safe",
+        description: "Add numbers (safe)",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "a" => { "type" => "number" }, "b" => { "type" => "number" } },
+          required: ["a", "b"],
+        },
+      ) do |args, **|
+        a = args.fetch("a").to_i
+        b = args.fetch("b").to_i
+        AgentCore::Resources::Tools::ToolResult.success(text: (a + b).to_s)
+      end
+    )
+
+    tool_policy =
+      AgentCore::Resources::Tools::Policy::Profiled.new(
+        allowed: ["math_add_safe"],
+        delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+      )
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy: tool_policy,
+        tool_name_repair_attempts: 1,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      name_repair = agent.metadata.dig("tool_loop", "tool_name_repair")
+      assert_equal 1, name_repair.fetch("repaired")
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
+      assert_equal 1, tasks.length
+      task = tasks.sole
+
+      assert_equal "math_add", task.body_input.fetch("requested_name")
+      assert_equal "math_add_safe", task.body_input.fetch("name")
+      assert_equal "repaired", task.body_input.fetch("name_resolution")
+
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [task.id], claimed.map(&:id)
+      DAG::Runner.run_node!(task.id)
+
+      next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
+
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [next_agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(next_agent.id)
+
+      next_agent.reload
+      assert_equal DAG::Node::FINISHED, next_agent.state
+      assert_equal "All done.", next_agent.body_output.fetch("content")
+
+      assert_equal 3, provider.calls.length
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
   test "max_tool_calls_per_turn: truncates tool_calls to avoid task explosion" do
     conversation = Conversation.create!
     graph = conversation.dag_graph

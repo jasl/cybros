@@ -31,6 +31,11 @@ module AgentCore
         :tool_call_repair_schema_max_depth,
         :tool_call_repair_max_schema_bytes,
         :tool_call_repair_max_candidates,
+        :tool_name_repair_attempts,
+        :tool_name_repair_fallback_models,
+        :tool_name_repair_max_output_tokens,
+        :tool_name_repair_max_candidates,
+        :tool_name_repair_max_visible_tool_names,
         :instrumenter,
         :max_tool_calls_per_turn,
         :max_steps_per_turn,
@@ -71,6 +76,11 @@ module AgentCore
           tool_call_repair_schema_max_depth: 2,
           tool_call_repair_max_schema_bytes: 8_000,
           tool_call_repair_max_candidates: 10,
+          tool_name_repair_attempts: 0,
+          tool_name_repair_fallback_models: [],
+          tool_name_repair_max_output_tokens: 200,
+          tool_name_repair_max_candidates: 10,
+          tool_name_repair_max_visible_tool_names: 200,
           instrumenter: nil,
           max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
@@ -218,6 +228,40 @@ module AgentCore
             details: { tool_call_repair_max_candidates: tool_call_repair_max_candidates },
           ) if tool_call_repair_max_candidates <= 0
 
+          tool_name_repair_attempts = Integer(tool_name_repair_attempts)
+          ValidationError.raise!(
+            "tool_name_repair_attempts must be >= 0",
+            code: "agent_core.dag.runtime.tool_name_repair_attempts_must_be_0",
+            details: { tool_name_repair_attempts: tool_name_repair_attempts },
+          ) if tool_name_repair_attempts.negative?
+
+          tool_name_repair_fallback_models =
+            Array(tool_name_repair_fallback_models)
+              .map { |m| m.to_s.strip }
+              .reject(&:empty?)
+              .freeze
+
+          tool_name_repair_max_output_tokens = Integer(tool_name_repair_max_output_tokens)
+          ValidationError.raise!(
+            "tool_name_repair_max_output_tokens must be > 0",
+            code: "agent_core.dag.runtime.tool_name_repair_max_output_tokens_must_be_0",
+            details: { tool_name_repair_max_output_tokens: tool_name_repair_max_output_tokens },
+          ) if tool_name_repair_max_output_tokens <= 0
+
+          tool_name_repair_max_candidates = Integer(tool_name_repair_max_candidates)
+          ValidationError.raise!(
+            "tool_name_repair_max_candidates must be > 0",
+            code: "agent_core.dag.runtime.tool_name_repair_max_candidates_must_be_0",
+            details: { tool_name_repair_max_candidates: tool_name_repair_max_candidates },
+          ) if tool_name_repair_max_candidates <= 0
+
+          tool_name_repair_max_visible_tool_names = Integer(tool_name_repair_max_visible_tool_names)
+          ValidationError.raise!(
+            "tool_name_repair_max_visible_tool_names must be > 0",
+            code: "agent_core.dag.runtime.tool_name_repair_max_visible_tool_names_must_be_0",
+            details: { tool_name_repair_max_visible_tool_names: tool_name_repair_max_visible_tool_names },
+          ) if tool_name_repair_max_visible_tool_names <= 0
+
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
           tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
@@ -268,6 +312,11 @@ module AgentCore
             tool_call_repair_schema_max_depth: tool_call_repair_schema_max_depth,
             tool_call_repair_max_schema_bytes: tool_call_repair_max_schema_bytes,
             tool_call_repair_max_candidates: tool_call_repair_max_candidates,
+            tool_name_repair_attempts: tool_name_repair_attempts,
+            tool_name_repair_fallback_models: tool_name_repair_fallback_models,
+            tool_name_repair_max_output_tokens: tool_name_repair_max_output_tokens,
+            tool_name_repair_max_candidates: tool_name_repair_max_candidates,
+            tool_name_repair_max_visible_tool_names: tool_name_repair_max_visible_tool_names,
             instrumenter: instrumenter,
             max_tool_calls_per_turn: max_tool_calls_per_turn,
             max_steps_per_turn: max_steps_per_turn,

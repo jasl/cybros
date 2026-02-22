@@ -23,6 +23,7 @@ module AgentCore
           schema_max_depth: 2,
           max_schema_bytes: DEFAULT_MAX_SCHEMA_BYTES,
           max_candidates: DEFAULT_MAX_CANDIDATES,
+          tool_name_repairs: {},
           tool_name_aliases: {},
           tool_name_normalize_fallback: false,
           options:,
@@ -41,6 +42,7 @@ module AgentCore
             schema_max_depth: schema_max_depth,
             max_schema_bytes: max_schema_bytes,
             max_candidates: max_candidates,
+            tool_name_repairs: tool_name_repairs,
             tool_name_aliases: tool_name_aliases,
             tool_name_normalize_fallback: tool_name_normalize_fallback,
             options: options,
@@ -49,7 +51,7 @@ module AgentCore
           ).call
         end
 
-        def initialize(provider:, requested_model:, fallback_models:, tool_calls:, visible_tools:, max_output_tokens:, max_attempts:, validate_schema:, schema_max_depth:, max_schema_bytes:, max_candidates:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
+        def initialize(provider:, requested_model:, fallback_models:, tool_calls:, visible_tools:, max_output_tokens:, max_attempts:, validate_schema:, schema_max_depth:, max_schema_bytes:, max_candidates:, tool_name_repairs:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
           @provider = provider
           @requested_model = requested_model.to_s
           @fallback_models = Array(fallback_models)
@@ -64,6 +66,7 @@ module AgentCore
           @max_schema_bytes = DEFAULT_MAX_SCHEMA_BYTES if @max_schema_bytes <= 0
           @max_candidates = Integer(max_candidates)
           @max_candidates = DEFAULT_MAX_CANDIDATES if @max_candidates <= 0
+          @tool_name_repairs = tool_name_repairs.is_a?(Hash) ? tool_name_repairs : {}
           @tool_name_aliases = tool_name_aliases
           @tool_name_normalize_fallback = tool_name_normalize_fallback == true
           @options = options.is_a?(Hash) ? options : {}
@@ -96,6 +99,8 @@ module AgentCore
             end
 
             tool_name = tc.respond_to?(:name) ? tc.name.to_s : ""
+            repaired_name = @tool_name_repairs[tool_call_id]
+            tool_name = repaired_name.to_s unless repaired_name.to_s.strip.empty?
             tool_name = tool_name.strip
             if tool_name.empty?
               skipped += 1

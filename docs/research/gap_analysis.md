@@ -183,7 +183,7 @@
 
 下一步（建议，P1+）：
 
-- ⏳ tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内）
+- ✅ tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内；默认关闭）
 - ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
 
 ### P1：Subagent Tool（把跨图模式“变成原语”）

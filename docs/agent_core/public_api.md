@@ -79,6 +79,11 @@ Tool calling 稳定性（Runner 级自愈）：
 - `tool_call_repair_schema_max_depth`：schema 校验/repair prompt schema excerpt 的最大深度（默认 `2`）
 - `tool_call_repair_max_schema_bytes`：repair prompt 中单个候选 schema 的最大 JSON bytes（默认 `8000`；超限会降级/截断）
 - `tool_call_repair_max_candidates`：单次 repair 最多发送的候选数（默认 `10`；超过部分会记录失败原因并保留原 tool_call）
+- `tool_name_repair_attempts`：工具名修复次数（默认 `0`；设为 `1` 可在 tool_not_found / tool_not_in_profile 时触发一次“仅修工具名”的修复调用；只允许修到本轮可见工具名列表）
+- `tool_name_repair_fallback_models`：tool name repair 失败时可升级的模型列表（同 provider；默认 `[]`）
+- `tool_name_repair_max_output_tokens`：tool name repair 调用输出上限（默认 `200`；prompt-only JSON）
+- `tool_name_repair_max_candidates`：单次 tool name repair 最多发送的候选数（默认 `10`）
+- `tool_name_repair_max_visible_tool_names`：tool name repair prompt 中 visible 工具名列表上限（默认 `200`；超限会截断并在 metadata 标记）
 
 工具错误模式：
 
