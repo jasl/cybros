@@ -98,6 +98,17 @@ When working on DAG-related code (engine, app integration, tests, scripts):
 
 Doc: `docs/dag/public_api.md`
 
+### Validation / Coercion 原则（重要）
+
+当一个入参可能来自**用户输入**（例如 controller params / URL query / JSON payload）：
+
+- **不允许 Ruby 原生 `ArgumentError/TypeError` 漏出**（例如 `Integer(limit)` / `Float(timeout_s)`），应先做安全 coercion/校验，再抛域内 `ValidationError`（或子类）并附带稳定 `code` + safe `details`。
+- 避免 silent coercion（例如 `to_i`/`to_f` 会把 `" "` 变成 `0`），推荐用 `Integer(value, exception: false)` / `Float(value, exception: false)`，失败时 raise `DAG::PaginationError` / `AgentCore::MCP::ServerConfigError` 等。
+
+当入参来自**开发者/程序内数据**（例如常量、内部 struct、模型字段、代码路径不应出现的值）：
+
+- 倾向 **fail-fast**：不要“自动修复/宽松转换”；允许原生异常/内部错误尽早暴露，帮助尽快定位 bug。
+
 ### DAG API safety tiers（very important）
 
 When building App features (controllers/views/services), treat the DAG engine as **Lane-first**:
