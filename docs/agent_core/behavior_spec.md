@@ -267,5 +267,4 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 
 以下能力**不属于当前实现的行为规范**，但对“tool calling 稳态成功率”提升很有效，建议按需进入 P1：
 
-- tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修工具名”的修复调用（限定在 visible_tools 范围内）
 - failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置

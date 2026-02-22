@@ -70,8 +70,8 @@ Playground 常见的“破限”需求，很多其实是想突破**产品默认�
 3. `ToolCallRepairLoop`：工具参数校验失败→结构化错误→有限次重试  
 4. `ProviderFailover`：把 tool 协议错误纳入可 failover 的错误域，并记录可观测事件  
 5. `ProtocolSanitizer`：机器协议块与 UI 文本分离（必要时）
+6. `ToolNameRepairLoop`：工具名不可见（tool_not_found / tool_not_in_profile）→ visible_tools 范围内重写（默认关闭）
 
 下一步（P1 建议，提升“稳态成功率”）：
 
-- tool name 修复（tool_not_found / tool_not_in_profile → visible_tools 范围内重写）
 - failover 错误域扩展（谨慎：timeout/5xx/429；mid-stream 后置）
