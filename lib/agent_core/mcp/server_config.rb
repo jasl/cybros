@@ -327,7 +327,7 @@ module AgentCore
         def normalize_optional_positive_integer(value, field:)
           return nil if blank?(value)
 
-          i = Integer(value, exception: false)
+          i = strict_integer(value)
           ServerConfigError.raise!(
             "#{field} must be an Integer",
             code: "agent_core.mcp.server_config.field_must_be_an_integer",
@@ -356,6 +356,21 @@ module AgentCore
         def self.value_preview(value, max_bytes: 200)
           s = value.to_s
           s.bytesize > max_bytes ? s.byteslice(0, max_bytes).to_s : s
+        end
+
+        def strict_integer(value)
+          case value
+          when Integer
+            value
+          when String
+            s = value.strip
+            return nil if s.empty?
+            return nil unless s.match?(/\A[+-]?\d+\z/)
+
+            Integer(s, 10)
+          else
+            nil
+          end
         end
       end
   end

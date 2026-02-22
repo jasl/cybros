@@ -423,7 +423,7 @@ module DAG
       end
 
       def coerce_integer_param(value, field:, code:)
-        i = Integer(value, exception: false)
+        i = strict_integer(value)
         return i unless i.nil?
 
         PaginationError.raise!(
@@ -431,6 +431,21 @@ module DAG
           code: code,
           details: { field: field.to_s, value_class: value.class.name, value_preview: value_preview(value) },
         )
+      end
+
+      def strict_integer(value)
+        case value
+        when Integer
+          value
+        when String
+          s = value.strip
+          return nil if s.empty?
+          return nil unless s.match?(/\A[+-]?\d+\z/)
+
+          Integer(s, 10)
+        else
+          nil
+        end
       end
 
       def coerce_optional_integer_param(value, field:, code:)

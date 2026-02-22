@@ -287,6 +287,19 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
 
     assert_equal "agent_core.mcp.server_config.field_must_be_an_integer", error.code
     assert_equal "sse_max_reconnects", error.details.fetch(:field)
+
+    error =
+      assert_raises(AgentCore::MCP::ServerConfigError) do
+        AgentCore::MCP::ServerConfig.new(
+          id: "remote",
+          transport: :streamable_http,
+          url: "https://example.com",
+          sse_max_reconnects: 1.2
+        )
+      end
+
+    assert_equal "agent_core.mcp.server_config.field_must_be_an_integer", error.code
+    assert_equal "sse_max_reconnects", error.details.fetch(:field)
   end
 
   def test_streamable_http_treats_blank_timeout_values_as_nil
