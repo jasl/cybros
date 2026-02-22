@@ -9,7 +9,12 @@
 - `AgentCore::Error < StandardError`：AgentCore 域内错误的统一捕获入口
 - `AgentCore::ValidationError < AgentCore::Error`：**业务数据/入参校验失败**
   - 典型场景：tool 注册冲突、schema 不匹配、配置字段非法、技能文件路径非法等
+  - 细分子类（用于可分支捕获；仍提供稳定 `code/details`）：
+    - `AgentCore::Resources::Tools::ToolNameConflictError`：tool 名称冲突
+    - `AgentCore::Resources::Skills::InvalidPathError`：skills 文件路径非法/越界
 - `AgentCore::ConfigurationError < AgentCore::ValidationError`：运行时配置不合法/不完整（属于校验失败的一种）
+  - 细分子类：
+    - `AgentCore::MCP::ServerConfigError`：MCP ServerConfig 配置校验失败
 
 > 约定：AgentCore 内显式抛出的“参数/业务数据不合法”统一使用 `AgentCore::ValidationError`（或子类），**不再使用 `ArgumentError`**。
 

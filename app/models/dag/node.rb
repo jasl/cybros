@@ -709,7 +709,7 @@ module DAG
         reason = graph.visibility_mutation_error(node: self, graph: graph)
         return if reason.nil?
 
-        ValidationError.raise!(
+        OperationNotAllowedError.raise!(
           reason,
           code: "dag.node.visibility_mutation_not_allowed",
           details: { reason: reason.to_s },

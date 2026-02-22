@@ -244,7 +244,7 @@ module AgentCore
 	                  next
 	                end
 	              unless within_dir?(base_real, skill_real)
-	                ValidationError.raise!(
+	                InvalidPathError.raise!(
 	                  "Skill directory escapes skills root: #{skill_dir}",
 	                  code: "agent_core.skills.file_system_store.skill_directory_escapes_skills_root",
 	                  details: { skill_dir: skill_dir.to_s },
@@ -263,7 +263,7 @@ module AgentCore
           target = File.realpath(abs_path.to_s)
 
 	          unless within_dir?(base, target)
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill #{label} path",
 	              code: "agent_core.skills.file_system_store.invalid_skill_path",
 	              details: { label: label.to_s },
@@ -272,7 +272,7 @@ module AgentCore
 
           target
 	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
-	          ValidationError.raise!(
+	          InvalidPathError.raise!(
 	            "Invalid skill #{label} path",
 	            code: "agent_core.skills.file_system_store.invalid_skill_path",
 	            details: { label: label.to_s },
@@ -376,14 +376,14 @@ module AgentCore
 	        def normalize_rel_path(value)
 	          raw = value.to_s
 	          normalized = raw.tr("\\", "/").strip
-	          ValidationError.raise!(
+	          InvalidPathError.raise!(
 	            "Invalid skill file path: #{raw}",
 	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	            details: { rel_path: raw.to_s },
 	          ) if normalized.empty?
 
 	          if absolute_path?(normalized)
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill file path: #{raw}",
 	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	              details: { rel_path: raw.to_s },
@@ -391,7 +391,7 @@ module AgentCore
 	          end
 
 	          unless REL_PATH_PATTERN.match?(normalized)
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill file path: #{raw}",
 	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	              details: { rel_path: raw.to_s },
@@ -400,7 +400,7 @@ module AgentCore
 
 	          segments = normalized.split("/")
 	          if segments.any? { |s| s == "." || s == ".." }
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill file path: #{raw}",
 	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	              details: { rel_path: raw.to_s },
@@ -408,7 +408,7 @@ module AgentCore
 	          end
 
 	          top = segments.first
-	          ValidationError.raise!(
+	          InvalidPathError.raise!(
 	            "Invalid skill file path: #{raw}",
 	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	            details: { rel_path: raw.to_s },
@@ -424,12 +424,12 @@ module AgentCore
           Pathname.new(value).absolute?
         end
 
-        def safe_join(base_dir, rel_path)
-          base = File.expand_path(base_dir.to_s)
-          target = File.expand_path(File.join(base, rel_path))
+	        def safe_join(base_dir, rel_path)
+	          base = File.expand_path(base_dir.to_s)
+	          target = File.expand_path(File.join(base, rel_path))
 
 	          unless within_dir?(base, target)
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill file path: #{rel_path}",
 	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	              details: { rel_path: rel_path.to_s },
@@ -439,21 +439,21 @@ module AgentCore
           target
         end
 
-        def ensure_realpath_within_skill_dir!(skill_dir:, abs_path:, rel_path:)
-          base = File.realpath(skill_dir.to_s)
-          target = File.realpath(abs_path.to_s)
+	        def ensure_realpath_within_skill_dir!(skill_dir:, abs_path:, rel_path:)
+	          base = File.realpath(skill_dir.to_s)
+	          target = File.realpath(abs_path.to_s)
 
 	          unless within_dir?(base, target)
-	            ValidationError.raise!(
+	            InvalidPathError.raise!(
 	              "Invalid skill file path: #{rel_path}",
 	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	              details: { rel_path: rel_path.to_s },
 	            )
 	          end
 
-          true
+	          true
 	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
-	          ValidationError.raise!(
+	          InvalidPathError.raise!(
 	            "Invalid skill file path: #{rel_path}",
 	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
 	            details: { rel_path: rel_path.to_s },

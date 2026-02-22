@@ -9,10 +9,16 @@
 - `DAG::Error < StandardError`：DAG 域内错误的统一捕获入口
 - `DAG::ValidationError < DAG::Error`：**参数/业务状态/合法性校验失败**
   - 典型场景：cursor 互斥、分页参数非法、节点/车道不属于该图、非法状态转换等
+  - 细分子类（用于可分支捕获；仍提供稳定 `code/details`）：
+    - `DAG::PaginationError`：分页/cursor/limit 相关校验失败
+    - `DAG::IdempotencyConflictError`：`idempotency_key` 碰撞且与既有记录不一致
+    - `DAG::OperationNotAllowedError`：由于图/节点状态或不变量导致“操作不允许”
 - `DAG::SafetyLimits::Exceeded < DAG::Error`：安全带超限（nodes/edges 扫描上限、context window 上限等）
   - 注意：这不是“业务校验失败”，不属于 `ValidationError`
 
 > 约定：DAG Public API 内显式抛出的“参数/状态不合法”统一使用 `DAG::ValidationError`，不再用 `ArgumentError`。
+>
+> 推荐：调用方一般 `rescue DAG::ValidationError` 兜底；需要分流处理时再按子类（如 `DAG::PaginationError`）细分捕获。
 
 ---
 

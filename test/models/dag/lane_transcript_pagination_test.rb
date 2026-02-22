@@ -90,13 +90,13 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [], empty.fetch("transcript")
 
     error =
-      assert_raises(DAG::ValidationError) do
+      assert_raises(DAG::PaginationError) do
         lane.transcript_page(limit_turns: 10, before_turn_id: "x", after_turn_id: "y")
       end
     assert_includes error.message, "mutually"
 
     error =
-      assert_raises(DAG::ValidationError) do
+      assert_raises(DAG::PaginationError) do
         lane.transcript_page(limit_turns: 10, before_turn_id: "0194f3c0-0000-7000-8000-00000000dead")
       end
     assert_includes error.message, "cursor"

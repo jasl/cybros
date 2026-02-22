@@ -134,19 +134,19 @@ class AgentCore::Resources::Skills::FileSystemStoreTest < Minitest::Test
   end
 
   def test_read_skill_file_invalid_path_absolute
-    assert_raises(AgentCore::ValidationError) do
+    assert_raises(AgentCore::Resources::Skills::InvalidPathError) do
       @store.read_skill_file(name: "another-skill", rel_path: "/etc/passwd")
     end
   end
 
   def test_read_skill_file_invalid_path_traversal
-    assert_raises(AgentCore::ValidationError) do
+    assert_raises(AgentCore::Resources::Skills::InvalidPathError) do
       @store.read_skill_file(name: "another-skill", rel_path: "scripts/../../../etc/passwd")
     end
   end
 
   def test_read_skill_file_invalid_top_dir
-    assert_raises(AgentCore::ValidationError) do
+    assert_raises(AgentCore::Resources::Skills::InvalidPathError) do
       @store.read_skill_file(name: "another-skill", rel_path: "other/file.txt")
     end
   end

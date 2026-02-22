@@ -115,7 +115,7 @@ module DAG
       after_seq = after_seq&.to_i
 
       if before_seq.present? && after_seq.present?
-        ValidationError.raise!(
+        PaginationError.raise!(
           "before_seq and after_seq are mutually exclusive",
           code: "dag.lane.before_seq_and_after_seq_are_mutually_exclusive",
           details: { before_seq: before_seq, after_seq: after_seq },
@@ -221,7 +221,7 @@ module DAG
       after_message_id = after_message_id&.to_s
 
       if before_message_id.present? && after_message_id.present?
-        ValidationError.raise!(
+        PaginationError.raise!(
           "before_message_id and after_message_id are mutually exclusive",
           code: "dag.lane.before_message_id_and_after_message_id_are_mutually_exclusive",
           details: { before_message_id: before_message_id, after_message_id: after_message_id },
@@ -237,7 +237,7 @@ module DAG
       cursor_message_id = before_message_id || after_message_id
       if cursor_message_id.present?
         unless scope.where(id: cursor_message_id).exists?
-          ValidationError.raise!(
+          PaginationError.raise!(
             "cursor message_id is unknown or not visible",
             code: "dag.lane.cursor_message_id_is_unknown_or_not_visible",
             details: { cursor_message_id: cursor_message_id },
@@ -363,8 +363,8 @@ module DAG
       now = Time.current
 
       graph.with_graph_lock! do
-        if graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
-          ValidationError.raise!(
+      if graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
+          OperationNotAllowedError.raise!(
             "cannot compact while graph has running nodes",
             code: "dag.lane.cannot_compact_while_graph_has_running_nodes",
           )
@@ -373,7 +373,7 @@ module DAG
         turn_nodes = nodes.active.where(turn_id: turn_id).lock.to_a
 
         unless turn_nodes.all?(&:terminal?)
-          ValidationError.raise!(
+          OperationNotAllowedError.raise!(
             "can only compact turns when all active nodes are terminal",
             code: "dag.lane.can_only_compact_turns_when_all_active_nodes_are_terminal",
           )
@@ -436,13 +436,13 @@ module DAG
         before_turn_id = before_turn_id&.to_s
         after_turn_id = after_turn_id&.to_s
 
-        if before_turn_id.present? && after_turn_id.present?
-          ValidationError.raise!(
-            "before_turn_id and after_turn_id are mutually exclusive",
-            code: "dag.lane.before_turn_id_and_after_turn_id_are_mutually_exclusive",
-            details: { before_turn_id: before_turn_id, after_turn_id: after_turn_id },
-          )
-        end
+      if before_turn_id.present? && after_turn_id.present?
+        PaginationError.raise!(
+          "before_turn_id and after_turn_id are mutually exclusive",
+          code: "dag.lane.before_turn_id_and_after_turn_id_are_mutually_exclusive",
+          details: { before_turn_id: before_turn_id, after_turn_id: after_turn_id },
+        )
+      end
 
         visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
 
@@ -453,7 +453,7 @@ module DAG
 
         if before_turn_id.present?
           unless visible_turns.where(id: before_turn_id).exists?
-            ValidationError.raise!(
+            PaginationError.raise!(
               "cursor turn_id is unknown or not visible",
               code: "dag.lane.cursor_turn_id_is_unknown_or_not_visible",
               details: { cursor_turn_id: before_turn_id },
@@ -469,7 +469,7 @@ module DAG
             .map(&:to_s)
         elsif after_turn_id.present?
           unless visible_turns.where(id: after_turn_id).exists?
-            ValidationError.raise!(
+            PaginationError.raise!(
               "cursor turn_id is unknown or not visible",
               code: "dag.lane.cursor_turn_id_is_unknown_or_not_visible",
               details: { cursor_turn_id: after_turn_id },

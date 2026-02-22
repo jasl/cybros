@@ -68,10 +68,10 @@ class DAG::NodeTest < ActiveSupport::TestCase
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
-    error = assert_raises(DAG::ValidationError) { node.exclude_from_context! }
+    error = assert_raises(DAG::OperationNotAllowedError) { node.exclude_from_context! }
     assert_match(/terminal/, error.message)
 
-    error = assert_raises(DAG::ValidationError) { node.soft_delete! }
+    error = assert_raises(DAG::OperationNotAllowedError) { node.soft_delete! }
     assert_match(/terminal/, error.message)
   end
 
@@ -87,10 +87,10 @@ class DAG::NodeTest < ActiveSupport::TestCase
       metadata: {}
     )
 
-    error = assert_raises(DAG::ValidationError) { terminal.exclude_from_context! }
+    error = assert_raises(DAG::OperationNotAllowedError) { terminal.exclude_from_context! }
     assert_match(/running nodes/, error.message)
 
-    error = assert_raises(DAG::ValidationError) { terminal.soft_delete! }
+    error = assert_raises(DAG::OperationNotAllowedError) { terminal.soft_delete! }
     assert_match(/running nodes/, error.message)
   end
 
@@ -167,7 +167,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     downstream = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
-    error = assert_raises(DAG::ValidationError) { original.retry! }
+    error = assert_raises(DAG::OperationNotAllowedError) { original.retry! }
     assert_match(/downstream nodes are not pending/, error.message)
   end
 
@@ -182,7 +182,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
       metadata: {}
     )
 
-    error = assert_raises(DAG::ValidationError) { original.retry! }
+    error = assert_raises(DAG::OperationNotAllowedError) { original.retry! }
     assert_match(/retriable/, error.message)
   end
 
@@ -194,7 +194,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     downstream = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
-    error = assert_raises(DAG::ValidationError) { original.edit!(new_input: { "content" => "hi2" }) }
+    error = assert_raises(DAG::OperationNotAllowedError) { original.edit!(new_input: { "content" => "hi2" }) }
     assert_match(/downstream nodes are pending or running/, error.message)
   end
 
@@ -211,7 +211,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     downstream = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     graph.edges.create!(from_node_id: original.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
 
-    error = assert_raises(DAG::ValidationError) { original.rerun! }
+    error = assert_raises(DAG::OperationNotAllowedError) { original.rerun! }
     assert_match(/leaf/, error.message)
   end
 

@@ -114,7 +114,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: branch.id, to_node_id: outside.id, edge_type: DAG::Edge::SEQUENCE)
 
     error =
-      assert_raises(DAG::ValidationError) do
+      assert_raises(DAG::OperationNotAllowedError) do
         conversation.compress!(node_ids: [main.id, branch.id], summary_content: "summary")
       end
     assert_match(/multiple lanes/, error.message)

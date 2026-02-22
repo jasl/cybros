@@ -122,7 +122,7 @@ module DAG
 
     def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
       limit = Integer(limit)
-      ValidationError.raise!(
+      PaginationError.raise!(
         "limit must be > 0",
         code: "dag.graph.limit_must_be_0",
         details: { limit: limit },
@@ -164,7 +164,7 @@ module DAG
 
     def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
       limit = Integer(limit)
-      ValidationError.raise!(
+      PaginationError.raise!(
         "limit must be > 0",
         code: "dag.graph.limit_must_be_0",
         details: { limit: limit },

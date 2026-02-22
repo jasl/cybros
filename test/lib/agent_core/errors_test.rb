@@ -43,6 +43,11 @@ class AgentCore::ErrorsTest < Minitest::Test
     assert_kind_of AgentCore::ValidationError, error
   end
 
+  def test_validation_error_subclasses
+    assert_operator AgentCore::MCP::ServerConfigError, :<, AgentCore::ConfigurationError
+    assert_operator AgentCore::Resources::Skills::InvalidPathError, :<, AgentCore::ValidationError
+  end
+
   def test_tool_error_with_attributes
     error = AgentCore::ToolError.new("tool failed", tool_name: "read", tool_call_id: "tc_1")
     assert_equal "tool failed", error.message

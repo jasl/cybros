@@ -20,14 +20,14 @@ module DAG
         end
 
         if nodes.any? { |node| node.compressed_at.present? }
-          ValidationError.raise!(
+          OperationNotAllowedError.raise!(
             "cannot compress nodes that are already compressed",
             code: "dag.compression.cannot_compress_nodes_that_are_already_compressed",
           )
         end
 
         unless nodes.all?(&:finished?)
-          ValidationError.raise!(
+          OperationNotAllowedError.raise!(
             "can only compress finished nodes",
             code: "dag.compression.can_only_compress_finished_nodes",
           )
@@ -46,7 +46,7 @@ module DAG
           blocking_edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
 
         if outgoing_blocking_edges.empty?
-          ValidationError.raise!(
+          OperationNotAllowedError.raise!(
             "summary node must not become a leaf",
             code: "dag.compression.summary_node_must_not_become_a_leaf",
           )
@@ -54,7 +54,7 @@ module DAG
 
         lane_ids = nodes.map(&:lane_id).uniq
         if lane_ids.length != 1
-          ValidationError.raise!(
+          OperationNotAllowedError.raise!(
             "cannot compress nodes across multiple lanes",
             code: "dag.compression.cannot_compress_nodes_across_multiple_lanes",
           )
