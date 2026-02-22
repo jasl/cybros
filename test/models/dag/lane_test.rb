@@ -72,10 +72,10 @@ class DAG::LaneTest < ActiveSupport::TestCase
     main = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, lane_id: main_lane.id, metadata: {})
     branch = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, lane_id: branch_lane.id, metadata: {})
 
-    error = assert_raises(ArgumentError) { main_lane.context_for(branch.id) }
+    error = assert_raises(DAG::ValidationError) { main_lane.context_for(branch.id) }
     assert_match(/must belong to this lane/, error.message)
 
-    error = assert_raises(ArgumentError) { branch_lane.context_for(main.id) }
+    error = assert_raises(DAG::ValidationError) { branch_lane.context_for(main.id) }
     assert_match(/must belong to this lane/, error.message)
   end
 
@@ -283,7 +283,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
       metadata: {}
     )
 
-    assert_raises(ArgumentError) do
+    assert_raises(DAG::ValidationError) do
       graph.mutate! do |m|
         m.merge_lanes!(
           target_lane: branch_lane,

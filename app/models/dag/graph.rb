@@ -26,7 +26,7 @@ module DAG
     before_destroy :purge_graph_records
 
     def mutate!(turn_id: nil)
-      raise ArgumentError, "block required" unless block_given?
+      raise ValidationError, "block required" unless block_given?
 
       executable_pending_nodes_created = false
 
@@ -119,7 +119,7 @@ module DAG
 
     def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
       limit = Integer(limit)
-      raise ArgumentError, "limit must be > 0" if limit <= 0
+      raise ValidationError, "limit must be > 0" if limit <= 0
 
       limit = [limit, 1000].min
 
@@ -157,7 +157,7 @@ module DAG
 
     def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
       limit = Integer(limit)
-      raise ArgumentError, "limit must be > 0" if limit <= 0
+      raise ValidationError, "limit must be > 0" if limit <= 0
 
       limit = [limit, 1000].min
 
@@ -618,8 +618,8 @@ module DAG
         subject_id = subject.id
       end
 
-      raise ArgumentError, "subject_type required" if subject_type.blank?
-      raise ArgumentError, "subject_id required" if subject_id.blank?
+      raise ValidationError, "subject_type required" if subject_type.blank?
+      raise ValidationError, "subject_id required" if subject_id.blank?
 
       begin
         hooks.record_event(
@@ -645,7 +645,7 @@ module DAG
     end
 
     def with_graph_lock!(&block)
-      raise ArgumentError, "block required" unless block_given?
+      raise ValidationError, "block required" unless block_given?
 
       self.class.with_advisory_lock!(advisory_lock_name) do
         transaction do
@@ -656,7 +656,7 @@ module DAG
     end
 
     def with_graph_try_lock(&block)
-      raise ArgumentError, "block required" unless block_given?
+      raise ValidationError, "block required" unless block_given?
 
       self.class.with_advisory_lock(advisory_lock_name, timeout_seconds: 0) do
         transaction do
@@ -782,7 +782,7 @@ module DAG
       def validate_event_type!(event_type)
         return if DAG::GraphHooks::EventTypes::ALL.include?(event_type)
 
-        raise ArgumentError,
+        raise ValidationError,
               "unknown DAG graph hook event_type=#{event_type.inspect}. " \
               "Add it to DAG::GraphHooks::EventTypes and update docs/spec."
       end

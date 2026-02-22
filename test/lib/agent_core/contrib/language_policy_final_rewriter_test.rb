@@ -55,7 +55,7 @@ class AgentCoreContribLanguagePolicyFinalRewriterTest < ActiveSupport::TestCase
   test "rewrite rejects reserved keys in llm_options" do
     provider = FakeProvider.new(reply_text: "x")
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Contrib::LanguagePolicy::FinalRewriter.rewrite(
         provider: provider,
         model: "m1",

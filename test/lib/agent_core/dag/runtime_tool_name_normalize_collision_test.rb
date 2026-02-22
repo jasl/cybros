@@ -8,7 +8,7 @@ class AgentCore::DAG::RuntimeToolNameNormalizeCollisionTest < Minitest::Test
     registry.register(AgentCore::Resources::Tools::Tool.new(name: "foo-bar", description: "") { })
     registry.register(AgentCore::Resources::Tools::Tool.new(name: "foo_bar", description: "") { })
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
       AgentCore::DAG::Runtime.new(
         provider: Object.new,
         model: "test-model",
@@ -22,7 +22,7 @@ class AgentCore::DAG::RuntimeToolNameNormalizeCollisionTest < Minitest::Test
     registry = AgentCore::Resources::Tools::Registry.new
     registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", description: "") { })
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
       AgentCore::DAG::Runtime.new(
         provider: Object.new,
         model: "test-model",
@@ -47,4 +47,3 @@ class AgentCore::DAG::RuntimeToolNameNormalizeCollisionTest < Minitest::Test
     assert_equal({ "echo" => "echo" }, runtime.tool_name_aliases)
   end
 end
-

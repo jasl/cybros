@@ -129,8 +129,8 @@ class ConversationContextTest < ActiveSupport::TestCase
 
     agent = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
-    assert_raises(ArgumentError) { graph.context_for(agent.id, limit_turns: 0) }
-    assert_raises(ArgumentError) { graph.context_node_scope_for(agent.id, limit_turns: 0) }
+    assert_raises(DAG::ValidationError) { graph.context_for(agent.id, limit_turns: 0) }
+    assert_raises(DAG::ValidationError) { graph.context_node_scope_for(agent.id, limit_turns: 0) }
   end
 
   test "soft deleted nodes are excluded from context by default" do

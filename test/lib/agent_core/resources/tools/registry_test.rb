@@ -51,7 +51,7 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     @registry.register(@echo_tool)
     dup = AgentCore::Resources::Tools::Tool.new(name: "echo", description: "dup") { }
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
       @registry.register(dup)
     end
   end
@@ -106,7 +106,7 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
       call_result: { "content" => [{ "type" => "text", "text" => "ok" }], "isError" => false },
     )
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
       @registry.register_mcp_client(client)
     end
   end
@@ -163,7 +163,7 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     )
 
     err =
-      assert_raises(ArgumentError) do
+      assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
         @registry.register_mcp_client(client, server_id: "srv")
       end
 
@@ -182,7 +182,7 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
 
     dup = AgentCore::Resources::Tools::Tool.new(name: "echo", description: "native") { }
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
       @registry.register(dup)
     end
   end

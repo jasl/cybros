@@ -81,7 +81,7 @@ class AgentCore::Resources::Skills::FileSystemStoreTest < Minitest::Test
   end
 
   def test_load_skill_unknown_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.load_skill(name: "nonexistent-skill")
     end
   end
@@ -122,37 +122,37 @@ class AgentCore::Resources::Skills::FileSystemStoreTest < Minitest::Test
   end
 
   def test_read_skill_file_unknown_skill_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.read_skill_file(name: "nonexistent", rel_path: "scripts/a.sh")
     end
   end
 
   def test_read_skill_file_unknown_file_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.read_skill_file(name: "another-skill", rel_path: "scripts/nonexistent.sh")
     end
   end
 
   def test_read_skill_file_invalid_path_absolute
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.read_skill_file(name: "another-skill", rel_path: "/etc/passwd")
     end
   end
 
   def test_read_skill_file_invalid_path_traversal
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.read_skill_file(name: "another-skill", rel_path: "scripts/../../../etc/passwd")
     end
   end
 
   def test_read_skill_file_invalid_top_dir
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       @store.read_skill_file(name: "another-skill", rel_path: "other/file.txt")
     end
   end
 
   def test_strict_mode_nonexistent_dir
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::FileSystemStore.new(dirs: ["/nonexistent/dir"], strict: true)
     end
   end

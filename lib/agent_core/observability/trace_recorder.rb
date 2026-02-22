@@ -32,18 +32,18 @@ module AgentCore
       # @param redactor [#call, nil] custom payload transformer: (name, payload_hash) -> Hash
       def initialize(capture: :safe, max_string_bytes: DEFAULT_MAX_STRING_BYTES, max_depth: DEFAULT_MAX_DEPTH, redactor: nil)
         unless CAPTURE_LEVELS.include?(capture)
-          raise ArgumentError, "capture must be one of: #{CAPTURE_LEVELS.join(", ")}"
+          raise ValidationError, "capture must be one of: #{CAPTURE_LEVELS.join(", ")}"
         end
 
         @capture = capture
         @max_string_bytes = Integer(max_string_bytes)
-        raise ArgumentError, "max_string_bytes must be positive" if @max_string_bytes <= 0
+        raise ValidationError, "max_string_bytes must be positive" if @max_string_bytes <= 0
 
         @max_depth = Integer(max_depth)
-        raise ArgumentError, "max_depth must be positive" if @max_depth <= 0
+        raise ValidationError, "max_depth must be positive" if @max_depth <= 0
 
         if redactor && !redactor.respond_to?(:call)
-          raise ArgumentError, "redactor must respond to #call"
+          raise ValidationError, "redactor must respond to #call"
         end
         @redactor = redactor
 

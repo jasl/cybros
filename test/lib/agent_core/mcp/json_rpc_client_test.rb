@@ -79,17 +79,17 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
   end
 
   def test_initialize_requires_transport
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::JsonRpcClient.new(transport: nil)
     end
   end
 
   def test_initialize_validates_timeout_s
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: 0)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: -1)
     end
   end
@@ -219,8 +219,8 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
   def test_request_blank_method_raises
     @client.start
 
-    assert_raises(ArgumentError) { @client.request("") }
-    assert_raises(ArgumentError) { @client.request("  ") }
+    assert_raises(AgentCore::ValidationError) { @client.request("") }
+    assert_raises(AgentCore::ValidationError) { @client.request("  ") }
   end
 
   def test_notify_sends_message_without_id
@@ -270,7 +270,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
   def test_notify_blank_method_raises
     @client.start
 
-    assert_raises(ArgumentError) { @client.notify("") }
+    assert_raises(AgentCore::ValidationError) { @client.notify("") }
   end
 
   def test_close_cancels_pending_requests

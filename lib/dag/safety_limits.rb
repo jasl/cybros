@@ -4,7 +4,7 @@ module DAG
     DEFAULT_MAX_CONTEXT_EDGES = 40_000
     DEFAULT_MAX_MESSAGE_PAGE_SCANNED_NODES = 2000
 
-    class Exceeded < StandardError; end
+    class Exceeded < DAG::Error; end
 
     def self.max_context_nodes
       env_positive_int("DAG_MAX_CONTEXT_NODES", DEFAULT_MAX_CONTEXT_NODES)

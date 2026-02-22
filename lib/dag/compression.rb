@@ -6,7 +6,7 @@ module DAG
 
     def compress!(node_ids:, summary_content:, summary_metadata: {})
       node_ids = Array(node_ids).map(&:to_s).uniq
-      raise ArgumentError, "node_ids must not be empty" if node_ids.empty?
+      raise ValidationError, "node_ids must not be empty" if node_ids.empty?
 
       @graph.with_graph_lock! do
         node_scope = @graph.nodes.where(id: node_ids).lock
@@ -17,11 +17,11 @@ module DAG
         end
 
         if nodes.any? { |node| node.compressed_at.present? }
-          raise ArgumentError, "cannot compress nodes that are already compressed"
+          raise ValidationError, "cannot compress nodes that are already compressed"
         end
 
         unless nodes.all?(&:finished?)
-          raise ArgumentError, "can only compress finished nodes"
+          raise ValidationError, "can only compress finished nodes"
         end
 
         edges_scope = @graph.edges.active
@@ -37,12 +37,12 @@ module DAG
           blocking_edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
 
         if outgoing_blocking_edges.empty?
-          raise ArgumentError, "summary node must not become a leaf"
+          raise ValidationError, "summary node must not become a leaf"
         end
 
         lane_ids = nodes.map(&:lane_id).uniq
         if lane_ids.length != 1
-          raise ArgumentError, "cannot compress nodes across multiple lanes"
+          raise ValidationError, "cannot compress nodes across multiple lanes"
         end
 
         now = Time.current

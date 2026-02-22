@@ -4,7 +4,7 @@ require "test_helper"
 
 class AgentCoreContribLanguagePolicyPromptTest < ActiveSupport::TestCase
   test "build requires target_lang" do
-    assert_raises(ArgumentError) { AgentCore::Contrib::LanguagePolicyPrompt.build("") }
+    assert_raises(AgentCore::ValidationError) { AgentCore::Contrib::LanguagePolicyPrompt.build("") }
   end
 
   test "build includes tool-calls rule by default but can be disabled" do

@@ -94,7 +94,7 @@ class AgentCore::Resources::Skills::SkillTest < Minitest::Test
   end
 
   def test_meta_must_be_skill_metadata
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Skill.new(
         meta: { name: "test" },
         body_markdown: "# Hello",

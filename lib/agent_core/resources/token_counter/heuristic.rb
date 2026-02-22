@@ -6,7 +6,7 @@ module AgentCore
       # Character-based heuristic token counter.
       #
       # Counting always succeeds for any String/nil input. Invalid configuration
-      # raises ArgumentError on initialization. Intended as a zero-dependency
+      # raises AgentCore::ValidationError on initialization. Intended as a zero-dependency
       # fallback when no real tokenizer is available.
       #
       # Default: 4.0 characters per token (conservative for English text
@@ -26,8 +26,8 @@ module AgentCore
         # @param chars_per_token [Float] Average characters per token
         # @param non_ascii_chars_per_token [Float] Average non-ASCII characters per token
         def initialize(chars_per_token: 4.0, non_ascii_chars_per_token: 1.0)
-          raise ArgumentError, "chars_per_token must be positive" unless chars_per_token > 0
-          raise ArgumentError, "non_ascii_chars_per_token must be positive" unless non_ascii_chars_per_token > 0
+          raise ValidationError, "chars_per_token must be positive" unless chars_per_token > 0
+          raise ValidationError, "non_ascii_chars_per_token must be positive" unless non_ascii_chars_per_token > 0
 
           @chars_per_token = chars_per_token.to_f
           @non_ascii_chars_per_token = non_ascii_chars_per_token.to_f

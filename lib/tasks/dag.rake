@@ -4,7 +4,7 @@ namespace :dag do
   desc "Audit a DAG graph (prints issues as JSON)"
   task :audit, [:graph_id] => :environment do |_task, args|
     graph_id = args[:graph_id]
-    raise ArgumentError, "graph_id required" if graph_id.blank?
+    raise Cybros::Error, "graph_id required" if graph_id.blank?
 
     graph = DAG::Graph.find_by(id: graph_id)
     raise ActiveRecord::RecordNotFound, "graph not found id=#{graph_id}" if graph.nil?
@@ -16,7 +16,7 @@ namespace :dag do
   desc "Repair common DAG graph issues (best-effort)"
   task :repair, [:graph_id] => :environment do |_task, args|
     graph_id = args[:graph_id]
-    raise ArgumentError, "graph_id required" if graph_id.blank?
+    raise Cybros::Error, "graph_id required" if graph_id.blank?
 
     graph = DAG::Graph.find_by(id: graph_id)
     raise ActiveRecord::RecordNotFound, "graph not found id=#{graph_id}" if graph.nil?

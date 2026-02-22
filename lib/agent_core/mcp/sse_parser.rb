@@ -15,17 +15,17 @@ module AgentCore
     #   end
     #   parser.finish { |event| puts event[:data] }
     class SseParser
-      class EventDataTooLargeError < ArgumentError; end
+      class EventDataTooLargeError < ProtocolError; end
 
-      # @param max_buffer_bytes [Integer] Maximum accumulated unparsed buffer size
-      # @param max_event_data_bytes [Integer, nil] Maximum data payload per event (nil = unlimited)
+        # @param max_buffer_bytes [Integer] Maximum accumulated unparsed buffer size
+        # @param max_event_data_bytes [Integer, nil] Maximum data payload per event (nil = unlimited)
       def initialize(max_buffer_bytes: 1_000_000, max_event_data_bytes: nil)
         @max_buffer_bytes = Integer(max_buffer_bytes)
-        raise ArgumentError, "max_buffer_bytes must be positive" if @max_buffer_bytes <= 0
+        raise ValidationError, "max_buffer_bytes must be positive" if @max_buffer_bytes <= 0
 
         @max_event_data_bytes = max_event_data_bytes.nil? ? nil : Integer(max_event_data_bytes)
         if !@max_event_data_bytes.nil? && @max_event_data_bytes <= 0
-          raise ArgumentError, "max_event_data_bytes must be positive"
+          raise ValidationError, "max_event_data_bytes must be positive"
         end
 
         @buffer = +"".b
@@ -44,7 +44,7 @@ module AgentCore
         return if chunk.empty?
 
         @buffer << chunk
-        raise ArgumentError, "SSE buffer exceeded max_buffer_bytes" if @buffer.bytesize > @max_buffer_bytes
+        raise ValidationError, "SSE buffer exceeded max_buffer_bytes" if @buffer.bytesize > @max_buffer_bytes
 
         each_line do |line|
           process_line(line) { |event| yield event if block_given? }

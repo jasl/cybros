@@ -27,7 +27,7 @@ module AgentCore
         timeout_s: AgentCore::MCP::DEFAULT_TIMEOUT_S,
         on_notification: nil
       )
-        raise ArgumentError, "transport is required" if transport.nil?
+        raise ValidationError, "transport is required" if transport.nil?
 
         protocol_version = protocol_version.to_s.strip
         protocol_version = AgentCore::MCP::DEFAULT_PROTOCOL_VERSION if protocol_version.empty?
@@ -37,7 +37,7 @@ module AgentCore
         @client_info = normalize_hash(client_info) || default_client_info
         @capabilities = normalize_hash(capabilities) || {}
         @timeout_s = Float(timeout_s)
-        raise ArgumentError, "timeout_s must be positive" if @timeout_s <= 0
+        raise ValidationError, "timeout_s must be positive" if @timeout_s <= 0
 
         @on_notification = on_notification.respond_to?(:call) ? on_notification : nil
 
@@ -97,7 +97,7 @@ module AgentCore
       # @return [Hash] The tools/call response (string keys)
       def call_tool(name:, arguments: {}, timeout_s: nil)
         tool_name = name.to_s
-        raise ArgumentError, "name is required" if tool_name.strip.empty?
+        raise ValidationError, "name is required" if tool_name.strip.empty?
 
         args = arguments.is_a?(Hash) ? arguments : {}
         attempt = 0

@@ -115,7 +115,7 @@ module DAG
       after_seq = after_seq&.to_i
 
       if before_seq.present? && after_seq.present?
-        raise ArgumentError, "before_seq and after_seq are mutually exclusive"
+        raise ValidationError, "before_seq and after_seq are mutually exclusive"
       end
 
       scope = turns.where.not(anchored_seq: nil)
@@ -217,7 +217,7 @@ module DAG
       after_message_id = after_message_id&.to_s
 
       if before_message_id.present? && after_message_id.present?
-        raise ArgumentError, "before_message_id and after_message_id are mutually exclusive"
+        raise ValidationError, "before_message_id and after_message_id are mutually exclusive"
       end
 
       candidate_types = graph.transcript_candidate_node_types
@@ -229,7 +229,7 @@ module DAG
       cursor_message_id = before_message_id || after_message_id
       if cursor_message_id.present?
         unless scope.where(id: cursor_message_id).exists?
-          raise ArgumentError, "cursor message_id is unknown or not visible"
+          raise ValidationError, "cursor message_id is unknown or not visible"
         end
       end
 
@@ -309,7 +309,7 @@ module DAG
       end_seq = Integer(end_seq)
 
       if start_seq > end_seq
-        raise ArgumentError, "start_seq must be <= end_seq"
+        raise ValidationError, "start_seq must be <= end_seq"
       end
 
       turn_ids =
@@ -348,19 +348,19 @@ module DAG
 
       graph.with_graph_lock! do
         if graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
-          raise ArgumentError, "cannot compact while graph has running nodes"
+          raise ValidationError, "cannot compact while graph has running nodes"
         end
 
         turn_nodes = nodes.active.where(turn_id: turn_id).lock.to_a
 
         unless turn_nodes.all?(&:terminal?)
-          raise ArgumentError, "can only compact turns when all active nodes are terminal"
+          raise ValidationError, "can only compact turns when all active nodes are terminal"
         end
 
         turn_node_ids = turn_nodes.map { |node| node.id.to_s }
         unexpected_keep_ids = keep_node_ids - turn_node_ids
         if unexpected_keep_ids.any?
-          raise ArgumentError, "keep_node_ids must belong to this lane and turn"
+          raise ValidationError, "keep_node_ids must belong to this lane and turn"
         end
 
         keep_nodes = turn_nodes.select { |node| keep_node_ids.include?(node.id.to_s) }
@@ -394,7 +394,7 @@ module DAG
         return if target_lane_id.nil?
         return if target_lane_id.to_s == id.to_s
 
-        raise ArgumentError, "node_id must belong to this lane"
+        raise ValidationError, "node_id must belong to this lane"
       end
 
       def transcript_turn_ids_page(limit_turns:, before_turn_id:, after_turn_id:, include_deleted:)
@@ -407,7 +407,7 @@ module DAG
         after_turn_id = after_turn_id&.to_s
 
         if before_turn_id.present? && after_turn_id.present?
-          raise ArgumentError, "before_turn_id and after_turn_id are mutually exclusive"
+          raise ValidationError, "before_turn_id and after_turn_id are mutually exclusive"
         end
 
         visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
@@ -419,7 +419,7 @@ module DAG
 
         if before_turn_id.present?
           unless visible_turns.where(id: before_turn_id).exists?
-            raise ArgumentError, "cursor turn_id is unknown or not visible"
+            raise ValidationError, "cursor turn_id is unknown or not visible"
           end
 
           visible_turns
@@ -431,7 +431,7 @@ module DAG
             .map(&:to_s)
         elsif after_turn_id.present?
           unless visible_turns.where(id: after_turn_id).exists?
-            raise ArgumentError, "cursor turn_id is unknown or not visible"
+            raise ValidationError, "cursor turn_id is unknown or not visible"
           end
 
           visible_turns

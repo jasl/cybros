@@ -47,7 +47,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
       )
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(DAG::ValidationError) do
       graph.mutate!(turn_id: turn_id) do |m|
         m.create_node(
           node_type: Messages::Task.node_type_key,

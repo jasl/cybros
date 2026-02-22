@@ -12,17 +12,17 @@ module AgentCore
 
         def initialize(tracer: nil, max_attribute_bytes: DEFAULT_MAX_ATTRIBUTE_BYTES)
           @max_attribute_bytes = Integer(max_attribute_bytes)
-          raise ArgumentError, "max_attribute_bytes must be positive" if @max_attribute_bytes <= 0
+          raise ValidationError, "max_attribute_bytes must be positive" if @max_attribute_bytes <= 0
 
           @tracer = tracer || default_tracer
           return if @tracer&.respond_to?(:in_span)
 
-          raise ArgumentError, "tracer must respond to #in_span (OpenTelemetry not available?)"
+          raise ValidationError, "tracer must respond to #in_span (OpenTelemetry not available?)"
         end
 
         def instrument(name, payload = {})
           event_name = name.to_s
-          raise ArgumentError, "name is required" if event_name.strip.empty?
+          raise ValidationError, "name is required" if event_name.strip.empty?
 
           data = payload.is_a?(Hash) ? payload : {}
           start = Process.clock_gettime(Process::CLOCK_MONOTONIC)

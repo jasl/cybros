@@ -23,7 +23,7 @@ module DAG
         body_class = @graph.body_class_for_node_type(node_type)
         destination = body_class.created_content_destination
         unless destination.is_a?(Array) && destination.length == 2
-          raise ArgumentError,
+          raise ValidationError,
                 "invalid created_content_destination=#{destination.inspect} " \
                 "for body_class=#{body_class.name}"
         end
@@ -38,7 +38,7 @@ module DAG
         when :output
           body_output[key] = content
         else
-          raise ArgumentError,
+          raise ValidationError,
                 "invalid created_content_destination=#{destination.inspect} " \
                 "for body_class=#{body_class.name}"
         end
@@ -61,7 +61,7 @@ module DAG
 
       if lane_id.present?
         if turn_lane_id.present? && turn_lane_id.to_s != lane_id.to_s
-          raise ArgumentError, "lane_id conflicts with existing nodes for turn"
+          raise ValidationError, "lane_id conflicts with existing nodes for turn"
         end
       else
         lane_id = turn_lane_id || @graph.main_lane.id
@@ -69,7 +69,7 @@ module DAG
       end
 
       if idempotency_key.present?
-        raise ArgumentError, "idempotency_key requires turn_id" if effective_turn_id.blank?
+        raise ValidationError, "idempotency_key requires turn_id" if effective_turn_id.blank?
 
         existing =
           @graph.nodes.active.find_by(
@@ -87,7 +87,7 @@ module DAG
           )
 
           if existing.lane_id.to_s != lane_id.to_s
-            raise ArgumentError, "idempotency_key collision with mismatched lane"
+            raise ValidationError, "idempotency_key collision with mismatched lane"
           end
 
           if existing.executable? && existing.pending?
@@ -124,7 +124,7 @@ module DAG
               idempotency_key: idempotency_key
             )
             if node.lane_id.to_s != lane_id.to_s
-              raise ArgumentError, "idempotency_key collision with mismatched lane"
+              raise ValidationError, "idempotency_key collision with mismatched lane"
             end
             node
           end
@@ -155,7 +155,7 @@ module DAG
           edge_type: edge_type
         )
       return existing if existing && existing.compressed_at.nil?
-      raise ArgumentError, "edge already exists but is archived" if existing
+      raise ValidationError, "edge already exists but is archived" if existing
 
       edge =
         begin
@@ -188,8 +188,8 @@ module DAG
 
     def fork_from!(from_node:, node_type:, state:, content: nil, body_input: {}, body_output: {}, metadata: {})
       assert_node_belongs_to_graph!(from_node)
-      raise ArgumentError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
-      raise ArgumentError, "can only fork from terminal nodes" unless from_node.terminal?
+      raise ValidationError, "cannot fork from compressed nodes" if from_node.compressed_at.present?
+      raise ValidationError, "can only fork from terminal nodes" unless from_node.terminal?
 
       lane =
         @graph.lanes.create!(
@@ -228,11 +228,11 @@ module DAG
       assert_lane_belongs_to_graph!(target_lane)
       assert_node_belongs_to_graph!(target_from_node)
 
-      raise ArgumentError, "cannot merge into archived lane" if target_lane.archived_at.present?
-      raise ArgumentError, "target_from_node must belong to target_lane" if target_from_node.lane_id != target_lane.id
+      raise ValidationError, "cannot merge into archived lane" if target_lane.archived_at.present?
+      raise ValidationError, "target_from_node must belong to target_lane" if target_from_node.lane_id != target_lane.id
 
       sources = Array(source_lanes_and_nodes)
-      raise ArgumentError, "source_lanes_and_nodes must not be empty" if sources.empty?
+      raise ValidationError, "source_lanes_and_nodes must not be empty" if sources.empty?
 
       source_lane_ids = []
       sources.each do |entry|
@@ -242,9 +242,9 @@ module DAG
         assert_lane_belongs_to_graph!(lane)
         assert_node_belongs_to_graph!(from_node)
 
-        raise ArgumentError, "main lane cannot be merged into another lane" if lane.role == DAG::Lane::MAIN
-        raise ArgumentError, "cannot merge a lane into itself" if lane.id == target_lane.id
-        raise ArgumentError, "source from_node must belong to lane" if from_node.lane_id != lane.id
+        raise ValidationError, "main lane cannot be merged into another lane" if lane.role == DAG::Lane::MAIN
+        raise ValidationError, "cannot merge a lane into itself" if lane.id == target_lane.id
+        raise ValidationError, "source from_node must belong to lane" if from_node.lane_id != lane.id
 
         source_lane_ids << lane.id
       end
@@ -288,7 +288,7 @@ module DAG
 
       mode = mode.to_sym
       unless mode.in?([:finish, :cancel])
-        raise ArgumentError, "mode must be :finish or :cancel"
+        raise ValidationError, "mode must be :finish or :cancel"
       end
 
       at = Time.current if at.nil?
@@ -362,23 +362,23 @@ module DAG
       now = Time.current
 
       unless old.body.retriable?
-        raise ArgumentError, "can only retry retriable nodes"
+        raise ValidationError, "can only retry retriable nodes"
       end
 
       unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::STOPPED].include?(old.state)
-        raise ArgumentError, "can only retry errored, rejected, or stopped nodes"
+        raise ValidationError, "can only retry errored, rejected, or stopped nodes"
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
       if @graph.nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
-        raise ArgumentError, "cannot retry when downstream nodes are not pending"
+        raise ValidationError, "cannot retry when downstream nodes are not pending"
       end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
         child_states = @graph.nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
         unless outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == DAG::Node::PENDING }
-          raise ArgumentError, "can only retry when all active blocking children are pending"
+          raise ValidationError, "can only retry when all active blocking children are pending"
         end
       end
 
@@ -447,16 +447,16 @@ module DAG
       now = Time.current
 
       unless old.body.rerunnable?
-        raise ArgumentError, "can only rerun rerunnable nodes"
+        raise ValidationError, "can only rerun rerunnable nodes"
       end
 
       unless old.state == DAG::Node::FINISHED
-        raise ArgumentError, "can only rerun finished nodes"
+        raise ValidationError, "can only rerun finished nodes"
       end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-        raise ArgumentError, "can only rerun leaf nodes"
+        raise ValidationError, "can only rerun leaf nodes"
       end
 
       metadata_patch = normalize_hash(metadata_patch)
@@ -506,24 +506,24 @@ module DAG
       now = Time.current
 
       if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
-        raise ArgumentError, "cannot adopt version while graph has running nodes"
+        raise ValidationError, "cannot adopt version while graph has running nodes"
       end
 
       unless target.finished?
-        raise ArgumentError, "can only adopt finished nodes"
+        raise ValidationError, "can only adopt finished nodes"
       end
 
       if @graph.edges.where(from_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES).exists?
-        raise ArgumentError, "can only adopt leaf nodes"
+        raise ValidationError, "can only adopt leaf nodes"
       end
 
       active_versions = @graph.nodes.active.where(version_set_id: target.version_set_id).lock.to_a
       if active_versions.empty? && target.compressed_at.present?
-        raise ArgumentError, "cannot adopt version when no active version exists"
+        raise ValidationError, "cannot adopt version when no active version exists"
       end
 
       if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.lane_id != target.lane_id }
-        raise ArgumentError, "version_set_id must not span multiple turns or lanes"
+        raise ValidationError, "version_set_id must not span multiple turns or lanes"
       end
 
       nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
@@ -543,7 +543,7 @@ module DAG
       active_node_ids = @graph.nodes.active.select(:id)
 
       unless @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).exists?
-        raise ArgumentError, "cannot adopt version without active incoming edges"
+        raise ValidationError, "cannot adopt version without active incoming edges"
       end
 
       @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).update_all(
@@ -552,7 +552,7 @@ module DAG
       )
 
       if active_outgoing_blocking_edges_from(target.id).any?
-        raise ArgumentError, "cannot adopt non-leaf nodes"
+        raise ValidationError, "cannot adopt non-leaf nodes"
       end
 
       cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
@@ -571,16 +571,16 @@ module DAG
       now = Time.current
 
       unless old.body.editable?
-        raise ArgumentError, "can only edit editable nodes"
+        raise ValidationError, "can only edit editable nodes"
       end
 
       unless old.state == DAG::Node::FINISHED
-        raise ArgumentError, "can only edit finished nodes"
+        raise ValidationError, "can only edit finished nodes"
       end
 
       descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
       if @graph.nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
-        raise ArgumentError, "cannot edit when downstream nodes are pending or running"
+        raise ValidationError, "cannot edit when downstream nodes are pending or running"
       end
 
       new_body_input = old.body.input_for_retry.deep_merge(normalize_hash(new_input))
@@ -633,13 +633,13 @@ module DAG
       def assert_node_belongs_to_graph!(node)
         return if node.graph_id == @graph.id
 
-        raise ArgumentError, "node must belong to the same graph"
+        raise ValidationError, "node must belong to the same graph"
       end
 
       def assert_lane_belongs_to_graph!(lane)
         return if lane.graph_id == @graph.id
 
-        raise ArgumentError, "lane must belong to the same graph"
+        raise ValidationError, "lane must belong to the same graph"
       end
 
       def locked_active_node!(node_or_id)
@@ -699,8 +699,8 @@ module DAG
 
       def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
         existing = @graph.edges.find_by(from_node_id: from_node_id, to_node_id: to_node_id, edge_type: edge_type)
-        return existing if existing && existing.compressed_at.nil?
-        raise ArgumentError, "edge already exists but is archived" if existing
+      return existing if existing && existing.compressed_at.nil?
+      raise ValidationError, "edge already exists but is archived" if existing
 
         edge =
           begin
@@ -796,7 +796,7 @@ module DAG
           break if invalid_leaves.empty?
 
           if invalid_leaves.any? { |leaf| turn_anchor_types.include?(leaf.node_type.to_s) }
-            raise ArgumentError, "cannot adopt version because it would invalidate turn anchors"
+            raise ValidationError, "cannot adopt version because it would invalidate turn anchors"
           end
 
           archive_nodes_and_incident_edges!(
@@ -809,14 +809,14 @@ module DAG
 
       def assert_idempotent_node_match!(node, expected_state:, expected_body_input:, expected_body_output:)
         if node.state != expected_state.to_s
-          raise ArgumentError, "idempotency_key collision with mismatched state"
+          raise ValidationError, "idempotency_key collision with mismatched state"
         end
 
         actual_body_input = node.body&.input.is_a?(Hash) ? node.body.input : {}
         actual_body_output = node.body&.output.is_a?(Hash) ? node.body.output : {}
 
         if actual_body_input != expected_body_input || actual_body_output != expected_body_output
-          raise ArgumentError, "idempotency_key collision with mismatched body I/O"
+          raise ValidationError, "idempotency_key collision with mismatched body I/O"
         end
       end
   end

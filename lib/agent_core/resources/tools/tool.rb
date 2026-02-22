@@ -50,6 +50,25 @@ module AgentCore
           raise AgentCore::Error, "No handler defined for tool '#{name}'" unless @handler
           execution_context = ExecutionContext.from(context)
           @handler.call(arguments, context: execution_context)
+        rescue AgentCore::ValidationError => e
+          mode = tool_error_mode.to_s.strip.downcase.tr("-", "_")
+          text =
+            if mode == "debug"
+              "Tool '#{name}' validation failed: #{e.class}: #{e.message}"
+            else
+              "Tool '#{name}' validation failed: #{e.message}"
+            end
+
+          ToolResult.error(
+            text: text,
+            metadata: {
+              validation_error: {
+                class: e.class.name,
+                code: e.code,
+                details: e.details,
+              }.compact,
+            },
+          )
         rescue AgentCore::Error
           raise
         rescue => e

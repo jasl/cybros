@@ -49,21 +49,21 @@ class AgentCore::Resources::TokenCounter::HeuristicTest < Minitest::Test
   end
 
   def test_invalid_chars_per_token_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::TokenCounter::Heuristic.new(chars_per_token: 0)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::TokenCounter::Heuristic.new(chars_per_token: -1)
     end
   end
 
   def test_invalid_non_ascii_chars_per_token_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::TokenCounter::Heuristic.new(non_ascii_chars_per_token: 0)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::TokenCounter::Heuristic.new(non_ascii_chars_per_token: -1)
     end
   end

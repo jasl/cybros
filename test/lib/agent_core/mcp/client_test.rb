@@ -67,13 +67,13 @@ class AgentCore::MCP::ClientTest < Minitest::Test
   end
 
   def test_initialize_requires_transport
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::Client.new(transport: nil)
     end
   end
 
   def test_initialize_validates_timeout_s
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::Client.new(transport: @transport, timeout_s: 0)
     end
   end
@@ -259,8 +259,8 @@ class AgentCore::MCP::ClientTest < Minitest::Test
     client = AgentCore::MCP::Client.new(transport: @transport)
     client.start
 
-    assert_raises(ArgumentError) { client.call_tool(name: "") }
-    assert_raises(ArgumentError) { client.call_tool(name: "  ") }
+    assert_raises(AgentCore::ValidationError) { client.call_tool(name: "") }
+    assert_raises(AgentCore::ValidationError) { client.call_tool(name: "  ") }
   ensure
     client&.close
   end

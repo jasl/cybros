@@ -50,7 +50,7 @@ module AgentCore
 
         def start
           command = @command
-          raise ArgumentError, "command is required" if command.strip.empty?
+          raise ValidationError, "command is required" if command.strip.empty?
 
           @mutex.synchronize do
             raise AgentCore::MCP::ClosedError, "transport is closed" if @closed
@@ -120,7 +120,7 @@ module AgentCore
 
           json = JSON.generate(message)
           if json.include?("\n") || json.include?("\r")
-            raise ArgumentError, "MCP stdio messages must be newline-delimited JSON (no embedded newlines)"
+            raise ValidationError, "MCP stdio messages must be newline-delimited JSON (no embedded newlines)"
           end
 
           stdin = @mutex.synchronize { @stdin }
@@ -139,7 +139,7 @@ module AgentCore
 
         def close(timeout_s: 2.0)
           timeout_s = Float(timeout_s)
-          raise ArgumentError, "timeout_s must be positive" if timeout_s <= 0
+          timeout_s = 0.0 if timeout_s <= 0
 
           stdin = nil
           wait_thr = nil

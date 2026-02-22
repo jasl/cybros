@@ -32,7 +32,7 @@
 - `TaskExecutor` 对 tool result 做 bytesize 限制（默认约 200KB），超限会截断并在 result.metadata 标记 `truncated=true`
 - `ContextBudgetManager` 在超预算路径下可对“旧 tool outputs”做 prompt-view 裁剪（`ToolOutputPruner`），不写回 DAG 历史
 - `tool_error_mode`：
-  - `:safe`（默认）：错误文本不包含异常 message/堆栈细节
+  - `:safe`（默认）：不包含堆栈；非校验类异常默认不包含 message（仅类型）。`AgentCore::ValidationError` 会包含 message（约定为可安全暴露，便于 LLM 自愈）。
   - `:debug`：错误文本包含异常类型与 message（仅建议在受控环境开启）
 
 ---

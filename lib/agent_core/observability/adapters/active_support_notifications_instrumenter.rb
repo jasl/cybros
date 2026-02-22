@@ -12,12 +12,12 @@ module AgentCore
           @notifier = notifier || default_notifier
           return if @notifier&.respond_to?(:instrument)
 
-          raise ArgumentError, "notifier must respond to #instrument (ActiveSupport not available?)"
+          raise ValidationError, "notifier must respond to #instrument (ActiveSupport not available?)"
         end
 
         def instrument(name, payload = {})
           event_name = name.to_s
-          raise ArgumentError, "name is required" if event_name.strip.empty?
+          raise ValidationError, "name is required" if event_name.strip.empty?
 
           data = payload.is_a?(Hash) ? payload : {}
           start = Process.clock_gettime(Process::CLOCK_MONOTONIC)

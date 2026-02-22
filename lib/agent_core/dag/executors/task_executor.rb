@@ -66,7 +66,7 @@ module AgentCore
             tool_name = input.fetch("name", "").to_s
             tool_name = input.fetch("requested_name", "").to_s if tool_name.strip.empty?
 
-            raise ArgumentError, "task.name is required" if tool_name.strip.empty?
+            raise ValidationError, "task.name is required" if tool_name.strip.empty?
 
             args = input.fetch("arguments", {})
             args = {} unless args.is_a?(Hash)

@@ -212,7 +212,7 @@ module AgentCore
         private_class_method :alnum_char?
 
         def invalid(strict, message, body_string)
-          raise ArgumentError, message if strict
+          raise ValidationError, message if strict
 
           [nil, body_string.to_s]
         end

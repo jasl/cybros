@@ -134,13 +134,13 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
   end
 
   def test_from_h_raises_on_non_array_content
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       ToolResult.from_h({ content: "nope", error: false, metadata: {} })
     end
   end
 
   def test_from_h_raises_on_non_hash_metadata
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       ToolResult.from_h({ content: [], error: false, metadata: "nope" })
     end
   end

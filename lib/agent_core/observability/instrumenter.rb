@@ -24,7 +24,7 @@ module AgentCore
       # @param payload [Hash] structured metadata
       def instrument(name, payload = {})
         event_name = name.to_s
-        raise ArgumentError, "name is required" if event_name.strip.empty?
+        raise ValidationError, "name is required" if event_name.strip.empty?
 
         data = payload.is_a?(Hash) ? payload : {}
         start = Process.clock_gettime(Process::CLOCK_MONOTONIC)

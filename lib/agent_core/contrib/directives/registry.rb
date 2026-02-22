@@ -18,7 +18,7 @@ module AgentCore
                   aliases: h.fetch(:aliases, nil),
                 )
               else
-                raise ArgumentError, "Invalid directive definition: #{definition.inspect}"
+                raise ValidationError, "Invalid directive definition: #{definition.inspect}"
               end
             end
         end

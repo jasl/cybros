@@ -17,11 +17,26 @@ module AgentCore
   # Base error class for all AgentCore errors.
   class Error < StandardError; end
 
+  # Raised when user/business input validation fails (e.g., invalid arguments,
+  # schema mismatches, or name conflicts).
+  #
+  # This is intentionally *not* an ArgumentError: callers should rescue
+  # AgentCore::ValidationError (or AgentCore::Error) to classify failures.
+  class ValidationError < Error
+    attr_reader :code, :details
+
+    def initialize(message = nil, code: nil, details: {})
+      @code = code
+      @details = details || {}
+      super(message)
+    end
+  end
+
   # Raised when a required abstract method is not implemented.
   class NotImplementedError < Error; end
 
   # Raised when configuration is invalid or incomplete.
-  class ConfigurationError < Error; end
+  class ConfigurationError < ValidationError; end
 
   # Raised when a tool call fails.
   class ToolError < Error

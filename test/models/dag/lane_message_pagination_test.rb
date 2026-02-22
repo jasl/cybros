@@ -196,7 +196,7 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
     with_deleted = lane.message_page(limit: 10, include_deleted: true)
     assert_equal [deleted_user.id, agent.id], with_deleted.fetch("message_ids")
 
-    assert_raises(ArgumentError) do
+    assert_raises(DAG::ValidationError) do
       lane.message_page(limit: 10, after_message_id: deleted_user.id)
     end
 
@@ -325,13 +325,13 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
     assert_equal [], empty.fetch("messages")
 
     error =
-      assert_raises(ArgumentError) do
+      assert_raises(DAG::ValidationError) do
         lane.message_page(limit: 10, before_message_id: "x", after_message_id: "y")
       end
     assert_includes error.message, "mutually"
 
     error =
-      assert_raises(ArgumentError) do
+      assert_raises(DAG::ValidationError) do
         lane.message_page(limit: 10, before_message_id: "0194f3c0-0000-7000-8000-00000000dead")
       end
     assert_includes error.message, "cursor"

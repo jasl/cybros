@@ -15,7 +15,7 @@ module AgentCore
     # @return [Hash]
     def symbolize_keys(value)
       return {} if value.nil?
-      raise ArgumentError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
+      raise ValidationError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
 
       out = {}
 
@@ -152,18 +152,18 @@ module AgentCore
 
     # Assert that all keys in a Hash are Symbols.
     #
-    # Raises ArgumentError if any key is not a Symbol. Used to enforce
+    # Raises AgentCore::ValidationError if any key is not a Symbol. Used to enforce
     # the symbol-keys convention at API boundaries.
     #
     # @param value [Hash]
     # @param path [String] Human-readable context for error messages
     # @return [nil]
     def assert_symbol_keys!(value, path: "value")
-      raise ArgumentError, "#{path} must be a Hash" unless value.is_a?(Hash)
+      raise ValidationError, "#{path} must be a Hash" unless value.is_a?(Hash)
 
       value.each_key do |key|
         unless key.is_a?(Symbol)
-          raise ArgumentError, "#{path} keys must be Symbols (got #{key.class})"
+          raise ValidationError, "#{path} keys must be Symbols (got #{key.class})"
         end
       end
 
@@ -195,7 +195,7 @@ module AgentCore
     # @return [Hash, nil] { name:, description:, input_schema: }
     def normalize_mcp_tool_definition(value)
       return nil if value.nil?
-      raise ArgumentError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
+      raise ValidationError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
 
       name = value.fetch("name", "").to_s.strip
       return nil if name.empty?
@@ -325,7 +325,7 @@ module AgentCore
 
     def parse_tool_arguments(value, max_bytes: DEFAULT_MAX_TOOL_ARGS_BYTES)
       max_bytes = Integer(max_bytes)
-      raise ArgumentError, "max_bytes must be positive" if max_bytes <= 0
+      raise ValidationError, "max_bytes must be positive" if max_bytes <= 0
 
       return [{}, nil] if value.nil?
 

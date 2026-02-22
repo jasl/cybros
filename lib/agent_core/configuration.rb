@@ -17,7 +17,7 @@ module AgentCore
     # Optional custom validator hook for media blocks.
     #
     # Called with the content block instance (ImageContent/DocumentContent/AudioContent).
-    # Return truthy to allow, falsey to reject (raises ArgumentError).
+    # Return truthy to allow, falsey to reject (raises AgentCore::ValidationError).
     # The validator may also raise its own error.
     attr_accessor :media_source_validator
 

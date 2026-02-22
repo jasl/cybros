@@ -10,7 +10,7 @@ module AgentCore
     class LRUCache
       def initialize(max_size:)
         @max_size = Integer(max_size)
-        raise ArgumentError, "max_size must be positive" if @max_size <= 0
+        raise ValidationError, "max_size must be positive" if @max_size <= 0
 
         @store = {}
         @mutex = Mutex.new

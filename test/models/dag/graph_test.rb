@@ -40,7 +40,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
 
-    assert_raises(ArgumentError) do
+    assert_raises(DAG::ValidationError) do
       graph.emit_event(event_type: "unknown_event_type", subject: node)
     end
   end

@@ -53,7 +53,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
   end
 
   def test_missing_opening_delimiter_strict
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse("no frontmatter here", strict: true)
     end
   end
@@ -68,7 +68,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
   def test_missing_closing_delimiter_strict
     content = "---\nname: test\n"
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -81,7 +81,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -94,7 +94,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -108,7 +108,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -122,7 +122,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, expected_name: "correct-name", strict: true)
     end
   end
@@ -148,7 +148,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -163,7 +163,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -204,7 +204,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
     long_desc = "a" * 1025
     content = "---\nname: my-skill\ndescription: #{long_desc}\n---\nBody"
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -275,7 +275,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -302,7 +302,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, path: "/skills/correct-name/SKILL.md", strict: true)
     end
   end
@@ -317,7 +317,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -346,7 +346,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end
@@ -360,7 +360,7 @@ class AgentCore::Resources::Skills::FrontmatterTest < Minitest::Test
       Body
     MD
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Skills::Frontmatter.parse(content, strict: true)
     end
   end

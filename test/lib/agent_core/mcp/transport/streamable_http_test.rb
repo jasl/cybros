@@ -17,7 +17,7 @@ class AgentCore::MCP::Transport::StreamableHttpTest < Minitest::Test
   end
 
   def test_initialize_requires_url
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::Transport::StreamableHttp.new(url: "")
     end
   end
@@ -28,47 +28,47 @@ class AgentCore::MCP::Transport::StreamableHttpTest < Minitest::Test
   end
 
   def test_initialize_validates_timeout_s
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", timeout_s: 0)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", timeout_s: -1)
     end
   end
 
   def test_initialize_validates_open_timeout_s
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", open_timeout_s: 0)
     end
   end
 
   def test_initialize_validates_read_timeout_s
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", read_timeout_s: -1)
     end
   end
 
   def test_initialize_validates_sse_max_reconnects
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", sse_max_reconnects: 0)
     end
   end
 
   def test_initialize_validates_max_response_bytes
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", max_response_bytes: -5)
     end
   end
 
   def test_initialize_validates_headers_must_be_hash
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", headers: "not a hash")
     end
   end
 
   def test_initialize_validates_headers_provider_must_be_callable
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", headers_provider: "not callable")
     end
   end

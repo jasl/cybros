@@ -13,7 +13,7 @@
 
       def call(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, mode: :preview, include_excluded: false, include_deleted: false)
       limit_turns = Integer(limit_turns)
-      raise ArgumentError, "limit_turns must be > 0" if limit_turns <= 0
+      raise ValidationError, "limit_turns must be > 0" if limit_turns <= 0
       limit_turns = [limit_turns, 1000].min
 
       target = load_target_node(target_node_id)
@@ -58,7 +58,7 @@
 
     def node_scope_for(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, include_excluded: false, include_deleted: false)
       limit_turns = Integer(limit_turns)
-      raise ArgumentError, "limit_turns must be > 0" if limit_turns <= 0
+      raise ValidationError, "limit_turns must be > 0" if limit_turns <= 0
       limit_turns = [limit_turns, 1000].min
 
       target = load_target_node(target_node_id)

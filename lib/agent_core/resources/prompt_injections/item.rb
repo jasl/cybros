@@ -25,7 +25,7 @@ module AgentCore
             metadata: nil
           )
             t = target.to_sym
-            raise ArgumentError, "target must be one of #{TARGETS.inspect} (got #{target.inspect})" unless TARGETS.include?(t)
+            raise ValidationError, "target must be one of #{TARGETS.inspect} (got #{target.inspect})" unless TARGETS.include?(t)
 
             ord = Integer(order || 0, exception: false) || 0
 
@@ -37,8 +37,8 @@ module AgentCore
 
             r = role.nil? ? nil : role.to_sym
             if t == :preamble_message
-              raise ArgumentError, "preamble_message requires role" if r.nil?
-              raise ArgumentError, "role must be one of #{ROLES.inspect} (got #{role.inspect})" unless ROLES.include?(r)
+              raise ValidationError, "preamble_message requires role" if r.nil?
+              raise ValidationError, "role must be one of #{ROLES.inspect} (got #{role.inspect})" unless ROLES.include?(r)
             else
               r = nil
             end

@@ -53,7 +53,7 @@ module AgentCore
           max_response_bytes: nil
         )
           id = id.to_s.strip
-          raise ArgumentError, "id is required" if id.empty?
+          raise ValidationError, "id is required" if id.empty?
 
           transport = normalize_transport(transport)
 
@@ -65,27 +65,27 @@ module AgentCore
 
           case transport
           when :stdio
-            raise ArgumentError, "command is required" if command.nil? || command.empty?
-            raise ArgumentError, "url must be empty for stdio transport" if url
+            raise ValidationError, "command is required" if command.nil? || command.empty?
+            raise ValidationError, "url must be empty for stdio transport" if url
 
             http_headers = normalize_headers(headers)
-            raise ArgumentError, "headers must be empty for stdio transport" if http_headers && !http_headers.empty?
-            raise ArgumentError, "headers_provider must be empty for stdio transport" unless headers_provider.nil?
-            raise ArgumentError, "open_timeout_s must be empty for stdio transport" unless open_timeout_s.nil?
-            raise ArgumentError, "read_timeout_s must be empty for stdio transport" unless read_timeout_s.nil?
-            raise ArgumentError, "sse_max_reconnects must be empty for stdio transport" unless sse_max_reconnects.nil?
-            raise ArgumentError, "max_response_bytes must be empty for stdio transport" unless max_response_bytes.nil?
+            raise ValidationError, "headers must be empty for stdio transport" if http_headers && !http_headers.empty?
+            raise ValidationError, "headers_provider must be empty for stdio transport" unless headers_provider.nil?
+            raise ValidationError, "open_timeout_s must be empty for stdio transport" unless open_timeout_s.nil?
+            raise ValidationError, "read_timeout_s must be empty for stdio transport" unless read_timeout_s.nil?
+            raise ValidationError, "sse_max_reconnects must be empty for stdio transport" unless sse_max_reconnects.nil?
+            raise ValidationError, "max_response_bytes must be empty for stdio transport" unless max_response_bytes.nil?
 
             env_provider = normalize_optional_callable(env_provider, field: "env_provider")
           when :streamable_http
-            raise ArgumentError, "url is required" if url.nil? || url.empty?
-            raise ArgumentError, "command must be empty for streamable_http transport" if command
-            raise ArgumentError, "args must be empty for streamable_http transport" unless Array(args).empty?
+            raise ValidationError, "url is required" if url.nil? || url.empty?
+            raise ValidationError, "command must be empty for streamable_http transport" if command
+            raise ValidationError, "args must be empty for streamable_http transport" unless Array(args).empty?
 
             env_hash = normalize_env(env)
-            raise ArgumentError, "env must be empty for streamable_http transport" unless env_hash.empty?
-            raise ArgumentError, "env_provider must be empty for streamable_http transport" unless env_provider.nil?
-            raise ArgumentError, "chdir must be empty for streamable_http transport" unless blank?(chdir)
+            raise ValidationError, "env must be empty for streamable_http transport" unless env_hash.empty?
+            raise ValidationError, "env_provider must be empty for streamable_http transport" unless env_provider.nil?
+            raise ValidationError, "chdir must be empty for streamable_http transport" unless blank?(chdir)
 
             open_timeout_s = normalize_optional_timeout_s(open_timeout_s, field: "open_timeout_s")
             read_timeout_s = normalize_optional_timeout_s(read_timeout_s, field: "read_timeout_s")
@@ -99,7 +99,7 @@ module AgentCore
             env_provider = nil
             chdir = nil
           else
-            raise ArgumentError, "unsupported transport: #{transport.inspect}"
+            raise ValidationError, "unsupported transport: #{transport.inspect}"
           end
 
           protocol_version = normalize_protocol_version(protocol_version)
@@ -136,7 +136,7 @@ module AgentCore
         def self.coerce(value)
           return value if value.is_a?(AgentCore::MCP::ServerConfig)
 
-          raise ArgumentError, "server config must be a ServerConfig or Hash" unless value.is_a?(Hash)
+          raise ValidationError, "server config must be a ServerConfig or Hash" unless value.is_a?(Hash)
 
           AgentCore::Utils.assert_symbol_keys!(value, path: "mcp server config")
 
@@ -171,7 +171,7 @@ module AgentCore
         end
 
         def normalize_env(value)
-          raise ArgumentError, "env must be a Hash" if !value.nil? && !value.is_a?(Hash)
+          raise ValidationError, "env must be a Hash" if !value.nil? && !value.is_a?(Hash)
 
           hash = value || {}
           hash.each_with_object({}) do |(k, v), out|
@@ -184,7 +184,7 @@ module AgentCore
 
         def normalize_headers(value)
           return nil if value.nil?
-          raise ArgumentError, "headers must be a Hash" unless value.is_a?(Hash)
+          raise ValidationError, "headers must be a Hash" unless value.is_a?(Hash)
 
           value.each_with_object({}) do |(k, v), out|
             key = k.to_s
@@ -205,7 +205,7 @@ module AgentCore
           when "streamable_http", "streamable-http"
             :streamable_http
           else
-            raise ArgumentError, "transport must be :stdio or :streamable_http"
+            raise ValidationError, "transport must be :stdio or :streamable_http"
           end
         end
 
@@ -216,7 +216,7 @@ module AgentCore
 
         def normalize_timeout_s(value)
           timeout_s = Float(value.nil? ? AgentCore::MCP::DEFAULT_TIMEOUT_S : value)
-          raise ArgumentError, "timeout_s must be positive" if timeout_s <= 0
+          raise ValidationError, "timeout_s must be positive" if timeout_s <= 0
 
           timeout_s
         end
@@ -225,7 +225,7 @@ module AgentCore
           return nil if value.nil?
 
           timeout_s = Float(value)
-          raise ArgumentError, "#{field} must be positive" if timeout_s <= 0
+          raise ValidationError, "#{field} must be positive" if timeout_s <= 0
 
           timeout_s
         end
@@ -234,7 +234,7 @@ module AgentCore
           return nil if value.nil?
 
           i = Integer(value)
-          raise ArgumentError, "#{field} must be positive" if i <= 0
+          raise ValidationError, "#{field} must be positive" if i <= 0
 
           i
         end
@@ -243,7 +243,7 @@ module AgentCore
           return nil if value.nil?
           return value if value.respond_to?(:call)
 
-          raise ArgumentError, "#{field} must respond to #call"
+          raise ValidationError, "#{field} must respond to #call"
         end
       end
   end

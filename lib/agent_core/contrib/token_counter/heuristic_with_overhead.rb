@@ -8,7 +8,7 @@ module AgentCore
 
         def initialize(per_message_overhead:, **heuristic_kwargs)
           overhead = Integer(per_message_overhead, exception: false)
-          raise ArgumentError, "per_message_overhead must be a non-negative Integer" unless overhead && overhead >= 0
+          raise ValidationError, "per_message_overhead must be a non-negative Integer" unless overhead && overhead >= 0
 
           @per_message_overhead = overhead
           super(**heuristic_kwargs)

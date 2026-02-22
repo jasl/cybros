@@ -34,14 +34,25 @@ module AgentCore
         # Register a native tool.
         # @param tool [Tool]
         # @return [self]
+        # @raise [ToolNameConflictError] If tool name conflicts with existing tools
         def register(tool)
           @mutex.synchronize do
             if @native_tools.key?(tool.name)
-              raise ArgumentError, "Native tool name collision: #{tool.name.inspect}"
+              raise ToolNameConflictError.new(
+                "Native tool name collision: #{tool.name.inspect}",
+                tool_name: tool.name,
+                existing_source: :native,
+                new_source: :native,
+              )
             end
 
             if @mcp_tools.key?(tool.name)
-              raise ArgumentError, "Native tool name collision with existing MCP tool: #{tool.name.inspect}"
+              raise ToolNameConflictError.new(
+                "Native tool name collision with existing MCP tool: #{tool.name.inspect}",
+                tool_name: tool.name,
+                existing_source: :mcp,
+                new_source: :native,
+              )
             end
 
             @native_tools[tool.name] = tool
@@ -102,6 +113,7 @@ module AgentCore
         # @param prefix [String, nil] Optional prefix for tool names (e.g., "mcp_server1_")
         # @param server_id [String, nil] MCP server identifier for safe tool name mapping
         # @return [self]
+        # @raise [ToolNameConflictError] If tool name conflicts with existing tools
         def register_mcp_client(client, prefix: nil, server_id: nil)
           ensure_mcp_loaded!
 
@@ -123,16 +135,29 @@ module AgentCore
 
               if (existing = @mcp_tools[tool_name])
                 if existing[:original_name] != tool_def[:name] || existing[:client] != client
-                  raise ArgumentError,
-                        "MCP tool name collision: #{tool_name} " \
-                        "(existing original_name=#{existing[:original_name].inspect}, " \
-                        "new original_name=#{tool_def[:name].inspect}). " \
-                        "Consider using server_id: to namespace MCP tools."
+                  raise ToolNameConflictError.new(
+                    "MCP tool name collision: #{tool_name} " \
+                    "(existing original_name=#{existing[:original_name].inspect}, " \
+                    "new original_name=#{tool_def[:name].inspect}). " \
+                    "Consider using server_id: to namespace MCP tools.",
+                    tool_name: tool_name,
+                    existing_source: :mcp,
+                    new_source: :mcp,
+                    details: {
+                      existing_original_name: existing[:original_name],
+                      new_original_name: tool_def[:name],
+                    },
+                  )
                 end
               end
 
               if @native_tools.key?(tool_name)
-                raise ArgumentError, "MCP tool name collision with existing native tool: #{tool_name.inspect}"
+                raise ToolNameConflictError.new(
+                  "MCP tool name collision with existing native tool: #{tool_name.inspect}",
+                  tool_name: tool_name,
+                  existing_source: :native,
+                  new_source: :mcp,
+                )
               end
               @mcp_tools[tool_name] = {
                 client: client,

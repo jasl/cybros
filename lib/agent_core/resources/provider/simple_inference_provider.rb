@@ -29,7 +29,7 @@ module AgentCore
 
         def chat(messages:, model:, tools: nil, stream: false, **options)
           model_name = model.to_s.strip
-          raise ArgumentError, "model is required" if model_name.empty?
+          raise ValidationError, "model is required" if model_name.empty?
 
           client = ensure_client!
 
@@ -80,7 +80,7 @@ module AgentCore
 
         def normalize_request_defaults(value)
           return {} if value.nil?
-          raise ArgumentError, "request_defaults must be a Hash" unless value.is_a?(Hash)
+          raise ValidationError, "request_defaults must be a Hash" unless value.is_a?(Hash)
 
           Utils.deep_symbolize_keys(value)
         end
@@ -311,7 +311,7 @@ module AgentCore
         def build_openai_messages(messages)
           Array(messages).map do |msg|
             unless msg.is_a?(Message)
-              raise ArgumentError, "messages must contain AgentCore::Message instances"
+              raise ValidationError, "messages must contain AgentCore::Message instances"
             end
 
             role = openai_role(msg.role)
@@ -344,7 +344,7 @@ module AgentCore
           when :assistant then "assistant"
           when :tool_result then "tool"
           else
-            raise ArgumentError, "Unsupported message role: #{role.inspect}"
+            raise ValidationError, "Unsupported message role: #{role.inspect}"
           end
         end
 
@@ -438,7 +438,7 @@ module AgentCore
 
         def build_openai_tools(tools)
           Array(tools).map do |tool|
-            raise ArgumentError, "tools must contain Hash definitions" unless tool.is_a?(Hash)
+            raise ValidationError, "tools must contain Hash definitions" unless tool.is_a?(Hash)
 
             h = Utils.symbolize_keys(tool)
 
@@ -457,7 +457,7 @@ module AgentCore
               parameters = h.fetch(:parameters, {})
             end
 
-            raise ArgumentError, "tool name is required" if name.strip.empty?
+            raise ValidationError, "tool name is required" if name.strip.empty?
 
             parameters = {} unless parameters.is_a?(Hash)
             parameters = Utils.normalize_json_schema(parameters)

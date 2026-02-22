@@ -28,8 +28,8 @@ module AgentCore
         # @param replacement [Message] The new message object
         # @return [Boolean] true if replaced, false if not found
         def replace_message(target, replacement)
-          raise ArgumentError, "target is required" if target.nil?
-          raise ArgumentError, "replacement is required" if replacement.nil?
+          raise ValidationError, "target is required" if target.nil?
+          raise ValidationError, "replacement is required" if replacement.nil?
 
           @mutex.synchronize do
             idx = @messages.rindex { |m| m.equal?(target) }

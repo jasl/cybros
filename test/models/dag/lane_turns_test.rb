@@ -196,7 +196,7 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
     assert_equal 2, newer.fetch("before_seq")
     assert_equal 2, newer.fetch("after_seq")
 
-    assert_raises(ArgumentError) do
+    assert_raises(DAG::ValidationError) do
       lane.anchored_turn_page(limit: 1, before_seq: 1, after_seq: 2)
     end
 

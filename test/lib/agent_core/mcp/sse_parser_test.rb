@@ -146,7 +146,7 @@ class AgentCore::MCP::SseParserTest < Minitest::Test
   def test_max_buffer_bytes_enforced
     parser = AgentCore::MCP::SseParser.new(max_buffer_bytes: 10)
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       parser.feed("data: this is way too long\n\n")
     end
   end
@@ -168,13 +168,13 @@ class AgentCore::MCP::SseParserTest < Minitest::Test
   end
 
   def test_invalid_max_buffer_bytes
-    assert_raises(ArgumentError) { AgentCore::MCP::SseParser.new(max_buffer_bytes: 0) }
-    assert_raises(ArgumentError) { AgentCore::MCP::SseParser.new(max_buffer_bytes: -1) }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::SseParser.new(max_buffer_bytes: 0) }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::SseParser.new(max_buffer_bytes: -1) }
   end
 
   def test_invalid_max_event_data_bytes
-    assert_raises(ArgumentError) { AgentCore::MCP::SseParser.new(max_event_data_bytes: 0) }
-    assert_raises(ArgumentError) { AgentCore::MCP::SseParser.new(max_event_data_bytes: -1) }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::SseParser.new(max_event_data_bytes: 0) }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::SseParser.new(max_event_data_bytes: -1) }
   end
 
   def test_consecutive_empty_lines_do_not_emit_empty_events

@@ -33,7 +33,7 @@ module AgentCore
           )
         end
 
-        raise ArgumentError, "history messages must be AgentCore::Message or Hash-like with role/content"
+        raise ValidationError, "history messages must be AgentCore::Message or Hash-like with role/content"
       end
 
       def coerce_hash_message(hash)
@@ -71,7 +71,7 @@ module AgentCore
       def coerce_tool_call(value, fallback_id:)
         return value if value.is_a?(AgentCore::ToolCall)
 
-        raise ArgumentError, "tool_calls entries must be Hash-like" unless value.is_a?(Hash)
+        raise ValidationError, "tool_calls entries must be Hash-like" unless value.is_a?(Hash)
 
         h = AgentCore::Utils.symbolize_keys(value)
 
@@ -81,7 +81,7 @@ module AgentCore
 
         fn = AgentCore::Utils.symbolize_keys(h.fetch(:function, nil))
         name = fn.fetch(:name, "").to_s.strip
-        raise ArgumentError, "tool_call.function.name is required" if name.empty?
+        raise ValidationError, "tool_call.function.name is required" if name.empty?
 
         raw_args = fn.fetch(:arguments, nil)
         args_hash, parse_error = AgentCore::Utils.parse_tool_arguments(raw_args)
@@ -106,7 +106,7 @@ module AgentCore
 
         sym = str.to_sym
         unless AgentCore::Message::ROLES.include?(sym)
-          raise ArgumentError, "Invalid message role: #{value.inspect}"
+          raise ValidationError, "Invalid message role: #{value.inspect}"
         end
 
         sym

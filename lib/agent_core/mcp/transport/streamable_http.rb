@@ -57,27 +57,27 @@ module AgentCore
           on_stderr_line: nil
         )
           @url = url.to_s.strip
-          raise ArgumentError, "url is required" if @url.empty?
+          raise ValidationError, "url is required" if @url.empty?
 
           @headers = normalize_headers(headers)
           @headers_provider = normalize_headers_provider(headers_provider)
 
           @timeout_s = Float(timeout_s)
-          raise ArgumentError, "timeout_s must be positive" if @timeout_s <= 0
+          raise ValidationError, "timeout_s must be positive" if @timeout_s <= 0
 
           @open_timeout_s = open_timeout_s.nil? ? @timeout_s : Float(open_timeout_s)
-          raise ArgumentError, "open_timeout_s must be positive" if @open_timeout_s <= 0
+          raise ValidationError, "open_timeout_s must be positive" if @open_timeout_s <= 0
 
           @read_timeout_s = read_timeout_s.nil? ? @timeout_s : Float(read_timeout_s)
-          raise ArgumentError, "read_timeout_s must be positive" if @read_timeout_s <= 0
+          raise ValidationError, "read_timeout_s must be positive" if @read_timeout_s <= 0
 
           @sse_max_reconnects =
             sse_max_reconnects.nil? ? DEFAULT_SSE_MAX_RECONNECTS : Integer(sse_max_reconnects)
-          raise ArgumentError, "sse_max_reconnects must be positive" if @sse_max_reconnects <= 0
+          raise ValidationError, "sse_max_reconnects must be positive" if @sse_max_reconnects <= 0
 
           @max_response_bytes =
             max_response_bytes.nil? ? DEFAULT_MAX_RESPONSE_BYTES : Integer(max_response_bytes)
-          raise ArgumentError, "max_response_bytes must be positive" if @max_response_bytes <= 0
+          raise ValidationError, "max_response_bytes must be positive" if @max_response_bytes <= 0
 
           @sleep_fn = sleep_fn&.respond_to?(:call) ? sleep_fn : Kernel.method(:sleep)
           @http_client = http_client
@@ -204,7 +204,7 @@ module AgentCore
 
         def close(timeout_s: 2.0)
           timeout_s = Float(timeout_s)
-          raise ArgumentError, "timeout_s must be positive" if timeout_s <= 0
+          timeout_s = 0.0 if timeout_s <= 0
 
           worker = nil
           sse_thread = nil
@@ -320,7 +320,7 @@ module AgentCore
             elsif base.is_a?(::HTTPX::Session)
               base.with(timeout: timeout_opts)
             else
-              raise ArgumentError, "http_client must be ::HTTPX or an instance of ::HTTPX::Session (got #{base.class})"
+              raise ValidationError, "http_client must be ::HTTPX or an instance of ::HTTPX::Session (got #{base.class})"
             end
 
           @client = session
@@ -678,7 +678,7 @@ module AgentCore
 
         def normalize_headers(value)
           return {} if value.nil?
-          raise ArgumentError, "headers must be a Hash" unless value.is_a?(Hash)
+          raise ValidationError, "headers must be a Hash" unless value.is_a?(Hash)
 
           value.each_with_object({}) do |(k, v), out|
             key = k.to_s
@@ -693,7 +693,7 @@ module AgentCore
           return nil if value.nil?
           return value if value.respond_to?(:call)
 
-          raise ArgumentError, "headers_provider must respond to #call"
+          raise ValidationError, "headers_provider must respond to #call"
         end
 
         def resolve_headers_provider!

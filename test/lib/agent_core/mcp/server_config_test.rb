@@ -89,84 +89,84 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
   end
 
   def test_id_is_required
-    assert_raises(ArgumentError) { AgentCore::MCP::ServerConfig.new(id: "", command: "echo") }
-    assert_raises(ArgumentError) { AgentCore::MCP::ServerConfig.new(id: "  ", command: "echo") }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::ServerConfig.new(id: "", command: "echo") }
+    assert_raises(AgentCore::ValidationError) { AgentCore::MCP::ServerConfig.new(id: "  ", command: "echo") }
   end
 
   def test_stdio_requires_command
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :stdio, command: nil)
     end
   end
 
   def test_stdio_rejects_url
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", url: "https://example.com")
     end
   end
 
   def test_stdio_rejects_headers
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", headers: { "X-Key" => "val" })
     end
   end
 
   def test_stdio_rejects_headers_provider
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", headers_provider: -> { {} })
     end
   end
 
   def test_stdio_rejects_http_timeout_fields
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", open_timeout_s: 5)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", read_timeout_s: 5)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", sse_max_reconnects: 5)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", max_response_bytes: 1000)
     end
   end
 
   def test_streamable_http_requires_url
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :streamable_http, url: nil)
     end
   end
 
   def test_streamable_http_rejects_command
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :streamable_http, url: "https://example.com", command: "echo")
     end
   end
 
   def test_streamable_http_rejects_args
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :streamable_http, url: "https://example.com", args: ["--flag"])
     end
   end
 
   def test_streamable_http_rejects_env
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :streamable_http, url: "https://example.com", env: { "FOO" => "bar" })
     end
   end
 
   def test_streamable_http_rejects_chdir
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :streamable_http, url: "https://example.com", chdir: "/tmp")
     end
   end
 
   def test_unsupported_transport
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", transport: :websocket, command: "echo")
     end
   end
@@ -187,11 +187,11 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
   end
 
   def test_timeout_s_positive
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", timeout_s: 0)
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", timeout_s: -1)
     end
   end
@@ -217,7 +217,7 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
   end
 
   def test_callable_validation
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", on_stdout_line: "not callable")
     end
   end
@@ -237,13 +237,13 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
   end
 
   def test_coerce_rejects_non_hash
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.coerce("not a hash")
     end
   end
 
   def test_coerce_rejects_string_keys
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::MCP::ServerConfig.coerce("id" => "test", "command" => "echo")
     end
   end

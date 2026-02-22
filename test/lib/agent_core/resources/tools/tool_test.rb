@@ -77,6 +77,25 @@ class AgentCore::Resources::Tools::ToolTest < Minitest::Test
     assert_raises(AgentCore::ToolNotFoundError) { tool.call({}) }
   end
 
+  def test_call_validation_error_returns_tool_result_error
+    tool = AgentCore::Resources::Tools::Tool.new(
+      name: "bad", description: "d",
+    ) { |_args, context:| raise AgentCore::ValidationError.new("bad input", code: "BAD_INPUT", details: { field: "x" }) }
+
+    result = tool.call({})
+    assert result.error?
+    assert_includes result.text, "validation failed"
+    assert_includes result.text, "bad input"
+    refute_includes result.text, "AgentCore::ValidationError"
+    assert_equal "BAD_INPUT", result.metadata.dig(:validation_error, :code)
+    assert_equal({ field: "x" }, result.metadata.dig(:validation_error, :details))
+
+    debug_result = tool.call({}, tool_error_mode: :debug)
+    assert debug_result.error?
+    assert_includes debug_result.text, "AgentCore::ValidationError"
+    assert_includes debug_result.text, "bad input"
+  end
+
   def test_to_definition
     tool = AgentCore::Resources::Tools::Tool.new(
       name: "read", description: "Read a file", parameters: { type: "object" },

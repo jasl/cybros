@@ -1,6 +1,6 @@
 module DAG
   class TopologicalSort
-    class CycleError < StandardError; end
+    class CycleError < DAG::Error; end
 
     def self.call(node_ids:, edges:)
       new(node_ids: node_ids, edges: edges).call

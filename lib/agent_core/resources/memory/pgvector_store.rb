@@ -14,7 +14,7 @@ module AgentCore
 
         def search(query:, limit: 5, metadata_filter: nil)
           limit = Integer(limit)
-          raise ArgumentError, "limit must be > 0" if limit <= 0
+          raise ValidationError, "limit must be > 0" if limit <= 0
 
           q = query.to_s.strip
           return [] if q.empty?
@@ -44,7 +44,7 @@ module AgentCore
 
         def store(content:, metadata: {})
           text = content.to_s
-          raise ArgumentError, "content is required" if text.strip.empty?
+          raise ValidationError, "content is required" if text.strip.empty?
 
           vector = @embedder.embed(text: text)
 

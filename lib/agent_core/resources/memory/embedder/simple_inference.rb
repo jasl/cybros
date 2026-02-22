@@ -10,12 +10,12 @@ module AgentCore
             @client_options = client_options
             @model = model.to_s.strip
 
-            raise ArgumentError, "model is required" if @model.empty?
+            raise ValidationError, "model is required" if @model.empty?
           end
 
           def embed(text:)
             input = text.to_s
-            raise ArgumentError, "text is required" if input.strip.empty?
+            raise ValidationError, "text is required" if input.strip.empty?
 
             client = ensure_client!
 

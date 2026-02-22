@@ -38,7 +38,7 @@ class DAG::NodeEventsTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, body_output: { "content" => "ok" }, metadata: {})
 
-    assert_raises(ArgumentError) { graph.node_event_page_for(node.id, limit: 0) }
+    assert_raises(DAG::ValidationError) { graph.node_event_page_for(node.id, limit: 0) }
 
     scope = graph.node_event_scope_for(node.id)
     assert scope.is_a?(ActiveRecord::Relation)

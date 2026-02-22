@@ -47,7 +47,7 @@ class AgentCoreContribProviderWithDefaultsTest < ActiveSupport::TestCase
   test "rejects reserved keys in request_defaults" do
     provider = FakeProvider.new
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Contrib::ProviderWithDefaults.new(
         provider: provider,
         request_defaults: { model: "nope" },

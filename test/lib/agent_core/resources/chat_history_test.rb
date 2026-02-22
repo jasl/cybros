@@ -118,7 +118,7 @@ class AgentCore::Resources::ChatHistory::WrapTest < Minitest::Test
   end
 
   def test_wrap_invalid
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::ChatHistory.wrap(42)
     end
   end

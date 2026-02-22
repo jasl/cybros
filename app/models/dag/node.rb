@@ -701,12 +701,12 @@ module DAG
       end
 
       def assert_visibility_mutation_allowed!
-        raise ArgumentError, "graph is missing or misconfigured" if graph.nil?
+        raise ValidationError, "graph is missing or misconfigured" if graph.nil?
 
         reason = graph.visibility_mutation_error(node: self, graph: graph)
         return if reason.nil?
 
-        raise ArgumentError, reason
+        raise ValidationError, reason
       end
 
       def active_causal_descendant_ids

@@ -18,7 +18,7 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
 
   def test_build_normalize_index_raises_on_collision
     err =
-      assert_raises(ArgumentError) do
+      assert_raises(AgentCore::Resources::Tools::ToolNameConflictError) do
         AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(["foo-bar", "foo_bar"])
       end
 
@@ -81,4 +81,3 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
     assert_equal "foo_bar", res.resolved_name
   end
 end
-

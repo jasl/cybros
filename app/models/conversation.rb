@@ -33,7 +33,7 @@ class Conversation < ApplicationRecord
     if lane.attachable.nil?
       lane.update!(attachable: topic)
     elsif lane.attachable != topic
-      raise ArgumentError, "main lane is already attached to a different model"
+      raise Cybros::Error, "main lane is already attached to a different model"
     end
 
     topic
@@ -59,10 +59,10 @@ class Conversation < ApplicationRecord
 
   def merge_topic_into_main(source_topic:, main_topic: ensure_main_topic, metadata: {})
     source_lane = source_topic.dag_lane
-    raise ArgumentError, "source_topic is missing dag_lane" if source_lane.nil?
+    raise Cybros::Error, "source_topic is missing dag_lane" if source_lane.nil?
 
     main_lane = main_topic.dag_lane
-    raise ArgumentError, "main_topic is missing dag_lane" if main_lane.nil?
+    raise Cybros::Error, "main_topic is missing dag_lane" if main_lane.nil?
 
     main_head = dag_graph.leaf_nodes.where(lane_id: main_lane.id).sole
     source_head = dag_graph.leaf_nodes.where(lane_id: source_lane.id).sole

@@ -71,9 +71,9 @@ module AgentCore
           tool_error_mode: :safe
         )
           model = model.to_s.strip
-          raise ArgumentError, "model is required" if model.empty?
-          raise ArgumentError, "provider is required" if provider.nil?
-          raise ArgumentError, "tools_registry is required" if tools_registry.nil?
+          raise ValidationError, "model is required" if model.empty?
+          raise ValidationError, "provider is required" if provider.nil?
+          raise ValidationError, "tools_registry is required" if tools_registry.nil?
 
           fallback_models =
             Array(fallback_models)
@@ -110,36 +110,36 @@ module AgentCore
           token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
 
           context_turns = Integer(context_turns)
-          raise ArgumentError, "context_turns must be > 0" if context_turns <= 0
+          raise ValidationError, "context_turns must be > 0" if context_turns <= 0
 
           context_window_tokens =
             if context_window_tokens.nil?
               nil
             else
               value = Integer(context_window_tokens)
-              raise ArgumentError, "context_window_tokens must be > 0" if value <= 0
+              raise ValidationError, "context_window_tokens must be > 0" if value <= 0
               value
             end
 
           reserved_output_tokens = Integer(reserved_output_tokens)
-          raise ArgumentError, "reserved_output_tokens must be >= 0" if reserved_output_tokens.negative?
+          raise ValidationError, "reserved_output_tokens must be >= 0" if reserved_output_tokens.negative?
 
           max_tool_calls_per_turn =
             if max_tool_calls_per_turn.nil?
               nil
             else
               value = Integer(max_tool_calls_per_turn)
-              raise ArgumentError, "max_tool_calls_per_turn must be > 0" if value <= 0
+              raise ValidationError, "max_tool_calls_per_turn must be > 0" if value <= 0
               value
             end
 
           max_steps_per_turn = Integer(max_steps_per_turn)
-          raise ArgumentError, "max_steps_per_turn must be > 0" if max_steps_per_turn <= 0
+          raise ValidationError, "max_steps_per_turn must be > 0" if max_steps_per_turn <= 0
 
           llm_options = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
 
           tool_call_repair_attempts = Integer(tool_call_repair_attempts)
-          raise ArgumentError, "tool_call_repair_attempts must be >= 0" if tool_call_repair_attempts.negative?
+          raise ValidationError, "tool_call_repair_attempts must be >= 0" if tool_call_repair_attempts.negative?
 
           tool_call_repair_fallback_models =
             Array(tool_call_repair_fallback_models)
@@ -148,7 +148,7 @@ module AgentCore
               .freeze
 
           tool_call_repair_max_output_tokens = Integer(tool_call_repair_max_output_tokens)
-          raise ArgumentError, "tool_call_repair_max_output_tokens must be > 0" if tool_call_repair_max_output_tokens <= 0
+          raise ValidationError, "tool_call_repair_max_output_tokens must be > 0" if tool_call_repair_max_output_tokens <= 0
 
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
@@ -157,7 +157,7 @@ module AgentCore
           prompt_injection_sources = Array(prompt_injection_sources)
 
           memory_search_limit = Integer(memory_search_limit)
-          raise ArgumentError, "memory_search_limit must be >= 0" if memory_search_limit.negative?
+          raise ValidationError, "memory_search_limit must be >= 0" if memory_search_limit.negative?
 
           prompt_mode = prompt_mode.to_s.strip.downcase.tr("-", "_").to_sym
           prompt_mode = :full unless AgentCore::Resources::PromptInjections::PROMPT_MODES.include?(prompt_mode)
@@ -210,13 +210,18 @@ module AgentCore
             next unless tools_registry.include?(from)
             next if from.to_s == to.to_s
 
-            raise ArgumentError,
-                  "tool_name_aliases contains a key that is shadowed by an existing tool name: " \
-                  "#{from.inspect} (maps to #{to.inspect}). " \
-                  "Remove the alias or rename the tool."
+            raise AgentCore::Resources::Tools::ToolNameConflictError.new(
+              "tool_name_aliases contains a key that is shadowed by an existing tool name: " \
+              "#{from.inspect} (maps to #{to.inspect}). " \
+              "Remove the alias or rename the tool.",
+              tool_name: from,
+              existing_source: :tools_registry,
+              new_source: :tool_name_aliases,
+              details: { from: from, to: to },
+            )
           end
         rescue StandardError => e
-          raise e if e.is_a?(ArgumentError)
+          raise e if e.is_a?(AgentCore::Error)
         end
       end
   end

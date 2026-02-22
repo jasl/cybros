@@ -12,7 +12,7 @@ module AgentCore
 
           def initialize(outcome:, reason: nil, required: false, deny_effect: nil)
             unless OUTCOMES.include?(outcome)
-              raise ArgumentError, "Invalid outcome: #{outcome}. Must be one of: #{OUTCOMES.join(", ")}"
+              raise ValidationError, "Invalid outcome: #{outcome}. Must be one of: #{OUTCOMES.join(", ")}"
             end
             @outcome = outcome
             @reason = reason

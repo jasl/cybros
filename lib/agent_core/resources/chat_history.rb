@@ -19,7 +19,7 @@ module AgentCore
           if input.respond_to?(:each)
             InMemory.new(input.to_a)
           else
-            raise ArgumentError, "Unsupported chat history: #{input.class}. " \
+            raise ValidationError, "Unsupported chat history: #{input.class}. " \
                                  "Expected nil, Array, Enumerable, or ChatHistory::Base."
           end
         end

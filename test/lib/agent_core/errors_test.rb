@@ -7,6 +7,15 @@ class AgentCore::ErrorsTest < Minitest::Test
     assert_operator AgentCore::Error, :<, StandardError
   end
 
+  def test_validation_error_hierarchy_and_fields
+    assert_operator AgentCore::ValidationError, :<, AgentCore::Error
+
+    error = AgentCore::ValidationError.new("bad input", code: "BAD_INPUT", details: { field: "name" })
+    assert_equal "bad input", error.message
+    assert_equal "BAD_INPUT", error.code
+    assert_equal({ field: "name" }, error.details)
+  end
+
   def test_not_implemented_error
     error = AgentCore::NotImplementedError.new("missing method")
     assert_kind_of AgentCore::Error, error
@@ -15,7 +24,8 @@ class AgentCore::ErrorsTest < Minitest::Test
 
   def test_configuration_error
     error = AgentCore::ConfigurationError.new("bad config")
-    assert_kind_of AgentCore::Error, error
+    assert_operator AgentCore::ConfigurationError, :<, AgentCore::ValidationError
+    assert_kind_of AgentCore::ValidationError, error
   end
 
   def test_tool_error_with_attributes

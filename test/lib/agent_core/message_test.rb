@@ -43,13 +43,13 @@ class AgentCore::MessageTest < Minitest::Test
   end
 
   def test_invalid_role_raises
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Message.new(role: :invalid, content: "x")
     end
   end
 
-  def test_nil_role_raises_argument_error
-    assert_raises(ArgumentError) do
+  def test_nil_role_raises_validation_error
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Message.new(role: nil, content: "x")
     end
   end
@@ -270,7 +270,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
 
     AgentCore.configure { |c| c.allow_url_media_sources = false }
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :url, url: "https://example.com/img.jpg")
     end
   ensure
@@ -283,7 +283,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
       c.allowed_media_url_schemes = %w[https]
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :url, url: "http://example.com/img.jpg")
     end
 
@@ -299,7 +299,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
       c.allowed_media_url_schemes = %w[https]
     end
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :url, url: "not a valid uri %%%")
     end
   ensure
@@ -309,7 +309,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
   def test_media_source_validator_hook_rejects
     AgentCore.configure { |c| c.media_source_validator = ->(_block) { false } }
 
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :base64, media_type: "image/png", data: "abc")
     end
   ensure
@@ -336,31 +336,31 @@ class AgentCore::ContentBlockTest < Minitest::Test
   end
 
   def test_image_content_base64_requires_data
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :base64, media_type: "image/png")
     end
   end
 
   def test_image_content_base64_requires_media_type
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :base64, data: "iVBOR")
     end
   end
 
   def test_image_content_url_requires_url
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :url)
     end
   end
 
   def test_image_content_requires_source_type
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: nil, data: "x", media_type: "image/png")
     end
   end
 
   def test_image_content_rejects_invalid_source_type
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ImageContent.new(source_type: :file, data: "x", media_type: "image/png")
     end
   end
@@ -442,7 +442,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
       filename: "report.pdf"
     )
     # media_type required for base64 — this should raise
-    assert_raises(ArgumentError) { dc }
+    assert_raises(AgentCore::ValidationError) { dc }
   rescue
     # If it doesn't raise, still check the effective type inferred from filename
     nil

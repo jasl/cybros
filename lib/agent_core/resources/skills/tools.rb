@@ -16,13 +16,13 @@ module AgentCore
 
         def build(store:, max_body_bytes: DEFAULT_MAX_BODY_BYTES, max_file_bytes: DEFAULT_MAX_FILE_BYTES, tool_name_prefix: DEFAULT_TOOL_NAME_PREFIX)
           unless store.respond_to?(:list_skills) && store.respond_to?(:load_skill) && store.respond_to?(:read_skill_file_bytes)
-            raise ArgumentError, "store must implement Skills::Store"
+            raise ValidationError, "store must implement Skills::Store"
           end
 
           max_body_bytes = Integer(max_body_bytes)
           max_file_bytes = Integer(max_file_bytes)
-          raise ArgumentError, "max_body_bytes must be positive" if max_body_bytes <= 0
-          raise ArgumentError, "max_file_bytes must be positive" if max_file_bytes <= 0
+          raise ValidationError, "max_body_bytes must be positive" if max_body_bytes <= 0
+          raise ValidationError, "max_file_bytes must be positive" if max_file_bytes <= 0
 
           prefix = tool_name_prefix.to_s
           prefix = prefix.tr(".", "_").gsub(/[^A-Za-z0-9_-]/, "_")

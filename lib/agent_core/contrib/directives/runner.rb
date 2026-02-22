@@ -176,7 +176,7 @@ module AgentCore
 
         def normalize_llm_options_hash(value)
           h = value.nil? ? {} : value
-          raise ArgumentError, "llm_options_defaults must be a Hash" unless h.is_a?(Hash)
+          raise ValidationError, "llm_options_defaults must be a Hash" unless h.is_a?(Hash)
 
           AgentCore::Utils.deep_symbolize_keys(h)
         end
@@ -437,7 +437,7 @@ module AgentCore
 
         def validate_llm_options!(llm_options)
           invalid = llm_options.keys & RESERVED_LLM_OPTIONS_KEYS
-          raise ArgumentError, "directives llm_options contains reserved keys: #{invalid.inspect}" if invalid.any?
+          raise ValidationError, "directives llm_options contains reserved keys: #{invalid.inspect}" if invalid.any?
         end
       end
     end

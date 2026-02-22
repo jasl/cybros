@@ -25,7 +25,7 @@ class AgentCore::Resources::Tools::Policy::DecisionTest < Minitest::Test
   end
 
   def test_invalid_outcome
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::Resources::Tools::Policy::Decision.new(outcome: :invalid)
     end
   end

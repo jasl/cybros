@@ -15,7 +15,7 @@ class AgentCore::ExecutionContextTest < Minitest::Test
   end
 
   def test_from_hash_requires_symbol_keys
-    assert_raises(ArgumentError) do
+    assert_raises(AgentCore::ValidationError) do
       AgentCore::ExecutionContext.from({ "user_id" => 123 })
     end
 

@@ -118,7 +118,12 @@ module AgentCore
                   "key=#{key.inspect} names=[#{sample}]"
                 end
 
-            raise ArgumentError, "Tool name normalize collisions:\n#{lines.join("\n")}"
+            raise ToolNameConflictError.new(
+              "Tool name normalize collisions:\n#{lines.join("\n")}",
+              existing_source: :tools_registry,
+              new_source: :tools_registry,
+              details: { collision_keys: collisions.keys.first(50) },
+            )
           end
 
           index

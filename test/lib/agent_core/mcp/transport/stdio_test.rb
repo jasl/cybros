@@ -22,7 +22,7 @@ class AgentCore::MCP::Transport::StdioTest < Minitest::Test
 
   def test_start_raises_on_blank_command
     transport = AgentCore::MCP::Transport::Stdio.new(command: "   ")
-    assert_raises(ArgumentError) { transport.start }
+    assert_raises(AgentCore::ValidationError) { transport.start }
   end
 
   def test_start_and_close_with_cat
@@ -191,7 +191,7 @@ class AgentCore::MCP::Transport::StdioTest < Minitest::Test
 
   def test_close_negative_timeout_returns_nil
     transport = AgentCore::MCP::Transport::Stdio.new(command: "cat")
-    # Negative timeout causes ArgumentError which is rescued → nil
+    # Negative timeout is treated as zero (fast close) → nil
     result = transport.close(timeout_s: -1.0)
     assert_nil result
   end
