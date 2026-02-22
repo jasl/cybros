@@ -430,48 +430,117 @@ module AgentCore
           pruner = @runtime.tool_output_pruner
           return [built_prompt, estimate] if pruner.nil?
 
-          pruned_messages, stats = pruner.call(messages: built_prompt.messages)
-          stats = stats.is_a?(Hash) ? stats : {}
+          soft_messages, soft_stats = pruner.call(messages: built_prompt.messages)
+          soft_stats = soft_stats.is_a?(Hash) ? soft_stats : {}
 
-          trimmed_count =
+          soft_trimmed_count =
             Integer(
-              stats.fetch(:trimmed_count, stats.fetch("trimmed_count", 0)),
+              soft_stats.fetch(:trimmed_count, 0),
               exception: false
             ) || 0
-          return [built_prompt, estimate] if trimmed_count <= 0
 
-          chars_saved =
+          soft_chars_saved =
             Integer(
-              stats.fetch(:chars_saved, stats.fetch("chars_saved", 0)),
+              soft_stats.fetch(:chars_saved, 0),
               exception: false
             ) || 0
+
+          prompt_after_soft = built_prompt
+          estimate_after_soft = estimate
+
+          if soft_trimmed_count > 0
+            prompt_after_soft =
+              PromptBuilder::BuiltPrompt.new(
+                system_prompt: built_prompt.system_prompt,
+                messages: soft_messages,
+                tools: built_prompt.tools,
+                options: built_prompt.options,
+              )
+
+            estimate_after_soft = prompt_after_soft.estimate_tokens(token_counter: @runtime.token_counter)
+          end
+
+          prompt_after_hard = prompt_after_soft
+          estimate_after_hard = estimate_after_soft
+          hard_cleared_count = 0
+          hard_chars_saved = 0
+
+          if !within_budget?(estimate_after_soft, limit: limit) && pruner.hard_clear_enabled == true
+            candidate_indexes = pruner.hard_clear_candidate_indexes(messages: prompt_after_soft.messages)
+
+            if candidate_indexes.any?
+              prunable_total_chars =
+                Array(candidate_indexes).sum { |idx| pruner.prunable_body_chars(prompt_after_soft.messages[idx]) }
+
+              if prunable_total_chars >= pruner.hard_clear_min_total_chars
+                messages = prompt_after_soft.messages.dup
+
+                Array(candidate_indexes).each do |idx|
+                  break if within_budget?(estimate_after_hard, limit: limit)
+
+                  msg = messages[idx]
+                  next unless msg.is_a?(Message)
+
+                  cleared = pruner.hard_clear_message(msg)
+                  next unless cleared.is_a?(Message)
+
+                  before = msg.text.to_s
+                  after = cleared.text.to_s
+                  next if after.length >= before.length
+
+                  messages[idx] = cleared
+                  hard_cleared_count += 1
+                  hard_chars_saved += before.length - after.length
+
+                  prompt_after_hard =
+                    PromptBuilder::BuiltPrompt.new(
+                      system_prompt: built_prompt.system_prompt,
+                      messages: messages,
+                      tools: built_prompt.tools,
+                      options: built_prompt.options,
+                    )
+
+                  estimate_after_hard = prompt_after_hard.estimate_tokens(token_counter: @runtime.token_counter)
+                end
+              end
+            end
+          end
+
+          return [built_prompt, estimate] if soft_trimmed_count <= 0 && hard_cleared_count <= 0
 
           attempt =
             Array(decisions).count { |d|
               d.is_a?(Hash) && d.fetch("type", nil).to_s == "prune_tool_outputs"
             } + 1
 
-          decisions << {
+          decision = {
             "type" => "prune_tool_outputs",
             "attempt" => attempt,
-            "recent_turns" => (pruner.respond_to?(:recent_turns) ? pruner.recent_turns : nil),
-            "max_output_chars" => (pruner.respond_to?(:max_output_chars) ? pruner.max_output_chars : nil),
-            "preview_chars" => (pruner.respond_to?(:preview_chars) ? pruner.preview_chars : nil),
-            "trimmed_count" => trimmed_count,
-            "chars_saved" => chars_saved,
+            "recent_turns" => pruner.recent_turns,
+            "keep_last_assistant_messages" => pruner.keep_last_assistant_messages,
+            "tools_allow_count" => pruner.tools_allow_count,
+            "tools_deny_count" => pruner.tools_deny_count,
+            "soft_trim" => {
+              "max_chars" => pruner.soft_trim_max_chars,
+              "head_chars" => pruner.soft_trim_head_chars,
+              "tail_chars" => pruner.soft_trim_tail_chars,
+              "trimmed_count" => soft_trimmed_count,
+              "chars_saved" => soft_chars_saved,
+            }.compact,
+            "hard_clear" => {
+              "enabled" => pruner.hard_clear_enabled,
+              "min_total_chars" => pruner.hard_clear_min_total_chars,
+              "placeholder_chars" => pruner.hard_clear_placeholder.to_s.length,
+              "cleared_count" => hard_cleared_count,
+              "chars_saved" => hard_chars_saved,
+              "triggered" => hard_cleared_count > 0,
+            }.compact,
+            "chars_saved_total" => soft_chars_saved + hard_chars_saved,
           }.compact
 
-          pruned_prompt =
-            PromptBuilder::BuiltPrompt.new(
-              system_prompt: built_prompt.system_prompt,
-              messages: pruned_messages,
-              tools: built_prompt.tools,
-              options: built_prompt.options,
-            )
+          decisions << decision
 
-          pruned_estimate = pruned_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-
-          [pruned_prompt, pruned_estimate]
+          [prompt_after_hard, estimate_after_hard]
         rescue StandardError
           [built_prompt, estimate]
         end

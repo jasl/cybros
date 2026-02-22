@@ -67,7 +67,17 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
     },
     "decisions": [
       { "type": "drop_memory_results" },
-      { "type": "prune_tool_outputs", "attempt": 1, "trimmed_count": 3, "chars_saved": 12000 },
+      {
+        "type": "prune_tool_outputs",
+        "attempt": 1,
+        "recent_turns": 2,
+        "keep_last_assistant_messages": 3,
+        "tools_allow_count": 0,
+        "tools_deny_count": 0,
+        "soft_trim": { "max_chars": 4000, "head_chars": 1500, "tail_chars": 1500, "trimmed_count": 3, "chars_saved": 12000 },
+        "hard_clear": { "enabled": true, "min_total_chars": 50000, "placeholder_chars": 31, "cleared_count": 0, "chars_saved": 0, "triggered": false },
+        "chars_saved_total": 12000
+      },
       { "type": "shrink_turns", "limit_turns": 5 },
       { "type": "auto_compact", "triggered": false }
     ]

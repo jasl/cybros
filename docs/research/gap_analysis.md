@@ -148,8 +148,8 @@
 
 - 只对 `task` 节点映射出的 tool_result 做处理（不动 user/assistant）
 - 策略参数：
-  - `keep_last_assistant_turns`（保护最近 N 轮）
-  - `min_prunable_bytes`（小于阈值不动）
+  - `keep_last_assistant_messages`（保护最近 N 条 assistant messages）
+  - `hard_clear_min_total_chars`（可 hard_clear 的 tool 输出总 chars 小于阈值则不动）
   - `soft_trim`（head+tail+marker）
   - `hard_clear`（替换为 placeholder）
   - allow/deny tool name glob（跳过图像类等）
@@ -158,7 +158,7 @@
 当前状态（2026-02-22）：
 
 - ✅ 已落地：`ToolOutputPruner`（仅超预算时启用；只裁剪旧 `tool_result` 与 system-tool 兜底消息；不写回 DAG；决策写入 `metadata["context_cost"]`）
-- ⏳ 未落地：按 tool name 的 allow/deny glob、head+tail（soft_trim）策略、hard_clear 策略、以及更细粒度的“保护边界”（keep_last_assistant_turns 等）
+- ✅ 已落地：按 tool name 的 allow/deny glob、head+tail（soft_trim）策略、hard_clear 策略、以及更细粒度的“保护边界”（keep_last_assistant_messages + bootstrap safety）
 
 ### P0：Strict schema + tool call repair（提升 tool calling 稳定性）
 

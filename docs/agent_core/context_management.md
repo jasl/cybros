@@ -42,8 +42,15 @@
 
 1) **丢弃 memory_results**（保留 prompt injections 与 history）
 2) **裁剪旧 tool outputs**（只影响本次 prompt view，不写回 DAG）：
-   - 保护最近 `N` 个 user turns（默认 2）
-   - 仅裁剪 `tool_result` 消息与 `"[tool:"` 前缀的 system-tool 兜底消息
+   - 仅处理 `tool_result` 消息与 `"[tool:"` 前缀的 system-tool 兜底消息（user/assistant 永不改写）
+   - 保护边界：
+     - 保护最近 `recent_turns` 个 user turns（默认 2）
+     - 保护最近 `keep_last_assistant_messages` 条 assistant messages（默认 3）
+     - bootstrap safety：first user message 之前不裁剪
+   - 工具选择：支持按 tool name `allow/deny` glob（`*` 通配、大小写不敏感、deny wins；allow 为空=全允许）
+   - 策略：
+     - `soft_trim`：对超长 tool output 保留 head+tail+marker，并追加 size note
+     - `hard_clear`：若 soft_trim 后仍超预算，对更旧 tool outputs 替换为 placeholder（增量直到 fit）
    - 若在 shrink-loop 中多次尝试 pruning，`context_cost.decisions` 会出现多个 `prune_tool_outputs`，并用 `attempt` 标注次序
 3) **缩小历史窗口**：递减 `limit_turns`，重取 `graph.context_for_full(node.id, limit_turns:)`（每次 shrink 后若仍超预算，会再次尝试 pruning）
 4) 若 `auto_compact=true`：在首次“缩窗后刚好 fit”的时刻尝试压缩（见第 3 节；压缩后会重新 estimate，必要时再 pruning）
