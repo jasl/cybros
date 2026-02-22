@@ -57,6 +57,7 @@ module Cybros
     config.generators do |g|
       g.helper false
       g.assets false
+      g.test_framework nil
     end
   end
 end
