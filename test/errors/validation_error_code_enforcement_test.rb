@@ -27,4 +27,3 @@ class ValidationErrorCodeEnforcementTest < Minitest::Test
     assert violations.empty?, "Found legacy raise ValidationError, usage:\n#{violations.join("\n")}"
   end
 end
-

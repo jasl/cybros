@@ -7,4 +7,3 @@ class Cybros::ErrorsTest < Minitest::Test
     assert_operator Cybros::Error, :<, StandardError
   end
 end
-

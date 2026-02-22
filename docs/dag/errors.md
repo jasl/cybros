@@ -36,4 +36,3 @@
 ## 3) `ValidationError#details`（可用户可见）
 
 与 AgentCore 一致：`details` 只放可安全暴露、体积受控、JSON 友好的字段（避免 secrets 与大对象）。
-

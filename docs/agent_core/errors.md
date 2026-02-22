@@ -56,4 +56,3 @@
 
 - `:safe`：会包含 `ValidationError#message`（约定为可安全暴露，便于 LLM 修复）
 - `:debug`：会额外包含异常类型等调试信息（仅建议在受控环境开启）
-
