@@ -30,6 +30,30 @@ class AgentCore::Resources::Tools::Policy::ProfiledTest < Minitest::Test
     assert_equal ["read", "skills_list", "mcp__server__echo"], names
   end
 
+  def test_group_refs_expand_via_tool_groups
+    delegate = AgentCore::Resources::Tools::Policy::AllowAll.new
+    groups = { "fs" => ["read", "write"] }
+
+    policy =
+      AgentCore::Resources::Tools::Policy::Profiled.new(
+        allowed: ["group:fs"],
+        delegate: delegate,
+        tool_groups: groups,
+      )
+
+    tools = [
+      { name: "read", description: "ok", parameters: {} },
+      { name: "write", description: "ok", parameters: {} },
+      { name: "other", description: "no", parameters: {} },
+    ]
+
+    ctx = AgentCore::ExecutionContext.from(nil)
+    filtered = policy.filter(tools: tools, context: ctx)
+
+    names = filtered.map { |t| t.fetch(:name, t.fetch("name", "")) }
+    assert_equal ["read", "write"], names
+  end
+
   def test_authorize_denies_when_tool_not_in_profile
     delegate = AgentCore::Resources::Tools::Policy::AllowAll.new
     policy = AgentCore::Resources::Tools::Policy::Profiled.new(allowed: ["read"], delegate: delegate)

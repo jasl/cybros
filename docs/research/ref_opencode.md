@@ -4,6 +4,8 @@
 调研对象：`references/opencode`  
 参考版本：`f07e8772042d`（2026-02-20）
 
+注（2026-02-22）：本仓库已在 AgentCore 落地 `Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`；app 层规则持久化与注入仍未实现（见 `docs/research/gap_analysis.md`）。
+
 ## 1) 项目定位与核心形态
 
 OpenCode 是一个开源 coding agent（CLI/桌面/网页等多端），核心目标是“可配置的编码代理”。它的关键特色不是某个单一模型能力，而是：
@@ -32,7 +34,7 @@ OpenCode 在 `packages/opencode/src/agent/agent.ts` 内把 agent 定义成一个
 对 Cybros 的映射与差距：
 
 - Cybros 已有 `tool_policy.authorize` 产出 `allow/deny/confirm(required, deny_effect)`，足以表达 ask/deny/allow；
-- 但目前内建 policy 只有 allow_all/deny_all，需要补一套 **规则化 policy**（见 `docs/research/gap_analysis.md` 的 P0）
+- 已补一套 **规则化 policy**（`Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`）；仍缺 app 层规则持久化与注入（见 `docs/research/gap_analysis.md` 的 P0）
 - OpenCode 的“按路径/外部目录/敏感文件”规则非常值得直接借鉴为 policy 的默认实现
 
 ## 3) Prompts 与上下文/指令管理
@@ -98,7 +100,7 @@ OpenCode 的 `beast.txt` prompt 里约定了一个“记忆文件”：
 
 P0：
 
-- **规则化 Tool Policy**（allow/confirm/deny + path/file patterns）
+- ✅ **规则化 Tool Policy**（AgentCore 已落地 allow/confirm/deny + path/file patterns；app 层持久化/注入未做）
 - **Context pruning**（按策略裁剪旧 tool results）
 - **Instruction files injection 扩展**（RepoDocs 支持更多文件类型/按需加载）
 
@@ -110,7 +112,7 @@ P1：
 
 如果目标是“让 Cybros 能承载 OpenCode 风格的实验”，优先做：
 
-1. `Policy::PatternRules`（路径、工具、敏感文件、外部目录）
+1. 已补 `Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`（路径、工具、敏感文件、外部目录的规则引擎）；下一步是 app 层持久化与注入
 2. Context pruning（旧 tool results 软/硬清理）
 3. subagent tool（explore-only profile）
 4. instruction injection 扩展（AGENTS/CLAUDE/TOOLS/MEMORY 的可控注入）

@@ -4,6 +4,8 @@
 调研对象：`references/codex`  
 参考版本：`64f3827d109c`（2026-02-20）
 
+注（2026-02-22）：本仓库已在 AgentCore 落地 `Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`；但 app 层“已批准规则”的持久化与注入仍未实现（见 `docs/research/gap_analysis.md`）。
+
 ## 1) 项目定位与核心形态
 
 Codex CLI 是 OpenAI 的本地 coding agent harness：在用户机器上运行，通过 LLM 生成计划、调用工具（读写文件/执行命令/应用补丁）、并在必要时请求用户审批。
@@ -50,8 +52,8 @@ Codex 的一个显著特色是把“工具执行安全”做到非常工程化�
 
 对 Cybros 的启发：
 
-- Cybros 现有 `tool_policy` 已支持 `allow/deny/confirm(required/deny_effect)` 与 `awaiting_approval` gate；但缺少：
-  - “prefix rule”这类可持久化规则模型（按 user/account/conversation scope）
+- Cybros 现有 `tool_policy` 已支持 `allow/deny/confirm(required/deny_effect)` 与 `awaiting_approval` gate；并已补齐 `Policy::PrefixRules`（前缀规则）、`Policy::PatternRules`（参数模式规则）、`Policy::ToolGroups`（工具组展开）。但仍缺少：
+  - app 层“prefix rule/已批准规则”的持久化与 prompt injection（按 user/account/conversation scope）
   - 对 shell/exec 的“真实路径解析与拦截”（若要达到 Codex 的强保证，需要外部 sandbox runtime 或集成 codex-shell-tool-mcp）
 
 ## 5) 记忆（Memory）系统
@@ -88,7 +90,7 @@ P1（运行时/产品形态）：
 ## 7) 建议的落地路径（如果要做“Cybros 的 Codex-like 实验”）
 
 1. 先在 Web UI 里做：`agent_message` + `task` + `awaiting_approval` 的基本交互（我们已有 DAG API 支撑）
-2. 补 `Policy::PrefixRules`（P0），把审批从“每次问”升级为“可授予能力范围”
+2. 已补 `Policy::PrefixRules`（P0）；下一步把审批从“每次问”升级为“可授予能力范围”的关键是 app 层规则持久化与注入
 3. 将 shell/exec 切换为“受控 MCP shell”（P1）：优先复用 `codex-shell-tool-mcp` 作为强安全层
 4. 再考虑做 CLI/IDE：把 DAG node events 映射到协议事件（可借鉴 Codex protocol_v1）
 

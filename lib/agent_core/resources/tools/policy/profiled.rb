@@ -5,8 +5,9 @@ module AgentCore
     module Tools
       module Policy
         class Profiled < Base
-          def initialize(allowed:, delegate:)
-            @allowed = Array(allowed)
+          def initialize(allowed:, delegate:, tool_groups: nil)
+            @tool_groups = coerce_tool_groups(tool_groups)
+            @allowed = expand_allowed(Array(allowed))
             @delegate = delegate
           end
 
@@ -29,6 +30,31 @@ module AgentCore
           end
 
           private
+
+            def coerce_tool_groups(value)
+              case value
+              when nil
+                nil
+              when ToolGroups
+                value
+              when Hash
+                ToolGroups.new(groups: value)
+              else
+                nil
+              end
+            end
+
+            def expand_allowed(patterns)
+              groups = @tool_groups
+
+              if groups
+                groups.expand(patterns)
+              else
+                patterns
+              end
+            rescue StandardError
+              patterns
+            end
 
             def allowed_tool_definition?(tool_def)
               name = tool_name_from_definition(tool_def)

@@ -32,6 +32,15 @@
 
 - `fallback_models`：Provider failover 模型列表（同 provider；默认 `[]`，空数组表示不启用 failover）
 - `tool_policy`：`AgentCore::Resources::Tools::Policy::*`（默认 `DenyAll`）
+  - 内建 policy（可组合）：
+    - `Policy::DenyAll` / `Policy::AllowAll`
+    - `Policy::Profiled`：控制 tool schema 可见性（支持 `group:...`，见 `Policy::ToolGroups`）
+    - `Policy::PatternRules`：按 tool name + arguments（path/url 等）判定 allow/confirm/deny
+    - `Policy::PrefixRules`：对 exec/shell 类工具按命令前缀判定 allow/confirm/deny
+    - `Policy::ToolGroups`：`group:fs` 这类“工具集合名”展开
+  - 组合建议：
+    - `Profiled` 放最外层（决定可见 tools）
+    - `PatternRules/PrefixRules` 仅做 `authorize`，`filter` 默认直接委托给下游
 - `tool_name_aliases`：工具名 alias 表（Hash；用于把模型输出名解析到 registry 中的 canonical name）
 - `tool_name_normalize_fallback`：是否启用启发式工具名 normalize fallback（默认 `false`；覆盖大小写 / 驼峰 / 分隔符漂移，并映射回 registry 中的 canonical tool name；启用后会对工具名做碰撞预检，存在歧义会 raise `AgentCore::Resources::Tools::ToolNameConflictError`）
 - `skills_store`：`AgentCore::Resources::Skills::Store`（用于 `<available_skills>` 注入）
@@ -68,6 +77,41 @@ fallback_models =
     .split(",")
     .map(&:strip)
     .reject(&:empty?)
+```
+
+Tool policy 组合示例：
+
+```ruby
+groups =
+  AgentCore::Resources::Tools::Policy::ToolGroups.new(
+    groups: {
+      "fs" => ["read", "write", "apply_patch"],
+      "memory" => ["memory_*"],
+    },
+  )
+
+tool_policy =
+  AgentCore::Resources::Tools::Policy::Profiled.new(
+    allowed: ["group:fs", "group:memory"],
+    tool_groups: groups,
+    delegate:
+      AgentCore::Resources::Tools::Policy::PatternRules.new(
+        tool_groups: groups,
+        rules: [
+          # Deny reads under config/
+          { tools: ["read"], arguments: [{ key: "path", glob: "config/**", normalize: "path" }], decision: { outcome: "deny", reason: "no_config_reads" } },
+        ],
+        delegate:
+          AgentCore::Resources::Tools::Policy::PrefixRules.new(
+            tool_groups: groups,
+            rules: [
+              # Allow safe, repeatable exec prefixes
+              { tools: ["exec"], argument_key: "command", prefixes: ["git status"], decision: { outcome: "allow", reason: "approved_prefix" } },
+            ],
+            delegate: AgentCore::Resources::Tools::Policy::DenyAll.new,
+          ),
+      ),
+  )
 ```
 
 Tool calling 稳定性（Runner 级自愈）：

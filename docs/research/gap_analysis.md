@@ -92,7 +92,8 @@
 当前状态（2026-02-22）：
 
 - ✅ 已落地：`AgentCore::Resources::Tools::Policy::Profiled`（工具可见性分层；exact / prefix* / regexp / `*`）
-- ⏳ 未落地：`Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`、以及 app 层“已批准规则”的持久化与注入
+- ✅ 已落地：`Policy::PatternRules` / `Policy::PrefixRules` / `Policy::ToolGroups`（含 `group:...` 展开）
+- ⏳ 未落地：app 层“已批准规则”的持久化与注入（conversation / user / account scope）
 
 ### P0：Memory 工具化 + 分层写入策略（长期助手必需）
 

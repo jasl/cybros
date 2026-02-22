@@ -17,6 +17,14 @@
 
 产品层应显式注入 allow/confirm/deny policy。
 
+AgentCore 内建的 policy 组合（可选）：
+
+- `Policy::Profiled`：控制 tool schema 可见性（profile）
+- `Policy::PatternRules`：按 tool name + arguments（path/url 等）规则化 allow/confirm/deny
+- `Policy::PrefixRules`：对 exec/shell 类工具按命令前缀 allowlist（用于持久化“已批准前缀”）
+  - 注意：PrefixRules 仅基于 arguments 的字符串/数组做匹配；并不等价于 `execve` 拦截的强语义（若要达到 Codex 等级的保证，需要受控 runtime/MCP shell）。
+- `Policy::ToolGroups`：`group:...` 展开（方便 profile/rules 引用工具集合）
+
 ---
 
 ## 2) Tool arguments / results（敏感数据）
