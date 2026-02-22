@@ -268,3 +268,7 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 以下能力**不属于当前实现的行为规范**，但对“tool calling 稳态成功率”提升很有效，建议按需进入 P1：
 
 - failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
+- validator 规则增强（谨慎）：为 `JsonSchemaLiteValidator` 逐项加入 `enum` / 数值范围（`minimum/maximum`）/ string `pattern` 等校验，并以 runtime flags 做逐项开关（默认关闭，避免误报导致 repair 调用膨胀）
+- 工具执行后 validation_error 自愈（高风险）：当 tool handler 返回 `ToolResult.error` 且携带 `metadata.validation_error` 时，尝试“修 args 并重试工具”
+  - 风险：非幂等/有副作用工具会产生重复操作
+  - 建议：仅对显式声明“纯/幂等/可重试”的工具启用（metadata allowlist），并默认关闭

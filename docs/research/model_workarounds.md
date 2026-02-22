@@ -49,6 +49,9 @@
 - **工具失败可降级**：将非致命异常转换为模型可见的 tool_result（而不是直接 raise 终止），并写入 tracing（OpenAI Agents SDK 的 failure_error_function）。
 - **模型/鉴权 failover**：把 tool 协议错误/invalid-request 也纳入可 failover 的错误类型（OpenClaw 的 model failover 处理思路），在 tool calling 不稳定时自动切换到更可靠的模型。
   - P1 建议：在不掩盖真实故障的前提下，按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置。
+- **（可选）工具执行后 validation_error 的自愈**：当 tool handler 返回 `ToolResult.error` 且携带 `metadata.validation_error` 时，可尝试触发一次“仅修参数并重试工具”的回路。
+  - 风险：工具可能非幂等/有副作用，自动重试会导致重复操作。
+  - 建议：仅对“纯/幂等/可重试”的工具启用（显式标记/allowlist），并默认关闭。
 
 ## 5) Playground“破限”：建议把它当作“实验开关”，不是越权
 

@@ -185,6 +185,13 @@
 下一步（建议，P1+）：
 
 - ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
+- ⏳ Validator/Repair 增强（可选，逐项开关）：
+  - `JsonSchemaLiteValidator`：按需补 `enum` 校验、数值范围（`minimum/maximum`）、string `pattern` 等
+    - 风险：schema 质量参差时更易误报 → 触发不必要的 repair 调用与成本上升
+    - 建议：以 runtime flags 做逐项开关，默认关闭；先从误报率低的规则（如 `enum`）开始，并配合观测指标（repair 触发率/成功率）
+  - “能 parse 但不可用”的另一类自愈：当工具执行返回 `ToolResult.error` 且携带 `metadata.validation_error` 时，尝试触发一次“修 args 并重试工具”
+    - 风险：工具可能非幂等/有副作用（写文件、发请求），自动重试可能造成重复操作
+    - 建议：仅对显式声明“纯/幂等/可重试”的工具启用（tool metadata allowlist），并默认关闭
 
 ### P1：Subagent Tool（把跨图模式“变成原语”）
 
