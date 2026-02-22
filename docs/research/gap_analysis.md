@@ -179,11 +179,11 @@
 
 - ✅ 已落地：`StrictJsonSchema`（在 prompt build 阶段对 tools schema 做保守 strict 化）
 - ✅ 已落地：`ToolCallRepairLoop`（覆盖 `arguments_parse_error`：`invalid_json/too_large` 与 schema invalid；批量一次修复；允许部分修复；repair prompt 支持候选数上限与 schema excerpt/truncate；若仍不满足 schema 则不执行工具、直接产出 `invalid_args` task；仅写 metadata、不写回 DAG 历史）
+- ✅ 已落地：tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内；默认关闭）
 - ✅ 已落地：`ProviderFailover`（同 provider 多模型重试；触发：404 + 400/422 工具/协议关键词；streaming 仅覆盖 `provider.chat(...)` 直接 raise 的场景）
 
 下一步（建议，P1+）：
 
-- ✅ tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内；默认关闭）
 - ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
 
 ### P1：Subagent Tool（把跨图模式“变成原语”）
