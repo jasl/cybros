@@ -6,7 +6,7 @@ module DAG
       @executable_pending_nodes_created = false
     end
 
-	    def create_node(
+      def create_node(
       node_type:,
       state:,
       content: nil,
@@ -19,36 +19,36 @@ module DAG
       body_input = normalize_hash(body_input)
       body_output = normalize_hash(body_output)
 
-	      if !content.nil?
-	        body_class = @graph.body_class_for_node_type(node_type)
-	        destination = body_class.created_content_destination
-	        unless destination.is_a?(Array) && destination.length == 2
-	          ValidationError.raise!(
-	            "invalid created_content_destination=#{destination.inspect} " \
-	              "for body_class=#{body_class.name}",
-	            code: "dag.mutations.invalid_created_content_destination_for_body_class",
-	            details: { destination: destination.inspect, body_class: body_class.name },
-	          )
-	        end
+        if !content.nil?
+          body_class = @graph.body_class_for_node_type(node_type)
+          destination = body_class.created_content_destination
+          unless destination.is_a?(Array) && destination.length == 2
+            ValidationError.raise!(
+              "invalid created_content_destination=#{destination.inspect} " \
+                "for body_class=#{body_class.name}",
+              code: "dag.mutations.invalid_created_content_destination_for_body_class",
+              details: { destination: destination.inspect, body_class: body_class.name },
+            )
+          end
 
         channel, key = destination
         channel = channel.to_sym
         key = key.to_s
 
-	        case channel
-	        when :input
-	          body_input[key] = content
-	        when :output
-	          body_output[key] = content
-	        else
-	          ValidationError.raise!(
-	            "invalid created_content_destination=#{destination.inspect} " \
-	              "for body_class=#{body_class.name}",
-	            code: "dag.mutations.invalid_created_content_destination_for_body_class",
-	            details: { destination: destination.inspect, body_class: body_class.name },
-	          )
-	        end
-	      end
+          case channel
+          when :input
+            body_input[key] = content
+          when :output
+            body_output[key] = content
+          else
+            ValidationError.raise!(
+              "invalid created_content_destination=#{destination.inspect} " \
+                "for body_class=#{body_class.name}",
+              code: "dag.mutations.invalid_created_content_destination_for_body_class",
+              details: { destination: destination.inspect, body_class: body_class.name },
+            )
+          end
+        end
 
       effective_turn_id = attributes.key?(:turn_id) ? attributes.delete(:turn_id) : @turn_id
 
@@ -65,24 +65,24 @@ module DAG
           nil
         end
 
-	      if lane_id.present?
-	        if turn_lane_id.present? && turn_lane_id.to_s != lane_id.to_s
-	          ValidationError.raise!(
-	            "lane_id conflicts with existing nodes for turn",
-	            code: "dag.mutations.lane_id_conflicts_with_existing_nodes_for_turn",
-	            details: { lane_id: lane_id.to_s, turn_lane_id: turn_lane_id.to_s, turn_id: effective_turn_id.to_s },
-	          )
-	        end
-	      else
+        if lane_id.present?
+          if turn_lane_id.present? && turn_lane_id.to_s != lane_id.to_s
+            ValidationError.raise!(
+              "lane_id conflicts with existing nodes for turn",
+              code: "dag.mutations.lane_id_conflicts_with_existing_nodes_for_turn",
+              details: { lane_id: lane_id.to_s, turn_lane_id: turn_lane_id.to_s, turn_id: effective_turn_id.to_s },
+            )
+          end
+        else
         lane_id = turn_lane_id || @graph.main_lane.id
         attributes[:lane_id] = lane_id
-      end
+        end
 
-	      if idempotency_key.present?
-	        ValidationError.raise!(
-	          "idempotency_key requires turn_id",
-	          code: "dag.mutations.idempotency_key_requires_turn_id",
-	        ) if effective_turn_id.blank?
+        if idempotency_key.present?
+          ValidationError.raise!(
+            "idempotency_key requires turn_id",
+            code: "dag.mutations.idempotency_key_requires_turn_id",
+          ) if effective_turn_id.blank?
 
         existing =
           @graph.nodes.active.find_by(
@@ -99,17 +99,17 @@ module DAG
             expected_body_output: body_output
           )
 
-	          if existing.lane_id.to_s != lane_id.to_s
-	            IdempotencyConflictError.raise!(
-	              "idempotency_key collision with mismatched lane",
-	              code: "dag.mutations.idempotency_key_collision_with_mismatched_lane",
-	              details: {
-	                idempotency_key: idempotency_key.to_s,
-	                expected_lane_id: lane_id.to_s,
-	                actual_lane_id: existing.lane_id.to_s,
-	              },
-	            )
-	          end
+            if existing.lane_id.to_s != lane_id.to_s
+              IdempotencyConflictError.raise!(
+                "idempotency_key collision with mismatched lane",
+                code: "dag.mutations.idempotency_key_collision_with_mismatched_lane",
+                details: {
+                  idempotency_key: idempotency_key.to_s,
+                  expected_lane_id: lane_id.to_s,
+                  actual_lane_id: existing.lane_id.to_s,
+                },
+              )
+            end
 
           if existing.executable? && existing.pending?
             @executable_pending_nodes_created = true
@@ -117,7 +117,7 @@ module DAG
 
           return existing
         end
-      end
+        end
 
       node_attributes = {
         node_type: node_type,
@@ -138,25 +138,25 @@ module DAG
             DAG::Node.transaction(requires_new: true) do
               @graph.nodes.create!(node_attributes)
             end
-	          rescue ActiveRecord::RecordNotUnique
-	            node = @graph.nodes.active.find_by!(
-	              turn_id: effective_turn_id,
-	              node_type: node_type,
-	              idempotency_key: idempotency_key
-	            )
-	            if node.lane_id.to_s != lane_id.to_s
-	              IdempotencyConflictError.raise!(
-	                "idempotency_key collision with mismatched lane",
-	                code: "dag.mutations.idempotency_key_collision_with_mismatched_lane",
-	                details: {
-	                  idempotency_key: idempotency_key.to_s,
-	                  expected_lane_id: lane_id.to_s,
-	                  actual_lane_id: node.lane_id.to_s,
-	                },
-	              )
-	            end
-	            node
-	          end
+            rescue ActiveRecord::RecordNotUnique
+              node = @graph.nodes.active.find_by!(
+                turn_id: effective_turn_id,
+                node_type: node_type,
+                idempotency_key: idempotency_key
+              )
+              if node.lane_id.to_s != lane_id.to_s
+                IdempotencyConflictError.raise!(
+                  "idempotency_key collision with mismatched lane",
+                  code: "dag.mutations.idempotency_key_collision_with_mismatched_lane",
+                  details: {
+                    idempotency_key: idempotency_key.to_s,
+                    expected_lane_id: lane_id.to_s,
+                    actual_lane_id: node.lane_id.to_s,
+                  },
+                )
+              end
+              node
+            end
         else
           @graph.nodes.create!(node_attributes)
         end
@@ -176,19 +176,19 @@ module DAG
       node
     end
 
-	    def create_edge(from_node:, to_node:, edge_type:, metadata: {})
+      def create_edge(from_node:, to_node:, edge_type:, metadata: {})
       existing =
         @graph.edges.find_by(
           from_node_id: from_node.id,
           to_node_id: to_node.id,
           edge_type: edge_type
         )
-	      return existing if existing && existing.compressed_at.nil?
-	      ValidationError.raise!(
-	        "edge already exists but is archived",
-	        code: "dag.mutations.edge_already_exists_but_is_archived",
-	        details: { from_node_id: from_node.id.to_s, to_node_id: to_node.id.to_s, edge_type: edge_type.to_s },
-	      ) if existing
+        return existing if existing && existing.compressed_at.nil?
+        ValidationError.raise!(
+          "edge already exists but is archived",
+          code: "dag.mutations.edge_already_exists_but_is_archived",
+          details: { from_node_id: from_node.id.to_s, to_node_id: to_node.id.to_s, edge_type: edge_type.to_s },
+        ) if existing
 
       edge =
         begin
@@ -219,16 +219,16 @@ module DAG
       edge
     end
 
-	    def fork_from!(from_node:, node_type:, state:, content: nil, body_input: {}, body_output: {}, metadata: {})
-	      assert_node_belongs_to_graph!(from_node)
-	      OperationNotAllowedError.raise!(
-	        "cannot fork from compressed nodes",
-	        code: "dag.mutations.cannot_fork_from_compressed_nodes",
-	      ) if from_node.compressed_at.present?
-	      OperationNotAllowedError.raise!(
-	        "can only fork from terminal nodes",
-	        code: "dag.mutations.can_only_fork_from_terminal_nodes",
-	      ) unless from_node.terminal?
+      def fork_from!(from_node:, node_type:, state:, content: nil, body_input: {}, body_output: {}, metadata: {})
+        assert_node_belongs_to_graph!(from_node)
+        OperationNotAllowedError.raise!(
+          "cannot fork from compressed nodes",
+          code: "dag.mutations.cannot_fork_from_compressed_nodes",
+        ) if from_node.compressed_at.present?
+        OperationNotAllowedError.raise!(
+          "can only fork from terminal nodes",
+          code: "dag.mutations.can_only_fork_from_terminal_nodes",
+        ) unless from_node.terminal?
 
       lane =
         @graph.lanes.create!(
@@ -263,24 +263,24 @@ module DAG
       node
     end
 
-	    def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {})
+      def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {})
       assert_lane_belongs_to_graph!(target_lane)
       assert_node_belongs_to_graph!(target_from_node)
 
-	      OperationNotAllowedError.raise!(
-	        "cannot merge into archived lane",
-	        code: "dag.mutations.cannot_merge_into_archived_lane",
-	      ) if target_lane.archived_at.present?
-	      ValidationError.raise!(
-	        "target_from_node must belong to target_lane",
-	        code: "dag.mutations.target_from_node_must_belong_to_target_lane",
-	      ) if target_from_node.lane_id != target_lane.id
+        OperationNotAllowedError.raise!(
+          "cannot merge into archived lane",
+          code: "dag.mutations.cannot_merge_into_archived_lane",
+        ) if target_lane.archived_at.present?
+        ValidationError.raise!(
+          "target_from_node must belong to target_lane",
+          code: "dag.mutations.target_from_node_must_belong_to_target_lane",
+        ) if target_from_node.lane_id != target_lane.id
 
-	      sources = Array(source_lanes_and_nodes)
-	      ValidationError.raise!(
-	        "source_lanes_and_nodes must not be empty",
-	        code: "dag.mutations.source_lanes_and_nodes_must_not_be_empty",
-	      ) if sources.empty?
+        sources = Array(source_lanes_and_nodes)
+        ValidationError.raise!(
+          "source_lanes_and_nodes must not be empty",
+          code: "dag.mutations.source_lanes_and_nodes_must_not_be_empty",
+        ) if sources.empty?
 
       source_lane_ids = []
       sources.each do |entry|
@@ -290,18 +290,18 @@ module DAG
         assert_lane_belongs_to_graph!(lane)
         assert_node_belongs_to_graph!(from_node)
 
-	        OperationNotAllowedError.raise!(
-	          "main lane cannot be merged into another lane",
-	          code: "dag.mutations.main_lane_cannot_be_merged_into_another_lane",
-	        ) if lane.role == DAG::Lane::MAIN
-	        OperationNotAllowedError.raise!(
-	          "cannot merge a lane into itself",
-	          code: "dag.mutations.cannot_merge_a_lane_into_itself",
-	        ) if lane.id == target_lane.id
-	        ValidationError.raise!(
-	          "source from_node must belong to lane",
-	          code: "dag.mutations.source_from_node_must_belong_to_lane",
-	        ) if from_node.lane_id != lane.id
+          OperationNotAllowedError.raise!(
+            "main lane cannot be merged into another lane",
+            code: "dag.mutations.main_lane_cannot_be_merged_into_another_lane",
+          ) if lane.role == DAG::Lane::MAIN
+          OperationNotAllowedError.raise!(
+            "cannot merge a lane into itself",
+            code: "dag.mutations.cannot_merge_a_lane_into_itself",
+          ) if lane.id == target_lane.id
+          ValidationError.raise!(
+            "source from_node must belong to lane",
+            code: "dag.mutations.source_from_node_must_belong_to_lane",
+          ) if from_node.lane_id != lane.id
 
         source_lane_ids << lane.id
       end
@@ -340,17 +340,17 @@ module DAG
       node
     end
 
-	    def archive_lane!(lane:, mode: :finish, at: Time.current, reason: "lane_archived")
+      def archive_lane!(lane:, mode: :finish, at: Time.current, reason: "lane_archived")
       assert_lane_belongs_to_graph!(lane)
 
-	      mode = mode.to_sym
-	      unless mode.in?([:finish, :cancel])
-	        ValidationError.raise!(
-	          "mode must be :finish or :cancel",
-	          code: "dag.mutations.mode_must_be_finish_or_cancel",
-	          details: { mode: mode.to_s },
-	        )
-	      end
+        mode = mode.to_sym
+        unless mode.in?([:finish, :cancel])
+          ValidationError.raise!(
+            "mode must be :finish or :cancel",
+            code: "dag.mutations.mode_must_be_finish_or_cancel",
+            details: { mode: mode.to_s },
+          )
+        end
 
       at = Time.current if at.nil?
       reason = reason.to_s.presence || "lane_archived"
@@ -418,42 +418,42 @@ module DAG
       lane
     end
 
-	    def retry_replace!(node:)
+      def retry_replace!(node:)
       old = locked_active_node!(node)
       now = Time.current
 
-	      unless old.body.retriable?
-	        OperationNotAllowedError.raise!(
-	          "can only retry retriable nodes",
-	          code: "dag.mutations.can_only_retry_retriable_nodes",
-	        )
-	      end
+        unless old.body.retriable?
+          OperationNotAllowedError.raise!(
+            "can only retry retriable nodes",
+            code: "dag.mutations.can_only_retry_retriable_nodes",
+          )
+        end
 
-	      unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::STOPPED].include?(old.state)
-	        OperationNotAllowedError.raise!(
-	          "can only retry errored, rejected, or stopped nodes",
-	          code: "dag.mutations.can_only_retry_errored_rejected_or_stopped_nodes",
-	        )
-	      end
+        unless [DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::STOPPED].include?(old.state)
+          OperationNotAllowedError.raise!(
+            "can only retry errored, rejected, or stopped nodes",
+            code: "dag.mutations.can_only_retry_errored_rejected_or_stopped_nodes",
+          )
+        end
 
-	      descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
-	      if @graph.nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
-	        OperationNotAllowedError.raise!(
-	          "cannot retry when downstream nodes are not pending",
-	          code: "dag.mutations.cannot_retry_when_downstream_nodes_are_not_pending",
-	        )
-	      end
+        descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
+        if @graph.nodes.where(id: descendant_ids, compressed_at: nil).where.not(state: DAG::Node::PENDING).exists?
+          OperationNotAllowedError.raise!(
+            "cannot retry when downstream nodes are not pending",
+            code: "dag.mutations.cannot_retry_when_downstream_nodes_are_not_pending",
+          )
+        end
 
       outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
       if outgoing_blocking_edges.any?
-	        child_states = @graph.nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
-	        unless outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == DAG::Node::PENDING }
-	          OperationNotAllowedError.raise!(
-	            "can only retry when all active blocking children are pending",
-	            code: "dag.mutations.can_only_retry_when_all_active_blocking_children_are_pending",
-	          )
-	        end
-	      end
+          child_states = @graph.nodes.where(id: outgoing_blocking_edges.map(&:to_node_id)).pluck(:id, :state).to_h
+          unless outgoing_blocking_edges.all? { |edge| child_states[edge.to_node_id] == DAG::Node::PENDING }
+            OperationNotAllowedError.raise!(
+              "can only retry when all active blocking children are pending",
+              code: "dag.mutations.can_only_retry_when_all_active_blocking_children_are_pending",
+            )
+          end
+      end
 
       attempt = old.metadata.fetch("attempt", 1).to_i + 1
       body_input = old.body.input_for_retry
@@ -515,31 +515,31 @@ module DAG
       new_node
     end
 
-	    def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
+      def rerun_replace!(node:, metadata_patch: {}, body_input_patch: {})
       old = locked_active_node!(node)
       now = Time.current
 
-	      unless old.body.rerunnable?
-	        OperationNotAllowedError.raise!(
-	          "can only rerun rerunnable nodes",
-	          code: "dag.mutations.can_only_rerun_rerunnable_nodes",
-	        )
-	      end
+        unless old.body.rerunnable?
+          OperationNotAllowedError.raise!(
+            "can only rerun rerunnable nodes",
+            code: "dag.mutations.can_only_rerun_rerunnable_nodes",
+          )
+        end
 
-	      unless old.state == DAG::Node::FINISHED
-	        OperationNotAllowedError.raise!(
-	          "can only rerun finished nodes",
-	          code: "dag.mutations.can_only_rerun_finished_nodes",
-	        )
-	      end
+        unless old.state == DAG::Node::FINISHED
+          OperationNotAllowedError.raise!(
+            "can only rerun finished nodes",
+            code: "dag.mutations.can_only_rerun_finished_nodes",
+          )
+        end
 
-	      outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
-	      if outgoing_blocking_edges.any?
-	        OperationNotAllowedError.raise!(
-	          "can only rerun leaf nodes",
-	          code: "dag.mutations.can_only_rerun_leaf_nodes",
-	        )
-	      end
+        outgoing_blocking_edges = active_outgoing_blocking_edges_from(old.id)
+        if outgoing_blocking_edges.any?
+          OperationNotAllowedError.raise!(
+            "can only rerun leaf nodes",
+            code: "dag.mutations.can_only_rerun_leaf_nodes",
+          )
+        end
 
       metadata_patch = normalize_hash(metadata_patch)
       body_input_patch = normalize_hash(body_input_patch)
@@ -583,45 +583,45 @@ module DAG
       new_node
     end
 
-	    def adopt_version!(node:)
+      def adopt_version!(node:)
       target = locked_node!(node)
       now = Time.current
 
-	      if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
-	        OperationNotAllowedError.raise!(
-	          "cannot adopt version while graph has running nodes",
-	          code: "dag.mutations.cannot_adopt_version_while_graph_has_running_nodes",
-	        )
-	      end
+        if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
+          OperationNotAllowedError.raise!(
+            "cannot adopt version while graph has running nodes",
+            code: "dag.mutations.cannot_adopt_version_while_graph_has_running_nodes",
+          )
+        end
 
-	      unless target.finished?
-	        OperationNotAllowedError.raise!(
-	          "can only adopt finished nodes",
-	          code: "dag.mutations.can_only_adopt_finished_nodes",
-	        )
-	      end
+        unless target.finished?
+          OperationNotAllowedError.raise!(
+            "can only adopt finished nodes",
+            code: "dag.mutations.can_only_adopt_finished_nodes",
+          )
+        end
 
-	      if @graph.edges.where(from_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES).exists?
-	        OperationNotAllowedError.raise!(
-	          "can only adopt leaf nodes",
-	          code: "dag.mutations.can_only_adopt_leaf_nodes",
-	        )
-	      end
+        if @graph.edges.where(from_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES).exists?
+          OperationNotAllowedError.raise!(
+            "can only adopt leaf nodes",
+            code: "dag.mutations.can_only_adopt_leaf_nodes",
+          )
+        end
 
-	      active_versions = @graph.nodes.active.where(version_set_id: target.version_set_id).lock.to_a
-	      if active_versions.empty? && target.compressed_at.present?
-	        OperationNotAllowedError.raise!(
-	          "cannot adopt version when no active version exists",
-	          code: "dag.mutations.cannot_adopt_version_when_no_active_version_exists",
-	        )
-	      end
+        active_versions = @graph.nodes.active.where(version_set_id: target.version_set_id).lock.to_a
+        if active_versions.empty? && target.compressed_at.present?
+          OperationNotAllowedError.raise!(
+            "cannot adopt version when no active version exists",
+            code: "dag.mutations.cannot_adopt_version_when_no_active_version_exists",
+          )
+        end
 
-	      if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.lane_id != target.lane_id }
-	        ValidationError.raise!(
-	          "version_set_id must not span multiple turns or lanes",
-	          code: "dag.mutations.version_set_id_must_not_span_multiple_turns_or_lanes",
-	        )
-	      end
+        if active_versions.any? && active_versions.any? { |node| node.turn_id != target.turn_id || node.lane_id != target.lane_id }
+          ValidationError.raise!(
+            "version_set_id must not span multiple turns or lanes",
+            code: "dag.mutations.version_set_id_must_not_span_multiple_turns_or_lanes",
+          )
+        end
 
       nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
 
@@ -639,24 +639,24 @@ module DAG
 
       active_node_ids = @graph.nodes.active.select(:id)
 
-	      unless @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).exists?
-	        OperationNotAllowedError.raise!(
-	          "cannot adopt version without active incoming edges",
-	          code: "dag.mutations.cannot_adopt_version_without_active_incoming_edges",
-	        )
-	      end
+        unless @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).exists?
+          OperationNotAllowedError.raise!(
+            "cannot adopt version without active incoming edges",
+            code: "dag.mutations.cannot_adopt_version_without_active_incoming_edges",
+          )
+        end
 
       @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).update_all(
         compressed_at: nil,
         updated_at: now
       )
 
-	      if active_outgoing_blocking_edges_from(target.id).any?
-	        OperationNotAllowedError.raise!(
-	          "cannot adopt non-leaf nodes",
-	          code: "dag.mutations.cannot_adopt_non_leaf_nodes",
-	        )
-	      end
+        if active_outgoing_blocking_edges_from(target.id).any?
+          OperationNotAllowedError.raise!(
+            "cannot adopt non-leaf nodes",
+            code: "dag.mutations.cannot_adopt_non_leaf_nodes",
+          )
+        end
 
       cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
 
@@ -669,31 +669,31 @@ module DAG
       @graph.nodes.reload.find(target.id)
     end
 
-	    def edit_replace!(node:, new_input:)
+      def edit_replace!(node:, new_input:)
       old = locked_active_node!(node)
       now = Time.current
 
-	      unless old.body.editable?
-	        OperationNotAllowedError.raise!(
-	          "can only edit editable nodes",
-	          code: "dag.mutations.can_only_edit_editable_nodes",
-	        )
-	      end
+        unless old.body.editable?
+          OperationNotAllowedError.raise!(
+            "can only edit editable nodes",
+            code: "dag.mutations.can_only_edit_editable_nodes",
+          )
+        end
 
-	      unless old.state == DAG::Node::FINISHED
-	        OperationNotAllowedError.raise!(
-	          "can only edit finished nodes",
-	          code: "dag.mutations.can_only_edit_finished_nodes",
-	        )
-	      end
+        unless old.state == DAG::Node::FINISHED
+          OperationNotAllowedError.raise!(
+            "can only edit finished nodes",
+            code: "dag.mutations.can_only_edit_finished_nodes",
+          )
+        end
 
-	      descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
-	      if @graph.nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
-	        OperationNotAllowedError.raise!(
-	          "cannot edit when downstream nodes are pending or running",
-	          code: "dag.mutations.cannot_edit_when_downstream_nodes_are_pending_or_running",
-	        )
-	      end
+        descendant_ids = active_causal_descendant_ids_for(old.id) - [old.id]
+        if @graph.nodes.where(id: descendant_ids, compressed_at: nil, state: [DAG::Node::PENDING, DAG::Node::RUNNING]).exists?
+          OperationNotAllowedError.raise!(
+            "cannot edit when downstream nodes are pending or running",
+            code: "dag.mutations.cannot_edit_when_downstream_nodes_are_pending_or_running",
+          )
+        end
 
       new_body_input = old.body.input_for_retry.deep_merge(normalize_hash(new_input))
 
@@ -742,23 +742,23 @@ module DAG
 
     private
 
-	      def assert_node_belongs_to_graph!(node)
-	        return if node.graph_id == @graph.id
+        def assert_node_belongs_to_graph!(node)
+          return if node.graph_id == @graph.id
 
-	        ValidationError.raise!(
-	          "node must belong to the same graph",
-	          code: "dag.mutations.node_must_belong_to_the_same_graph",
-	        )
-	      end
+          ValidationError.raise!(
+            "node must belong to the same graph",
+            code: "dag.mutations.node_must_belong_to_the_same_graph",
+          )
+        end
 
-	      def assert_lane_belongs_to_graph!(lane)
-	        return if lane.graph_id == @graph.id
+        def assert_lane_belongs_to_graph!(lane)
+          return if lane.graph_id == @graph.id
 
-	        ValidationError.raise!(
-	          "lane must belong to the same graph",
-	          code: "dag.mutations.lane_must_belong_to_the_same_graph",
-	        )
-	      end
+          ValidationError.raise!(
+            "lane must belong to the same graph",
+            code: "dag.mutations.lane_must_belong_to_the_same_graph",
+          )
+        end
 
       def locked_active_node!(node_or_id)
         node_id = node_or_id.is_a?(DAG::Node) ? node_or_id.id : node_or_id
@@ -815,14 +815,14 @@ module DAG
           end
       end
 
-	      def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
-	        existing = @graph.edges.find_by(from_node_id: from_node_id, to_node_id: to_node_id, edge_type: edge_type)
-	      return existing if existing && existing.compressed_at.nil?
-	      ValidationError.raise!(
-	        "edge already exists but is archived",
-	        code: "dag.mutations.edge_already_exists_but_is_archived",
-	        details: { from_node_id: from_node_id.to_s, to_node_id: to_node_id.to_s, edge_type: edge_type.to_s },
-	      ) if existing
+        def create_edge_by_id(from_node_id:, to_node_id:, edge_type:, metadata:)
+          existing = @graph.edges.find_by(from_node_id: from_node_id, to_node_id: to_node_id, edge_type: edge_type)
+        return existing if existing && existing.compressed_at.nil?
+        ValidationError.raise!(
+          "edge already exists but is archived",
+          code: "dag.mutations.edge_already_exists_but_is_archived",
+          details: { from_node_id: from_node_id.to_s, to_node_id: to_node_id.to_s, edge_type: edge_type.to_s },
+        ) if existing
 
         edge =
           begin
@@ -917,13 +917,13 @@ module DAG
 
           break if invalid_leaves.empty?
 
-	        if invalid_leaves.any? { |leaf| turn_anchor_types.include?(leaf.node_type.to_s) }
-		            OperationNotAllowedError.raise!(
-		              "cannot adopt version because it would invalidate turn anchors",
-		              code: "dag.mutations.cannot_adopt_version_because_it_would_invalidate_turn_anchors",
-		              details: { lane_id: lane_id.to_s, turn_id: turn_id.to_s },
-		            )
-	          end
+          if invalid_leaves.any? { |leaf| turn_anchor_types.include?(leaf.node_type.to_s) }
+                OperationNotAllowedError.raise!(
+                  "cannot adopt version because it would invalidate turn anchors",
+                  code: "dag.mutations.cannot_adopt_version_because_it_would_invalidate_turn_anchors",
+                  details: { lane_id: lane_id.to_s, turn_id: turn_id.to_s },
+                )
+          end
 
           archive_nodes_and_incident_edges!(
             node_ids: invalid_leaves.map(&:id),
@@ -933,25 +933,25 @@ module DAG
         end
       end
 
-	      def assert_idempotent_node_match!(node, expected_state:, expected_body_input:, expected_body_output:)
-	        if node.state != expected_state.to_s
-	          IdempotencyConflictError.raise!(
-	            "idempotency_key collision with mismatched state",
-	            code: "dag.mutations.idempotency_key_collision_with_mismatched_state",
-	            details: { idempotency_key: node.idempotency_key.to_s, expected_state: expected_state.to_s, actual_state: node.state.to_s },
-	          )
-	        end
+        def assert_idempotent_node_match!(node, expected_state:, expected_body_input:, expected_body_output:)
+          if node.state != expected_state.to_s
+            IdempotencyConflictError.raise!(
+              "idempotency_key collision with mismatched state",
+              code: "dag.mutations.idempotency_key_collision_with_mismatched_state",
+              details: { idempotency_key: node.idempotency_key.to_s, expected_state: expected_state.to_s, actual_state: node.state.to_s },
+            )
+          end
 
         actual_body_input = node.body&.input.is_a?(Hash) ? node.body.input : {}
         actual_body_output = node.body&.output.is_a?(Hash) ? node.body.output : {}
 
-	        if actual_body_input != expected_body_input || actual_body_output != expected_body_output
-	          IdempotencyConflictError.raise!(
-	            "idempotency_key collision with mismatched body I/O",
-	            code: "dag.mutations.idempotency_key_collision_with_mismatched_body_i_o",
-	            details: { idempotency_key: node.idempotency_key.to_s },
-	          )
-	        end
-	      end
+          if actual_body_input != expected_body_input || actual_body_output != expected_body_output
+            IdempotencyConflictError.raise!(
+              "idempotency_key collision with mismatched body I/O",
+              code: "dag.mutations.idempotency_key_collision_with_mismatched_body_i_o",
+              details: { idempotency_key: node.idempotency_key.to_s },
+            )
+          end
+        end
   end
 end

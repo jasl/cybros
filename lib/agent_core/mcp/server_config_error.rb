@@ -7,4 +7,3 @@ module AgentCore
     class ServerConfigError < AgentCore::ConfigurationError; end
   end
 end
-

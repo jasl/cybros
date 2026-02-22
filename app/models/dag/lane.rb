@@ -378,7 +378,7 @@ module DAG
             "cannot compact while graph has running nodes",
             code: "dag.lane.cannot_compact_while_graph_has_running_nodes",
           )
-        end
+      end
 
         turn_nodes = nodes.active.where(turn_id: turn_id).lock.to_a
 

@@ -200,30 +200,30 @@ module AgentCore
             next unless File.directory?(root)
 
               base_real =
-	              begin
-	                File.realpath(root.to_s)
-	              rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
-	                ValidationError.raise!(
-	                  "Failed to scan skills dir: #{root} (#{e.class}: #{e.message})",
-	                  code: "agent_core.skills.file_system_store.failed_to_scan_skills_dir",
-	                  details: { root: root.to_s, error_class: e.class.name },
-	                ) if @strict
+                begin
+                  File.realpath(root.to_s)
+                rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
+                  ValidationError.raise!(
+                    "Failed to scan skills dir: #{root} (#{e.class}: #{e.message})",
+                    code: "agent_core.skills.file_system_store.failed_to_scan_skills_dir",
+                    details: { root: root.to_s, error_class: e.class.name },
+                  ) if @strict
 
-	                next
-	              end
+                  next
+                end
 
               entries =
-	              begin
-	                Dir.children(root).sort
-	              rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
-	                ValidationError.raise!(
-	                  "Failed to scan skills dir: #{root} (#{e.class}: #{e.message})",
-	                  code: "agent_core.skills.file_system_store.failed_to_scan_skills_dir",
-	                  details: { root: root.to_s, error_class: e.class.name },
-	                ) if @strict
+                begin
+                  Dir.children(root).sort
+                rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
+                  ValidationError.raise!(
+                    "Failed to scan skills dir: #{root} (#{e.class}: #{e.message})",
+                    code: "agent_core.skills.file_system_store.failed_to_scan_skills_dir",
+                    details: { root: root.to_s, error_class: e.class.name },
+                  ) if @strict
 
-	                next
-	              end
+                  next
+                end
 
             entries.each do |entry|
               next if entry.start_with?(".")
@@ -232,26 +232,26 @@ module AgentCore
               next unless File.directory?(skill_dir)
 
               skill_real =
-	                begin
-	                  File.realpath(skill_dir.to_s)
-	                rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
-	                  ValidationError.raise!(
-	                    "Failed to read skill directory: #{skill_dir} (#{e.class}: #{e.message})",
-	                    code: "agent_core.skills.file_system_store.failed_to_read_skill_directory",
-	                    details: { skill_dir: skill_dir.to_s, error_class: e.class.name },
-	                  ) if @strict
+                  begin
+                    File.realpath(skill_dir.to_s)
+                  rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
+                    ValidationError.raise!(
+                      "Failed to read skill directory: #{skill_dir} (#{e.class}: #{e.message})",
+                      code: "agent_core.skills.file_system_store.failed_to_read_skill_directory",
+                      details: { skill_dir: skill_dir.to_s, error_class: e.class.name },
+                    ) if @strict
 
-	                  next
-	                end
-	              unless within_dir?(base_real, skill_real)
-	                InvalidPathError.raise!(
-	                  "Skill directory escapes skills root: #{skill_dir}",
-	                  code: "agent_core.skills.file_system_store.skill_directory_escapes_skills_root",
-	                  details: { skill_dir: skill_dir.to_s },
-	                ) if @strict
+                    next
+                  end
+                unless within_dir?(base_real, skill_real)
+                  InvalidPathError.raise!(
+                    "Skill directory escapes skills root: #{skill_dir}",
+                    code: "agent_core.skills.file_system_store.skill_directory_escapes_skills_root",
+                    details: { skill_dir: skill_dir.to_s },
+                  ) if @strict
 
-	                next
-	              end
+                  next
+                end
 
               block.call(skill_dir, skill_real)
             end
@@ -262,22 +262,22 @@ module AgentCore
           base = File.realpath(base_dir.to_s)
           target = File.realpath(abs_path.to_s)
 
-	          unless within_dir?(base, target)
-	            InvalidPathError.raise!(
-	              "Invalid skill #{label} path",
-	              code: "agent_core.skills.file_system_store.invalid_skill_path",
-	              details: { label: label.to_s },
-	            )
-	          end
+            unless within_dir?(base, target)
+              InvalidPathError.raise!(
+                "Invalid skill #{label} path",
+                code: "agent_core.skills.file_system_store.invalid_skill_path",
+                details: { label: label.to_s },
+              )
+            end
 
           target
-	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
-	          InvalidPathError.raise!(
-	            "Invalid skill #{label} path",
-	            code: "agent_core.skills.file_system_store.invalid_skill_path",
-	            details: { label: label.to_s },
-	          )
-	        end
+          rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
+            InvalidPathError.raise!(
+              "Invalid skill #{label} path",
+              code: "agent_core.skills.file_system_store.invalid_skill_path",
+              details: { label: label.to_s },
+            )
+          end
 
         def read_skill_md_for_frontmatter(path)
           max_bytes = SKILL_MD_FRONTMATTER_MAX_BYTES
@@ -305,36 +305,36 @@ module AgentCore
             return lines[0..closing_index].join
           end
 
-	          if truncated && @strict
-	            ValidationError.raise!(
-	              "SKILL.md frontmatter exceeds #{max_bytes} bytes: #{path}",
-	              code: "agent_core.skills.file_system_store.skill_md_frontmatter_exceeds_bytes",
-	              details: { max_bytes: max_bytes, path: path.to_s },
-	            )
-	          end
+            if truncated && @strict
+              ValidationError.raise!(
+                "SKILL.md frontmatter exceeds #{max_bytes} bytes: #{path}",
+                code: "agent_core.skills.file_system_store.skill_md_frontmatter_exceeds_bytes",
+                details: { max_bytes: max_bytes, path: path.to_s },
+              )
+            end
 
           data
-	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
-	          ValidationError.raise!(
-	            "Failed to read SKILL.md: #{path} (#{e.class}: #{e.message})",
-	            code: "agent_core.skills.file_system_store.failed_to_read_skill_md",
-	            details: { path: path.to_s, error_class: e.class.name },
-	          ) if @strict
+          rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
+            ValidationError.raise!(
+              "Failed to read SKILL.md: #{path} (#{e.class}: #{e.message})",
+              code: "agent_core.skills.file_system_store.failed_to_read_skill_md",
+              details: { path: path.to_s, error_class: e.class.name },
+            ) if @strict
 
-	          ""
-	        end
+            ""
+          end
 
-	        def find_skill_metadata!(name)
-	          name = name.to_s
-	          meta = list_skills.find { |m| m.name == name }
-	          ValidationError.raise!(
-	            "Unknown skill: #{name}",
-	            code: "agent_core.skills.file_system_store.unknown_skill",
-	            details: { skill_name: name.to_s },
-	          ) unless meta
+          def find_skill_metadata!(name)
+            name = name.to_s
+            meta = list_skills.find { |m| m.name == name }
+            ValidationError.raise!(
+              "Unknown skill: #{name}",
+              code: "agent_core.skills.file_system_store.unknown_skill",
+              details: { skill_name: name.to_s },
+            ) unless meta
 
-	          meta
-	        end
+            meta
+          end
 
         def find_skill_md(skill_dir)
           SKILL_MD_FILENAMES.each do |name|
@@ -373,46 +373,46 @@ module AgentCore
           []
         end
 
-	        def normalize_rel_path(value)
-	          raw = value.to_s
-	          normalized = raw.tr("\\", "/").strip
-	          InvalidPathError.raise!(
-	            "Invalid skill file path: #{raw}",
-	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	            details: { rel_path: raw.to_s },
-	          ) if normalized.empty?
+          def normalize_rel_path(value)
+            raw = value.to_s
+            normalized = raw.tr("\\", "/").strip
+            InvalidPathError.raise!(
+              "Invalid skill file path: #{raw}",
+              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+              details: { rel_path: raw.to_s },
+            ) if normalized.empty?
 
-	          if absolute_path?(normalized)
-	            InvalidPathError.raise!(
-	              "Invalid skill file path: #{raw}",
-	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	              details: { rel_path: raw.to_s },
-	            )
-	          end
+            if absolute_path?(normalized)
+              InvalidPathError.raise!(
+                "Invalid skill file path: #{raw}",
+                code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+                details: { rel_path: raw.to_s },
+              )
+            end
 
-	          unless REL_PATH_PATTERN.match?(normalized)
-	            InvalidPathError.raise!(
-	              "Invalid skill file path: #{raw}",
-	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	              details: { rel_path: raw.to_s },
-	            )
-	          end
+            unless REL_PATH_PATTERN.match?(normalized)
+              InvalidPathError.raise!(
+                "Invalid skill file path: #{raw}",
+                code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+                details: { rel_path: raw.to_s },
+              )
+            end
 
-	          segments = normalized.split("/")
-	          if segments.any? { |s| s == "." || s == ".." }
-	            InvalidPathError.raise!(
-	              "Invalid skill file path: #{raw}",
-	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	              details: { rel_path: raw.to_s },
-	            )
-	          end
+            segments = normalized.split("/")
+            if segments.any? { |s| s == "." || s == ".." }
+              InvalidPathError.raise!(
+                "Invalid skill file path: #{raw}",
+                code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+                details: { rel_path: raw.to_s },
+              )
+            end
 
-	          top = segments.first
-	          InvalidPathError.raise!(
-	            "Invalid skill file path: #{raw}",
-	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	            details: { rel_path: raw.to_s },
-	          ) unless ALLOWED_TOP_DIRS.include?(top)
+            top = segments.first
+            InvalidPathError.raise!(
+              "Invalid skill file path: #{raw}",
+              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+              details: { rel_path: raw.to_s },
+            ) unless ALLOWED_TOP_DIRS.include?(top)
 
           normalized
         end
@@ -424,41 +424,41 @@ module AgentCore
           Pathname.new(value).absolute?
         end
 
-	        def safe_join(base_dir, rel_path)
-	          base = File.expand_path(base_dir.to_s)
-	          target = File.expand_path(File.join(base, rel_path))
+          def safe_join(base_dir, rel_path)
+            base = File.expand_path(base_dir.to_s)
+            target = File.expand_path(File.join(base, rel_path))
 
-	          unless within_dir?(base, target)
-	            InvalidPathError.raise!(
-	              "Invalid skill file path: #{rel_path}",
-	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	              details: { rel_path: rel_path.to_s },
-	            )
-	          end
+            unless within_dir?(base, target)
+              InvalidPathError.raise!(
+                "Invalid skill file path: #{rel_path}",
+                code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+                details: { rel_path: rel_path.to_s },
+              )
+            end
 
           target
         end
 
-	        def ensure_realpath_within_skill_dir!(skill_dir:, abs_path:, rel_path:)
-	          base = File.realpath(skill_dir.to_s)
-	          target = File.realpath(abs_path.to_s)
+          def ensure_realpath_within_skill_dir!(skill_dir:, abs_path:, rel_path:)
+            base = File.realpath(skill_dir.to_s)
+            target = File.realpath(abs_path.to_s)
 
-	          unless within_dir?(base, target)
-	            InvalidPathError.raise!(
-	              "Invalid skill file path: #{rel_path}",
-	              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	              details: { rel_path: rel_path.to_s },
-	            )
-	          end
+            unless within_dir?(base, target)
+              InvalidPathError.raise!(
+                "Invalid skill file path: #{rel_path}",
+                code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+                details: { rel_path: rel_path.to_s },
+              )
+            end
 
-	          true
-	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
-	          InvalidPathError.raise!(
-	            "Invalid skill file path: #{rel_path}",
-	            code: "agent_core.skills.file_system_store.invalid_skill_file_path",
-	            details: { rel_path: rel_path.to_s },
-	          )
-	        end
+            true
+          rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError
+            InvalidPathError.raise!(
+              "Invalid skill file path: #{rel_path}",
+              code: "agent_core.skills.file_system_store.invalid_skill_file_path",
+              details: { rel_path: rel_path.to_s },
+            )
+          end
 
         def within_dir?(base_dir, target_path)
           base = base_dir.to_s
@@ -473,37 +473,37 @@ module AgentCore
           path.end_with?(File::SEPARATOR) ? path : (path + File::SEPARATOR)
         end
 
-	        def read_file_limited(path, max_bytes:, label:)
-	          max_bytes = Integer(max_bytes)
-	          ValidationError.raise!(
-	            "max_bytes must be positive",
-	            code: "agent_core.skills.file_system_store.max_bytes_must_be_positive",
-	            details: { max_bytes: max_bytes },
-	          ) if max_bytes <= 0
+          def read_file_limited(path, max_bytes:, label:)
+            max_bytes = Integer(max_bytes)
+            ValidationError.raise!(
+              "max_bytes must be positive",
+              code: "agent_core.skills.file_system_store.max_bytes_must_be_positive",
+              details: { max_bytes: max_bytes },
+            ) if max_bytes <= 0
 
           data =
             File.open(path, "rb") do |io|
               io.read(max_bytes + 1)
             end
 
-	          if data && data.bytesize > max_bytes
-	            ValidationError.raise!(
-	              "Skill file too large: #{label}",
-	              code: "agent_core.skills.file_system_store.skill_file_too_large",
-	              details: { label: label.to_s, max_bytes: max_bytes },
-	            )
-	          end
+            if data && data.bytesize > max_bytes
+              ValidationError.raise!(
+                "Skill file too large: #{label}",
+                code: "agent_core.skills.file_system_store.skill_file_too_large",
+                details: { label: label.to_s, max_bytes: max_bytes },
+              )
+            end
 
           data.to_s
         end
 
-	        def read_file_prefix(path, max_bytes:, label:)
-	          max_bytes = Integer(max_bytes)
-	          ValidationError.raise!(
-	            "max_bytes must be positive",
-	            code: "agent_core.skills.file_system_store.max_bytes_must_be_positive",
-	            details: { max_bytes: max_bytes },
-	          ) if max_bytes <= 0
+          def read_file_prefix(path, max_bytes:, label:)
+            max_bytes = Integer(max_bytes)
+            ValidationError.raise!(
+              "max_bytes must be positive",
+              code: "agent_core.skills.file_system_store.max_bytes_must_be_positive",
+              details: { max_bytes: max_bytes },
+            ) if max_bytes <= 0
 
           raw =
             File.open(path, "rb") do |io|
@@ -515,13 +515,13 @@ module AgentCore
           data = truncated ? raw.byteslice(0, max_bytes).to_s : raw
 
           [data, truncated]
-	        rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
-	          ValidationError.raise!(
-	            "Failed to read #{label}: #{e.class}: #{e.message}",
-	            code: "agent_core.skills.file_system_store.failed_to_read_label",
-	            details: { label: label.to_s, error_class: e.class.name },
-	          )
-	        end
+          rescue Errno::ENOENT, Errno::EACCES, Errno::ENOTDIR, Errno::EINVAL, SystemCallError => e
+            ValidationError.raise!(
+              "Failed to read #{label}: #{e.class}: #{e.message}",
+              code: "agent_core.skills.file_system_store.failed_to_read_label",
+              details: { label: label.to_s, error_class: e.class.name },
+            )
+          end
 
         def normalize_utf8(value)
           str = value.to_s

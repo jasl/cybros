@@ -17,8 +17,8 @@ module AgentCore
     class SseParser
       class EventDataTooLargeError < ProtocolError; end
 
-        # @param max_buffer_bytes [Integer] Maximum accumulated unparsed buffer size
-        # @param max_event_data_bytes [Integer, nil] Maximum data payload per event (nil = unlimited)
+      # @param max_buffer_bytes [Integer] Maximum accumulated unparsed buffer size
+      # @param max_event_data_bytes [Integer, nil] Maximum data payload per event (nil = unlimited)
       def initialize(max_buffer_bytes: 1_000_000, max_event_data_bytes: nil)
         @max_buffer_bytes = Integer(max_buffer_bytes)
         ValidationError.raise!(

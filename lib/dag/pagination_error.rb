@@ -5,4 +5,3 @@ module DAG
   # unknown/hidden cursors, non-positive limits, etc.).
   class PaginationError < ValidationError; end
 end
-

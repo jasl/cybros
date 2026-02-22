@@ -5,4 +5,3 @@ module DAG
   # expected and actual values do not match (lane/state/body input-output).
   class IdempotencyConflictError < ValidationError; end
 end
-

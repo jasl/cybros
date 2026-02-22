@@ -5,4 +5,3 @@ module DAG
   # state or invariants (e.g. cannot retry, can only rerun leaf nodes, etc.).
   class OperationNotAllowedError < ValidationError; end
 end
-
