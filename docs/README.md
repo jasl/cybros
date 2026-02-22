@@ -23,3 +23,7 @@ This directory contains Cybros architecture/design notes intended for humans and
   - Implementation plan: `docs/agent_core/knowledge_context_memory_implementation_plan.md`
 - Security: `docs/agent_core/security.md`
 - Migration parity notes: `docs/agent_core/parity.md`
+
+## Execution subsystem (ExecHub + Runner)
+
+- Design (policies, sandboxing, NAT, rollout plan): `docs/execution/execution_subsystem_design.md`
