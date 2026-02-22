@@ -181,6 +181,13 @@
 - ✅ 已落地：`ToolCallRepairLoop`（仅修 `arguments_parse_error`：`invalid_json/too_large`；批量一次修复；允许部分修复；仅写 metadata、不写回 DAG 历史）
 - ✅ 已落地：`ProviderFailover`（同 provider 多模型重试；触发：404 + 400/422 工具/协议关键词；streaming 仅覆盖 `provider.chat(...)` 直接 raise 的场景）
 
+下一步（建议，P1+）：
+
+- ⏳ schema 语义校验触发 repair：当 args 能 parse 但不满足 schema（漏 required / 类型明显不对 / additionalProperties=false 下出现未知 key）时，走一次“仅修参数”修复回路（仍限制次数，避免死循环）
+- ⏳ tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内）
+- ⏳ repair prompt 体积治理：对传入 repair 的 schema 做裁剪（max_schema_bytes / 只传相关 properties 子树），避免工具多时 repair prompt 自身超预算
+- ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
+
 ### P1：Subagent Tool（把跨图模式“变成原语”）
 
 参考项目触发点：

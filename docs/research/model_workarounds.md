@@ -43,9 +43,11 @@
 当模型/Provider 不稳定时，单纯加提示词往往不够；需要 Runner 层兜底：
 
 - **解析-校验-纠错回路**：tool args 校验失败时，生成结构化错误并要求模型“仅修正参数”重试（限制重试次数，避免死循环）。
+  - P1 建议：从“仅 parse_error（invalid_json/too_large）”扩展到“schema 语义校验失败”（漏必填/类型明显不对/未知 key 等）也触发同一修复回路。
 - **call_id/事件去重与归一**：兼容 `call_id||id`，并对重复 item/call 去重合并（OpenAI Agents SDK 的 run_state 思路）。
 - **工具失败可降级**：将非致命异常转换为模型可见的 tool_result（而不是直接 raise 终止），并写入 tracing（OpenAI Agents SDK 的 failure_error_function）。
 - **模型/鉴权 failover**：把 tool 协议错误/invalid-request 也纳入可 failover 的错误类型（OpenClaw 的 model failover 处理思路），在 tool calling 不稳定时自动切换到更可靠的模型。
+  - P1 建议：在不掩盖真实故障的前提下，按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置。
 
 ## 5) Playground“破限”：建议把它当作“实验开关”，不是越权
 
@@ -67,3 +69,10 @@ Playground 常见的“破限”需求，很多其实是想突破**产品默认�
 3. `ToolCallRepairLoop`：工具参数校验失败→结构化错误→有限次重试  
 4. `ProviderFailover`：把 tool 协议错误纳入可 failover 的错误域，并记录可观测事件  
 5. `ProtocolSanitizer`：机器协议块与 UI 文本分离（必要时）
+
+下一步（P1 建议，提升“稳态成功率”）：
+
+- schema 语义校验触发 repair（不要只修 parse_error）
+- tool name 修复（tool_not_found / tool_not_in_profile → visible_tools 范围内重写）
+- repair prompt 体积治理（max_schema_bytes / 只传必要 schema 子树）
+- failover 错误域扩展（谨慎：timeout/5xx/429；mid-stream 后置）
