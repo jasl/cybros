@@ -15,7 +15,11 @@ module AgentCore
           :files_index,
         ) do
           def initialize(meta:, body_markdown:, body_truncated: false, files_index: nil)
-            raise ValidationError, "meta must be a Skills::SkillMetadata" unless meta.is_a?(SkillMetadata)
+            ValidationError.raise!(
+              "meta must be a Skills::SkillMetadata",
+              code: "agent_core.skills.skill.meta_must_be_a_skills_skill_metadata",
+              details: { meta_class: meta.class.name },
+            ) unless meta.is_a?(SkillMetadata)
 
             normalized_index = normalize_files_index(files_index)
 

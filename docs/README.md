@@ -9,6 +9,7 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Normative behavior spec (nodes/edges/states/invariants/streaming): `docs/dag/behavior_spec.md`
 - Sub-agent patterns: `docs/dag/subagent_patterns.md`
 - Audit history: `docs/dag/audit.md`
+- Errors: `docs/dag/errors.md`
 
 ## AgentCore (DAG-first)
 
@@ -17,6 +18,7 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Public API / injection points: `docs/agent_core/public_api.md`
 - Node payload schemas: `docs/agent_core/node_payloads.md`
 - Context management + auto-compaction: `docs/agent_core/context_management.md`
+- Errors: `docs/agent_core/errors.md`
 - Knowledge / Context / Memory design:
   - Considerations: `docs/agent_core/knowledge_context_memory_considerations.md`
   - Design (Lite vs Ultimate): `docs/agent_core/knowledge_context_memory_design.md`

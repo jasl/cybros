@@ -91,11 +91,19 @@ module AgentCore
     private
 
     def validate_role!(role)
-      raise ValidationError, "Role cannot be nil. Must be one of: #{ROLES.join(", ")}" if role.nil?
+      ValidationError.raise!(
+        "Role cannot be nil. Must be one of: #{ROLES.join(", ")}",
+        code: "agent_core.message.role_cannot_be_nil_must_be_one_of",
+        details: { roles: ROLES.map(&:to_s).sort },
+      ) if role.nil?
 
       sym = role.to_sym
       unless ROLES.include?(sym)
-        raise ValidationError, "Invalid role: #{role}. Must be one of: #{ROLES.join(", ")}"
+        ValidationError.raise!(
+          "Invalid role: #{role}. Must be one of: #{ROLES.join(", ")}",
+          code: "agent_core.message.invalid_role_must_be_one_of",
+          details: { role: role.to_s, roles: ROLES.map(&:to_s).sort },
+        )
       end
       sym
     end

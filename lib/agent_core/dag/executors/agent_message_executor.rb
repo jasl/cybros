@@ -144,7 +144,11 @@ module AgentCore
 
             built_prompt.messages.each do |msg|
               unless msg.is_a?(Message)
-                raise ValidationError, "prompt messages must be AgentCore::Message (got #{msg.class})"
+                ValidationError.raise!(
+                  "prompt messages must be AgentCore::Message (got #{msg.class})",
+                  code: "agent_core.dag.agent_message_executor.prompt_messages_must_be_agentcore_message_got",
+                  details: { message_class: msg.class.name },
+                )
               end
               messages << msg
             end

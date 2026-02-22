@@ -32,18 +32,33 @@ module AgentCore
       # @param redactor [#call, nil] custom payload transformer: (name, payload_hash) -> Hash
       def initialize(capture: :safe, max_string_bytes: DEFAULT_MAX_STRING_BYTES, max_depth: DEFAULT_MAX_DEPTH, redactor: nil)
         unless CAPTURE_LEVELS.include?(capture)
-          raise ValidationError, "capture must be one of: #{CAPTURE_LEVELS.join(", ")}"
+          ValidationError.raise!(
+            "capture must be one of: #{CAPTURE_LEVELS.join(", ")}",
+            code: "agent_core.observability.trace_recorder.capture_must_be_one_of",
+            details: { capture: capture&.to_s, allowed: CAPTURE_LEVELS.map(&:to_s).sort },
+          )
         end
 
         @capture = capture
         @max_string_bytes = Integer(max_string_bytes)
-        raise ValidationError, "max_string_bytes must be positive" if @max_string_bytes <= 0
+        ValidationError.raise!(
+          "max_string_bytes must be positive",
+          code: "agent_core.observability.trace_recorder.max_string_bytes_must_be_positive",
+          details: { max_string_bytes: @max_string_bytes },
+        ) if @max_string_bytes <= 0
 
         @max_depth = Integer(max_depth)
-        raise ValidationError, "max_depth must be positive" if @max_depth <= 0
+        ValidationError.raise!(
+          "max_depth must be positive",
+          code: "agent_core.observability.trace_recorder.max_depth_must_be_positive",
+          details: { max_depth: @max_depth },
+        ) if @max_depth <= 0
 
         if redactor && !redactor.respond_to?(:call)
-          raise ValidationError, "redactor must respond to #call"
+          ValidationError.raise!(
+            "redactor must respond to #call",
+            code: "agent_core.observability.trace_recorder.redactor_must_respond_to_call",
+          )
         end
         @redactor = redactor
 

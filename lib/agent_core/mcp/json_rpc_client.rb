@@ -30,11 +30,18 @@ module AgentCore
       # @param timeout_s [Float] Default request timeout
       # @param on_notification [#call, nil] Callback for server notifications
       def initialize(transport:, timeout_s: AgentCore::MCP::DEFAULT_TIMEOUT_S, on_notification: nil)
-        raise ValidationError, "transport is required" if transport.nil?
+        ValidationError.raise!(
+          "transport is required",
+          code: "agent_core.mcp.json_rpc_client.transport_is_required",
+        ) if transport.nil?
 
         @transport = transport
         @timeout_s = Float(timeout_s)
-        raise ValidationError, "timeout_s must be positive" if @timeout_s <= 0
+        ValidationError.raise!(
+          "timeout_s must be positive",
+          code: "agent_core.mcp.json_rpc_client.timeout_s_must_be_positive",
+          details: { timeout_s: @timeout_s },
+        ) if @timeout_s <= 0
 
         @on_notification = on_notification.respond_to?(:call) ? on_notification : nil
 
@@ -110,7 +117,10 @@ module AgentCore
       # @raise [AgentCore::MCP::JsonRpcError] If the server returns an error
       def request(method, params = {}, timeout_s: nil)
         method_name = method.to_s
-        raise ValidationError, "method is required" if method_name.strip.empty?
+        ValidationError.raise!(
+          "method is required",
+          code: "agent_core.mcp.json_rpc_client.method_is_required",
+        ) if method_name.strip.empty?
 
         pending = PendingRequest.new
         id = nil
@@ -144,7 +154,10 @@ module AgentCore
       # @return [true]
       def notify(method, params = nil)
         method_name = method.to_s
-        raise ValidationError, "method is required" if method_name.strip.empty?
+        ValidationError.raise!(
+          "method is required",
+          code: "agent_core.mcp.json_rpc_client.method_is_required",
+        ) if method_name.strip.empty?
 
         @pending_mutex.synchronize do
           raise AgentCore::MCP::ClosedError, "client is closed" if @closed
@@ -191,7 +204,11 @@ module AgentCore
 
       def await_pending!(id, pending, method_name, timeout_s:)
         timeout_s = timeout_s.nil? ? @timeout_s : Float(timeout_s)
-        raise ValidationError, "timeout_s must be positive" if timeout_s <= 0
+        ValidationError.raise!(
+          "timeout_s must be positive",
+          code: "agent_core.mcp.json_rpc_client.timeout_s_must_be_positive",
+          details: { timeout_s: timeout_s },
+        ) if timeout_s <= 0
 
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout_s
 

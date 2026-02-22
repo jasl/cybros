@@ -68,24 +68,43 @@ module AgentCore
                 require "json"
                 JSON.parse(value)
               rescue JSON::ParserError => e
-                raise ValidationError, "tool result is not valid JSON: #{e.message}"
+                ValidationError.raise!(
+                  "tool result is not valid JSON: #{e.message}",
+                  code: "agent_core.tools.tool_result.tool_result_is_not_valid_json",
+                )
               end
             when Hash
               value
             else
-              raise ValidationError, "tool result must be a Hash or JSON String (got #{value.class})"
+              ValidationError.raise!(
+                "tool result must be a Hash or JSON String (got #{value.class})",
+                code: "agent_core.tools.tool_result.tool_result_must_be_a_hash_or_json_string_got",
+                details: { value_class: value.class.name },
+              )
             end
 
-          raise ValidationError, "tool result must be a Hash" unless h.is_a?(Hash)
+          ValidationError.raise!(
+            "tool result must be a Hash",
+            code: "agent_core.tools.tool_result.tool_result_must_be_a_hash",
+            details: { value_class: h.class.name },
+          ) unless h.is_a?(Hash)
 
           content = h.fetch("content", h.fetch(:content, nil))
-          raise ValidationError, "tool result content must be an Array" unless content.is_a?(Array)
+          ValidationError.raise!(
+            "tool result content must be an Array",
+            code: "agent_core.tools.tool_result.tool_result_content_must_be_an_array",
+            details: { content_class: content.class.name },
+          ) unless content.is_a?(Array)
 
           error = h.fetch("error", h.fetch(:error, false))
 
           metadata = h.fetch("metadata", h.fetch(:metadata, {}))
           metadata = {} if metadata.nil?
-          raise ValidationError, "tool result metadata must be a Hash" unless metadata.is_a?(Hash)
+          ValidationError.raise!(
+            "tool result metadata must be a Hash",
+            code: "agent_core.tools.tool_result.tool_result_metadata_must_be_a_hash",
+            details: { metadata_class: metadata.class.name },
+          ) unless metadata.is_a?(Hash)
 
           metadata = AgentCore::Utils.symbolize_keys(metadata)
 

@@ -88,7 +88,10 @@ module AgentCore
 
           raise last_error if last_error
 
-          raise ValidationError, "No models provided for provider failover"
+          ValidationError.raise!(
+            "No models provided for provider failover",
+            code: "agent_core.resources.provider.provider_failover.no_models_provided_for_provider_failover",
+          )
         end
 
         private

@@ -25,7 +25,11 @@ module AgentCore
             metadata: nil
           )
             t = target.to_sym
-            raise ValidationError, "target must be one of #{TARGETS.inspect} (got #{target.inspect})" unless TARGETS.include?(t)
+            ValidationError.raise!(
+              "target must be one of #{TARGETS.inspect} (got #{target.inspect})",
+              code: "agent_core.resources.prompt_injections.item.target_must_be_one_of_got",
+              details: { target: target&.to_s, allowed: TARGETS.map(&:to_s).sort },
+            ) unless TARGETS.include?(t)
 
             ord = Integer(order || 0, exception: false) || 0
 
@@ -37,8 +41,15 @@ module AgentCore
 
             r = role.nil? ? nil : role.to_sym
             if t == :preamble_message
-              raise ValidationError, "preamble_message requires role" if r.nil?
-              raise ValidationError, "role must be one of #{ROLES.inspect} (got #{role.inspect})" unless ROLES.include?(r)
+              ValidationError.raise!(
+                "preamble_message requires role",
+                code: "agent_core.resources.prompt_injections.item.preamble_message_requires_role",
+              ) if r.nil?
+              ValidationError.raise!(
+                "role must be one of #{ROLES.inspect} (got #{role.inspect})",
+                code: "agent_core.resources.prompt_injections.item.role_must_be_one_of_got",
+                details: { role: role&.to_s, allowed: ROLES.map(&:to_s).sort },
+              ) unless ROLES.include?(r)
             else
               r = nil
             end

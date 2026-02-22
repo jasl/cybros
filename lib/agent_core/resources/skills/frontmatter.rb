@@ -212,7 +212,11 @@ module AgentCore
         private_class_method :alnum_char?
 
         def invalid(strict, message, body_string)
-          raise ValidationError, message if strict
+          ValidationError.raise!(
+            message,
+            code: "agent_core.skills.frontmatter.invalid_frontmatter",
+            details: { message: message.to_s },
+          ) if strict
 
           [nil, body_string.to_s]
         end

@@ -10,12 +10,18 @@ module AgentCore
             @client_options = client_options
             @model = model.to_s.strip
 
-            raise ValidationError, "model is required" if @model.empty?
+            ValidationError.raise!(
+              "model is required",
+              code: "agent_core.memory.embedder.simple_inference.model_is_required",
+            ) if @model.empty?
           end
 
           def embed(text:)
             input = text.to_s
-            raise ValidationError, "text is required" if input.strip.empty?
+            ValidationError.raise!(
+              "text is required",
+              code: "agent_core.memory.embedder.simple_inference.text_is_required",
+            ) if input.strip.empty?
 
             client = ensure_client!
 

@@ -16,6 +16,21 @@ class AgentCore::ErrorsTest < Minitest::Test
     assert_equal({ field: "name" }, error.details)
   end
 
+  def test_validation_error_raise_requires_code
+    assert_raises(ArgumentError) { AgentCore::ValidationError.raise!("bad input") }
+  end
+
+  def test_validation_error_raise_sets_code_and_details
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        AgentCore::ValidationError.raise!("bad input", code: "agent_core.example.bad_input", details: { field: "name" })
+      end
+
+    assert_equal "bad input", error.message
+    assert_equal "agent_core.example.bad_input", error.code
+    assert_equal({ field: "name" }, error.details)
+  end
+
   def test_not_implemented_error
     error = AgentCore::NotImplementedError.new("missing method")
     assert_kind_of AgentCore::Error, error

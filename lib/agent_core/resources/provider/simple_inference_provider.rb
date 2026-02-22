@@ -29,7 +29,10 @@ module AgentCore
 
         def chat(messages:, model:, tools: nil, stream: false, **options)
           model_name = model.to_s.strip
-          raise ValidationError, "model is required" if model_name.empty?
+          ValidationError.raise!(
+            "model is required",
+            code: "agent_core.resources.provider.simple_inference_provider.model_is_required",
+          ) if model_name.empty?
 
           client = ensure_client!
 
@@ -80,7 +83,11 @@ module AgentCore
 
         def normalize_request_defaults(value)
           return {} if value.nil?
-          raise ValidationError, "request_defaults must be a Hash" unless value.is_a?(Hash)
+          ValidationError.raise!(
+            "request_defaults must be a Hash",
+            code: "agent_core.resources.provider.simple_inference_provider.request_defaults_must_be_a_hash",
+            details: { value_class: value.class.name },
+          ) unless value.is_a?(Hash)
 
           Utils.deep_symbolize_keys(value)
         end
@@ -311,7 +318,11 @@ module AgentCore
         def build_openai_messages(messages)
           Array(messages).map do |msg|
             unless msg.is_a?(Message)
-              raise ValidationError, "messages must contain AgentCore::Message instances"
+              ValidationError.raise!(
+                "messages must contain AgentCore::Message instances",
+                code: "agent_core.resources.provider.simple_inference_provider.messages_must_contain_agentcore_message_instances",
+                details: { message_class: msg.class.name },
+              )
             end
 
             role = openai_role(msg.role)
@@ -344,7 +355,11 @@ module AgentCore
           when :assistant then "assistant"
           when :tool_result then "tool"
           else
-            raise ValidationError, "Unsupported message role: #{role.inspect}"
+            ValidationError.raise!(
+              "Unsupported message role: #{role.inspect}",
+              code: "agent_core.resources.provider.simple_inference_provider.unsupported_message_role",
+              details: { role: role.to_s, role_inspect: role.inspect },
+            )
           end
         end
 
@@ -438,7 +453,11 @@ module AgentCore
 
         def build_openai_tools(tools)
           Array(tools).map do |tool|
-            raise ValidationError, "tools must contain Hash definitions" unless tool.is_a?(Hash)
+            ValidationError.raise!(
+              "tools must contain Hash definitions",
+              code: "agent_core.resources.provider.simple_inference_provider.tools_must_contain_hash_definitions",
+              details: { tool_class: tool.class.name },
+            ) unless tool.is_a?(Hash)
 
             h = Utils.symbolize_keys(tool)
 
@@ -457,7 +476,10 @@ module AgentCore
               parameters = h.fetch(:parameters, {})
             end
 
-            raise ValidationError, "tool name is required" if name.strip.empty?
+            ValidationError.raise!(
+              "tool name is required",
+              code: "agent_core.resources.provider.simple_inference_provider.tool_name_is_required",
+            ) if name.strip.empty?
 
             parameters = {} unless parameters.is_a?(Hash)
             parameters = Utils.normalize_json_schema(parameters)

@@ -14,7 +14,7 @@
 - **JSON 一律 string keys**：所有持久化到 JSONB 的字段（`metadata/payload/particulars` 等）约定使用 string keys；Public API 返回的 Hash 也使用 string keys。
 - **分页一律 keyset**：所有面向产品 UI 的分页 API 禁止 OFFSET；统一使用 `before_* / after_*` cursor。
 - **limit 强约束**：所有分页 API 的 `limit` 会被 clamp 到 `<= 1000`（避免误用造成不必要的全量扫描）。
-- **错误类型约定**：Public API 的“参数/状态不合法”统一 raise `DAG::ValidationError`（不再用 `ArgumentError`）；安全带超限 raise `DAG::SafetyLimits::Exceeded`（两者均继承 `DAG::Error`）。
+- **错误类型约定**：Public API 的“参数/状态不合法”统一 raise `DAG::ValidationError`（不再用 `ArgumentError`），并提供稳定的 `code` + safe `details` 便于分类捕获与结构化日志；安全带超限 raise `DAG::SafetyLimits::Exceeded`（两者均继承 `DAG::Error`）。
 
 ---
 

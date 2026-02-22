@@ -57,27 +57,50 @@ module AgentCore
           on_stderr_line: nil
         )
           @url = url.to_s.strip
-          raise ValidationError, "url is required" if @url.empty?
+          ValidationError.raise!(
+            "url is required",
+            code: "agent_core.mcp.streamable_http.url_is_required",
+          ) if @url.empty?
 
           @headers = normalize_headers(headers)
           @headers_provider = normalize_headers_provider(headers_provider)
 
           @timeout_s = Float(timeout_s)
-          raise ValidationError, "timeout_s must be positive" if @timeout_s <= 0
+          ValidationError.raise!(
+            "timeout_s must be positive",
+            code: "agent_core.mcp.streamable_http.timeout_s_must_be_positive",
+            details: { timeout_s: @timeout_s },
+          ) if @timeout_s <= 0
 
           @open_timeout_s = open_timeout_s.nil? ? @timeout_s : Float(open_timeout_s)
-          raise ValidationError, "open_timeout_s must be positive" if @open_timeout_s <= 0
+          ValidationError.raise!(
+            "open_timeout_s must be positive",
+            code: "agent_core.mcp.streamable_http.open_timeout_s_must_be_positive",
+            details: { open_timeout_s: @open_timeout_s },
+          ) if @open_timeout_s <= 0
 
           @read_timeout_s = read_timeout_s.nil? ? @timeout_s : Float(read_timeout_s)
-          raise ValidationError, "read_timeout_s must be positive" if @read_timeout_s <= 0
+          ValidationError.raise!(
+            "read_timeout_s must be positive",
+            code: "agent_core.mcp.streamable_http.read_timeout_s_must_be_positive",
+            details: { read_timeout_s: @read_timeout_s },
+          ) if @read_timeout_s <= 0
 
           @sse_max_reconnects =
             sse_max_reconnects.nil? ? DEFAULT_SSE_MAX_RECONNECTS : Integer(sse_max_reconnects)
-          raise ValidationError, "sse_max_reconnects must be positive" if @sse_max_reconnects <= 0
+          ValidationError.raise!(
+            "sse_max_reconnects must be positive",
+            code: "agent_core.mcp.streamable_http.sse_max_reconnects_must_be_positive",
+            details: { sse_max_reconnects: @sse_max_reconnects },
+          ) if @sse_max_reconnects <= 0
 
           @max_response_bytes =
             max_response_bytes.nil? ? DEFAULT_MAX_RESPONSE_BYTES : Integer(max_response_bytes)
-          raise ValidationError, "max_response_bytes must be positive" if @max_response_bytes <= 0
+          ValidationError.raise!(
+            "max_response_bytes must be positive",
+            code: "agent_core.mcp.streamable_http.max_response_bytes_must_be_positive",
+            details: { max_response_bytes: @max_response_bytes },
+          ) if @max_response_bytes <= 0
 
           @sleep_fn = sleep_fn&.respond_to?(:call) ? sleep_fn : Kernel.method(:sleep)
           @http_client = http_client
@@ -320,7 +343,11 @@ module AgentCore
             elsif base.is_a?(::HTTPX::Session)
               base.with(timeout: timeout_opts)
             else
-              raise ValidationError, "http_client must be ::HTTPX or an instance of ::HTTPX::Session (got #{base.class})"
+              ValidationError.raise!(
+                "http_client must be ::HTTPX or an instance of ::HTTPX::Session (got #{base.class})",
+                code: "agent_core.mcp.streamable_http.http_client_must_be_httpx_or_httpx_session_got",
+                details: { http_client_class: base.class.name },
+              )
             end
 
           @client = session
@@ -678,7 +705,11 @@ module AgentCore
 
         def normalize_headers(value)
           return {} if value.nil?
-          raise ValidationError, "headers must be a Hash" unless value.is_a?(Hash)
+          ValidationError.raise!(
+            "headers must be a Hash",
+            code: "agent_core.mcp.streamable_http.headers_must_be_a_hash",
+            details: { value_class: value.class.name },
+          ) unless value.is_a?(Hash)
 
           value.each_with_object({}) do |(k, v), out|
             key = k.to_s
@@ -693,7 +724,11 @@ module AgentCore
           return nil if value.nil?
           return value if value.respond_to?(:call)
 
-          raise ValidationError, "headers_provider must respond to #call"
+          ValidationError.raise!(
+            "headers_provider must respond to #call",
+            code: "agent_core.mcp.streamable_http.headers_provider_must_respond_to_call",
+            details: { value_class: value.class.name },
+          )
         end
 
         def resolve_headers_provider!

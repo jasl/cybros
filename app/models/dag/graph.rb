@@ -26,7 +26,10 @@ module DAG
     before_destroy :purge_graph_records
 
     def mutate!(turn_id: nil)
-      raise ValidationError, "block required" unless block_given?
+      ValidationError.raise!(
+        "block required",
+        code: "dag.graph.block_required",
+      ) unless block_given?
 
       executable_pending_nodes_created = false
 
@@ -119,7 +122,11 @@ module DAG
 
     def node_event_page_for(node_id, after_event_id: nil, limit: 200, kinds: nil)
       limit = Integer(limit)
-      raise ValidationError, "limit must be > 0" if limit <= 0
+      ValidationError.raise!(
+        "limit must be > 0",
+        code: "dag.graph.limit_must_be_0",
+        details: { limit: limit },
+      ) if limit <= 0
 
       limit = [limit, 1000].min
 
@@ -157,7 +164,11 @@ module DAG
 
     def awaiting_approval_page(limit: 50, after_node_id: nil, lane_id: nil)
       limit = Integer(limit)
-      raise ValidationError, "limit must be > 0" if limit <= 0
+      ValidationError.raise!(
+        "limit must be > 0",
+        code: "dag.graph.limit_must_be_0",
+        details: { limit: limit },
+      ) if limit <= 0
 
       limit = [limit, 1000].min
 
@@ -618,8 +629,14 @@ module DAG
         subject_id = subject.id
       end
 
-      raise ValidationError, "subject_type required" if subject_type.blank?
-      raise ValidationError, "subject_id required" if subject_id.blank?
+      ValidationError.raise!(
+        "subject_type required",
+        code: "dag.graph.subject_type_required",
+      ) if subject_type.blank?
+      ValidationError.raise!(
+        "subject_id required",
+        code: "dag.graph.subject_id_required",
+      ) if subject_id.blank?
 
       begin
         hooks.record_event(
@@ -645,7 +662,10 @@ module DAG
     end
 
     def with_graph_lock!(&block)
-      raise ValidationError, "block required" unless block_given?
+      ValidationError.raise!(
+        "block required",
+        code: "dag.graph.block_required",
+      ) unless block_given?
 
       self.class.with_advisory_lock!(advisory_lock_name) do
         transaction do
@@ -656,7 +676,10 @@ module DAG
     end
 
     def with_graph_try_lock(&block)
-      raise ValidationError, "block required" unless block_given?
+      ValidationError.raise!(
+        "block required",
+        code: "dag.graph.block_required",
+      ) unless block_given?
 
       self.class.with_advisory_lock(advisory_lock_name, timeout_seconds: 0) do
         transaction do
@@ -782,9 +805,12 @@ module DAG
       def validate_event_type!(event_type)
         return if DAG::GraphHooks::EventTypes::ALL.include?(event_type)
 
-        raise ValidationError,
-              "unknown DAG graph hook event_type=#{event_type.inspect}. " \
-              "Add it to DAG::GraphHooks::EventTypes and update docs/spec."
+        ValidationError.raise!(
+          "unknown DAG graph hook event_type=#{event_type.inspect}. " \
+            "Add it to DAG::GraphHooks::EventTypes and update docs/spec.",
+          code: "dag.graph.unknown_dag_graph_hook_event_type_add_it_to_dag_graphhooks_eventtypes_and_update_docs_spec",
+          details: { event_type: event_type.to_s },
+        )
       end
 
       def purge_graph_records

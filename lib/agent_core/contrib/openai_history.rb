@@ -33,7 +33,11 @@ module AgentCore
           )
         end
 
-        raise ValidationError, "history messages must be AgentCore::Message or Hash-like with role/content"
+        ValidationError.raise!(
+          "history messages must be AgentCore::Message or Hash-like with role/content",
+          code: "agent_core.contrib.openai_history.history_messages_must_be_agentcore_message_or_hash_like_with_role_content",
+          details: { value_class: value.class.name },
+        )
       end
 
       def coerce_hash_message(hash)
@@ -71,7 +75,11 @@ module AgentCore
       def coerce_tool_call(value, fallback_id:)
         return value if value.is_a?(AgentCore::ToolCall)
 
-        raise ValidationError, "tool_calls entries must be Hash-like" unless value.is_a?(Hash)
+        ValidationError.raise!(
+          "tool_calls entries must be Hash-like",
+          code: "agent_core.contrib.openai_history.tool_calls_entries_must_be_hash_like",
+          details: { value_class: value.class.name },
+        ) unless value.is_a?(Hash)
 
         h = AgentCore::Utils.symbolize_keys(value)
 
@@ -81,7 +89,10 @@ module AgentCore
 
         fn = AgentCore::Utils.symbolize_keys(h.fetch(:function, nil))
         name = fn.fetch(:name, "").to_s.strip
-        raise ValidationError, "tool_call.function.name is required" if name.empty?
+        ValidationError.raise!(
+          "tool_call.function.name is required",
+          code: "agent_core.contrib.openai_history.tool_call_function_name_is_required",
+        ) if name.empty?
 
         raw_args = fn.fetch(:arguments, nil)
         args_hash, parse_error = AgentCore::Utils.parse_tool_arguments(raw_args)
@@ -106,7 +117,11 @@ module AgentCore
 
         sym = str.to_sym
         unless AgentCore::Message::ROLES.include?(sym)
-          raise ValidationError, "Invalid message role: #{value.inspect}"
+          ValidationError.raise!(
+            "Invalid message role: #{value.inspect}",
+            code: "agent_core.contrib.openai_history.invalid_message_role",
+            details: { role: value.to_s, role_inspect: value.inspect },
+          )
         end
 
         sym

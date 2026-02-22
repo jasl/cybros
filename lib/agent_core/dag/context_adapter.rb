@@ -100,7 +100,11 @@ module AgentCore
             when String
               JSON.parse(value)
             else
-              raise ValidationError, "message payload must be a Hash or JSON String (got #{value.class})"
+              ValidationError.raise!(
+                "message payload must be a Hash or JSON String (got #{value.class})",
+                code: "agent_core.dag.context_adapter.message_payload_must_be_a_hash_or_json_string_got",
+                details: { value_class: value.class.name },
+              )
             end
 
           Message.from_h(hash)

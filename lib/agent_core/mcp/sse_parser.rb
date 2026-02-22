@@ -21,11 +21,19 @@ module AgentCore
         # @param max_event_data_bytes [Integer, nil] Maximum data payload per event (nil = unlimited)
       def initialize(max_buffer_bytes: 1_000_000, max_event_data_bytes: nil)
         @max_buffer_bytes = Integer(max_buffer_bytes)
-        raise ValidationError, "max_buffer_bytes must be positive" if @max_buffer_bytes <= 0
+        ValidationError.raise!(
+          "max_buffer_bytes must be positive",
+          code: "agent_core.mcp.sse_parser.max_buffer_bytes_must_be_positive",
+          details: { max_buffer_bytes: @max_buffer_bytes },
+        ) if @max_buffer_bytes <= 0
 
         @max_event_data_bytes = max_event_data_bytes.nil? ? nil : Integer(max_event_data_bytes)
         if !@max_event_data_bytes.nil? && @max_event_data_bytes <= 0
-          raise ValidationError, "max_event_data_bytes must be positive"
+          ValidationError.raise!(
+            "max_event_data_bytes must be positive",
+            code: "agent_core.mcp.sse_parser.max_event_data_bytes_must_be_positive",
+            details: { max_event_data_bytes: @max_event_data_bytes },
+          )
         end
 
         @buffer = +"".b
@@ -44,7 +52,11 @@ module AgentCore
         return if chunk.empty?
 
         @buffer << chunk
-        raise ValidationError, "SSE buffer exceeded max_buffer_bytes" if @buffer.bytesize > @max_buffer_bytes
+        ValidationError.raise!(
+          "SSE buffer exceeded max_buffer_bytes",
+          code: "agent_core.mcp.sse_parser.sse_buffer_exceeded_max_buffer_bytes",
+          details: { max_buffer_bytes: @max_buffer_bytes, buffer_bytes: @buffer.bytesize },
+        ) if @buffer.bytesize > @max_buffer_bytes
 
         each_line do |line|
           process_line(line) { |event| yield event if block_given? }

@@ -261,7 +261,11 @@ module AgentCore
 
         if strict == true && failed.any?
           msg = failed.map { |f| "#{f[:path]} (#{f[:error_class]}: #{f[:message]})" }.join(", ")
-          raise ValidationError, "Failed to preload tokenizers: #{msg}"
+          ValidationError.raise!(
+            "Failed to preload tokenizers: #{msg}",
+            code: "agent_core.contrib.token_estimator.failed_to_preload_tokenizers",
+            details: { failed_count: failed.length },
+          )
         end
 
         { loaded: loaded, failed: failed }

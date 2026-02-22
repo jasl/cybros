@@ -21,7 +21,11 @@ module AgentCore
       # @return [String] Summary text
       def summarize(previous_summary:, transcript:, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS)
         max_output_tokens = Integer(max_output_tokens)
-        raise ValidationError, "max_output_tokens must be positive" if max_output_tokens <= 0
+        ValidationError.raise!(
+          "max_output_tokens must be positive",
+          code: "agent_core.context_management.summarizer.max_output_tokens_must_be_positive",
+          details: { max_output_tokens: max_output_tokens },
+        ) if max_output_tokens <= 0
 
         sys = <<~SYSTEM
           You are a system component that maintains a running conversation summary for an AI agent.

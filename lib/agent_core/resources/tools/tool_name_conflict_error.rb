@@ -10,7 +10,7 @@ module AgentCore
           @tool_name = tool_name&.to_s
           @existing_source = existing_source
           @new_source = new_source
-          super(message, code: "tool_name_conflict", details: details || {})
+          super(message, code: "agent_core.tools.tool_name_conflict", details: details || {})
         end
       end
     end

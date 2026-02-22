@@ -14,9 +14,21 @@ module AgentCore
         @max_output_chars = Integer(max_output_chars)
         @preview_chars = Integer(preview_chars)
 
-        raise ValidationError, "recent_turns must be >= 0" if @recent_turns.negative?
-        raise ValidationError, "max_output_chars must be > 0" if @max_output_chars <= 0
-        raise ValidationError, "preview_chars must be > 0" if @preview_chars <= 0
+        ValidationError.raise!(
+          "recent_turns must be >= 0",
+          code: "agent_core.context_management.tool_output_pruner.recent_turns_must_be_0",
+          details: { recent_turns: @recent_turns },
+        ) if @recent_turns.negative?
+        ValidationError.raise!(
+          "max_output_chars must be > 0",
+          code: "agent_core.context_management.tool_output_pruner.max_output_chars_must_be_0",
+          details: { max_output_chars: @max_output_chars },
+        ) if @max_output_chars <= 0
+        ValidationError.raise!(
+          "preview_chars must be > 0",
+          code: "agent_core.context_management.tool_output_pruner.preview_chars_must_be_0",
+          details: { preview_chars: @preview_chars },
+        ) if @preview_chars <= 0
       end
 
       # Prune older tool outputs in the prompt view to reduce token/char usage.

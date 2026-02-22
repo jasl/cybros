@@ -15,7 +15,11 @@ module AgentCore
     # @return [Hash]
     def symbolize_keys(value)
       return {} if value.nil?
-      raise ValidationError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
+      ValidationError.raise!(
+        "Expected Hash, got #{value.class}",
+        code: "agent_core.utils.expected_hash_got",
+        details: { value_class: value.class.name },
+      ) unless value.is_a?(Hash)
 
       out = {}
 
@@ -159,11 +163,19 @@ module AgentCore
     # @param path [String] Human-readable context for error messages
     # @return [nil]
     def assert_symbol_keys!(value, path: "value")
-      raise ValidationError, "#{path} must be a Hash" unless value.is_a?(Hash)
+      ValidationError.raise!(
+        "#{path} must be a Hash",
+        code: "agent_core.utils.path_must_be_a_hash",
+        details: { path: path.to_s },
+      ) unless value.is_a?(Hash)
 
       value.each_key do |key|
         unless key.is_a?(Symbol)
-          raise ValidationError, "#{path} keys must be Symbols (got #{key.class})"
+          ValidationError.raise!(
+            "#{path} keys must be Symbols (got #{key.class})",
+            code: "agent_core.utils.path_keys_must_be_symbols_got",
+            details: { path: path.to_s, key_class: key.class.name },
+          )
         end
       end
 
@@ -195,7 +207,11 @@ module AgentCore
     # @return [Hash, nil] { name:, description:, input_schema: }
     def normalize_mcp_tool_definition(value)
       return nil if value.nil?
-      raise ValidationError, "Expected Hash, got #{value.class}" unless value.is_a?(Hash)
+      ValidationError.raise!(
+        "Expected Hash, got #{value.class}",
+        code: "agent_core.utils.expected_hash_got",
+        details: { value_class: value.class.name },
+      ) unless value.is_a?(Hash)
 
       name = value.fetch("name", "").to_s.strip
       return nil if name.empty?
@@ -325,7 +341,11 @@ module AgentCore
 
     def parse_tool_arguments(value, max_bytes: DEFAULT_MAX_TOOL_ARGS_BYTES)
       max_bytes = Integer(max_bytes)
-      raise ValidationError, "max_bytes must be positive" if max_bytes <= 0
+      ValidationError.raise!(
+        "max_bytes must be positive",
+        code: "agent_core.utils.max_bytes_must_be_positive",
+        details: { max_bytes: max_bytes },
+      ) if max_bytes <= 0
 
       return [{}, nil] if value.nil?
 

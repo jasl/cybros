@@ -53,7 +53,10 @@ module AgentCore
           max_response_bytes: nil
         )
           id = id.to_s.strip
-          raise ValidationError, "id is required" if id.empty?
+          ValidationError.raise!(
+            "id is required",
+            code: "agent_core.mcp.server_config.id_is_required",
+          ) if id.empty?
 
           transport = normalize_transport(transport)
 
@@ -65,27 +68,71 @@ module AgentCore
 
           case transport
           when :stdio
-            raise ValidationError, "command is required" if command.nil? || command.empty?
-            raise ValidationError, "url must be empty for stdio transport" if url
+            ValidationError.raise!(
+              "command is required",
+              code: "agent_core.mcp.server_config.command_is_required",
+            ) if command.nil? || command.empty?
+            ValidationError.raise!(
+              "url must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.url_must_be_empty_for_stdio_transport",
+            ) if url
 
             http_headers = normalize_headers(headers)
-            raise ValidationError, "headers must be empty for stdio transport" if http_headers && !http_headers.empty?
-            raise ValidationError, "headers_provider must be empty for stdio transport" unless headers_provider.nil?
-            raise ValidationError, "open_timeout_s must be empty for stdio transport" unless open_timeout_s.nil?
-            raise ValidationError, "read_timeout_s must be empty for stdio transport" unless read_timeout_s.nil?
-            raise ValidationError, "sse_max_reconnects must be empty for stdio transport" unless sse_max_reconnects.nil?
-            raise ValidationError, "max_response_bytes must be empty for stdio transport" unless max_response_bytes.nil?
+            ValidationError.raise!(
+              "headers must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.headers_must_be_empty_for_stdio_transport",
+              details: { header_count: http_headers&.length.to_i },
+            ) if http_headers && !http_headers.empty?
+            ValidationError.raise!(
+              "headers_provider must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.headers_provider_must_be_empty_for_stdio_transport",
+            ) unless headers_provider.nil?
+            ValidationError.raise!(
+              "open_timeout_s must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.open_timeout_s_must_be_empty_for_stdio_transport",
+            ) unless open_timeout_s.nil?
+            ValidationError.raise!(
+              "read_timeout_s must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.read_timeout_s_must_be_empty_for_stdio_transport",
+            ) unless read_timeout_s.nil?
+            ValidationError.raise!(
+              "sse_max_reconnects must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.sse_max_reconnects_must_be_empty_for_stdio_transport",
+            ) unless sse_max_reconnects.nil?
+            ValidationError.raise!(
+              "max_response_bytes must be empty for stdio transport",
+              code: "agent_core.mcp.server_config.max_response_bytes_must_be_empty_for_stdio_transport",
+            ) unless max_response_bytes.nil?
 
             env_provider = normalize_optional_callable(env_provider, field: "env_provider")
           when :streamable_http
-            raise ValidationError, "url is required" if url.nil? || url.empty?
-            raise ValidationError, "command must be empty for streamable_http transport" if command
-            raise ValidationError, "args must be empty for streamable_http transport" unless Array(args).empty?
+            ValidationError.raise!(
+              "url is required",
+              code: "agent_core.mcp.server_config.url_is_required",
+            ) if url.nil? || url.empty?
+            ValidationError.raise!(
+              "command must be empty for streamable_http transport",
+              code: "agent_core.mcp.server_config.command_must_be_empty_for_streamable_http_transport",
+            ) if command
+            ValidationError.raise!(
+              "args must be empty for streamable_http transport",
+              code: "agent_core.mcp.server_config.args_must_be_empty_for_streamable_http_transport",
+            ) unless Array(args).empty?
 
             env_hash = normalize_env(env)
-            raise ValidationError, "env must be empty for streamable_http transport" unless env_hash.empty?
-            raise ValidationError, "env_provider must be empty for streamable_http transport" unless env_provider.nil?
-            raise ValidationError, "chdir must be empty for streamable_http transport" unless blank?(chdir)
+            ValidationError.raise!(
+              "env must be empty for streamable_http transport",
+              code: "agent_core.mcp.server_config.env_must_be_empty_for_streamable_http_transport",
+              details: { env_keys: env_hash.keys.sort },
+            ) unless env_hash.empty?
+            ValidationError.raise!(
+              "env_provider must be empty for streamable_http transport",
+              code: "agent_core.mcp.server_config.env_provider_must_be_empty_for_streamable_http_transport",
+            ) unless env_provider.nil?
+            ValidationError.raise!(
+              "chdir must be empty for streamable_http transport",
+              code: "agent_core.mcp.server_config.chdir_must_be_empty_for_streamable_http_transport",
+            ) unless blank?(chdir)
 
             open_timeout_s = normalize_optional_timeout_s(open_timeout_s, field: "open_timeout_s")
             read_timeout_s = normalize_optional_timeout_s(read_timeout_s, field: "read_timeout_s")
@@ -99,7 +146,11 @@ module AgentCore
             env_provider = nil
             chdir = nil
           else
-            raise ValidationError, "unsupported transport: #{transport.inspect}"
+            ValidationError.raise!(
+              "unsupported transport: #{transport.inspect}",
+              code: "agent_core.mcp.server_config.unsupported_transport",
+              details: { transport: transport&.to_s },
+            )
           end
 
           protocol_version = normalize_protocol_version(protocol_version)
@@ -136,7 +187,11 @@ module AgentCore
         def self.coerce(value)
           return value if value.is_a?(AgentCore::MCP::ServerConfig)
 
-          raise ValidationError, "server config must be a ServerConfig or Hash" unless value.is_a?(Hash)
+          ValidationError.raise!(
+            "server config must be a ServerConfig or Hash",
+            code: "agent_core.mcp.server_config.server_config_must_be_a_server_config_or_hash",
+            details: { value_class: value.class.name },
+          ) unless value.is_a?(Hash)
 
           AgentCore::Utils.assert_symbol_keys!(value, path: "mcp server config")
 
@@ -171,7 +226,11 @@ module AgentCore
         end
 
         def normalize_env(value)
-          raise ValidationError, "env must be a Hash" if !value.nil? && !value.is_a?(Hash)
+          ValidationError.raise!(
+            "env must be a Hash",
+            code: "agent_core.mcp.server_config.env_must_be_a_hash",
+            details: { value_class: value.class.name },
+          ) if !value.nil? && !value.is_a?(Hash)
 
           hash = value || {}
           hash.each_with_object({}) do |(k, v), out|
@@ -184,7 +243,11 @@ module AgentCore
 
         def normalize_headers(value)
           return nil if value.nil?
-          raise ValidationError, "headers must be a Hash" unless value.is_a?(Hash)
+          ValidationError.raise!(
+            "headers must be a Hash",
+            code: "agent_core.mcp.server_config.headers_must_be_a_hash",
+            details: { value_class: value.class.name },
+          ) unless value.is_a?(Hash)
 
           value.each_with_object({}) do |(k, v), out|
             key = k.to_s
@@ -205,7 +268,11 @@ module AgentCore
           when "streamable_http", "streamable-http"
             :streamable_http
           else
-            raise ValidationError, "transport must be :stdio or :streamable_http"
+            ValidationError.raise!(
+              "transport must be :stdio or :streamable_http",
+              code: "agent_core.mcp.server_config.transport_must_be_stdio_or_streamable_http",
+              details: { transport: value.to_s },
+            )
           end
         end
 
@@ -216,7 +283,11 @@ module AgentCore
 
         def normalize_timeout_s(value)
           timeout_s = Float(value.nil? ? AgentCore::MCP::DEFAULT_TIMEOUT_S : value)
-          raise ValidationError, "timeout_s must be positive" if timeout_s <= 0
+          ValidationError.raise!(
+            "timeout_s must be positive",
+            code: "agent_core.mcp.server_config.timeout_s_must_be_positive",
+            details: { timeout_s: timeout_s },
+          ) if timeout_s <= 0
 
           timeout_s
         end
@@ -225,7 +296,11 @@ module AgentCore
           return nil if value.nil?
 
           timeout_s = Float(value)
-          raise ValidationError, "#{field} must be positive" if timeout_s <= 0
+          ValidationError.raise!(
+            "#{field} must be positive",
+            code: "agent_core.mcp.server_config.field_must_be_positive",
+            details: { field: field.to_s, value: timeout_s },
+          ) if timeout_s <= 0
 
           timeout_s
         end
@@ -234,7 +309,11 @@ module AgentCore
           return nil if value.nil?
 
           i = Integer(value)
-          raise ValidationError, "#{field} must be positive" if i <= 0
+          ValidationError.raise!(
+            "#{field} must be positive",
+            code: "agent_core.mcp.server_config.field_must_be_positive",
+            details: { field: field.to_s, value: i },
+          ) if i <= 0
 
           i
         end
@@ -243,7 +322,11 @@ module AgentCore
           return nil if value.nil?
           return value if value.respond_to?(:call)
 
-          raise ValidationError, "#{field} must respond to #call"
+          ValidationError.raise!(
+            "#{field} must respond to #call",
+            code: "agent_core.mcp.server_config.field_must_respond_to_call",
+            details: { field: field.to_s, value_class: value.class.name },
+          )
         end
       end
   end

@@ -14,11 +14,19 @@ module AgentCore
 
         def build(store:, max_body_bytes: DEFAULT_MAX_BODY_BYTES, tool_name_prefix: DEFAULT_TOOL_NAME_PREFIX)
           unless store.respond_to?(:search) && store.respond_to?(:store) && store.respond_to?(:forget)
-            raise ValidationError, "store must implement Memory::Base"
+            ValidationError.raise!(
+              "store must implement Memory::Base",
+              code: "agent_core.memory.tools.store_must_implement_memory_base",
+              details: { store_class: store.class.name },
+            )
           end
 
           max_body_bytes = Integer(max_body_bytes)
-          raise ValidationError, "max_body_bytes must be positive" if max_body_bytes <= 0
+          ValidationError.raise!(
+            "max_body_bytes must be positive",
+            code: "agent_core.memory.tools.max_body_bytes_must_be_positive",
+            details: { max_body_bytes: max_body_bytes },
+          ) if max_body_bytes <= 0
 
           prefix = tool_name_prefix.to_s
           prefix = prefix.tr(".", "_").gsub(/[^A-Za-z0-9_-]/, "_")

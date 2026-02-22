@@ -14,7 +14,11 @@ module AgentCore
 
         def search(query:, limit: 5, metadata_filter: nil)
           limit = Integer(limit)
-          raise ValidationError, "limit must be > 0" if limit <= 0
+          ValidationError.raise!(
+            "limit must be > 0",
+            code: "agent_core.memory.pgvector_store.limit_must_be_0",
+            details: { limit: limit },
+          ) if limit <= 0
 
           q = query.to_s.strip
           return [] if q.empty?
@@ -44,7 +48,10 @@ module AgentCore
 
         def store(content:, metadata: {})
           text = content.to_s
-          raise ValidationError, "content is required" if text.strip.empty?
+          ValidationError.raise!(
+            "content is required",
+            code: "agent_core.memory.pgvector_store.content_is_required",
+          ) if text.strip.empty?
 
           vector = @embedder.embed(text: text)
 

@@ -28,8 +28,14 @@ module AgentCore
         # @param replacement [Message] The new message object
         # @return [Boolean] true if replaced, false if not found
         def replace_message(target, replacement)
-          raise ValidationError, "target is required" if target.nil?
-          raise ValidationError, "replacement is required" if replacement.nil?
+          ValidationError.raise!(
+            "target is required",
+            code: "agent_core.resources.chat_history.in_memory.target_is_required",
+          ) if target.nil?
+          ValidationError.raise!(
+            "replacement is required",
+            code: "agent_core.resources.chat_history.in_memory.replacement_is_required",
+          ) if replacement.nil?
 
           @mutex.synchronize do
             idx = @messages.rindex { |m| m.equal?(target) }

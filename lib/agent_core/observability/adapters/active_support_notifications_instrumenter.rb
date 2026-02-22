@@ -12,12 +12,19 @@ module AgentCore
           @notifier = notifier || default_notifier
           return if @notifier&.respond_to?(:instrument)
 
-          raise ValidationError, "notifier must respond to #instrument (ActiveSupport not available?)"
+          ValidationError.raise!(
+            "notifier must respond to #instrument (ActiveSupport not available?)",
+            code: "agent_core.observability.active_support_notifications_instrumenter.notifier_must_respond_to_instrument_active_support_not_available",
+            details: { notifier_class: @notifier&.class&.name },
+          )
         end
 
         def instrument(name, payload = {})
           event_name = name.to_s
-          raise ValidationError, "name is required" if event_name.strip.empty?
+          ValidationError.raise!(
+            "name is required",
+            code: "agent_core.observability.active_support_notifications_instrumenter.name_is_required",
+          ) if event_name.strip.empty?
 
           data = payload.is_a?(Hash) ? payload : {}
           start = Process.clock_gettime(Process::CLOCK_MONOTONIC)

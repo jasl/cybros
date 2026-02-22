@@ -50,7 +50,10 @@ module AgentCore
 
         def start
           command = @command
-          raise ValidationError, "command is required" if command.strip.empty?
+          ValidationError.raise!(
+            "command is required",
+            code: "agent_core.mcp.stdio.command_is_required",
+          ) if command.strip.empty?
 
           @mutex.synchronize do
             raise AgentCore::MCP::ClosedError, "transport is closed" if @closed
@@ -120,7 +123,10 @@ module AgentCore
 
           json = JSON.generate(message)
           if json.include?("\n") || json.include?("\r")
-            raise ValidationError, "MCP stdio messages must be newline-delimited JSON (no embedded newlines)"
+            ValidationError.raise!(
+              "MCP stdio messages must be newline-delimited JSON (no embedded newlines)",
+              code: "agent_core.mcp.stdio.mcp_stdio_messages_must_be_newline_delimited_json_no_embedded_newlines",
+            )
           end
 
           stdin = @mutex.synchronize { @stdin }

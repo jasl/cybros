@@ -71,9 +71,18 @@ module AgentCore
           tool_error_mode: :safe
         )
           model = model.to_s.strip
-          raise ValidationError, "model is required" if model.empty?
-          raise ValidationError, "provider is required" if provider.nil?
-          raise ValidationError, "tools_registry is required" if tools_registry.nil?
+          ValidationError.raise!(
+            "model is required",
+            code: "agent_core.dag.runtime.model_is_required",
+          ) if model.empty?
+          ValidationError.raise!(
+            "provider is required",
+            code: "agent_core.dag.runtime.provider_is_required",
+          ) if provider.nil?
+          ValidationError.raise!(
+            "tools_registry is required",
+            code: "agent_core.dag.runtime.tools_registry_is_required",
+          ) if tools_registry.nil?
 
           fallback_models =
             Array(fallback_models)
@@ -110,36 +119,60 @@ module AgentCore
           token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
 
           context_turns = Integer(context_turns)
-          raise ValidationError, "context_turns must be > 0" if context_turns <= 0
+          ValidationError.raise!(
+            "context_turns must be > 0",
+            code: "agent_core.dag.runtime.context_turns_must_be_0",
+            details: { context_turns: context_turns },
+          ) if context_turns <= 0
 
           context_window_tokens =
             if context_window_tokens.nil?
               nil
             else
               value = Integer(context_window_tokens)
-              raise ValidationError, "context_window_tokens must be > 0" if value <= 0
+              ValidationError.raise!(
+                "context_window_tokens must be > 0",
+                code: "agent_core.dag.runtime.context_window_tokens_must_be_0",
+                details: { context_window_tokens: value },
+              ) if value <= 0
               value
             end
 
           reserved_output_tokens = Integer(reserved_output_tokens)
-          raise ValidationError, "reserved_output_tokens must be >= 0" if reserved_output_tokens.negative?
+          ValidationError.raise!(
+            "reserved_output_tokens must be >= 0",
+            code: "agent_core.dag.runtime.reserved_output_tokens_must_be_0",
+            details: { reserved_output_tokens: reserved_output_tokens },
+          ) if reserved_output_tokens.negative?
 
           max_tool_calls_per_turn =
             if max_tool_calls_per_turn.nil?
               nil
             else
               value = Integer(max_tool_calls_per_turn)
-              raise ValidationError, "max_tool_calls_per_turn must be > 0" if value <= 0
+              ValidationError.raise!(
+                "max_tool_calls_per_turn must be > 0",
+                code: "agent_core.dag.runtime.max_tool_calls_per_turn_must_be_0",
+                details: { max_tool_calls_per_turn: value },
+              ) if value <= 0
               value
             end
 
           max_steps_per_turn = Integer(max_steps_per_turn)
-          raise ValidationError, "max_steps_per_turn must be > 0" if max_steps_per_turn <= 0
+          ValidationError.raise!(
+            "max_steps_per_turn must be > 0",
+            code: "agent_core.dag.runtime.max_steps_per_turn_must_be_0",
+            details: { max_steps_per_turn: max_steps_per_turn },
+          ) if max_steps_per_turn <= 0
 
           llm_options = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
 
           tool_call_repair_attempts = Integer(tool_call_repair_attempts)
-          raise ValidationError, "tool_call_repair_attempts must be >= 0" if tool_call_repair_attempts.negative?
+          ValidationError.raise!(
+            "tool_call_repair_attempts must be >= 0",
+            code: "agent_core.dag.runtime.tool_call_repair_attempts_must_be_0",
+            details: { tool_call_repair_attempts: tool_call_repair_attempts },
+          ) if tool_call_repair_attempts.negative?
 
           tool_call_repair_fallback_models =
             Array(tool_call_repair_fallback_models)
@@ -148,7 +181,11 @@ module AgentCore
               .freeze
 
           tool_call_repair_max_output_tokens = Integer(tool_call_repair_max_output_tokens)
-          raise ValidationError, "tool_call_repair_max_output_tokens must be > 0" if tool_call_repair_max_output_tokens <= 0
+          ValidationError.raise!(
+            "tool_call_repair_max_output_tokens must be > 0",
+            code: "agent_core.dag.runtime.tool_call_repair_max_output_tokens_must_be_0",
+            details: { tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens },
+          ) if tool_call_repair_max_output_tokens <= 0
 
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
@@ -157,7 +194,11 @@ module AgentCore
           prompt_injection_sources = Array(prompt_injection_sources)
 
           memory_search_limit = Integer(memory_search_limit)
-          raise ValidationError, "memory_search_limit must be >= 0" if memory_search_limit.negative?
+          ValidationError.raise!(
+            "memory_search_limit must be >= 0",
+            code: "agent_core.dag.runtime.memory_search_limit_must_be_0",
+            details: { memory_search_limit: memory_search_limit },
+          ) if memory_search_limit.negative?
 
           prompt_mode = prompt_mode.to_s.strip.downcase.tr("-", "_").to_sym
           prompt_mode = :full unless AgentCore::Resources::PromptInjections::PROMPT_MODES.include?(prompt_mode)

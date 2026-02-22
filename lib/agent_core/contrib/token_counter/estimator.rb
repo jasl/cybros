@@ -8,11 +8,19 @@ module AgentCore
 
         def initialize(token_estimator:, model_hint: nil, per_message_overhead: 0)
           unless token_estimator.respond_to?(:estimate)
-            raise ValidationError, "token_estimator must respond to #estimate"
+            ValidationError.raise!(
+              "token_estimator must respond to #estimate",
+              code: "agent_core.contrib.token_counter.estimator.token_estimator_must_respond_to_estimate",
+              details: { token_estimator_class: token_estimator.class.name },
+            )
           end
 
           overhead = Integer(per_message_overhead, exception: false)
-          raise ValidationError, "per_message_overhead must be a non-negative Integer" unless overhead && overhead >= 0
+          ValidationError.raise!(
+            "per_message_overhead must be a non-negative Integer",
+            code: "agent_core.contrib.token_counter.estimator.per_message_overhead_must_be_a_non_negative_integer",
+            details: { per_message_overhead: per_message_overhead },
+          ) unless overhead && overhead >= 0
 
           @token_estimator = token_estimator
           @model_hint = model_hint

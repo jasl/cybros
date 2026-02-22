@@ -12,17 +12,28 @@ module AgentCore
 
         def initialize(tracer: nil, max_attribute_bytes: DEFAULT_MAX_ATTRIBUTE_BYTES)
           @max_attribute_bytes = Integer(max_attribute_bytes)
-          raise ValidationError, "max_attribute_bytes must be positive" if @max_attribute_bytes <= 0
+          ValidationError.raise!(
+            "max_attribute_bytes must be positive",
+            code: "agent_core.observability.open_telemetry_instrumenter.max_attribute_bytes_must_be_positive",
+            details: { max_attribute_bytes: @max_attribute_bytes },
+          ) if @max_attribute_bytes <= 0
 
           @tracer = tracer || default_tracer
           return if @tracer&.respond_to?(:in_span)
 
-          raise ValidationError, "tracer must respond to #in_span (OpenTelemetry not available?)"
+          ValidationError.raise!(
+            "tracer must respond to #in_span (OpenTelemetry not available?)",
+            code: "agent_core.observability.open_telemetry_instrumenter.tracer_must_respond_to_in_span_open_telemetry_not_available",
+            details: { tracer_class: @tracer&.class&.name },
+          )
         end
 
         def instrument(name, payload = {})
           event_name = name.to_s
-          raise ValidationError, "name is required" if event_name.strip.empty?
+          ValidationError.raise!(
+            "name is required",
+            code: "agent_core.observability.open_telemetry_instrumenter.name_is_required",
+          ) if event_name.strip.empty?
 
           data = payload.is_a?(Hash) ? payload : {}
           start = Process.clock_gettime(Process::CLOCK_MONOTONIC)

@@ -21,7 +21,10 @@ module AgentCore
           reserved_output_tokens: 0
         )
           lang = AgentCore::Contrib::LanguagePolicy::Detector.canonical_target_lang(target_lang)
-          raise ValidationError, "target_lang is required" if lang.empty?
+          ValidationError.raise!(
+            "target_lang is required",
+            code: "agent_core.contrib.final_rewriter.target_lang_is_required",
+          ) if lang.empty?
 
           input = text.to_s
           return input if input.bytesize > DEFAULT_MAX_INPUT_BYTES
@@ -76,14 +79,22 @@ module AgentCore
 
         def normalize_llm_options(value)
           h = value.nil? ? {} : value
-          raise ValidationError, "llm_options must be a Hash" unless h.is_a?(Hash)
+          ValidationError.raise!(
+            "llm_options must be a Hash",
+            code: "agent_core.contrib.final_rewriter.llm_options_must_be_a_hash",
+            details: { value_class: h.class.name },
+          ) unless h.is_a?(Hash)
 
           normalized = AgentCore::Utils.deep_symbolize_keys(h)
           AgentCore::Utils.assert_symbol_keys!(normalized, path: "llm_options")
 
           reserved = normalized.keys & AgentCore::Contrib::OpenAI::RESERVED_CHAT_COMPLETIONS_KEYS
           if reserved.any?
-            raise ValidationError, "llm_options contains reserved keys: #{reserved.map(&:to_s).sort.inspect}"
+            ValidationError.raise!(
+              "llm_options contains reserved keys: #{reserved.map(&:to_s).sort.inspect}",
+              code: "agent_core.contrib.final_rewriter.llm_options_contains_reserved_keys",
+              details: { reserved_keys: reserved.map(&:to_s).sort },
+            )
           end
 
           normalized

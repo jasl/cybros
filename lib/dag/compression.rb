@@ -6,7 +6,10 @@ module DAG
 
     def compress!(node_ids:, summary_content:, summary_metadata: {})
       node_ids = Array(node_ids).map(&:to_s).uniq
-      raise ValidationError, "node_ids must not be empty" if node_ids.empty?
+      ValidationError.raise!(
+        "node_ids must not be empty",
+        code: "dag.compression.node_ids_must_not_be_empty",
+      ) if node_ids.empty?
 
       @graph.with_graph_lock! do
         node_scope = @graph.nodes.where(id: node_ids).lock
@@ -17,11 +20,17 @@ module DAG
         end
 
         if nodes.any? { |node| node.compressed_at.present? }
-          raise ValidationError, "cannot compress nodes that are already compressed"
+          ValidationError.raise!(
+            "cannot compress nodes that are already compressed",
+            code: "dag.compression.cannot_compress_nodes_that_are_already_compressed",
+          )
         end
 
         unless nodes.all?(&:finished?)
-          raise ValidationError, "can only compress finished nodes"
+          ValidationError.raise!(
+            "can only compress finished nodes",
+            code: "dag.compression.can_only_compress_finished_nodes",
+          )
         end
 
         edges_scope = @graph.edges.active
@@ -37,12 +46,18 @@ module DAG
           blocking_edges_scope.where(from_node_id: node_ids).where.not(to_node_id: node_ids).to_a
 
         if outgoing_blocking_edges.empty?
-          raise ValidationError, "summary node must not become a leaf"
+          ValidationError.raise!(
+            "summary node must not become a leaf",
+            code: "dag.compression.summary_node_must_not_become_a_leaf",
+          )
         end
 
         lane_ids = nodes.map(&:lane_id).uniq
         if lane_ids.length != 1
-          raise ValidationError, "cannot compress nodes across multiple lanes"
+          ValidationError.raise!(
+            "cannot compress nodes across multiple lanes",
+            code: "dag.compression.cannot_compress_nodes_across_multiple_lanes",
+          )
         end
 
         now = Time.current

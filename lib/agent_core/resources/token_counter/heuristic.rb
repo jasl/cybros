@@ -26,8 +26,16 @@ module AgentCore
         # @param chars_per_token [Float] Average characters per token
         # @param non_ascii_chars_per_token [Float] Average non-ASCII characters per token
         def initialize(chars_per_token: 4.0, non_ascii_chars_per_token: 1.0)
-          raise ValidationError, "chars_per_token must be positive" unless chars_per_token > 0
-          raise ValidationError, "non_ascii_chars_per_token must be positive" unless non_ascii_chars_per_token > 0
+          ValidationError.raise!(
+            "chars_per_token must be positive",
+            code: "agent_core.resources.token_counter.heuristic.chars_per_token_must_be_positive",
+            details: { chars_per_token: chars_per_token },
+          ) unless chars_per_token > 0
+          ValidationError.raise!(
+            "non_ascii_chars_per_token must be positive",
+            code: "agent_core.resources.token_counter.heuristic.non_ascii_chars_per_token_must_be_positive",
+            details: { non_ascii_chars_per_token: non_ascii_chars_per_token },
+          ) unless non_ascii_chars_per_token > 0
 
           @chars_per_token = chars_per_token.to_f
           @non_ascii_chars_per_token = non_ascii_chars_per_token.to_f

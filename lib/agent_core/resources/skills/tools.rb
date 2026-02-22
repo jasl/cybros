@@ -16,13 +16,25 @@ module AgentCore
 
         def build(store:, max_body_bytes: DEFAULT_MAX_BODY_BYTES, max_file_bytes: DEFAULT_MAX_FILE_BYTES, tool_name_prefix: DEFAULT_TOOL_NAME_PREFIX)
           unless store.respond_to?(:list_skills) && store.respond_to?(:load_skill) && store.respond_to?(:read_skill_file_bytes)
-            raise ValidationError, "store must implement Skills::Store"
+            ValidationError.raise!(
+              "store must implement Skills::Store",
+              code: "agent_core.skills.tools.store_must_implement_skills_store",
+              details: { store_class: store.class.name },
+            )
           end
 
           max_body_bytes = Integer(max_body_bytes)
           max_file_bytes = Integer(max_file_bytes)
-          raise ValidationError, "max_body_bytes must be positive" if max_body_bytes <= 0
-          raise ValidationError, "max_file_bytes must be positive" if max_file_bytes <= 0
+          ValidationError.raise!(
+            "max_body_bytes must be positive",
+            code: "agent_core.skills.tools.max_body_bytes_must_be_positive",
+            details: { max_body_bytes: max_body_bytes },
+          ) if max_body_bytes <= 0
+          ValidationError.raise!(
+            "max_file_bytes must be positive",
+            code: "agent_core.skills.tools.max_file_bytes_must_be_positive",
+            details: { max_file_bytes: max_file_bytes },
+          ) if max_file_bytes <= 0
 
           prefix = tool_name_prefix.to_s
           prefix = prefix.tr(".", "_").gsub(/[^A-Za-z0-9_-]/, "_")

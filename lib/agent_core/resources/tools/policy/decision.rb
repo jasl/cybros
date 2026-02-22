@@ -12,7 +12,11 @@ module AgentCore
 
           def initialize(outcome:, reason: nil, required: false, deny_effect: nil)
             unless OUTCOMES.include?(outcome)
-              raise ValidationError, "Invalid outcome: #{outcome}. Must be one of: #{OUTCOMES.join(", ")}"
+              ValidationError.raise!(
+                "Invalid outcome: #{outcome}. Must be one of: #{OUTCOMES.join(", ")}",
+                code: "agent_core.tools.policy.decision.invalid_outcome_must_be_one_of",
+                details: { outcome: outcome&.to_s, allowed: OUTCOMES.map(&:to_s).sort },
+              )
             end
             @outcome = outcome
             @reason = reason

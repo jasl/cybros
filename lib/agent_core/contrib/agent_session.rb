@@ -46,7 +46,11 @@ module AgentCore
 
       def run_until_idle!(limit: 100)
         limit = Integer(limit)
-        raise ValidationError, "limit must be > 0" if limit <= 0
+        ValidationError.raise!(
+          "limit must be > 0",
+          code: "agent_core.contrib.agent_session.limit_must_be_0",
+          details: { limit: limit },
+        ) if limit <= 0
 
         runs = 0
 

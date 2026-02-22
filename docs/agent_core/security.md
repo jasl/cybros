@@ -34,6 +34,8 @@
 - `tool_error_mode`：
   - `:safe`（默认）：不包含堆栈；非校验类异常默认不包含 message（仅类型）。`AgentCore::ValidationError` 会包含 message（约定为可安全暴露，便于 LLM 自愈）。
   - `:debug`：错误文本包含异常类型与 message（仅建议在受控环境开启）
+- `ToolResult.metadata[:validation_error]`：
+  - 当 tool handler 抛出 `AgentCore::ValidationError` 时，Tool 会返回 `ToolResult.error`，并在 metadata 中附带 `{class, code, details}`（均应为 safe，可用于用户可见日志/结构化展示）。
 
 ---
 

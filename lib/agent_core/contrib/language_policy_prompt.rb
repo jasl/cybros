@@ -7,7 +7,10 @@ module AgentCore
 
       def build(target_lang, style_hint: nil, special_tags: [], tool_calls_rule: true)
         lang = target_lang.to_s.strip
-        raise ValidationError, "target_lang is required" if lang.empty?
+        ValidationError.raise!(
+          "target_lang is required",
+          code: "agent_core.contrib.language_policy_prompt.target_lang_is_required",
+        ) if lang.empty?
 
         hint = style_hint.to_s.strip
         hint = nil if hint.empty?

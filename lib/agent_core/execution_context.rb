@@ -37,7 +37,11 @@ module AgentCore
 
         inst = instrumenter || AgentCore::Observability::NullInstrumenter.new
         unless inst.respond_to?(:instrument) && inst.respond_to?(:publish)
-          raise ValidationError, "instrumenter must respond to #instrument and #publish"
+          ValidationError.raise!(
+            "instrumenter must respond to #instrument and #publish",
+            code: "agent_core.execution_context.instrumenter_must_respond_to_instrument_and_publish",
+            details: { instrumenter_class: inst.class.name },
+          )
         end
 
         clk = clock || DefaultClock.new
@@ -73,7 +77,11 @@ module AgentCore
           merged = attributes.empty? ? value : value.merge(attributes)
           new(attributes: merged, instrumenter: instrumenter)
         else
-          raise ValidationError, "context must be nil, a Hash (Symbol keys), or AgentCore::ExecutionContext (got #{value.class})"
+          ValidationError.raise!(
+            "context must be nil, a Hash (Symbol keys), or AgentCore::ExecutionContext (got #{value.class})",
+            code: "agent_core.execution_context.context_must_be_nil_a_hash_symbol_keys_or_agentcore_execution_context_got",
+            details: { value_class: value.class.name },
+          )
         end
       end
     end

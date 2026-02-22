@@ -26,14 +26,22 @@ module AgentCore
 
       def normalize_request_defaults(value)
         h = value.nil? ? {} : value
-        raise ValidationError, "request_defaults must be a Hash" unless h.is_a?(Hash)
+        ValidationError.raise!(
+          "request_defaults must be a Hash",
+          code: "agent_core.contrib.provider_with_defaults.request_defaults_must_be_a_hash",
+          details: { value_class: h.class.name },
+        ) unless h.is_a?(Hash)
 
         normalized = AgentCore::Utils.deep_symbolize_keys(h)
         AgentCore::Utils.assert_symbol_keys!(normalized, path: "request_defaults")
 
         reserved = normalized.keys & AgentCore::Contrib::OpenAI::RESERVED_CHAT_COMPLETIONS_KEYS
         if reserved.any?
-          raise ValidationError, "request_defaults contains reserved keys: #{reserved.map(&:to_s).sort.inspect}"
+          ValidationError.raise!(
+            "request_defaults contains reserved keys: #{reserved.map(&:to_s).sort.inspect}",
+            code: "agent_core.contrib.provider_with_defaults.request_defaults_contains_reserved_keys",
+            details: { reserved_keys: reserved.map(&:to_s).sort },
+          )
         end
 
         canonicalize_stop_keys(normalized)
