@@ -1,6 +1,6 @@
 # 知识管理 / 上下文管理 / 记忆管理：方案设计（Lite vs Ultimate）
 
-更新时间：2026-02-21  
+更新时间：2026-02-23  
 适用范围：Cybros `DAG 引擎 + AgentCore（DAG-first）`
 
 本文给出两档方案：
@@ -164,6 +164,11 @@ Lite 与 Ultimate 的差异主要在 **Retrieve**（本地 vs 服务化）与 **
   - 本轮检索结果（snippets）与裁剪报告（可选）
 
 这要求 Context 模块在 Assemble 阶段明确“章节边界”，并把章节级 tokens 统计写入 ContextCostReport（即便 Lite 只做粗粒度，也要能区分 prefix vs tail）。
+
+已部分落地（P1）：
+
+- PromptBuilder 的 system prompt 组装支持 `prefix`（稳定）/`tail`（动态）分段；`<relevant_context>`（memory snippets）强制进入 `tail`。
+- `agent_message.metadata["context_cost"]["prompt_sections"]` 写入 `prefix/tail` 的 bytes/tokens/sha256 与每个 section 的 bytes/tokens + safe metadata（不记录任何 prompt 文本内容）。
 
 ---
 

@@ -13,6 +13,7 @@ module AgentCore
             prompt_modes: PROMPT_MODES,
             root_key: nil,
             total_max_bytes: nil,
+            stability: :prefix,
             marker: Truncation::DEFAULT_MARKER,
             section_header: DEFAULT_SECTION_HEADER,
             substitute_variables: false,
@@ -23,6 +24,7 @@ module AgentCore
             @prompt_modes = Array(prompt_modes).map { |m| m.to_sym }
             @root_key = root_key&.to_sym
             @total_max_bytes = total_max_bytes
+            @stability = normalize_stability(stability)
             @marker = marker.to_s
             @section_header = section_header.to_s.strip
             @section_header = DEFAULT_SECTION_HEADER if @section_header.empty?
@@ -35,27 +37,48 @@ module AgentCore
             selected_files = filter_files_for_mode(prompt_mode)
 
             body = +"# #{@section_header}\n"
+            files_meta = []
 
             selected_files.each do |spec|
-              rendered = render_file(spec, root: root)
-              next if rendered.nil?
+              rendered, meta = render_file(spec, root: root)
+              next if rendered.nil? || meta.nil?
 
               body << "\n" unless body.end_with?("\n\n")
               body << rendered
               body << "\n" unless body.end_with?("\n")
+
+              files_meta << meta
             end
 
+            bytes_before = body.bytesize
+            body_after = body
+            truncated_total = false
+
             if @total_max_bytes
-              body = Truncation.head_marker_tail(body, max_bytes: @total_max_bytes, marker: @marker)
+              max_bytes = Integer(@total_max_bytes, exception: false)
+              if max_bytes && max_bytes >= 0
+                truncated_total = bytes_before > max_bytes
+                body_after = Truncation.head_marker_tail(body, max_bytes: max_bytes, marker: @marker)
+              end
             end
 
             item =
               Item.new(
                 target: :system_section,
-                content: body,
+                content: body_after,
                 order: @order,
                 prompt_modes: @prompt_modes,
                 substitute_variables: @substitute_variables,
+                metadata: {
+                  source: "file_set",
+                  stability: @stability.to_s,
+                  section_header: @section_header,
+                  total_max_bytes: @total_max_bytes,
+                  bytes_before: bytes_before,
+                  bytes_after: body_after.bytesize,
+                  truncated: truncated_total,
+                  files: files_meta,
+                }.compact,
               )
 
             [item]
@@ -92,10 +115,17 @@ module AgentCore
             @files
           end
 
+          def normalize_stability(value)
+            s = value.to_s.strip.downcase.tr("-", "_")
+            s == "tail" ? :tail : :prefix
+          rescue StandardError
+            :prefix
+          end
+
           def render_file(spec, root:)
             h = spec.is_a?(Hash) ? AgentCore::Utils.symbolize_keys(spec) : {}
             rel = h.fetch(:path).to_s
-            return nil if rel.strip.empty?
+            return [nil, nil] if rel.strip.empty?
 
             title = h.fetch(:title, rel).to_s.strip
             title = rel if title.empty?
@@ -105,22 +135,58 @@ module AgentCore
             max_bytes = h[:max_bytes]
             max_bytes = Integer(max_bytes, exception: false) if max_bytes
 
-            content =
+            content, meta =
               if path && File.file?(path)
-                Truncation.normalize_utf8(File.binread(path))
+                raw = Truncation.normalize_utf8(File.binread(path))
+                raw_bytes = raw.bytesize
+
+                if max_bytes && max_bytes.positive?
+                  truncated = raw_bytes > max_bytes
+                  rendered = Truncation.head_marker_tail(raw, max_bytes: max_bytes, marker: @marker)
+                  [
+                    rendered,
+                    {
+                      path: rel,
+                      bytes: rendered.bytesize,
+                      bytes_before: raw_bytes,
+                      missing: false,
+                      truncated: truncated,
+                      max_bytes: max_bytes,
+                    }.compact,
+                  ]
+                else
+                  [
+                    raw,
+                    {
+                      path: rel,
+                      bytes: raw_bytes,
+                      bytes_before: raw_bytes,
+                      missing: false,
+                      truncated: false,
+                      max_bytes: max_bytes,
+                    }.compact,
+                  ]
+                end
               elsif @include_missing
-                "[MISSING] #{rel}"
+                placeholder = "[MISSING] #{rel}"
+                [
+                  placeholder,
+                  {
+                    path: rel,
+                    bytes: placeholder.bytesize,
+                    bytes_before: placeholder.bytesize,
+                    missing: true,
+                    truncated: false,
+                    max_bytes: max_bytes,
+                  }.compact,
+                ]
               end
 
-            return nil if content.nil?
+            return [nil, nil] if content.nil? || meta.nil?
 
-            if max_bytes && max_bytes.positive?
-              content = Truncation.head_marker_tail(content, max_bytes: max_bytes, marker: @marker)
-            end
-
-            "## #{title}\n#{content}"
+            ["## #{title}\n#{content}", meta]
           rescue StandardError
-            nil
+            [nil, nil]
           end
 
           def safe_join(root, rel)

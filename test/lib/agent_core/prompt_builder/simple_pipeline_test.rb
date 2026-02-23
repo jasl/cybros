@@ -167,9 +167,9 @@ class AgentCore::PromptBuilder::SimplePipelineTest < Minitest::Test
     idx_skills = sys.index("<available_skills>")
 
     assert idx_mem && idx_i1 && idx_i2 && idx_skills
-    assert_operator idx_mem, :<, idx_i1
     assert_operator idx_i1, :<, idx_i2
     assert_operator idx_i2, :<, idx_skills
+    assert_operator idx_skills, :<, idx_mem
   end
 
   def test_inserts_preamble_messages_before_chat_history

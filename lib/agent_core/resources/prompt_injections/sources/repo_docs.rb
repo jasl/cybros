@@ -14,7 +14,8 @@ module AgentCore
             order: 0,
             prompt_modes: PROMPT_MODES,
             wrapper_template: DEFAULT_WRAPPER_TEMPLATE,
-            marker: Truncation::DEFAULT_MARKER
+            marker: Truncation::DEFAULT_MARKER,
+            stability: :prefix
           )
             @filenames = Array(filenames).map(&:to_s).reject(&:empty?)
             @filenames = DEFAULT_FILENAMES if @filenames.empty?
@@ -24,6 +25,7 @@ module AgentCore
             @wrapper_template = wrapper_template.to_s
             @wrapper_template = DEFAULT_WRAPPER_TEMPLATE if @wrapper_template.strip.empty?
             @marker = marker.to_s
+            @stability = normalize_stability(stability)
           end
 
           def items(agent:, user_message:, execution_context:, prompt_mode:)
@@ -33,20 +35,39 @@ module AgentCore
             files = discover_files(repo_root, cwd)
             return [] if files.empty?
 
-            body = render_files(files, repo_root: repo_root)
+            body, files_meta = render_files(files, repo_root: repo_root)
+
+            bytes_before = body.bytesize
+            body_after = body
+            truncated_total = false
+
             if @max_total_bytes
-              body = Truncation.head_marker_tail(body, max_bytes: @max_total_bytes, marker: @marker)
+              max_bytes = Integer(@max_total_bytes, exception: false)
+              if max_bytes && max_bytes >= 0
+                truncated_total = bytes_before > max_bytes
+                body_after = Truncation.head_marker_tail(body, max_bytes: max_bytes, marker: @marker)
+              end
             end
 
-            wrapped = @wrapper_template.gsub("{{content}}", body)
+            wrapped = @wrapper_template.gsub("{{content}}", body_after)
 
             [
               Item.new(
-                target: :preamble_message,
-                role: :user,
+                target: :system_section,
                 content: wrapped,
                 order: @order,
                 prompt_modes: @prompt_modes,
+                id: "repo_docs",
+                metadata: {
+                  source: "repo_docs",
+                  stability: @stability.to_s,
+                  filenames: @filenames,
+                  max_total_bytes: @max_total_bytes,
+                  bytes_before: bytes_before,
+                  bytes_after: body_after.bytesize,
+                  truncated: truncated_total,
+                  files: files_meta,
+                }.compact,
               ),
             ]
           rescue StandardError
@@ -114,21 +135,38 @@ module AgentCore
             [cwd]
           end
 
+          def normalize_stability(value)
+            s = value.to_s.strip.downcase.tr("-", "_")
+            s == "tail" ? :tail : :prefix
+          rescue StandardError
+            :prefix
+          end
+
           def render_files(paths, repo_root:)
             root = File.expand_path(repo_root.to_s)
 
             out = +"# Repo Instructions\n"
+            files_meta = []
 
             paths.each do |path|
               rel = path.start_with?(root) ? path.delete_prefix(root).sub(%r{\A/+}, "") : path
               out << "\n## #{rel}\n"
-              out << Truncation.normalize_utf8(File.binread(path))
+              content = Truncation.normalize_utf8(File.binread(path))
+              out << content
               out << "\n" unless out.end_with?("\n")
+
+              files_meta << {
+                path: rel,
+                bytes: content.bytesize,
+                missing: false,
+                truncated: false,
+                max_bytes: nil,
+              }.compact
             end
 
-            out
+            [out, files_meta]
           rescue StandardError
-            ""
+            ["", []]
           end
         end
       end

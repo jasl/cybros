@@ -41,6 +41,7 @@ module AgentCore
               prompt_modes: h.fetch(:prompt_modes, PROMPT_MODES),
               root_key: h[:root_key],
               total_max_bytes: h[:total_max_bytes],
+              stability: h[:stability],
               marker: h.fetch(:marker, Truncation::DEFAULT_MARKER),
               section_header: h.fetch(:section_header, Sources::FileSet::DEFAULT_SECTION_HEADER),
               substitute_variables: h[:substitute_variables] == true,
@@ -54,6 +55,7 @@ module AgentCore
               prompt_modes: h.fetch(:prompt_modes, PROMPT_MODES),
               wrapper_template: h.fetch(:wrapper_template, Sources::RepoDocs::DEFAULT_WRAPPER_TEMPLATE),
               marker: h.fetch(:marker, Truncation::DEFAULT_MARKER),
+              stability: h[:stability],
             )
           else
             nil

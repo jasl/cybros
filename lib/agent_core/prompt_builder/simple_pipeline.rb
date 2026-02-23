@@ -28,60 +28,7 @@ module AgentCore
       private
 
       def build_system_prompt(context)
-        memory_section_order = 200
-        skills_section_order = 800
-
-        base = substitute_variables(context.system_prompt.to_s, context.variables)
-
-        sections = []
-
-        if context.memory_results.any?
-          memory_text = context.memory_results.map(&:content).join("\n\n")
-          sections << { order: memory_section_order, content: "<relevant_context>\n#{memory_text}\n</relevant_context>" }
-        end
-
-        Array(context.prompt_injection_items).each do |item|
-          next unless item.respond_to?(:system_section?) && item.system_section?
-          if item.respond_to?(:allowed_in_prompt_mode?) && !item.allowed_in_prompt_mode?(context.prompt_mode)
-            next
-          end
-
-          content =
-            if item.respond_to?(:substitute_variables) && item.substitute_variables == true
-              substitute_variables(item.content.to_s, context.variables)
-            else
-              item.content.to_s
-            end
-
-          sections << { order: item.order.to_i, content: content }
-        end
-
-        if context.skills_store
-          begin
-            fragment =
-              Resources::Skills::PromptFragment.available_skills_xml(
-                store: context.skills_store,
-                include_location: context.include_skill_locations
-              )
-            unless fragment.to_s.empty?
-              sections << { order: skills_section_order, content: fragment.to_s }
-            end
-          rescue StandardError
-            # Skip skills fragment on any store/prompt rendering error.
-          end
-        end
-
-        sections
-          .each_with_index
-          .sort_by { |(section, idx)| [section.fetch(:order), idx] }
-          .each do |(section, _)|
-            content = section.fetch(:content).to_s
-            next if content.strip.empty?
-
-            base = base.empty? ? content : "#{base}\n\n#{content}"
-          end
-
-        base
+        SystemPromptSectionsBuilder.build(context: context).full_text
       end
 
       def build_messages(context)
@@ -116,14 +63,6 @@ module AgentCore
         end
 
         messages
-      end
-
-      def substitute_variables(template, variables)
-        out = template.to_s.dup
-        (variables || {}).each do |key, value|
-          out = out.gsub("{{#{key}}}", value.to_s)
-        end
-        out
       end
 
       def build_tools(context)

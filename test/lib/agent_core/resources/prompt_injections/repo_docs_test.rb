@@ -19,6 +19,7 @@ class AgentCore::Resources::PromptInjections::Sources::RepoDocsTest < Minitest::
 
       items = source.items(agent: nil, user_message: "u", execution_context: ctx, prompt_mode: :full)
       assert_equal 1, items.size
+      assert items.first.system_section?
 
       content = items.first.content
       assert_includes content, "<user_instructions>"
@@ -43,6 +44,7 @@ class AgentCore::Resources::PromptInjections::Sources::RepoDocsTest < Minitest::
 
       items = source.items(agent: nil, user_message: "u", execution_context: ctx, prompt_mode: :full)
       assert_equal 1, items.size
+      assert items.first.system_section?
       assert_includes items.first.content, "ROOT"
     end
   end
@@ -57,6 +59,7 @@ class AgentCore::Resources::PromptInjections::Sources::RepoDocsTest < Minitest::
 
       items = source.items(agent: nil, user_message: "u", execution_context: ctx, prompt_mode: :full)
       assert_equal 1, items.size
+      assert items.first.system_section?
 
       content = items.first.content
       assert_includes content, "<user_instructions>"

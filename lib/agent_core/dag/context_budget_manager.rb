@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "digest"
+require "json"
 require "set"
 
 module AgentCore
@@ -371,6 +373,7 @@ module AgentCore
               "injections" => injections_tokens,
               "memory_knowledge" => memory_knowledge_tokens,
             }.compact,
+            "prompt_sections" => prompt_sections_report(base_system_prompt, build, prepared: prepared, memory_results: memory_results),
             "decisions" => Array(build.decisions).map { |d| d.is_a?(Hash) ? d : { "type" => d.to_s } },
           }.compact
         rescue StandardError
@@ -385,6 +388,136 @@ module AgentCore
             }.compact,
             "decisions" => Array(build.decisions),
           }.compact
+        end
+
+        def prompt_sections_report(base_system_prompt, build, prepared:, memory_results:)
+          token_counter = @runtime.token_counter
+
+          prompt_context =
+            PromptBuilder::Context.new(
+              system_prompt: base_system_prompt.to_s,
+              memory_results: memory_results,
+              variables: prompt_variables,
+              prompt_mode: @runtime.prompt_mode,
+              prompt_injection_items: prepared.prompt_injection_items,
+              skills_store: @runtime.skills_store,
+              include_skill_locations: @runtime.include_skill_locations,
+            )
+
+          sections = PromptBuilder::SystemPromptSectionsBuilder.build(context: prompt_context)
+
+          prefix = text_summary(sections.prefix_text.to_s, token_counter: token_counter)
+          tail = text_summary(sections.tail_text.to_s, token_counter: token_counter)
+
+          system_sections =
+            Array(sections.sections).map do |section|
+              content = section.content.to_s
+              md = section.metadata.is_a?(Hash) ? section.metadata : {}
+
+              {
+                "id" => section.id.to_s,
+                "stability" => section.stability.to_s,
+                "order" => section.order.to_i,
+                "bytes" => content.bytesize,
+                "estimated_tokens" => token_counter.count_text(content),
+                "metadata" => AgentCore::Utils.deep_stringify_keys(md),
+              }.compact
+            end
+
+          tools_schema = tools_schema_report(build)
+          preamble_messages = preamble_messages_report(prepared, token_counter: token_counter)
+
+          {
+            "system_prompt" => {
+              "prefix" => prefix,
+              "tail" => tail,
+              "sections" => system_sections,
+            },
+            "tools_schema" => tools_schema,
+            "preamble_messages" => preamble_messages,
+          }.compact
+        rescue StandardError
+          nil
+        end
+
+        def text_summary(text, token_counter:)
+          {
+            "bytes" => text.to_s.bytesize,
+            "estimated_tokens" => token_counter.count_text(text.to_s),
+            "sha256" => Digest::SHA256.hexdigest(text.to_s),
+          }
+        rescue StandardError
+          { "bytes" => 0, "estimated_tokens" => 0, "sha256" => Digest::SHA256.hexdigest("") }
+        end
+
+        def tools_schema_report(build)
+          tools = Array(build.built_prompt.tools)
+          bytes =
+            begin
+              JSON.generate(tools).bytesize
+            rescue StandardError
+              0
+            end
+
+          estimate = build.estimate.is_a?(Hash) ? build.estimate : {}
+          tool_tokens = estimate.fetch(:tools, nil)
+
+          {
+            "tool_count" => tools.length,
+            "bytes" => bytes,
+            "estimated_tokens" => tool_tokens,
+          }.compact
+        rescue StandardError
+          nil
+        end
+
+        def preamble_messages_report(prepared, token_counter:)
+          items =
+            Array(prepared.prompt_injection_items)
+              .select { |item| item.respond_to?(:preamble_message?) && item.preamble_message? }
+              .each_with_index
+              .sort_by { |(item, idx)| [item.order.to_i, idx] }
+              .filter_map do |(item, idx)|
+                if item.respond_to?(:allowed_in_prompt_mode?) && !item.allowed_in_prompt_mode?(@runtime.prompt_mode)
+                  next
+                end
+
+                role = item.role.to_sym
+                next unless role == :user || role == :assistant
+
+                content = item.content.to_s
+                next if content.strip.empty?
+
+                id =
+                  if item.respond_to?(:id) && item.id.to_s.strip != ""
+                    item.id.to_s
+                  else
+                    "preamble_injection:#{idx + 1}"
+                  end
+
+                md = item.respond_to?(:metadata) && item.metadata.is_a?(Hash) ? item.metadata : {}
+
+                {
+                  "id" => id,
+                  "role" => role.to_s,
+                  "order" => item.order.to_i,
+                  "bytes" => content.bytesize,
+                  "estimated_tokens" => token_counter.count_text(content),
+                  "metadata" => AgentCore::Utils.deep_stringify_keys(md),
+                }.compact
+              end
+
+          items
+        rescue StandardError
+          []
+        end
+
+        def prompt_variables
+          attrs = @execution_context.attributes
+          vars = attrs[:variables] || attrs[:prompt_variables]
+          vars.is_a?(Hash) ? vars : {}
+        rescue StandardError
+          {}
         end
 
         def preamble_injection_message_count(prompt_injection_items)

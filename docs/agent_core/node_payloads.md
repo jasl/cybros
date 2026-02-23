@@ -50,26 +50,39 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 
 ```json
 {
-  "context_cost": {
-    "context_window_tokens": 8192,
-    "reserved_output_tokens": 0,
-    "limit": 8192,
-    "memory_dropped": false,
-    "limit_turns": 12,
-    "auto_compact": true,
-    "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
-    "estimated_tokens_coarse": {
-      "tools_schema": 334,
-      "tool_results": 120,
-      "history": 700,
-      "injections": 50,
-      "memory_knowledge": 30
-    },
-    "decisions": [
-      { "type": "drop_memory_results" },
-      {
-        "type": "prune_tool_outputs",
-        "attempt": 1,
+	  "context_cost": {
+	    "context_window_tokens": 8192,
+	    "reserved_output_tokens": 0,
+	    "limit": 8192,
+	    "memory_dropped": false,
+	    "limit_turns": 12,
+	    "auto_compact": true,
+	    "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
+	    "estimated_tokens_coarse": {
+	      "tools_schema": 334,
+	      "tool_results": 120,
+	      "history": 700,
+	      "injections": 50,
+	      "memory_knowledge": 30
+	    },
+	    "prompt_sections": {
+	      "system_prompt": {
+	        "prefix": { "bytes": 123, "estimated_tokens": 45, "sha256": "..." },
+	        "tail": { "bytes": 67, "estimated_tokens": 12, "sha256": "..." },
+	        "sections": [
+	          { "id": "base_system_prompt", "stability": "prefix", "order": 0, "bytes": 123, "estimated_tokens": 45, "metadata": {} }
+	        ]
+	      },
+	      "tools_schema": { "tool_count": 3, "bytes": 2000, "estimated_tokens": 334 },
+	      "preamble_messages": [
+	        { "id": "preamble_injection:1", "role": "user", "order": 10, "bytes": 80, "estimated_tokens": 20, "metadata": {} }
+	      ]
+	    },
+	    "decisions": [
+	      { "type": "drop_memory_results" },
+	      {
+	        "type": "prune_tool_outputs",
+	        "attempt": 1,
         "recent_turns": 2,
         "keep_last_assistant_messages": 3,
         "tools_allow_count": 0,
@@ -89,6 +102,11 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 
 - `estimated_tokens` 是最终 prompt 的估算（messages + tools）。
 - `estimated_tokens_coarse` 是粗粒度拆分（不要求与 total 严格相加一致）。
+- `prompt_sections` 是章节级可观测信息（metadata-only），用于区分 system prompt 的 `prefix`/`tail` 与各段占比；不记录任何 prompt 文本内容。
+  - `system_prompt.prefix/tail`：`bytes`/`estimated_tokens`/`sha256`（sha256 是对该段文本的 hash）。
+  - `system_prompt.sections[*].metadata`：仅透传注入 source 的 safe 元数据（例如 repo_docs/file_set 的文件与预算明细），不包含 prompt 内容。
+  - `tools_schema`：tools JSON schema 的 `tool_count`/`bytes`/`estimated_tokens`。
+  - `preamble_messages`：进入 messages 的注入项清单（含 bytes/tokens/metadata，但不含 content）。
 - `decisions` 记录本轮为满足预算做过的降级决策（按发生顺序）。
   - `prune_tool_outputs.attempt`：同一轮内若多次 pruning（例如 shrink-loop 中反复尝试），attempt 递增。
 
