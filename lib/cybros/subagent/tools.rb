@@ -445,10 +445,10 @@ module Cybros
 
           case node_type
           when "user_message"
-            text = "U:#{input.fetch('content', '').to_s}"
+            text = "U:#{input.fetch("content", "")}"
             AgentCore::Utils.truncate_utf8_bytes(text, max_bytes: TRANSCRIPT_LINE_MAX_BYTES)
           when "agent_message", "character_message"
-            text = "A:#{output_preview.fetch('content', '').to_s}"
+            text = "A:#{output_preview.fetch("content", "")}"
             AgentCore::Utils.truncate_utf8_bytes(text, max_bytes: TRANSCRIPT_LINE_MAX_BYTES)
           else
             nil

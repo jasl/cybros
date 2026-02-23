@@ -13,7 +13,7 @@ module AgentCore
           _ = stream
 
           runtime = AgentCore::DAG.runtime_for(node: node)
-          execution_context = build_execution_context(node, runtime: runtime)
+          execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
 
           tool_name, arguments = tool_call_from_input(node)
 
@@ -37,8 +37,8 @@ module AgentCore
           ::DAG::ExecutionResult.finished(
             content: result.to_h,
             metadata: {
-              tool: { name: tool_name },
-              agent: execution_context.attributes.fetch(:agent, {}),
+              "tool" => { "name" => tool_name },
+              "agent" => AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:agent, {})),
             },
           )
         rescue AgentCore::ToolNotFoundError => e
@@ -48,57 +48,6 @@ module AgentCore
         end
 
         private
-
-          def build_execution_context(node, runtime:)
-            agent_attrs = agent_attributes_for(node)
-
-            workspace_dir = workspace_dir_for_execution_context
-
-            channel = channel_for_execution_context(node)
-
-            attrs = {
-              cwd: workspace_dir,
-              workspace_dir: workspace_dir,
-              dag: {
-                graph_id: node.graph_id.to_s,
-                node_id: node.id.to_s,
-                lane_id: node.lane_id.to_s,
-                turn_id: node.turn_id.to_s,
-              },
-              agent: agent_attrs,
-            }
-            attrs[:channel] = channel if channel
-
-            ExecutionContext.new(
-              run_id: node.turn_id.to_s,
-              instrumenter: runtime.instrumenter,
-              attributes: attrs,
-            )
-          end
-
-          def workspace_dir_for_execution_context
-            if defined?(Rails) && Rails.respond_to?(:root)
-              Rails.root.to_s
-            else
-              Dir.pwd
-            end
-          rescue StandardError
-            Dir.pwd
-          end
-
-          def agent_attributes_for(node)
-            Cybros::AgentRuntimeResolver.agent_attributes_for(node)
-          rescue NameError, StandardError
-            { key: "main", agent_profile: "coding" }
-          end
-
-          def channel_for_execution_context(node)
-            channel = Cybros::AgentRuntimeResolver.channel_for(node: node)
-            channel = channel.to_s.strip
-            channel.empty? ? nil : channel
-          rescue NameError, StandardError
-            nil
-          end
 
           def tool_call_from_input(node)
             input = node.body_input.is_a?(Hash) ? node.body_input : {}

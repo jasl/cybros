@@ -59,14 +59,19 @@ module AgentCore
     end
 
     def self.from_h(hash)
-      h = hash.transform_keys(&:to_sym)
+      ValidationError.raise!(
+        "document content must be a Hash (got #{hash.class})",
+        code: "agent_core.document_content.document_content_must_be_a_hash_got",
+        details: { value_class: hash.class.name },
+      ) unless hash.is_a?(Hash)
+
       new(
-        source_type: h[:source_type],
-        data: h[:data],
-        media_type: h[:media_type],
-        url: h[:url],
-        filename: h[:filename],
-        title: h[:title]
+        source_type: hash.fetch("source_type", hash.fetch(:source_type, nil)),
+        data: hash.fetch("data", hash.fetch(:data, nil)),
+        media_type: hash.fetch("media_type", hash.fetch(:media_type, nil)),
+        url: hash.fetch("url", hash.fetch(:url, nil)),
+        filename: hash.fetch("filename", hash.fetch(:filename, nil)),
+        title: hash.fetch("title", hash.fetch(:title, nil)),
       )
     end
   end

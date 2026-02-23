@@ -252,7 +252,7 @@
 - ✅ 已落地：prefix 稳定性测试（memory 变化不影响 prefix）+ prompt_sections shape 测试
 - ✅ 已落地：内建 sections（Safety/Tooling/Workspace/Time/Channel）与统一 section-level 配置（enabled/order/prompt_modes/stability；含 skills/memory；`time/channel/memory` 强制 tail；支持 `agent_profile.system_prompt_sections` 安全 overrides）
 
-## 3) 三类实验形态的“最小落地集合”
+## 3) 三类实验形态的“最小落地集合
 
 ### 3.1 Coding agent（Codex/OpenCode/Bub/Accomplish）
 

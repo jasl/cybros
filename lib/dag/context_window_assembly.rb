@@ -1,7 +1,9 @@
-  module DAG
-    class ContextWindowAssembly
-      DEFAULT_CONTEXT_TURNS = 50
-      SUMMARY_PIN_LIMIT = 3
+# frozen_string_literal: true
+
+module DAG
+  class ContextWindowAssembly
+    DEFAULT_CONTEXT_TURNS = 50
+    SUMMARY_PIN_LIMIT = 3
 
     PINNED_NODE_TYPES = %w[system_message developer_message].freeze
 
@@ -11,13 +13,8 @@
       @node_cache = {}
     end
 
-      def call(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, mode: :preview, include_excluded: false, include_deleted: false)
-      limit_turns = Integer(limit_turns)
-      ValidationError.raise!(
-        "limit_turns must be > 0",
-        code: "dag.context_window_assembly.limit_turns_must_be_0",
-      ) if limit_turns <= 0
-      limit_turns = [limit_turns, 1000].min
+    def call(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, mode: :preview, include_excluded: false, include_deleted: false)
+      limit_turns = normalize_limit_turns!(limit_turns)
 
       target = load_target_node(target_node_id)
       return [] if target.nil?
@@ -29,15 +26,15 @@
           target: target,
           segments: segments,
           limit_turns: limit_turns,
-          include_deleted: include_deleted
+          include_deleted: include_deleted,
         )
 
       pinned_node_ids = pinned_node_ids_for_context
-        nodes = load_nodes(turn_ids: turn_ids, pinned_node_ids: pinned_node_ids)
-        return [] if nodes.empty?
+      nodes = load_nodes(turn_ids: turn_ids, pinned_node_ids: pinned_node_ids)
+      return [] if nodes.empty?
 
-        edges = load_edges(node_ids: nodes.keys)
-        ordered_ids = DAG::TopologicalSort.call(node_ids: nodes.keys, edges: edges)
+      edges = load_edges(node_ids: nodes.keys)
+      ordered_ids = DAG::TopologicalSort.call(node_ids: nodes.keys, edges: edges)
 
       included_ids =
         ordered_ids.select do |node_id|
@@ -45,27 +42,22 @@
             nodes.fetch(node_id),
             target_node_id: target.id,
             include_excluded: include_excluded,
-            include_deleted: include_deleted
+            include_deleted: include_deleted,
           )
         end
 
       included_nodes = included_ids.map { |node_id| nodes.fetch(node_id) }
       bodies = load_bodies(nodes: included_nodes, mode: mode)
 
-        included_ids.map do |node_id|
-          node = nodes.fetch(node_id)
-          body = bodies[node.body_id]
-          context_hash_for(node, body, mode: mode)
-        end
+      included_ids.map do |node_id|
+        node = nodes.fetch(node_id)
+        body = bodies[node.body_id]
+        context_hash_for(node, body, mode: mode)
       end
+    end
 
     def node_scope_for(target_node_id, limit_turns: DEFAULT_CONTEXT_TURNS, include_excluded: false, include_deleted: false)
-      limit_turns = Integer(limit_turns)
-      ValidationError.raise!(
-        "limit_turns must be > 0",
-        code: "dag.context_window_assembly.limit_turns_must_be_0",
-      ) if limit_turns <= 0
-      limit_turns = [limit_turns, 1000].min
+      limit_turns = normalize_limit_turns!(limit_turns)
 
       target = load_target_node(target_node_id)
       return @graph.nodes.none if target.nil?
@@ -77,7 +69,7 @@
           target: target,
           segments: segments,
           limit_turns: limit_turns,
-          include_deleted: include_deleted
+          include_deleted: include_deleted,
         )
 
       pinned_node_ids = pinned_node_ids_for_context
@@ -94,6 +86,23 @@
     private
 
       Segment = Data.define(:lane_id, :cutoff_turn_id)
+
+      def normalize_limit_turns!(value)
+        raw_limit_turns = value
+        limit_turns = Integer(raw_limit_turns, exception: false)
+        PaginationError.raise!(
+          "limit_turns must be an Integer",
+          code: "dag.context_window_assembly.limit_turns_must_be_an_integer",
+          details: { value_class: raw_limit_turns.class.name },
+        ) unless limit_turns
+
+        PaginationError.raise!(
+          "limit_turns must be > 0",
+          code: "dag.context_window_assembly.limit_turns_must_be_0",
+        ) if limit_turns <= 0
+
+        [limit_turns, 1000].min
+      end
 
       def load_target_node(target_node_id)
         @graph.nodes.active
@@ -149,7 +158,7 @@
 
           segments << Segment.new(
             lane_id: current_lane.id,
-            cutoff_turn_id: current_cutoff_node.turn_id
+            cutoff_turn_id: current_cutoff_node.turn_id,
           )
 
           parent_lane_id = current_lane.parent_lane_id
@@ -177,7 +186,7 @@
           window_turn_ids_for_segments(
             segments,
             limit_turns: limit_turns,
-            include_deleted: include_deleted
+            include_deleted: include_deleted,
           )
 
         pinned_turn_ids = segments.map { |segment| segment.cutoff_turn_id.to_s }
@@ -199,7 +208,7 @@
             anchored_turn_ids_for_segment(
               segment,
               limit_turns: limit_turns,
-              include_deleted: include_deleted
+              include_deleted: include_deleted,
             )
           end
 
@@ -240,56 +249,57 @@
         (pinned + summary_ids).uniq
       end
 
-        def load_nodes(turn_ids:, pinned_node_ids:)
-          max_nodes = DAG::SafetyLimits.max_context_nodes
-          node_records = []
+      def load_nodes(turn_ids:, pinned_node_ids:)
+        max_nodes = DAG::SafetyLimits.max_context_nodes
+        node_records = []
 
+        node_records.concat(
+          @graph.nodes.active
+            .where(turn_id: turn_ids)
+            .limit(max_nodes + 1)
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+            .to_a
+        )
+
+        if node_records.length > max_nodes
+          raise DAG::SafetyLimits::Exceeded, "context node limit exceeded (limit=#{max_nodes})"
+        end
+
+        if pinned_node_ids.any?
           node_records.concat(
             @graph.nodes.active
-              .where(turn_id: turn_ids)
-              .limit(max_nodes + 1)
+              .where(id: pinned_node_ids)
               .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
               .to_a
           )
-
-          if node_records.length > max_nodes
-            raise DAG::SafetyLimits::Exceeded, "context node limit exceeded (limit=#{max_nodes})"
-          end
-
-          if pinned_node_ids.any?
-            node_records.concat(
-              @graph.nodes.active
-                .where(id: pinned_node_ids)
-                .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
-                .to_a
-            )
-          end
-
-          nodes = node_records.uniq { |node| node.id }
-          if nodes.length > max_nodes
-            raise DAG::SafetyLimits::Exceeded, "context node limit exceeded (limit=#{max_nodes})"
-          end
-
-          nodes.index_by(&:id)
         end
 
-        def load_edges(node_ids:)
-          max_edges = DAG::SafetyLimits.max_context_edges
-          @graph.edges.active
-            .where(
-              edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,
-              from_node_id: node_ids,
-              to_node_id: node_ids
-            )
-            .limit(max_edges + 1)
-            .pluck(:from_node_id, :to_node_id)
-            .tap do |rows|
-              if rows.length > max_edges
-                raise DAG::SafetyLimits::Exceeded, "context edge limit exceeded (limit=#{max_edges})"
-              end
+        nodes = node_records.uniq { |node| node.id }
+        if nodes.length > max_nodes
+          raise DAG::SafetyLimits::Exceeded, "context node limit exceeded (limit=#{max_nodes})"
+        end
+
+        nodes.index_by(&:id)
+      end
+
+      def load_edges(node_ids:)
+        max_edges = DAG::SafetyLimits.max_context_edges
+
+        @graph.edges.active
+          .where(
+            edge_type: DAG::Edge::BLOCKING_EDGE_TYPES,
+            from_node_id: node_ids,
+            to_node_id: node_ids,
+          )
+          .limit(max_edges + 1)
+          .pluck(:from_node_id, :to_node_id)
+          .tap do |rows|
+            if rows.length > max_edges
+              raise DAG::SafetyLimits::Exceeded, "context edge limit exceeded (limit=#{max_edges})"
             end
-            .map { |from_node_id, to_node_id| { from: from_node_id, to: to_node_id } }
-        end
+          end
+          .map { |from_node_id, to_node_id| { from: from_node_id, to: to_node_id } }
+      end
 
       def load_bodies(nodes:, mode:)
         body_ids = nodes.map(&:body_id).compact.uniq
@@ -352,5 +362,5 @@
             .select(:id, :lane_id, :turn_id)
             .first
       end
-    end
   end
+end

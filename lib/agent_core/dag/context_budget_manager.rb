@@ -52,6 +52,7 @@ module AgentCore
       end
 
       private
+
         def with_system_prompt_now_utc(context)
           ctx = ExecutionContext.from(context, instrumenter: @runtime.instrumenter)
 

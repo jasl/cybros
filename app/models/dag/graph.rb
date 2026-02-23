@@ -224,8 +224,9 @@ module DAG
       mode: :preview,
       include_deleted: false
     )
-      limit_turns = Integer(limit_turns)
+      limit_turns = coerce_integer_param(limit_turns, field: "limit_turns", code: "dag.graph.limit_turns_must_be_an_integer")
       return [] if limit_turns <= 0
+      limit_turns = [limit_turns, 1000].min
 
       unless include_deleted
         deleted_at = nodes.where(id: target_node_id).pick(:deleted_at)
@@ -274,7 +275,15 @@ module DAG
       transcript = projection.apply_rules(context_nodes: transcript)
 
       if limit
-        transcript = transcript.last(Integer(limit))
+        limit = coerce_integer_param(limit, field: "limit", code: "dag.graph.limit_must_be_an_integer")
+        PaginationError.raise!(
+          "limit must be > 0",
+          code: "dag.graph.limit_must_be_0",
+          details: { limit: limit },
+        ) if limit <= 0
+
+        limit = [limit, 1000].min
+        transcript = transcript.last(limit)
       end
 
       transcript
@@ -312,7 +321,15 @@ module DAG
       transcript = projection.apply_rules(context_nodes: transcript)
 
       if limit
-        transcript = transcript.last(Integer(limit))
+        limit = coerce_integer_param(limit, field: "limit", code: "dag.graph.limit_must_be_an_integer")
+        PaginationError.raise!(
+          "limit must be > 0",
+          code: "dag.graph.limit_must_be_0",
+          details: { limit: limit },
+        ) if limit <= 0
+
+        limit = [limit, 1000].min
+        transcript = transcript.last(limit)
       end
 
       transcript
@@ -328,8 +345,9 @@ module DAG
     end
 
     def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
-      limit_turns = Integer(limit_turns)
+      limit_turns = coerce_integer_param(limit_turns, field: "limit_turns", code: "dag.graph.limit_turns_must_be_an_integer")
       return [] if limit_turns <= 0
+      limit_turns = [limit_turns, 1000].min
 
       turn_ids =
         turns

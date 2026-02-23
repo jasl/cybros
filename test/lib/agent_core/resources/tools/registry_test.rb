@@ -234,7 +234,7 @@ class AgentCore::Resources::Tools::RegistryTest < Minitest::Test
     @registry.register_mcp_client(client)
     result = @registry.execute(name: "structured", arguments: {})
 
-    assert_equal({ structured_content: { "answer" => 42 } }, result.metadata)
+    assert_equal({ "structured_content" => { "answer" => 42 } }, result.metadata)
   end
 
   def test_execute_mcp_tool_converts_image_blocks_to_content_blocks

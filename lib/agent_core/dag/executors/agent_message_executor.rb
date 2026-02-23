@@ -9,8 +9,11 @@ module AgentCore
         def context_mode = :full
 
         def execute(node:, context:, stream:)
+          runtime = nil
+          execution_context = nil
+
           runtime = AgentCore::DAG.runtime_for(node: node)
-          execution_context = build_execution_context(node, runtime: runtime)
+          execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
           agent_metadata = { agent: execution_context.attributes.fetch(:agent, {}) }
 
           instrumenter = execution_context.instrumenter
@@ -85,6 +88,7 @@ module AgentCore
             end
           end
         rescue AgentCore::ContextWindowExceededError => e
+          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
           ::DAG::ExecutionResult.errored(
             error: "ContextWindowExceededError: #{e.message}",
             metadata: {
@@ -98,73 +102,32 @@ module AgentCore
                   "tools" => e.tool_tokens,
                 }.compact,
               }.compact,
-              "agent" => agent_attributes_for(node),
+              "agent" => agent,
             }
           )
         rescue AgentCore::ProviderError => e
+          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
           ::DAG::ExecutionResult.errored(
             error: "ProviderError: #{e.message}",
             metadata: {
-              provider: runtime_name_safe(node),
+              provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
               status: e.status,
-              agent: agent_attributes_for(node),
+              agent: agent,
             }.compact,
           )
         rescue StandardError => e
-          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: { agent: agent_attributes_for(node) })
+          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: { agent: agent }.compact)
         end
 
         private
 
-          def build_execution_context(node, runtime:)
-            agent_attrs = agent_attributes_for(node)
-
-            workspace_dir = workspace_dir_for_execution_context
-
-            channel = channel_for_execution_context(node)
-
-            attrs = {
-              cwd: workspace_dir,
-              workspace_dir: workspace_dir,
-              dag: {
-                graph_id: node.graph_id.to_s,
-                node_id: node.id.to_s,
-                lane_id: node.lane_id.to_s,
-                turn_id: node.turn_id.to_s,
-              },
-              agent: agent_attrs,
-            }
-            attrs[:channel] = channel if channel
-
-            ExecutionContext.new(
-              run_id: node.turn_id.to_s,
-              instrumenter: runtime.instrumenter,
-              attributes: attrs,
-            )
-          end
-
-          def workspace_dir_for_execution_context
-            if defined?(Rails) && Rails.respond_to?(:root)
-              Rails.root.to_s
-            else
-              Dir.pwd
-            end
+          def agent_attributes_from(execution_context:, runtime:)
+            agent = execution_context&.attributes&.fetch(:agent, nil)
+            agent = runtime&.execution_context_attributes&.fetch(:agent, nil) if agent.nil?
+            agent.is_a?(Hash) ? agent : {}
           rescue StandardError
-            Dir.pwd
-          end
-
-          def agent_attributes_for(node)
-            Cybros::AgentRuntimeResolver.agent_attributes_for(node)
-          rescue NameError, StandardError
-            { key: "main", agent_profile: "coding" }
-          end
-
-          def channel_for_execution_context(node)
-            channel = Cybros::AgentRuntimeResolver.channel_for(node: node)
-            channel = channel.to_s.strip
-            channel.empty? ? nil : channel
-          rescue NameError, StandardError
-            nil
+            {}
           end
 
           def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:)
@@ -309,7 +272,7 @@ module AgentCore
             count =
               node.graph.nodes.active
                 .where(turn_id: turn_id, lane_id: node.lane_id)
-                .where(node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key])
+                .where(node_type: %w[agent_message character_message])
                 .count
 
             count < runtime.max_steps_per_turn
@@ -328,14 +291,11 @@ module AgentCore
             invalid_schema_count = 0
             invalid_schema_sample = []
             tool_name_aliases = runtime.tool_name_aliases
-            normalize_index =
-              if runtime.tool_name_normalize_fallback
-                AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(runtime.tools_registry.tool_names)
-              end
+            normalize_index = runtime.tool_name_normalize_index
 
             visible_tool_schemas = index_visible_tool_schemas(visible_tools)
 
-            if Integer(runtime.tool_name_repair_attempts, exception: false).to_i > 0 && Array(visible_tools).any? && Array(tool_calls).any?
+            if runtime.tool_name_repair_attempts.to_i.positive? && Array(visible_tools).any? && Array(tool_calls).any?
               name_repair_result =
                 AgentCore::Resources::Tools::ToolNameRepairLoop.call(
                   provider: runtime.provider,
@@ -443,7 +403,7 @@ module AgentCore
 
                   task =
                     m.create_node(
-                      node_type: Messages::Task.node_type_key,
+                      node_type: "task",
                       state: ::DAG::Node::FINISHED,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
@@ -474,7 +434,7 @@ module AgentCore
 
                   task =
                     m.create_node(
-                      node_type: Messages::Task.node_type_key,
+                      node_type: "task",
                       state: ::DAG::Node::FINISHED,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
@@ -537,7 +497,7 @@ module AgentCore
 
                       task =
                         m.create_node(
-                          node_type: Messages::Task.node_type_key,
+                          node_type: "task",
                           state: ::DAG::Node::FINISHED,
                           idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                           lane_id: node.lane_id,
@@ -561,7 +521,7 @@ module AgentCore
 
                   task =
                     m.create_node(
-                      node_type: Messages::Task.node_type_key,
+                      node_type: "task",
                       state: ::DAG::Node::PENDING,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
@@ -612,7 +572,7 @@ module AgentCore
 
                       task =
                         m.create_node(
-                          node_type: Messages::Task.node_type_key,
+                          node_type: "task",
                           state: ::DAG::Node::FINISHED,
                           idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                           lane_id: node.lane_id,
@@ -646,7 +606,7 @@ module AgentCore
 
                   task =
                     m.create_node(
-                      node_type: Messages::Task.node_type_key,
+                      node_type: "task",
                       state: ::DAG::Node::AWAITING_APPROVAL,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
@@ -677,7 +637,7 @@ module AgentCore
 
                   task =
                     m.create_node(
-                      node_type: Messages::Task.node_type_key,
+                      node_type: "task",
                       state: ::DAG::Node::FINISHED,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
@@ -955,7 +915,7 @@ module AgentCore
           end
 
           def should_repair_tool_calls?(tool_calls, runtime:)
-            attempts = Integer(runtime.tool_call_repair_attempts)
+            attempts = runtime.tool_call_repair_attempts.to_i
             return false if attempts <= 0
 
             Array(tool_calls).any?

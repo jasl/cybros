@@ -11,6 +11,7 @@ module AgentCore
         :tool_policy,
         :tool_name_aliases,
         :tool_name_normalize_fallback,
+        :tool_name_normalize_index,
         :skills_store,
         :memory_store,
         :memory_search_limit,
@@ -37,6 +38,7 @@ module AgentCore
         :tool_name_repair_max_candidates,
         :tool_name_repair_max_visible_tool_names,
         :instrumenter,
+        :execution_context_attributes,
         :max_tool_calls_per_turn,
         :max_steps_per_turn,
         :include_skill_locations,
@@ -57,6 +59,7 @@ module AgentCore
           tool_policy: nil,
           tool_name_aliases: {},
           tool_name_normalize_fallback: false,
+          tool_name_normalize_index: nil,
           skills_store: nil,
           memory_store: nil,
           memory_search_limit: DEFAULT_MEMORY_SEARCH_LIMIT,
@@ -83,6 +86,7 @@ module AgentCore
           tool_name_repair_max_candidates: 10,
           tool_name_repair_max_visible_tool_names: 200,
           instrumenter: nil,
+          execution_context_attributes: {},
           max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
           include_skill_locations: false,
@@ -132,13 +136,28 @@ module AgentCore
           merged_tool_name_aliases = AgentCore::Resources::Tools::ToolNameResolver.merge_aliases(tool_name_aliases)
           validate_tool_name_aliases!(tools_registry, merged_tool_name_aliases)
 
-          if tool_name_normalize_fallback
-            AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tools_registry.tool_names)
+          if !tool_name_normalize_index.nil? && !tool_name_normalize_index.is_a?(Hash)
+            ValidationError.raise!(
+              "tool_name_normalize_index must be a Hash",
+              code: "agent_core.dag.runtime.tool_name_normalize_index_must_be_a_hash",
+              details: { value_class: tool_name_normalize_index.class.name },
+            )
           end
+
+          tool_name_normalize_index =
+            if tool_name_normalize_fallback
+              AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tools_registry.tool_names).freeze
+            end
 
           token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
 
-          context_turns = Integer(context_turns)
+          raw_context_turns = context_turns
+          context_turns = Integer(raw_context_turns, exception: false)
+          ValidationError.raise!(
+            "context_turns must be an Integer",
+            code: "agent_core.dag.runtime.context_turns_must_be_an_integer",
+            details: { value_class: raw_context_turns.class.name },
+          ) unless context_turns
           ValidationError.raise!(
             "context_turns must be > 0",
             code: "agent_core.dag.runtime.context_turns_must_be_0",
@@ -149,7 +168,13 @@ module AgentCore
             if context_window_tokens.nil?
               nil
             else
-              value = Integer(context_window_tokens)
+              raw_context_window_tokens = context_window_tokens
+              value = Integer(raw_context_window_tokens, exception: false)
+              ValidationError.raise!(
+                "context_window_tokens must be an Integer",
+                code: "agent_core.dag.runtime.context_window_tokens_must_be_an_integer",
+                details: { value_class: raw_context_window_tokens.class.name },
+              ) unless value
               ValidationError.raise!(
                 "context_window_tokens must be > 0",
                 code: "agent_core.dag.runtime.context_window_tokens_must_be_0",
@@ -158,7 +183,13 @@ module AgentCore
               value
             end
 
-          reserved_output_tokens = Integer(reserved_output_tokens)
+          raw_reserved_output_tokens = reserved_output_tokens
+          reserved_output_tokens = Integer(raw_reserved_output_tokens, exception: false)
+          ValidationError.raise!(
+            "reserved_output_tokens must be an Integer",
+            code: "agent_core.dag.runtime.reserved_output_tokens_must_be_an_integer",
+            details: { value_class: raw_reserved_output_tokens.class.name },
+          ) unless reserved_output_tokens
           ValidationError.raise!(
             "reserved_output_tokens must be >= 0",
             code: "agent_core.dag.runtime.reserved_output_tokens_must_be_0",
@@ -169,7 +200,13 @@ module AgentCore
             if max_tool_calls_per_turn.nil?
               nil
             else
-              value = Integer(max_tool_calls_per_turn)
+              raw_max_tool_calls_per_turn = max_tool_calls_per_turn
+              value = Integer(raw_max_tool_calls_per_turn, exception: false)
+              ValidationError.raise!(
+                "max_tool_calls_per_turn must be an Integer",
+                code: "agent_core.dag.runtime.max_tool_calls_per_turn_must_be_an_integer",
+                details: { value_class: raw_max_tool_calls_per_turn.class.name },
+              ) unless value
               ValidationError.raise!(
                 "max_tool_calls_per_turn must be > 0",
                 code: "agent_core.dag.runtime.max_tool_calls_per_turn_must_be_0",
@@ -178,7 +215,13 @@ module AgentCore
               value
             end
 
-          max_steps_per_turn = Integer(max_steps_per_turn)
+          raw_max_steps_per_turn = max_steps_per_turn
+          max_steps_per_turn = Integer(raw_max_steps_per_turn, exception: false)
+          ValidationError.raise!(
+            "max_steps_per_turn must be an Integer",
+            code: "agent_core.dag.runtime.max_steps_per_turn_must_be_an_integer",
+            details: { value_class: raw_max_steps_per_turn.class.name },
+          ) unless max_steps_per_turn
           ValidationError.raise!(
             "max_steps_per_turn must be > 0",
             code: "agent_core.dag.runtime.max_steps_per_turn_must_be_0",
@@ -187,7 +230,13 @@ module AgentCore
 
           llm_options = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
 
-          tool_call_repair_attempts = Integer(tool_call_repair_attempts)
+          raw_tool_call_repair_attempts = tool_call_repair_attempts
+          tool_call_repair_attempts = Integer(raw_tool_call_repair_attempts, exception: false)
+          ValidationError.raise!(
+            "tool_call_repair_attempts must be an Integer",
+            code: "agent_core.dag.runtime.tool_call_repair_attempts_must_be_an_integer",
+            details: { value_class: raw_tool_call_repair_attempts.class.name },
+          ) unless tool_call_repair_attempts
           ValidationError.raise!(
             "tool_call_repair_attempts must be >= 0",
             code: "agent_core.dag.runtime.tool_call_repair_attempts_must_be_0",
@@ -200,7 +249,13 @@ module AgentCore
               .reject(&:empty?)
               .freeze
 
-          tool_call_repair_max_output_tokens = Integer(tool_call_repair_max_output_tokens)
+          raw_tool_call_repair_max_output_tokens = tool_call_repair_max_output_tokens
+          tool_call_repair_max_output_tokens = Integer(raw_tool_call_repair_max_output_tokens, exception: false)
+          ValidationError.raise!(
+            "tool_call_repair_max_output_tokens must be an Integer",
+            code: "agent_core.dag.runtime.tool_call_repair_max_output_tokens_must_be_an_integer",
+            details: { value_class: raw_tool_call_repair_max_output_tokens.class.name },
+          ) unless tool_call_repair_max_output_tokens
           ValidationError.raise!(
             "tool_call_repair_max_output_tokens must be > 0",
             code: "agent_core.dag.runtime.tool_call_repair_max_output_tokens_must_be_0",
@@ -209,28 +264,52 @@ module AgentCore
 
           tool_call_repair_validate_schema = tool_call_repair_validate_schema == true
 
-          tool_call_repair_schema_max_depth = Integer(tool_call_repair_schema_max_depth)
+          raw_tool_call_repair_schema_max_depth = tool_call_repair_schema_max_depth
+          tool_call_repair_schema_max_depth = Integer(raw_tool_call_repair_schema_max_depth, exception: false)
+          ValidationError.raise!(
+            "tool_call_repair_schema_max_depth must be an Integer",
+            code: "agent_core.dag.runtime.tool_call_repair_schema_max_depth_must_be_an_integer",
+            details: { value_class: raw_tool_call_repair_schema_max_depth.class.name },
+          ) unless tool_call_repair_schema_max_depth
           ValidationError.raise!(
             "tool_call_repair_schema_max_depth must be >= 0",
             code: "agent_core.dag.runtime.tool_call_repair_schema_max_depth_must_be_0",
             details: { tool_call_repair_schema_max_depth: tool_call_repair_schema_max_depth },
           ) if tool_call_repair_schema_max_depth.negative?
 
-          tool_call_repair_max_schema_bytes = Integer(tool_call_repair_max_schema_bytes)
+          raw_tool_call_repair_max_schema_bytes = tool_call_repair_max_schema_bytes
+          tool_call_repair_max_schema_bytes = Integer(raw_tool_call_repair_max_schema_bytes, exception: false)
+          ValidationError.raise!(
+            "tool_call_repair_max_schema_bytes must be an Integer",
+            code: "agent_core.dag.runtime.tool_call_repair_max_schema_bytes_must_be_an_integer",
+            details: { value_class: raw_tool_call_repair_max_schema_bytes.class.name },
+          ) unless tool_call_repair_max_schema_bytes
           ValidationError.raise!(
             "tool_call_repair_max_schema_bytes must be > 0",
             code: "agent_core.dag.runtime.tool_call_repair_max_schema_bytes_must_be_0",
             details: { tool_call_repair_max_schema_bytes: tool_call_repair_max_schema_bytes },
           ) if tool_call_repair_max_schema_bytes <= 0
 
-          tool_call_repair_max_candidates = Integer(tool_call_repair_max_candidates)
+          raw_tool_call_repair_max_candidates = tool_call_repair_max_candidates
+          tool_call_repair_max_candidates = Integer(raw_tool_call_repair_max_candidates, exception: false)
+          ValidationError.raise!(
+            "tool_call_repair_max_candidates must be an Integer",
+            code: "agent_core.dag.runtime.tool_call_repair_max_candidates_must_be_an_integer",
+            details: { value_class: raw_tool_call_repair_max_candidates.class.name },
+          ) unless tool_call_repair_max_candidates
           ValidationError.raise!(
             "tool_call_repair_max_candidates must be > 0",
             code: "agent_core.dag.runtime.tool_call_repair_max_candidates_must_be_0",
             details: { tool_call_repair_max_candidates: tool_call_repair_max_candidates },
           ) if tool_call_repair_max_candidates <= 0
 
-          tool_name_repair_attempts = Integer(tool_name_repair_attempts)
+          raw_tool_name_repair_attempts = tool_name_repair_attempts
+          tool_name_repair_attempts = Integer(raw_tool_name_repair_attempts, exception: false)
+          ValidationError.raise!(
+            "tool_name_repair_attempts must be an Integer",
+            code: "agent_core.dag.runtime.tool_name_repair_attempts_must_be_an_integer",
+            details: { value_class: raw_tool_name_repair_attempts.class.name },
+          ) unless tool_name_repair_attempts
           ValidationError.raise!(
             "tool_name_repair_attempts must be >= 0",
             code: "agent_core.dag.runtime.tool_name_repair_attempts_must_be_0",
@@ -243,21 +322,39 @@ module AgentCore
               .reject(&:empty?)
               .freeze
 
-          tool_name_repair_max_output_tokens = Integer(tool_name_repair_max_output_tokens)
+          raw_tool_name_repair_max_output_tokens = tool_name_repair_max_output_tokens
+          tool_name_repair_max_output_tokens = Integer(raw_tool_name_repair_max_output_tokens, exception: false)
+          ValidationError.raise!(
+            "tool_name_repair_max_output_tokens must be an Integer",
+            code: "agent_core.dag.runtime.tool_name_repair_max_output_tokens_must_be_an_integer",
+            details: { value_class: raw_tool_name_repair_max_output_tokens.class.name },
+          ) unless tool_name_repair_max_output_tokens
           ValidationError.raise!(
             "tool_name_repair_max_output_tokens must be > 0",
             code: "agent_core.dag.runtime.tool_name_repair_max_output_tokens_must_be_0",
             details: { tool_name_repair_max_output_tokens: tool_name_repair_max_output_tokens },
           ) if tool_name_repair_max_output_tokens <= 0
 
-          tool_name_repair_max_candidates = Integer(tool_name_repair_max_candidates)
+          raw_tool_name_repair_max_candidates = tool_name_repair_max_candidates
+          tool_name_repair_max_candidates = Integer(raw_tool_name_repair_max_candidates, exception: false)
+          ValidationError.raise!(
+            "tool_name_repair_max_candidates must be an Integer",
+            code: "agent_core.dag.runtime.tool_name_repair_max_candidates_must_be_an_integer",
+            details: { value_class: raw_tool_name_repair_max_candidates.class.name },
+          ) unless tool_name_repair_max_candidates
           ValidationError.raise!(
             "tool_name_repair_max_candidates must be > 0",
             code: "agent_core.dag.runtime.tool_name_repair_max_candidates_must_be_0",
             details: { tool_name_repair_max_candidates: tool_name_repair_max_candidates },
           ) if tool_name_repair_max_candidates <= 0
 
-          tool_name_repair_max_visible_tool_names = Integer(tool_name_repair_max_visible_tool_names)
+          raw_tool_name_repair_max_visible_tool_names = tool_name_repair_max_visible_tool_names
+          tool_name_repair_max_visible_tool_names = Integer(raw_tool_name_repair_max_visible_tool_names, exception: false)
+          ValidationError.raise!(
+            "tool_name_repair_max_visible_tool_names must be an Integer",
+            code: "agent_core.dag.runtime.tool_name_repair_max_visible_tool_names_must_be_an_integer",
+            details: { value_class: raw_tool_name_repair_max_visible_tool_names.class.name },
+          ) unless tool_name_repair_max_visible_tool_names
           ValidationError.raise!(
             "tool_name_repair_max_visible_tool_names must be > 0",
             code: "agent_core.dag.runtime.tool_name_repair_max_visible_tool_names_must_be_0",
@@ -266,11 +363,89 @@ module AgentCore
 
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
 
+          execution_context_attributes =
+            if execution_context_attributes.nil?
+              {}.freeze
+            elsif execution_context_attributes.is_a?(Hash)
+              attrs = execution_context_attributes.dup
+              attrs.each_key do |key|
+                next if key.is_a?(Symbol)
+
+                ValidationError.raise!(
+                  "execution_context_attributes keys must be Symbols (got #{key.class})",
+                  code: "agent_core.dag.runtime.execution_context_attributes_keys_must_be_symbols_got",
+                  details: { key_class: key.class.name },
+                )
+              end
+
+              if attrs.key?(:agent)
+                agent = attrs.fetch(:agent)
+
+                if agent.nil?
+                  # ok
+                elsif agent.is_a?(Hash)
+                  agent.each_key do |key|
+                    next if key.is_a?(Symbol)
+
+                    ValidationError.raise!(
+                      "execution_context_attributes[:agent] keys must be Symbols (got #{key.class})",
+                      code: "agent_core.dag.runtime.execution_context_attributes_agent_keys_must_be_symbols_got",
+                      details: { key_class: key.class.name },
+                    )
+                  end
+                else
+                  ValidationError.raise!(
+                    "execution_context_attributes[:agent] must be a Hash",
+                    code: "agent_core.dag.runtime.execution_context_attributes_agent_must_be_a_hash",
+                    details: { value_class: agent.class.name },
+                  )
+                end
+              end
+
+              if attrs.key?(:dag)
+                dag = attrs.fetch(:dag)
+
+                if dag.nil?
+                  # ok
+                elsif dag.is_a?(Hash)
+                  dag.each_key do |key|
+                    next if key.is_a?(Symbol)
+
+                    ValidationError.raise!(
+                      "execution_context_attributes[:dag] keys must be Symbols (got #{key.class})",
+                      code: "agent_core.dag.runtime.execution_context_attributes_dag_keys_must_be_symbols_got",
+                      details: { key_class: key.class.name },
+                    )
+                  end
+                else
+                  ValidationError.raise!(
+                    "execution_context_attributes[:dag] must be a Hash",
+                    code: "agent_core.dag.runtime.execution_context_attributes_dag_must_be_a_hash",
+                    details: { value_class: dag.class.name },
+                  )
+                end
+              end
+
+              attrs.freeze
+            else
+              ValidationError.raise!(
+                "execution_context_attributes must be a Hash",
+                code: "agent_core.dag.runtime.execution_context_attributes_must_be_a_hash",
+                details: { value_class: execution_context_attributes.class.name },
+              )
+            end
+
           tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
 
           prompt_injection_sources = Array(prompt_injection_sources)
 
-          memory_search_limit = Integer(memory_search_limit)
+          raw_memory_search_limit = memory_search_limit
+          memory_search_limit = Integer(raw_memory_search_limit, exception: false)
+          ValidationError.raise!(
+            "memory_search_limit must be an Integer",
+            code: "agent_core.dag.runtime.memory_search_limit_must_be_an_integer",
+            details: { value_class: raw_memory_search_limit.class.name },
+          ) unless memory_search_limit
           ValidationError.raise!(
             "memory_search_limit must be >= 0",
             code: "agent_core.dag.runtime.memory_search_limit_must_be_0",
@@ -293,6 +468,19 @@ module AgentCore
           summary_model = summary_model&.to_s&.strip
           summary_model = nil if summary_model.to_s.empty?
 
+          raw_summary_max_tokens = summary_max_tokens
+          summary_max_tokens = Integer(raw_summary_max_tokens, exception: false)
+          ValidationError.raise!(
+            "summary_max_tokens must be an Integer",
+            code: "agent_core.dag.runtime.summary_max_tokens_must_be_an_integer",
+            details: { value_class: raw_summary_max_tokens.class.name },
+          ) unless summary_max_tokens
+          ValidationError.raise!(
+            "summary_max_tokens must be > 0",
+            code: "agent_core.dag.runtime.summary_max_tokens_must_be_0",
+            details: { summary_max_tokens: summary_max_tokens },
+          ) if summary_max_tokens <= 0
+
           super(
             provider: provider,
             model: model,
@@ -301,6 +489,7 @@ module AgentCore
             tool_policy: tool_policy,
             tool_name_aliases: tool_name_aliases,
             tool_name_normalize_fallback: tool_name_normalize_fallback,
+            tool_name_normalize_index: tool_name_normalize_index,
             skills_store: skills_store,
             memory_store: memory_store,
             memory_search_limit: memory_search_limit,
@@ -312,7 +501,7 @@ module AgentCore
             reserved_output_tokens: reserved_output_tokens,
             auto_compact: auto_compact == true,
             summary_model: summary_model,
-            summary_max_tokens: Integer(summary_max_tokens),
+            summary_max_tokens: summary_max_tokens,
             llm_options: llm_options.freeze,
             tool_call_repair_attempts: tool_call_repair_attempts,
             tool_call_repair_fallback_models: tool_call_repair_fallback_models,
@@ -327,6 +516,7 @@ module AgentCore
             tool_name_repair_max_candidates: tool_name_repair_max_candidates,
             tool_name_repair_max_visible_tool_names: tool_name_repair_max_visible_tool_names,
             instrumenter: instrumenter,
+            execution_context_attributes: execution_context_attributes,
             max_tool_calls_per_turn: max_tool_calls_per_turn,
             max_steps_per_turn: max_steps_per_turn,
             include_skill_locations: include_skill_locations == true,

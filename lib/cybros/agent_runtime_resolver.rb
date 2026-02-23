@@ -81,35 +81,31 @@ module Cybros
 
       runtime_kwargs[:context_turns] = context_turns if context_turns
 
-      AgentCore::DAG::Runtime.new(**runtime_kwargs)
-    end
+      agent_key = agent_metadata&.fetch("key", nil).to_s.strip
+      agent_key = "main" if agent_key.empty?
 
-    def agent_attributes_for(node)
-      conversation = conversation_for(node)
-      agent_metadata = agent_metadata_for(conversation)
+      agent_attrs = { key: agent_key, agent_profile: profile_name }
+      agent_attrs[:context_turns] = context_turns if context_turns
 
-      key = agent_metadata&.fetch("key", nil).to_s.strip
-      key = "main" if key.empty?
-
-      profile_resolution = resolve_profile(agent_metadata)
-      profile_name = profile_resolution.fetch(:profile_name)
-      profile_config = profile_resolution.fetch(:profile_config)
-
-      context_turns =
-        if profile_config&.context_turns
-          profile_config.context_turns
+      workspace_dir =
+        if defined?(Rails) && Rails.respond_to?(:root)
+          Rails.root.to_s
         else
-          parse_context_turns(agent_metadata&.fetch("context_turns", nil))
+          Dir.pwd
         end
+      workspace_dir = Dir.pwd if workspace_dir.to_s.strip.empty?
 
-      attrs = {
-        key: key,
-        agent_profile: profile_name,
+      ctx_attrs = {
+        cwd: workspace_dir,
+        workspace_dir: workspace_dir,
+        agent: agent_attrs,
       }
-      attrs[:context_turns] = context_turns if context_turns
-      attrs
-    rescue StandardError
-      { key: "main", agent_profile: Cybros::AgentProfiles::DEFAULT_PROFILE }
+      if (channel = channel_for(node: node))
+        ctx_attrs[:channel] = channel
+      end
+      runtime_kwargs[:execution_context_attributes] = ctx_attrs
+
+      AgentCore::DAG::Runtime.new(**runtime_kwargs)
     end
 
     def build_tools_registry

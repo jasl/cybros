@@ -166,7 +166,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
       result = spawn_tool.call({ "name" => "child", "prompt" => "hi", "context_turns" => "abc" }, context: ctx)
       assert result.error?
       assert_includes result.text, "validation failed"
-      assert_equal "cybros.subagent_spawn.context_turns_must_be_an_integer", result.metadata.dig(:validation_error, :code)
+      assert_equal "cybros.subagent_spawn.context_turns_must_be_an_integer", result.metadata.dig("validation_error", "code")
     end
   end
 
@@ -205,7 +205,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
       result = spawn_tool.call({ "name" => "child", "prompt" => "hi", "agent_profile" => "wat" }, context: ctx)
       assert result.error?
       assert_includes result.text, "validation failed"
-      assert_equal "cybros.subagent_spawn.invalid_agent_profile", result.metadata.dig(:validation_error, :code)
+      assert_equal "cybros.subagent_spawn.invalid_agent_profile", result.metadata.dig("validation_error", "code")
     end
   end
 
@@ -222,7 +222,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: nil)
     assert result.error?
     assert_includes result.text, "validation failed"
-    assert_equal "cybros.subagent_poll.limit_turns_must_be_an_integer", result.metadata.dig(:validation_error, :code)
+    assert_equal "cybros.subagent_poll.limit_turns_must_be_an_integer", result.metadata.dig("validation_error", "code")
   end
 
   test "subagent_poll returns pending status and transcript preview" do

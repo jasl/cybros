@@ -38,13 +38,18 @@ module AgentCore
     end
 
     def self.from_h(hash)
-      h = hash.transform_keys(&:to_sym)
+      ValidationError.raise!(
+        "tool_call must be a Hash (got #{hash.class})",
+        code: "agent_core.tool_call.tool_call_must_be_a_hash_got",
+        details: { value_class: hash.class.name },
+      ) unless hash.is_a?(Hash)
+
       new(
-        id: h[:id],
-        name: h[:name],
-        arguments: h[:arguments] || {},
-        arguments_parse_error: h[:arguments_parse_error],
-        arguments_raw: h[:arguments_raw],
+        id: hash.fetch("id", hash.fetch(:id, nil)),
+        name: hash.fetch("name", hash.fetch(:name, nil)),
+        arguments: hash.fetch("arguments", hash.fetch(:arguments, {})) || {},
+        arguments_parse_error: hash.fetch("arguments_parse_error", hash.fetch(:arguments_parse_error, nil)),
+        arguments_raw: hash.fetch("arguments_raw", hash.fetch(:arguments_raw, nil)),
       )
     end
 

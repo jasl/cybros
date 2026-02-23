@@ -21,7 +21,13 @@ module AgentCore
 
           @content = normalized.map(&:freeze).freeze
           @error = !!error
-          @metadata = (metadata || {}).freeze
+          meta = metadata || {}
+          ValidationError.raise!(
+            "tool result metadata must be a Hash",
+            code: "agent_core.tools.tool_result.tool_result_metadata_must_be_a_hash",
+            details: { metadata_class: meta.class.name },
+          ) unless meta.is_a?(Hash)
+          @metadata = AgentCore::Utils.deep_stringify_keys(meta).freeze
         end
 
         def error? = error
@@ -105,8 +111,6 @@ module AgentCore
             code: "agent_core.tools.tool_result.tool_result_metadata_must_be_a_hash",
             details: { metadata_class: metadata.class.name },
           ) unless metadata.is_a?(Hash)
-
-          metadata = AgentCore::Utils.symbolize_keys(metadata)
 
           new(
             content: content,

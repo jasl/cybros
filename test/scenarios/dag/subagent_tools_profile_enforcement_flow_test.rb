@@ -110,7 +110,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
           required: ["text"],
         },
       ) do |args, **|
-        AgentCore::Resources::Tools::ToolResult.success(text: "echo=#{args.fetch('text')}")
+        AgentCore::Resources::Tools::ToolResult.success(text: "echo=#{args.fetch("text")}")
       end
     )
 

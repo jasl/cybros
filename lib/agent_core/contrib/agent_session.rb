@@ -23,7 +23,7 @@ module AgentCore
         graph.mutate!(turn_id: turn_id) do |m|
           user =
             m.create_node(
-              node_type: Messages::UserMessage.node_type_key,
+              node_type: "user_message",
               state: ::DAG::Node::FINISHED,
               content: user_content,
               metadata: {},
@@ -32,7 +32,7 @@ module AgentCore
 
           agent =
             m.create_node(
-              node_type: Messages::AgentMessage.node_type_key,
+              node_type: "agent_message",
               state: ::DAG::Node::PENDING,
               metadata: agent_metadata,
               lane_id: effective_lane_id,

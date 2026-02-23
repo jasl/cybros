@@ -78,7 +78,7 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
 
   def test_metadata
     result = ToolResult.success(text: "ok", metadata: { elapsed_ms: 42 })
-    assert_equal({ elapsed_ms: 42 }, result.metadata)
+    assert_equal({ "elapsed_ms" => 42 }, result.metadata)
     assert result.metadata.frozen?
   end
 
@@ -111,7 +111,7 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
     assert_equal :base64, result.content.first[:source_type]
   end
 
-  def test_from_h_symbolizes_metadata_keys
+  def test_from_h_stringifies_metadata_keys
     input = {
       "content" => [{ "type" => "text", "text" => "ok" }],
       "error" => false,
@@ -122,7 +122,7 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
 
     refute result.error?
     assert_equal "ok", result.text
-    assert_equal 1.5, result.metadata.fetch(:duration_ms)
+    assert_equal 1.5, result.metadata.fetch("duration_ms")
   end
 
   def test_from_h_accepts_json_string

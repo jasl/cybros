@@ -74,17 +74,40 @@ module AgentCore
 
     # Build a Message from a serialized Hash.
     def self.from_h(hash)
-      h = hash.transform_keys(&:to_sym)
-      content = deserialize_content(h[:content])
-      tool_calls = h[:tool_calls]&.map { |tc| ToolCall.from_h(tc) }
+      ValidationError.raise!(
+        "message must be a Hash (got #{hash.class})",
+        code: "agent_core.message.message_must_be_a_hash_got",
+        details: { value_class: hash.class.name },
+      ) unless hash.is_a?(Hash)
+
+      role = hash.fetch("role", hash.fetch(:role, nil))
+      content = deserialize_content(hash.fetch("content", hash.fetch(:content, nil)))
+
+      tool_calls =
+        if hash.key?("tool_calls") || hash.key?(:tool_calls)
+          raw = hash.fetch("tool_calls", hash.fetch(:tool_calls, nil))
+          ValidationError.raise!(
+            "tool_calls must be an Array",
+            code: "agent_core.message.tool_calls_must_be_an_array",
+            details: { tool_calls_class: raw.class.name },
+          ) unless raw.is_a?(Array)
+
+          raw.map { |tc| ToolCall.from_h(tc) }
+        end
+
+      tool_call_id = hash.fetch("tool_call_id", hash.fetch(:tool_call_id, nil))
+      name = hash.fetch("name", hash.fetch(:name, nil))
+
+      metadata = hash.fetch("metadata", hash.fetch(:metadata, {}))
+      metadata = {} unless metadata.is_a?(Hash)
 
       new(
-        role: h[:role],
+        role: role,
         content: content,
         tool_calls: tool_calls,
-        tool_call_id: h[:tool_call_id],
-        name: h[:name],
-        metadata: h[:metadata]
+        tool_call_id: tool_call_id,
+        name: name,
+        metadata: metadata
       )
     end
 

@@ -34,7 +34,7 @@
 
 - 默认把渠道写在 `conversation.metadata["routing"]["channel"]`（例如 `"web"|"slack"|"telegram"`）
 - 单个 turn 需要覆盖时，可写在 `node.metadata["routing"]["channel"]`（node 覆盖优先）
-- executor 会把 `effective_channel` 注入到 `execution_context.attributes[:channel]`，用于 `<channel>` system tail section（仅当存在时注入，不影响 prefix 稳定性）
+- resolver（或其委托）负责把 `effective_channel` 写入 `runtime.execution_context_attributes[:channel]`，executor 会将其透传到 `execution_context.attributes[:channel]`，用于 `<channel>` system tail section（仅当存在时注入，不影响 prefix 稳定性）
 
 ---
 
@@ -67,6 +67,7 @@
 - `tool_output_pruner`：`AgentCore::ContextManagement::ToolOutputPruner`（仅在超预算时启用；可设为 nil 禁用）
 - `prompt_injection_sources`：`AgentCore::Resources::PromptInjections::Source::*`
 - `instrumenter`：`AgentCore::Observability::Instrumenter`（默认 `NullInstrumenter`）
+- `execution_context_attributes`：执行上下文属性（Hash，Symbol keys；executor 会基于它构建 `ExecutionContext.attributes`，并自动注入 `dag.graph_id/node_id/lane_id/turn_id`；可用于注入 `cwd/workspace_dir/channel/agent/...` 等 app 侧信息）
 - `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `Heuristic`）
 - `include_skill_locations`：是否在 `<available_skills>` 注入中包含技能 location（默认 `false`）
 - `prompt_mode`：提示词模式（默认 `:full`；`prompt_injections` 可按 mode 过滤）
