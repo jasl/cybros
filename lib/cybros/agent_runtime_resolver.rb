@@ -6,6 +6,19 @@ module Cybros
 
     module_function
 
+    def channel_for(node:)
+      from_node = routing_channel_from_metadata(node&.metadata)
+      return from_node if from_node
+
+      conversation = conversation_for(node)
+      from_conversation = routing_channel_from_metadata(conversation&.metadata)
+      return from_conversation if from_conversation
+
+      nil
+    rescue StandardError
+      nil
+    end
+
     def runtime_for(node:, provider: nil, base_tool_policy: nil, tools_registry: nil, instrumenter: nil)
       conversation = conversation_for(node)
 
@@ -173,6 +186,22 @@ module Cybros
       nil
     end
     private_class_method :agent_metadata_for
+
+    def routing_channel_from_metadata(metadata)
+      return nil unless metadata.is_a?(Hash)
+
+      routing = metadata["routing"] || metadata[:routing]
+      return nil unless routing.is_a?(Hash)
+
+      channel = routing["channel"] || routing[:channel]
+      channel = channel.to_s.lines.first.to_s.strip
+      return nil if channel.empty?
+
+      channel
+    rescue StandardError
+      nil
+    end
+    private_class_method :routing_channel_from_metadata
 
     def resolve_profile(agent_metadata)
       raw = agent_metadata.is_a?(Hash) ? agent_metadata.fetch("agent_profile", nil) : nil

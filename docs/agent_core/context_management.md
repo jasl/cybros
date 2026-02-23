@@ -28,6 +28,7 @@
     - **prefix（尽量跨 turn 稳定）**：`base_system_prompt` + `<safety>` + `<tooling>` + `<workspace>` + `<available_skills>` + `system_section` injections（默认）
     - **tail（每 turn 可能变化）**：`<time>` +（可选）`<channel>` + `<relevant_context>`（memory；强制 tail）+ stability=tail 的 injections
     - `prompt_mode=:minimal` 默认仅包含 safety（不包含 tooling/workspace/time/channel/skills；memory 仅当显式提供）
+    - `<channel>` 来源：优先 `node.metadata["routing"]["channel"]`，否则 `conversation.metadata["routing"]["channel"]`；不存在则省略
   - 注入 prompt_injections（sources.items；按 `prompt_mode` 过滤）
   - 注入 memory：`<relevant_context> ... </relevant_context>`（条数由 `runtime.memory_search_limit` 控制；强制进入 tail）
   - 注入 skills fragment：`<available_skills ... />`（默认仅 full mode）

@@ -126,6 +126,28 @@ class AgentCore::PromptBuilder::SystemPromptSectionsBuilderTest < Minitest::Test
     assert_operator idx_skills, :<, idx_safety
   end
 
+  def test_channel_is_injected_in_tail_in_full_mode
+    exec =
+      AgentCore::ExecutionContext.new(
+        attributes: { channel: "web\nINJECTED" },
+        clock: FixedClock.new(Time.utc(2026, 2, 23, 0, 0, 0)),
+      )
+
+    ctx =
+      AgentCore::PromptBuilder::Context.new(
+        system_prompt: "BASE",
+        prompt_mode: :full,
+        execution_context: exec,
+      )
+
+    r = AgentCore::PromptBuilder::SystemPromptSectionsBuilder.build(context: ctx)
+
+    assert_includes r.tail_text, "<channel>"
+    assert_includes r.tail_text, "name: web"
+    refute_includes r.tail_text, "INJECTED"
+    refute_includes r.prefix_text, "<channel>"
+  end
+
   def test_injection_with_stability_tail_only_appears_in_tail
     tail_item =
       AgentCore::Resources::PromptInjections::Item.new(

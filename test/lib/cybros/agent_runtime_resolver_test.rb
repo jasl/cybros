@@ -3,6 +3,111 @@
 require "test_helper"
 
 class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
+  test "channel_for reads conversation routing.channel" do
+    conversation =
+      Conversation.create!(
+        metadata: {
+          "routing" => { "channel" => "web" },
+          "agent" => { "agent_profile" => "coding" },
+        },
+      )
+
+    graph = conversation.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    node = nil
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    assert_equal "web", Cybros::AgentRuntimeResolver.channel_for(node: node)
+  end
+
+  test "channel_for prefers node routing.channel over conversation default" do
+    conversation =
+      Conversation.create!(
+        metadata: {
+          "routing" => { "channel" => "web" },
+          "agent" => { "agent_profile" => "coding" },
+        },
+      )
+
+    graph = conversation.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    node = nil
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: { "routing" => { "channel" => "slack" } },
+        )
+
+      m.create_edge(from_node: user, to_node: node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    assert_equal "slack", Cybros::AgentRuntimeResolver.channel_for(node: node)
+  end
+
+  test "channel_for returns nil for empty or invalid routing metadata" do
+    conversation =
+      Conversation.create!(
+        metadata: {
+          "routing" => "wat",
+          "agent" => { "agent_profile" => "coding" },
+        },
+      )
+
+    graph = conversation.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    node = nil
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: { "routing" => { "channel" => "" } },
+        )
+
+      m.create_edge(from_node: user, to_node: node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    assert_nil Cybros::AgentRuntimeResolver.channel_for(node: node)
+  end
+
   test "agent_profile hash applies prompt and tool restrictions" do
     conversation =
       Conversation.create!(

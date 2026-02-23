@@ -54,20 +54,25 @@ module AgentCore
 
             workspace_dir = workspace_dir_for_execution_context
 
+            channel = channel_for_execution_context(node)
+
+            attrs = {
+              cwd: workspace_dir,
+              workspace_dir: workspace_dir,
+              dag: {
+                graph_id: node.graph_id.to_s,
+                node_id: node.id.to_s,
+                lane_id: node.lane_id.to_s,
+                turn_id: node.turn_id.to_s,
+              },
+              agent: agent_attrs,
+            }
+            attrs[:channel] = channel if channel
+
             ExecutionContext.new(
               run_id: node.turn_id.to_s,
               instrumenter: runtime.instrumenter,
-              attributes: {
-                cwd: workspace_dir,
-                workspace_dir: workspace_dir,
-                dag: {
-                  graph_id: node.graph_id.to_s,
-                  node_id: node.id.to_s,
-                  lane_id: node.lane_id.to_s,
-                  turn_id: node.turn_id.to_s,
-                },
-                agent: agent_attrs,
-              },
+              attributes: attrs,
             )
           end
 
@@ -85,6 +90,14 @@ module AgentCore
             Cybros::AgentRuntimeResolver.agent_attributes_for(node)
           rescue NameError, StandardError
             { key: "main", agent_profile: "coding" }
+          end
+
+          def channel_for_execution_context(node)
+            channel = Cybros::AgentRuntimeResolver.channel_for(node: node)
+            channel = channel.to_s.strip
+            channel.empty? ? nil : channel
+          rescue NameError, StandardError
+            nil
           end
 
           def tool_call_from_input(node)

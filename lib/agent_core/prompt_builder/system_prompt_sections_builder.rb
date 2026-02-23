@@ -230,7 +230,9 @@ module AgentCore
       private_class_method :build_workspace_fragment
 
       def build_channel_fragment(context)
-        channel = context.execution_context.attributes[:channel].to_s.strip
+        channel = context.execution_context.attributes[:channel].to_s
+        channel = channel.lines.first.to_s.strip
+        channel = AgentCore::Utils.truncate_utf8_bytes(channel, max_bytes: 128)
         return "" if channel.empty?
 
         "<channel>\nname: #{channel}\n</channel>"

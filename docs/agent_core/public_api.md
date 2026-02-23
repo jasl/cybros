@@ -30,6 +30,12 @@
   - Object：`{ base: "...", ...overrides }`（安全白名单字段，见 `lib/cybros/agent_profile_config.rb`）
     - `system_prompt_sections`：内建 system prompt sections 的 section-level overrides（enabled/order/prompt_modes/stability）
 
+多渠道（routing）约定：
+
+- 默认把渠道写在 `conversation.metadata["routing"]["channel"]`（例如 `"web"|"slack"|"telegram"`）
+- 单个 turn 需要覆盖时，可写在 `node.metadata["routing"]["channel"]`（node 覆盖优先）
+- executor 会把 `effective_channel` 注入到 `execution_context.attributes[:channel]`，用于 `<channel>` system tail section（仅当存在时注入，不影响 prefix 稳定性）
+
 ---
 
 ## 2) `AgentCore::DAG::Runtime` 字段（核心）
