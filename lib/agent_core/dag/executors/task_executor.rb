@@ -36,7 +36,10 @@ module AgentCore
 
           ::DAG::ExecutionResult.finished(
             content: result.to_h,
-            metadata: { tool: { name: tool_name } },
+            metadata: {
+              tool: { name: tool_name },
+              agent: execution_context.attributes.fetch(:agent, {}),
+            },
           )
         rescue AgentCore::ToolNotFoundError => e
           ::DAG::ExecutionResult.errored(error: "ToolNotFoundError: #{e.message}")
@@ -47,6 +50,8 @@ module AgentCore
         private
 
           def build_execution_context(node, runtime:)
+            agent_attrs = agent_attributes_for(node)
+
             ExecutionContext.new(
               run_id: node.turn_id.to_s,
               instrumenter: runtime.instrumenter,
@@ -57,8 +62,15 @@ module AgentCore
                   lane_id: node.lane_id.to_s,
                   turn_id: node.turn_id.to_s,
                 },
+                agent: agent_attrs,
               },
             )
+          end
+
+          def agent_attributes_for(node)
+            Cybros::AgentRuntimeResolver.agent_attributes_for(node)
+          rescue NameError, StandardError
+            { key: "main", policy_profile: "full" }
           end
 
           def tool_call_from_input(node)

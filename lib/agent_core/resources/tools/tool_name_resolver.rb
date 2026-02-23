@@ -32,6 +32,12 @@ module AgentCore
           "skills-list" => "skills_list",
           "skills-load" => "skills_load",
           "skills-read-file" => "skills_read_file",
+
+          # SubagentTools (canonical: subagent_spawn/subagent_poll)
+          "subagent.spawn" => "subagent_spawn",
+          "subagent.poll" => "subagent_poll",
+          "subagent-spawn" => "subagent_spawn",
+          "subagent-poll" => "subagent_poll",
         }.freeze
 
         module_function

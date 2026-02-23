@@ -18,6 +18,14 @@
 
 默认实现见：`config/initializers/agent_core.rb`。
 
+补充（Cybros app 侧约定）：
+
+- 默认 resolver 委托到 `Cybros::AgentRuntimeResolver.runtime_for(node:)`
+- resolver 会读取 `node.graph.attachable`（通常是 `Conversation`）的 `conversations.metadata["agent"]` 并立刻生效：
+  - `policy_profile`：通过 `Policy::Profiled` 包裹 base policy，影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
+  - `context_turns`：覆盖 runtime 的 context turns 窗口（范围 1..1000）
+- profiles 映射见：`lib/cybros/agent_profiles.rb`（`full|minimal|memory_only|skills_only`）
+
 ---
 
 ## 2) `AgentCore::DAG::Runtime` 字段（核心）
@@ -136,6 +144,7 @@ Tool calling 稳定性（Runner 级自愈）：
 工具名解析（alias / normalize）：
 
 - AgentCore 内置少量默认 alias（例如 `memory.search`→`memory_search`、`skills.list`→`skills_list`），用于缓解部分模型的工具名漂移。
+- 另：`subagent.spawn`/`subagent.poll`（以及 `subagent-spawn`/`subagent-poll`）会映射到 `subagent_spawn`/`subagent_poll`。
 - `tool_name_aliases` 可用于追加/覆盖 alias（例如把 `math.add` 映射到 `math_add`）。
 - `tool_name_normalize_fallback` 默认关闭；开启后会在 alias 解析失败时尝试 normalize fallback：
   - 大小写漂移：`Skills_List`/`SKILLS_LIST` → `skills_list`
@@ -153,6 +162,15 @@ Tool calling 稳定性（Runner 级自愈）：
 registry = AgentCore::Resources::Tools::Registry.new
 registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", description: "...") { |args, **| ... })
 ```
+
+### 3.1.1 Subagent tools（Cybros）
+
+默认 runtime resolver 会注册：
+
+- `subagent_spawn`
+- `subagent_poll`
+
+并以 `conversations.metadata["agent"]` 控制 child conversation 的 `policy_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
 
 ### 3.2 Skills tools
 

@@ -207,13 +207,15 @@
 
 - `docs/dag/subagent_patterns.md` 已给出“跨图”建模
 
-建议产品化：
+当前状态（2026-02-22）：
 
-- 提供一个 native tool：`subagent.run(name, prompt, policy_profile?, context_limit_turns?, merge_mode?)`
-  - 实现：创建 child Conversation/Graph → 运行到 leaf 稳定 → 返回 child transcript 摘要
-- 或分成两段：`subagent.spawn` + `subagent.poll`（适合长任务/并发）
-
-关键：subagent 必须能配置不同 tool policy/profile（只读探索、web-only、写文件 agent 等）。
+- ✅ 已落地：native tools `subagent_spawn` + `subagent_poll`
+  - spawn：创建 child `Conversation/Graph` + 写入 child `conversations.metadata.agent/subagent` 契约 + 在 child 图中 seed 最小可执行 turn（`user_message` finished → `agent_message` pending）
+  - poll：返回 child 状态（`running/pending/awaiting_approval/idle/missing`）+ main lane leaf + bounded transcript 预览（默认 10 turns，最大 50）
+- ✅ 已落地：基于 `conversations.metadata["agent"]` 的 runtime/profile 生效
+  - `policy_profile` 通过 `Policy::Profiled` 立刻影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
+  - `context_turns` 立刻影响 prompt build 的 context window（turns）
+- ✅ 已落地：默认禁止 nested spawn（subagent 内再 spawn 直接报错）
 
 ### P1：Prompt Builder 结构化（full/minimal + 稳定 prefix）
 

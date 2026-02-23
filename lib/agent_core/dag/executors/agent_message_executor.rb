@@ -11,6 +11,7 @@ module AgentCore
         def execute(node:, context:, stream:)
           runtime = AgentCore::DAG.runtime_for(node: node)
           execution_context = build_execution_context(node, runtime: runtime)
+          agent_metadata = { agent: execution_context.attributes.fetch(:agent, {}) }
 
           instrumenter = execution_context.instrumenter
 
@@ -49,6 +50,7 @@ module AgentCore
                     deep_merge_metadata(tool_call_limit_metadata, { reason: "max_steps_exceeded" })
                   )
                 )
+              metadata = deep_merge_metadata(metadata, agent_metadata)
 
               ::DAG::ExecutionResult.finished(content: content, payload: output_payload, metadata: metadata, usage: usage)
             else
@@ -73,6 +75,7 @@ module AgentCore
                     deep_merge_metadata(tool_call_limit_metadata, tool_loop_metadata)
                   )
                 )
+              metadata = deep_merge_metadata(metadata, agent_metadata)
 
               if streamed_output
                 ::DAG::ExecutionResult.finished(payload: output_payload, metadata: metadata, usage: usage, streamed_output: true)
@@ -95,6 +98,7 @@ module AgentCore
                   "tools" => e.tool_tokens,
                 }.compact,
               }.compact,
+              "agent" => agent_attributes_for(node),
             }
           )
         rescue AgentCore::ProviderError => e
@@ -103,15 +107,18 @@ module AgentCore
             metadata: {
               provider: runtime_name_safe(node),
               status: e.status,
+              agent: agent_attributes_for(node),
             }.compact,
           )
         rescue StandardError => e
-          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}")
+          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: { agent: agent_attributes_for(node) })
         end
 
         private
 
           def build_execution_context(node, runtime:)
+            agent_attrs = agent_attributes_for(node)
+
             ExecutionContext.new(
               run_id: node.turn_id.to_s,
               instrumenter: runtime.instrumenter,
@@ -122,8 +129,15 @@ module AgentCore
                   lane_id: node.lane_id.to_s,
                   turn_id: node.turn_id.to_s,
                 },
+                agent: agent_attrs,
               },
             )
+          end
+
+          def agent_attributes_for(node)
+            Cybros::AgentRuntimeResolver.agent_attributes_for(node)
+          rescue NameError, StandardError
+            { key: "main", policy_profile: "full" }
           end
 
           def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:)

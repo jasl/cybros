@@ -23,6 +23,39 @@
 - `child_conversation.dag_graph.main_lane.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
 - 若要“锚定某个节点做审计”：`child_conversation.dag_graph.transcript_for(target_node_id, limit_turns: N)`
 
+## 1.1) Native tools（P1 已落地）
+
+为了把上述“跨图”模式变成模型可调用的原语，Cybros 提供两个 native tools：
+
+- `subagent_spawn`：创建 child `Conversation/Graph`，写入 metadata 契约，并在 child 图中生成最小可执行 turn（`developer_message` finished + `user_message` finished + `agent_message` pending + `sequence` edges）。
+- `subagent_poll`：基于 child id 返回子会话状态（`running/pending/awaiting_approval/idle/missing`）、main lane leaf、以及 bounded transcript 预览（默认 10 turns，最大 50）。
+
+child conversation metadata 契约（写入 `conversations.metadata`）：
+
+```json
+{
+  "agent": {
+    "key": "subagent:<name>",
+    "policy_profile": "full|minimal|memory_only|skills_only",
+    "context_turns": 50
+  },
+  "subagent": {
+    "name": "<name>",
+    "parent_conversation_id": "<uuid>",
+    "parent_graph_id": "<uuid>",
+    "spawned_from_node_id": "<uuid>"
+  }
+}
+```
+
+运行时 profile 生效（关键）：
+
+- `AgentCore::DAG.runtime_resolver` 会读取 `conversation.metadata["agent"]`，并用 `Policy::Profiled` 包裹 base policy，使 `policy_profile/context_turns` 立刻影响该会话的工具可见性与授权判定。
+
+安全约束（当前默认）：
+
+- 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 以 `subagent:` 开头时，`subagent_spawn` 直接返回错误。
+
 ## 2) 父子图之间如何等待/同步？
 
 v1 不提供跨图 edges；推荐由 App executor 定义同步策略：

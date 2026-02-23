@@ -2,34 +2,7 @@
 
 Rails.application.config.to_prepare do
   AgentCore::DAG.runtime_resolver ||= lambda do |node:|
-    _ = node
-
-    provider =
-      AgentCore::Resources::Provider::SimpleInferenceProvider.new(
-        base_url: ENV["SIMPLE_INFERENCE_BASE_URL"],
-        api_key: ENV["SIMPLE_INFERENCE_API_KEY"],
-      )
-
-    tools_registry = AgentCore::Resources::Tools::Registry.new
-
-    instrumenter =
-      AgentCore::Observability::Adapters::ActiveSupportNotificationsInstrumenter.new
-
-    fallback_models =
-      ENV
-        .fetch("AGENT_CORE_FALLBACK_MODELS", "")
-        .split(",")
-        .map(&:strip)
-        .reject(&:empty?)
-
-    AgentCore::DAG::Runtime.new(
-      provider: provider,
-      model: ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini"),
-      fallback_models: fallback_models,
-      tools_registry: tools_registry,
-      tool_policy: AgentCore::Resources::Tools::Policy::DenyAll.new,
-      instrumenter: instrumenter,
-    )
+    Cybros::AgentRuntimeResolver.runtime_for(node: node)
   end
 
   DAG::ExecutorRegistry
