@@ -88,4 +88,37 @@ class AgentCore::Resources::Skills::ToolsTest < Minitest::Test
       assert_equal Base64.strict_encode64(bytes), block.fetch(:data)
     end
   end
+
+  def test_validation_error_from_store_bubbles_to_tool_metadata
+    store =
+      Class.new do
+        def list_skills
+          []
+        end
+
+        def load_skill(name:, max_bytes:)
+          _ = max_bytes
+          AgentCore::ValidationError.raise!(
+            "invalid skill name",
+            code: "test.skills.invalid_name",
+            details: { name: name.to_s },
+          )
+        end
+
+        def read_skill_file_bytes(name:, rel_path:, max_bytes:)
+          _ = name
+          _ = rel_path
+          _ = max_bytes
+          +""
+        end
+      end.new
+
+    tools = AgentCore::Resources::Skills::Tools.build(store: store)
+    load = tools.find { |t| t.name == "skills_load" }
+
+    result = load.call({ "name" => "wat" })
+    assert result.error?
+    assert_includes result.text, "validation failed"
+    assert_equal "test.skills.invalid_name", result.metadata.dig("validation_error", "code")
+  end
 end

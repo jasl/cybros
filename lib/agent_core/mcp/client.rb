@@ -39,7 +39,18 @@ module AgentCore
         @protocol_version = protocol_version
         @client_info = normalize_hash(client_info) || default_client_info
         @capabilities = normalize_hash(capabilities) || {}
-        @timeout_s = Float(timeout_s)
+        raw_timeout_s = timeout_s
+        @timeout_s = Float(raw_timeout_s, exception: false)
+        ValidationError.raise!(
+          "timeout_s must be a number",
+          code: "agent_core.mcp.client.timeout_s_must_be_a_number",
+          details: { value_class: raw_timeout_s.class.name, value_preview: raw_timeout_s.to_s[0, 200] },
+        ) if @timeout_s.nil?
+        ValidationError.raise!(
+          "timeout_s must be a finite number",
+          code: "agent_core.mcp.client.timeout_s_must_be_finite",
+          details: { timeout_s: @timeout_s },
+        ) unless @timeout_s.finite?
         ValidationError.raise!(
           "timeout_s must be positive",
           code: "agent_core.mcp.client.timeout_s_must_be_positive",

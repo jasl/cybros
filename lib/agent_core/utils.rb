@@ -6,6 +6,7 @@ module AgentCore
 
     DEFAULT_MAX_TOOL_ARGS_BYTES = 200_000
     DEFAULT_MAX_TOOL_OUTPUT_BYTES = 200_000
+    UUID_REGEX = /\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i
 
     # Shallow-convert Hash keys to Symbols.
     #
@@ -98,6 +99,12 @@ module AgentCore
     # - Non-Hash inputs are treated as {}.
     def deep_merge_hashes(*hashes)
       hashes.reduce({}) { |acc, h| deep_merge_two(acc, h) }
+    end
+
+    def uuid_like?(value)
+      UUID_REGEX.match?(value.to_s)
+    rescue StandardError
+      false
     end
 
     def truncate_utf8_bytes(value, max_bytes:)

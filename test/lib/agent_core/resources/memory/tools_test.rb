@@ -79,4 +79,36 @@ class AgentCore::Resources::Memory::ToolsTest < Minitest::Test
     assert entry.key?("metadata")
     assert entry.fetch("metadata").is_a?(Hash)
   end
+
+  def test_validation_error_from_store_bubbles_to_tool_metadata
+    store =
+      Class.new do
+        def search(query:, limit: 5, metadata_filter: nil)
+          _ = query
+          _ = limit
+          _ = metadata_filter
+          []
+        end
+
+        def store(content:, metadata: {})
+          AgentCore::Resources::Memory::Entry.new(id: "1", content: content, metadata: metadata)
+        end
+
+        def forget(id:)
+          AgentCore::ValidationError.raise!(
+            "invalid id",
+            code: "test.memory.invalid_id",
+            details: { id: id.to_s },
+          )
+        end
+      end.new
+
+    tools = AgentCore::Resources::Memory::Tools.build(store: store)
+    forget = tools.index_by(&:name).fetch("memory_forget")
+
+    result = forget.call({ "id" => "not-a-real-id" })
+    assert result.error?
+    assert_includes result.text, "validation failed"
+    assert_equal "test.memory.invalid_id", result.metadata.dig("validation_error", "code")
+  end
 end

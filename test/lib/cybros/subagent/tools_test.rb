@@ -210,7 +210,24 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll returns missing status when child does not exist" do
-    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff" }, context: nil)
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: "0194f3c0-0000-7000-8000-00000000ffff",
+          },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
+        },
+      )
+
+    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff" }, context: ctx)
     refute result.error?, result.text
 
     payload = JSON.parse(result.text)
@@ -219,10 +236,90 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll rejects invalid limit_turns when provided" do
-    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: nil)
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: "0194f3c0-0000-7000-8000-00000000ffff",
+          },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
+        },
+      )
+
+    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: ctx)
     assert result.error?
     assert_includes result.text, "validation failed"
     assert_equal "cybros.subagent_poll.limit_turns_must_be_an_integer", result.metadata.dig("validation_error", "code")
+  end
+
+  test "subagent_poll rejects invalid child_conversation_id format" do
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: "0194f3c0-0000-7000-8000-00000000ffff",
+          },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
+        },
+      )
+
+    result = poll_tool.call({ "child_conversation_id" => "not-a-uuid" }, context: ctx)
+    assert result.error?
+    assert_includes result.text, "validation failed"
+    assert_equal "cybros.subagent_poll.child_conversation_id_must_be_a_uuid", result.metadata.dig("validation_error", "code")
+  end
+
+  test "subagent_poll rejects polling a non-owned conversation" do
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    from_node = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      from_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "parent",
+          metadata: {},
+        )
+    end
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: from_node.id.to_s,
+            lane_id: from_node.lane_id.to_s,
+            turn_id: from_node.turn_id.to_s,
+          },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
+        },
+      )
+
+    other = Conversation.create!
+
+    poll = poll_tool.call({ "child_conversation_id" => other.id.to_s, "limit_turns" => 10 }, context: ctx)
+    assert poll.error?
+    assert_includes poll.text, "validation failed"
+    assert_equal "cybros.subagent_poll.child_conversation_not_owned", poll.metadata.dig("validation_error", "code")
   end
 
   test "subagent_poll returns pending status and transcript preview" do
@@ -261,7 +358,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
 
     child_id = JSON.parse(spawn.text).fetch("child_conversation_id")
 
-    poll = poll_tool.call({ "child_conversation_id" => child_id, "limit_turns" => 10 }, context: nil)
+    poll = poll_tool.call({ "child_conversation_id" => child_id, "limit_turns" => 10 }, context: ctx)
     refute poll.error?, poll.text
 
     payload = JSON.parse(poll.text)

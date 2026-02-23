@@ -144,8 +144,9 @@ module AgentCore
         end
 
         def close(timeout_s: 2.0)
-          timeout_s = Float(timeout_s)
-          timeout_s = 0.0 if timeout_s <= 0
+          raw_timeout_s = timeout_s
+          timeout_s = Float(raw_timeout_s, exception: false)
+          timeout_s = 0.0 if timeout_s.nil? || !timeout_s.finite? || timeout_s <= 0
 
           stdin = nil
           wait_thr = nil
@@ -195,8 +196,6 @@ module AgentCore
           stderr_thread&.join(0.2)
           monitor_thread&.join(0.2)
 
-          nil
-        rescue ArgumentError, TypeError
           nil
         end
 

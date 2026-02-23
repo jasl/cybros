@@ -28,4 +28,3 @@ class AgentCore::Resources::Tools::Policy::ConfirmAllTest < Minitest::Test
     assert_equal "block", decision.deny_effect
   end
 end
-

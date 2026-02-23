@@ -51,4 +51,3 @@ class AgentCore::Resources::Tools::Policy::RulesetTest < Minitest::Test
     assert_equal "first", decision.reason
   end
 end
-

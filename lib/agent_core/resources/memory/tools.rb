@@ -105,6 +105,8 @@ module AgentCore
             Resources::Tools::ToolResult.success(text: json)
           rescue KeyError => e
             Resources::Tools::ToolResult.error(text: "memory_search missing argument: #{e.message}")
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "memory_search failed: #{e.message}")
           end
@@ -211,6 +213,8 @@ module AgentCore
             Resources::Tools::ToolResult.success(text: json)
           rescue KeyError => e
             Resources::Tools::ToolResult.error(text: "memory_store missing argument: #{e.message}")
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "memory_store failed: #{e.message}")
           end
@@ -239,6 +243,8 @@ module AgentCore
             Resources::Tools::ToolResult.success(text: JSON.generate({ "ok" => ok }))
           rescue KeyError => e
             Resources::Tools::ToolResult.error(text: "memory_forget missing argument: #{e.message}")
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "memory_forget failed: #{e.message}")
           end

@@ -65,37 +65,90 @@ module AgentCore
           @headers = normalize_headers(headers)
           @headers_provider = normalize_headers_provider(headers_provider)
 
-          @timeout_s = Float(timeout_s)
+          raw_timeout_s = timeout_s
+          @timeout_s = Float(raw_timeout_s, exception: false)
+          ValidationError.raise!(
+            "timeout_s must be a number",
+            code: "agent_core.mcp.streamable_http.timeout_s_must_be_a_number",
+            details: { value_class: raw_timeout_s.class.name, value_preview: raw_timeout_s.to_s[0, 200] },
+          ) if @timeout_s.nil?
+          ValidationError.raise!(
+            "timeout_s must be a finite number",
+            code: "agent_core.mcp.streamable_http.timeout_s_must_be_finite",
+            details: { timeout_s: @timeout_s },
+          ) unless @timeout_s.finite?
           ValidationError.raise!(
             "timeout_s must be positive",
             code: "agent_core.mcp.streamable_http.timeout_s_must_be_positive",
             details: { timeout_s: @timeout_s },
           ) if @timeout_s <= 0
 
-          @open_timeout_s = open_timeout_s.nil? ? @timeout_s : Float(open_timeout_s)
+          raw_open_timeout_s = open_timeout_s
+          @open_timeout_s = open_timeout_s.nil? ? @timeout_s : Float(raw_open_timeout_s, exception: false)
+          ValidationError.raise!(
+            "open_timeout_s must be a number",
+            code: "agent_core.mcp.streamable_http.open_timeout_s_must_be_a_number",
+            details: { value_class: raw_open_timeout_s.class.name, value_preview: raw_open_timeout_s.to_s[0, 200] },
+          ) if @open_timeout_s.nil?
+          ValidationError.raise!(
+            "open_timeout_s must be a finite number",
+            code: "agent_core.mcp.streamable_http.open_timeout_s_must_be_finite",
+            details: { open_timeout_s: @open_timeout_s },
+          ) unless @open_timeout_s.finite?
           ValidationError.raise!(
             "open_timeout_s must be positive",
             code: "agent_core.mcp.streamable_http.open_timeout_s_must_be_positive",
             details: { open_timeout_s: @open_timeout_s },
           ) if @open_timeout_s <= 0
 
-          @read_timeout_s = read_timeout_s.nil? ? @timeout_s : Float(read_timeout_s)
+          raw_read_timeout_s = read_timeout_s
+          @read_timeout_s = read_timeout_s.nil? ? @timeout_s : Float(raw_read_timeout_s, exception: false)
+          ValidationError.raise!(
+            "read_timeout_s must be a number",
+            code: "agent_core.mcp.streamable_http.read_timeout_s_must_be_a_number",
+            details: { value_class: raw_read_timeout_s.class.name, value_preview: raw_read_timeout_s.to_s[0, 200] },
+          ) if @read_timeout_s.nil?
+          ValidationError.raise!(
+            "read_timeout_s must be a finite number",
+            code: "agent_core.mcp.streamable_http.read_timeout_s_must_be_finite",
+            details: { read_timeout_s: @read_timeout_s },
+          ) unless @read_timeout_s.finite?
           ValidationError.raise!(
             "read_timeout_s must be positive",
             code: "agent_core.mcp.streamable_http.read_timeout_s_must_be_positive",
             details: { read_timeout_s: @read_timeout_s },
           ) if @read_timeout_s <= 0
 
+          raw_sse_max_reconnects = sse_max_reconnects
           @sse_max_reconnects =
-            sse_max_reconnects.nil? ? DEFAULT_SSE_MAX_RECONNECTS : Integer(sse_max_reconnects)
+            if raw_sse_max_reconnects.nil?
+              DEFAULT_SSE_MAX_RECONNECTS
+            else
+              Integer(raw_sse_max_reconnects, exception: false)
+            end
+          ValidationError.raise!(
+            "sse_max_reconnects must be an Integer",
+            code: "agent_core.mcp.streamable_http.sse_max_reconnects_must_be_an_integer",
+            details: { value_class: raw_sse_max_reconnects.class.name, value_preview: raw_sse_max_reconnects.to_s[0, 200] },
+          ) if @sse_max_reconnects.nil?
           ValidationError.raise!(
             "sse_max_reconnects must be positive",
             code: "agent_core.mcp.streamable_http.sse_max_reconnects_must_be_positive",
             details: { sse_max_reconnects: @sse_max_reconnects },
           ) if @sse_max_reconnects <= 0
 
+          raw_max_response_bytes = max_response_bytes
           @max_response_bytes =
-            max_response_bytes.nil? ? DEFAULT_MAX_RESPONSE_BYTES : Integer(max_response_bytes)
+            if raw_max_response_bytes.nil?
+              DEFAULT_MAX_RESPONSE_BYTES
+            else
+              Integer(raw_max_response_bytes, exception: false)
+            end
+          ValidationError.raise!(
+            "max_response_bytes must be an Integer",
+            code: "agent_core.mcp.streamable_http.max_response_bytes_must_be_an_integer",
+            details: { value_class: raw_max_response_bytes.class.name, value_preview: raw_max_response_bytes.to_s[0, 200] },
+          ) if @max_response_bytes.nil?
           ValidationError.raise!(
             "max_response_bytes must be positive",
             code: "agent_core.mcp.streamable_http.max_response_bytes_must_be_positive",
@@ -226,8 +279,9 @@ module AgentCore
         end
 
         def close(timeout_s: 2.0)
-          timeout_s = Float(timeout_s)
-          timeout_s = 0.0 if timeout_s <= 0
+          raw_timeout_s = timeout_s
+          timeout_s = Float(raw_timeout_s, exception: false)
+          timeout_s = 0.0 if timeout_s.nil? || !timeout_s.finite? || timeout_s <= 0
 
           worker = nil
           sse_thread = nil

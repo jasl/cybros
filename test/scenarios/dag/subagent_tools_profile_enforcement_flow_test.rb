@@ -176,7 +176,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
       assert tool_msg, "expected tool_result message with tool_call_id tc_1"
       assert_includes tool_msg.text, "tool_not_in_profile"
 
-      poll = poll_tool.call({ "child_conversation_id" => child.id.to_s, "limit_turns" => 10 }, context: nil)
+      poll = poll_tool.call({ "child_conversation_id" => child.id.to_s, "limit_turns" => 10 }, context: spawn_ctx)
       refute poll.error?, poll.text
 
       poll_payload = JSON.parse(poll.text)

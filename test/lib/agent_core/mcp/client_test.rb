@@ -78,6 +78,16 @@ class AgentCore::MCP::ClientTest < Minitest::Test
     end
   end
 
+  def test_initialize_rejects_non_finite_timeout_s
+    assert_raises(AgentCore::ValidationError) do
+      AgentCore::MCP::Client.new(transport: @transport, timeout_s: "NaN")
+    end
+
+    assert_raises(AgentCore::ValidationError) do
+      AgentCore::MCP::Client.new(transport: @transport, timeout_s: "Infinity")
+    end
+  end
+
   def test_start_performs_initialize_handshake
     client = AgentCore::MCP::Client.new(transport: @transport)
     client.start

@@ -132,12 +132,22 @@ module Cybros
             required: ["child_conversation_id"],
           },
           metadata: { source: :cybros, category: :subagent },
-        ) do |args, **|
+        ) do |args, context:|
           child_id = args.fetch("child_conversation_id").to_s.strip
           AgentCore::ValidationError.raise!(
             "child_conversation_id is required",
             code: "cybros.subagent_poll.child_conversation_id_is_required",
           ) if child_id.empty?
+
+          AgentCore::ValidationError.raise!(
+            "child_conversation_id must be a UUID",
+            code: "cybros.subagent_poll.child_conversation_id_must_be_a_uuid",
+            details: { child_conversation_id: child_id },
+          ) unless AgentCore::Utils.uuid_like?(child_id)
+
+          parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_poll")
+          parent_id = parent.id.to_s
+          parent_graph_id = context.attributes.dig(:dag, :graph_id).to_s
 
           limit_turns =
             if args.key?("limit_turns")
@@ -172,6 +182,8 @@ module Cybros
 
             AgentCore::Resources::Tools::ToolResult.success(text: JSON.generate(payload), metadata: { subagent: payload })
           else
+            validate_child_ownership!(child, parent_id: parent_id, parent_graph_id: parent_graph_id)
+
             graph = child.dag_graph
             counts = node_state_counts(graph)
             status = status_for_counts(counts)
@@ -207,32 +219,63 @@ module Cybros
       end
       private_class_method :enforce_no_nested_spawn!
 
-      def parent_conversation_from_context!(context)
+      def parent_conversation_from_context!(context, code_prefix: "cybros.subagent_spawn")
         graph_id = context.attributes.dig(:dag, :graph_id).to_s
         node_id = context.attributes.dig(:dag, :node_id).to_s
 
         AgentCore::ValidationError.raise!(
           "missing dag context (graph_id/node_id)",
-          code: "cybros.subagent_spawn.missing_dag_context",
+          code: "#{code_prefix}.missing_dag_context",
         ) if graph_id.empty? || node_id.empty?
 
         graph = DAG::Graph.find_by(id: graph_id)
         AgentCore::ValidationError.raise!(
           "parent graph not found",
-          code: "cybros.subagent_spawn.parent_graph_not_found",
+          code: "#{code_prefix}.parent_graph_not_found",
           details: { graph_id: graph_id },
         ) if graph.nil?
 
         convo = graph.attachable
         AgentCore::ValidationError.raise!(
           "parent graph attachable is not a Conversation",
-          code: "cybros.subagent_spawn.parent_graph_attachable_is_not_a_conversation",
+          code: "#{code_prefix}.parent_graph_attachable_is_not_a_conversation",
           details: { attachable_class: convo.class.name },
         ) unless convo.is_a?(Conversation)
 
         convo
       end
       private_class_method :parent_conversation_from_context!
+
+      def validate_child_ownership!(child, parent_id:, parent_graph_id:)
+        meta = child.metadata
+        meta = meta.is_a?(Hash) ? meta : {}
+
+        subagent = meta["subagent"] || meta[:subagent]
+        subagent = subagent.is_a?(Hash) ? subagent : {}
+
+        claimed_parent_id = subagent["parent_conversation_id"] || subagent[:parent_conversation_id]
+        claimed_parent_id = claimed_parent_id.to_s.strip
+
+        claimed_parent_graph_id = subagent["parent_graph_id"] || subagent[:parent_graph_id]
+        claimed_parent_graph_id = claimed_parent_graph_id.to_s.strip
+
+        unless claimed_parent_id == parent_id && claimed_parent_graph_id == parent_graph_id
+          AgentCore::ValidationError.raise!(
+            "child conversation is not owned by this parent",
+            code: "cybros.subagent_poll.child_conversation_not_owned",
+            details: { child_conversation_id: child.id.to_s },
+          )
+        end
+
+        true
+      rescue StandardError
+        AgentCore::ValidationError.raise!(
+          "child conversation is not owned by this parent",
+          code: "cybros.subagent_poll.child_conversation_not_owned",
+          details: { child_conversation_id: child.id.to_s },
+        )
+      end
+      private_class_method :validate_child_ownership!
 
       def normalize_name(name)
         s = name.to_s.strip.downcase
@@ -300,9 +343,9 @@ module Cybros
         parsed = Integer(raw, exception: false)
         return parsed if parsed && parsed >= 1 && parsed <= MAX_CONTEXT_TURNS
 
-        ::DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
+        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
       rescue StandardError
-        ::DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
+        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
       end
       private_class_method :inherit_context_turns
 

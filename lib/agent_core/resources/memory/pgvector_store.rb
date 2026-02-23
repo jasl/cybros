@@ -6,6 +6,8 @@ module AgentCore
   module Resources
     module Memory
       class PgvectorStore < Base
+        MAX_LIMIT = 1000
+
         def initialize(embedder:, conversation_id: nil, include_global: true)
           @embedder = embedder
           @conversation_id = conversation_id
@@ -13,12 +15,19 @@ module AgentCore
         end
 
         def search(query:, limit: 5, metadata_filter: nil)
-          limit = Integer(limit)
+          raw_limit = limit
+          limit = Integer(raw_limit, exception: false)
+          ValidationError.raise!(
+            "limit must be an Integer",
+            code: "agent_core.memory.pgvector_store.limit_must_be_an_integer",
+            details: { value_class: raw_limit.class.name },
+          ) unless limit
           ValidationError.raise!(
             "limit must be > 0",
-            code: "agent_core.memory.pgvector_store.limit_must_be_0",
+            code: "agent_core.memory.pgvector_store.limit_must_be_positive",
             details: { limit: limit },
           ) if limit <= 0
+          limit = [limit, MAX_LIMIT].min
 
           q = query.to_s.strip
           return [] if q.empty?
@@ -67,6 +76,18 @@ module AgentCore
         end
 
         def forget(id:)
+          raw_id = id
+          id = raw_id.to_s.strip
+          ValidationError.raise!(
+            "id is required",
+            code: "agent_core.memory.pgvector_store.id_is_required",
+          ) if id.empty?
+          ValidationError.raise!(
+            "id must be a UUID",
+            code: "agent_core.memory.pgvector_store.id_must_be_a_uuid",
+            details: { id: id },
+          ) unless AgentCore::Utils.uuid_like?(id)
+
           deleted = ::AgentMemoryEntry.where(id: id).delete_all
           deleted.positive?
         end

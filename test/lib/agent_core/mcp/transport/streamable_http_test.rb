@@ -37,6 +37,16 @@ class AgentCore::MCP::Transport::StreamableHttpTest < Minitest::Test
     end
   end
 
+  def test_initialize_rejects_non_finite_timeout_s
+    assert_raises(AgentCore::ValidationError) do
+      build_transport(url: "https://example.com/mcp", timeout_s: "NaN")
+    end
+
+    assert_raises(AgentCore::ValidationError) do
+      build_transport(url: "https://example.com/mcp", timeout_s: "Infinity")
+    end
+  end
+
   def test_initialize_validates_open_timeout_s
     assert_raises(AgentCore::ValidationError) do
       build_transport(url: "https://example.com/mcp", open_timeout_s: 0)

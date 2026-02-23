@@ -196,6 +196,16 @@ class AgentCore::MCP::ServerConfigTest < Minitest::Test
     end
   end
 
+  def test_timeout_s_must_be_finite
+    assert_raises(AgentCore::MCP::ServerConfigError) do
+      AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", timeout_s: "NaN")
+    end
+
+    assert_raises(AgentCore::MCP::ServerConfigError) do
+      AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", timeout_s: "Infinity")
+    end
+  end
+
   def test_env_normalization
     config = AgentCore::MCP::ServerConfig.new(id: "test", command: "echo", env: { FOO: "bar", "NUM" => 42 })
     assert_equal({ "FOO" => "bar", "NUM" => "42" }, config.env)

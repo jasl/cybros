@@ -88,6 +88,8 @@ module AgentCore
             end
 
             Resources::Tools::ToolResult.success(text: json)
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "skills_list failed: #{e.message}")
           end
@@ -138,6 +140,8 @@ module AgentCore
             Resources::Tools::ToolResult.success(text: json)
           rescue KeyError => e
             Resources::Tools::ToolResult.error(text: "skills_load missing argument: #{e.message}")
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "skills_load failed: #{e.message}")
           end
@@ -189,6 +193,8 @@ module AgentCore
             end
           rescue KeyError => e
             Resources::Tools::ToolResult.error(text: "skills_read_file missing argument: #{e.message}")
+          rescue AgentCore::ValidationError
+            raise
           rescue StandardError => e
             Resources::Tools::ToolResult.error(text: "skills_read_file failed: #{e.message}")
           end

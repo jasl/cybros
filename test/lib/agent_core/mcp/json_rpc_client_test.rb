@@ -94,6 +94,16 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
     end
   end
 
+  def test_initialize_rejects_non_finite_timeout_s
+    assert_raises(AgentCore::ValidationError) do
+      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: "NaN")
+    end
+
+    assert_raises(AgentCore::ValidationError) do
+      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: "Infinity")
+    end
+  end
+
   def test_start_wires_stdout_callback
     @client.start
 

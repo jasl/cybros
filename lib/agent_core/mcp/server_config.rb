@@ -298,6 +298,11 @@ module AgentCore
             details: { value_class: raw.class.name, value_preview: self.class.value_preview(raw) },
           ) if timeout_s.nil?
           ServerConfigError.raise!(
+            "timeout_s must be a finite number",
+            code: "agent_core.mcp.server_config.timeout_s_must_be_finite",
+            details: { value_class: raw.class.name, value_preview: self.class.value_preview(raw) },
+          ) unless timeout_s.finite?
+          ServerConfigError.raise!(
             "timeout_s must be positive",
             code: "agent_core.mcp.server_config.timeout_s_must_be_positive",
             details: { timeout_s: timeout_s },
@@ -315,6 +320,11 @@ module AgentCore
             code: "agent_core.mcp.server_config.field_must_be_a_number",
             details: { field: field.to_s, value_class: value.class.name, value_preview: self.class.value_preview(value) },
           ) if timeout_s.nil?
+          ServerConfigError.raise!(
+            "#{field} must be a finite number",
+            code: "agent_core.mcp.server_config.field_must_be_finite",
+            details: { field: field.to_s, value_class: value.class.name, value_preview: self.class.value_preview(value) },
+          ) unless timeout_s.finite?
           ServerConfigError.raise!(
             "#{field} must be positive",
             code: "agent_core.mcp.server_config.field_must_be_positive",
