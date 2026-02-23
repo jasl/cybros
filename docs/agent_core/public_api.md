@@ -172,6 +172,11 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 
 并以 `conversations.metadata["agent"]` 控制 child conversation 的 `policy_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
 
+安全/限制（当前默认）：
+
+- 禁止 nested spawn（subagent 内再 spawn 直接报错）
+- `subagent_poll.limit_turns` 最大 50，且 transcript_lines 为预览用途（单行会做 bytes 截断）
+
 ### 3.2 Skills tools
 
 - 用于让 LLM 通过 tool calling 做 `skills_list/skills_load/skills_read_file`

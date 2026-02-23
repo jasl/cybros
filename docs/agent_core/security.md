@@ -25,6 +25,20 @@ AgentCore 内建的 policy 组合（可选）：
   - 注意：PrefixRules 仅基于 arguments 的字符串/数组做匹配；并不等价于 `execve` 拦截的强语义（若要达到 Codex 等级的保证，需要受控 runtime/MCP shell）。
 - `Policy::ToolGroups`：`group:...` 展开（方便 profile/rules 引用工具集合）
 
+### 1.1 Subagent tools（Cybros app 扩展）
+
+Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于跨图子会话模式），但仍遵循 **deny-by-default**：
+
+- runtime 默认 base policy 仍可保持 `Policy::DenyAll`，因此即便 profile 为 `full`，tools 也不会自动暴露给模型。
+- 当 app 注入的 base policy 允许时，`policy_profile` 会通过 `Policy::Profiled` 作为额外收敛层生效：
+  - 未命中 profile 的工具会被拒绝（reason=`tool_not_in_profile`），并产出可审计的 tool_result。
+  - 这不会扩大原有授权边界（只会更严格）。
+
+当前默认限制：
+
+- 禁止 nested spawn：subagent 会话内调用 `subagent_spawn` 会直接返回校验错误。
+- `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
+
 ---
 
 ## 2) Tool arguments / results（敏感数据）

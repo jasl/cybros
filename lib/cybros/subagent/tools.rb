@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "json"
-require "securerandom"
 
 module Cybros
   module Subagent
@@ -9,6 +8,7 @@ module Cybros
       MAX_CONTEXT_TURNS = 1000
       DEFAULT_POLL_LIMIT_TURNS = 10
       MAX_POLL_LIMIT_TURNS = 50
+      TRANSCRIPT_LINE_MAX_BYTES = 1_000
 
       ALLOWED_POLICY_PROFILES = Cybros::AgentProfiles::PROFILES.keys.freeze
 
@@ -139,7 +139,19 @@ module Cybros
             code: "cybros.subagent_poll.child_conversation_id_is_required",
           ) if child_id.empty?
 
-          limit_turns = Integer(args.fetch("limit_turns", DEFAULT_POLL_LIMIT_TURNS), exception: false) || DEFAULT_POLL_LIMIT_TURNS
+          limit_turns =
+            if args.key?("limit_turns")
+              value = Integer(args.fetch("limit_turns", nil), exception: false)
+              AgentCore::ValidationError.raise!(
+                "limit_turns must be an Integer",
+                code: "cybros.subagent_poll.limit_turns_must_be_an_integer",
+                details: { value_class: args.fetch("limit_turns", nil).class.name },
+              ) unless value
+              value
+            else
+              DEFAULT_POLL_LIMIT_TURNS
+            end
+
           AgentCore::ValidationError.raise!(
             "limit_turns must be between 1 and #{MAX_POLL_LIMIT_TURNS}",
             code: "cybros.subagent_poll.limit_turns_out_of_range",
@@ -185,7 +197,7 @@ module Cybros
 
       def enforce_no_nested_spawn!(context)
         agent_key = context.attributes.dig(:agent, :key).to_s
-        return unless agent_key.start_with?("subagent:")
+        return unless agent_key == "subagent" || agent_key.start_with?("subagent:")
 
         AgentCore::ValidationError.raise!(
           "nested subagent_spawn is not allowed",
@@ -325,9 +337,7 @@ module Cybros
 
       def seed_child_graph!(conversation, initial_prompt:)
         graph = conversation.dag_graph
-        turn_id = generate_uuidv7(graph)
-
-        graph.mutate!(turn_id: turn_id) do |m|
+        graph.mutate! do |m|
           developer =
             m.create_node(
               node_type: Messages::DeveloperMessage.node_type_key,
@@ -336,12 +346,15 @@ module Cybros
               metadata: { "transcript_visible" => false },
             )
 
+          turn_id = developer.turn_id
+
           user =
             m.create_node(
               node_type: Messages::UserMessage.node_type_key,
               state: DAG::Node::FINISHED,
               content: initial_prompt,
               metadata: {},
+              turn_id: turn_id,
             )
 
           agent =
@@ -349,6 +362,7 @@ module Cybros
               node_type: Messages::AgentMessage.node_type_key,
               state: DAG::Node::PENDING,
               metadata: {},
+              turn_id: turn_id,
             )
 
           m.create_edge(from_node: developer, to_node: user, edge_type: DAG::Edge::SEQUENCE)
@@ -356,14 +370,6 @@ module Cybros
         end
       end
       private_class_method :seed_child_graph!
-
-      def generate_uuidv7(graph)
-        _ = graph
-        ActiveRecord::Base.connection.select_value("select uuidv7()")
-      rescue StandardError
-        SecureRandom.uuid
-      end
-      private_class_method :generate_uuidv7
 
       def node_state_counts(graph)
         rows =
@@ -425,9 +431,11 @@ module Cybros
 
           case node_type
           when "user_message"
-            "U:#{input.fetch('content', '').to_s}"
+            text = "U:#{input.fetch('content', '').to_s}"
+            AgentCore::Utils.truncate_utf8_bytes(text, max_bytes: TRANSCRIPT_LINE_MAX_BYTES)
           when "agent_message", "character_message"
-            "A:#{output_preview.fetch('content', '').to_s}"
+            text = "A:#{output_preview.fetch('content', '').to_s}"
+            AgentCore::Utils.truncate_utf8_bytes(text, max_bytes: TRANSCRIPT_LINE_MAX_BYTES)
           else
             nil
           end

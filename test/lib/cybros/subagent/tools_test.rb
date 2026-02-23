@@ -121,6 +121,53 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
       assert result.error?
       assert_includes result.text, "nested subagent_spawn is not allowed"
     end
+
+    ctx2 = ctx.with(attributes: ctx.attributes.merge(agent: ctx.attributes.fetch(:agent).merge(key: "subagent")))
+
+    assert_no_difference -> { Conversation.count } do
+      result = spawn_tool.call({ "name" => "nested", "prompt" => "hi" }, context: ctx2)
+      assert result.error?
+      assert_includes result.text, "nested subagent_spawn is not allowed"
+    end
+  end
+
+  test "subagent_spawn rejects invalid context_turns" do
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    from_node = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      from_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "parent",
+          metadata: {},
+        )
+    end
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: from_node.id.to_s,
+            lane_id: from_node.lane_id.to_s,
+            turn_id: from_node.turn_id.to_s,
+          },
+          agent: { key: "main", policy_profile: "full", context_turns: 50 },
+        },
+      )
+
+    assert_no_difference -> { Conversation.count } do
+      result = spawn_tool.call({ "name" => "child", "prompt" => "hi", "context_turns" => "abc" }, context: ctx)
+      assert result.error?
+      assert_includes result.text, "validation failed"
+      assert_equal "cybros.subagent_spawn.context_turns_must_be_an_integer", result.metadata.dig(:validation_error, :code)
+    end
   end
 
   test "subagent_poll returns missing status when child does not exist" do
@@ -130,6 +177,13 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     payload = JSON.parse(result.text)
     assert_equal "missing", payload.fetch("status")
     assert_equal [], payload.fetch("transcript_lines")
+  end
+
+  test "subagent_poll rejects invalid limit_turns when provided" do
+    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: nil)
+    assert result.error?
+    assert_includes result.text, "validation failed"
+    assert_equal "cybros.subagent_poll.limit_turns_must_be_an_integer", result.metadata.dig(:validation_error, :code)
   end
 
   test "subagent_poll returns pending status and transcript preview" do
@@ -176,4 +230,3 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     assert_includes payload.fetch("transcript_lines").join("\n"), "child: hello"
   end
 end
-

@@ -55,6 +55,11 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 安全约束（当前默认）：
 
 - 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 以 `subagent:` 开头时，`subagent_spawn` 直接返回错误。
+- bounded 输出（避免 tool 输出膨胀）：
+  - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
+  - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
+- profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `policy_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
+- `context_turns` 仅接受 1..1000；非法值会在 runtime_resolver 中降级为默认值（不会抛出到执行路径）。
 
 ## 2) 父子图之间如何等待/同步？
 
