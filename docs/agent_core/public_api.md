@@ -177,6 +177,13 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 - 禁止 nested spawn（subagent 内再 spawn 直接报错）
 - `subagent_poll.limit_turns` 最大 50，且 transcript_lines 为预览用途（单行会做 bytes 截断）
 
+已知限制 / 建议后续（未落地）：
+
+- `subagent_poll` 当前不校验 child 是否属于“本会话 spawn 的 child”（parent ownership）；需要更强隔离时，应在工具层补强校验或通过 policy/ACL 限制工具可见性与调用方范围。
+- 建议对 `child_conversation_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- 建议为 `subagent_spawn` 加入配额/速率限制（避免滥用造成大量 child 会话）。
+- 可选新增更高层编排原语：`subagent_run`（spawn+wait/超时）、`subagent_cancel`/`subagent_kill`（终止/取消子会话）。
+
 ### 3.2 Skills tools
 
 - 用于让 LLM 通过 tool calling 做 `skills_list/skills_load/skills_read_file`

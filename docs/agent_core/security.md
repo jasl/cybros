@@ -40,6 +40,13 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 - `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
 - `subagent_poll` 当前按 conversation id 直接读取，不做 parent ownership 校验；如需更强隔离，应在工具层增加校验或通过 policy/ACL 限制工具可用性。
 
+建议后续加强（未落地）：
+
+- `subagent_poll` 增加 parent ownership 强校验：读取 child `conversations.metadata["subagent"]["parent_conversation_id"]` 并与当前会话一致，否则拒绝（避免越权读取）。
+- 对 `child_conversation_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- 对 `subagent_spawn` 增加配额/速率限制（conversation/user/account scope 均可；以审计可回放为前提记录拒绝原因）。
+- 可选提供更高层编排原语（`subagent_run`/`subagent_cancel`/`subagent_kill`），但需要先定清语义（阻塞/超时/幂等/审计字段）。
+
 ---
 
 ## 2) Tool arguments / results（敏感数据）

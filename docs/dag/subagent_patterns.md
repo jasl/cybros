@@ -62,6 +62,21 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 - profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `policy_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
 - `context_turns` 仅接受 1..1000；非法值会在 runtime_resolver 中降级为默认值（不会抛出到执行路径）。
 
+### 1.2) 未来增强（建议，未落地）
+
+下述能力当前 **已在文档中定稿**，但为了保持 P1 的实现最小可用与代码库纯粹，暂未实现（需要时再做）：
+
+- `subagent_poll` 的 **parent ownership 强校验**：
+  - 目标：避免模型拿到任意 `child_conversation_id` 就能读取预览（即便只是 bounded transcript）。
+  - 建议实现：在 `subagent_poll` 中读取 `child.metadata["subagent"]["parent_conversation_id"]`，并与当前执行上下文的 parent conversation id 做一致性校验；不一致则返回校验错误（或 `missing`）。
+  - 过渡策略：在落地前，通过 tool policy/ACL（或 controller 层）限制 `subagent_poll` 的可见性与调用方范围。
+- 输入校验/防滥用：
+  - `child_conversation_id` 做 UUID 格式校验（避免无效 uuid 触发数据库层异常/噪声；也能更快 fail-fast）。
+  - subagent spawn 配额：限制单个 parent conversation 的 spawn 数量/频率（例如 per minute/per day），并记录可审计的拒绝原因（rate_limited/quota_exceeded）。
+- 更高层编排原语（可选）：
+  - `subagent_run`：`spawn + wait/poll`，支持超时（以及返回“仍在运行”的引用，避免阻塞工具执行）。
+  - `subagent_cancel` / `subagent_kill`：对子会话的 pending/running 节点执行 stop/deny 等操作（需定义清晰的语义：软取消/硬终止、对已完成节点的幂等行为、审计字段等）。
+
 ## 2) 父子图之间如何等待/同步？
 
 v1 不提供跨图 edges；推荐由 App executor 定义同步策略：
