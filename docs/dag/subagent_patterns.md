@@ -58,6 +58,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 - bounded 输出（避免 tool 输出膨胀）：
   - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
   - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
+- `subagent_poll` 目前按 `child_conversation_id` 直接读取会话，不校验其是否为“本会话 spawn 的 child”；如需更强隔离，可在工具层增加 parent 校验或通过 tool policy 限制可见性。
 - profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `policy_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
 - `context_turns` 仅接受 1..1000；非法值会在 runtime_resolver 中降级为默认值（不会抛出到执行路径）。
 

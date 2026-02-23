@@ -38,6 +38,7 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 
 - 禁止 nested spawn：subagent 会话内调用 `subagent_spawn` 会直接返回校验错误。
 - `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
+- `subagent_poll` 当前按 conversation id 直接读取，不做 parent ownership 校验；如需更强隔离，应在工具层增加校验或通过 policy/ACL 限制工具可用性。
 
 ---
 
