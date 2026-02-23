@@ -88,7 +88,7 @@ module AgentCore
               :normalize,
             ) do
               MATCH_KEYS = %i[equals prefix glob regexp present absent].freeze
-              NORMALIZERS = %i[none path command].freeze
+              NORMALIZERS = %i[none path command url_host].freeze
 
               def initialize(keys: nil, path: nil, match:, normalize: :none)
                 keys = Array(keys).map { |k| k.to_s.strip }.reject(&:empty?)
@@ -265,9 +265,30 @@ module AgentCore
                     Pathname.new(value.tr("\\", "/")).cleanpath.to_s
                   when :command
                     value.lstrip
+                  when :url_host
+                    extract_url_host(value)
                   else
                     value
                   end
+                end
+
+                def extract_url_host(value)
+                  str = value.to_s.strip
+                  return "" if str.empty?
+
+                  require "uri"
+                  uri = URI.parse(str)
+                  host = uri.host.to_s.strip.downcase
+                  return host unless host.empty?
+
+                  return "" if str.include?("://")
+
+                  fallback = URI.parse("http://#{str}")
+                  fallback.host.to_s.strip.downcase
+                rescue URI::InvalidURIError
+                  ""
+                rescue StandardError
+                  ""
                 end
 
                 def match_string?(key, matcher, value)

@@ -53,8 +53,11 @@
 - `tool_policy`：`AgentCore::Resources::Tools::Policy::*`（默认 `DenyAll`）
   - 内建 policy（可组合）：
     - `Policy::DenyAll` / `Policy::AllowAll`
+    - `Policy::ConfirmAll`：工具可见，但所有执行默认进入审批（`awaiting_approval`）
+    - `Policy::DenyAllVisible`：工具可见，但所有执行默认拒绝（可用于 “dontAsk” 风格默认）
     - `Policy::Profiled`：控制 tool schema 可见性（支持 `group:...`，见 `Policy::ToolGroups`）
     - `Policy::PatternRules`：按 tool name + arguments（path/url 等）判定 allow/confirm/deny
+    - `Policy::Ruleset`：三段式规则（deny>confirm>allow，first-match-wins）
     - `Policy::PrefixRules`：对 exec/shell 类工具按命令前缀判定 allow/confirm/deny
     - `Policy::ToolGroups`：`group:fs` 这类“工具集合名”展开
   - 组合建议：
@@ -124,14 +127,14 @@ tool_policy =
           { tools: ["read"], arguments: [{ key: "path", glob: "config/**", normalize: "path" }], decision: { outcome: "deny", reason: "no_config_reads" } },
         ],
         delegate:
-          AgentCore::Resources::Tools::Policy::PrefixRules.new(
-            tool_groups: groups,
-            rules: [
-              # Allow safe, repeatable exec prefixes
-              { tools: ["exec"], argument_key: "command", prefixes: ["git status"], decision: { outcome: "allow", reason: "approved_prefix" } },
-            ],
-            delegate: AgentCore::Resources::Tools::Policy::DenyAll.new,
-          ),
+	          AgentCore::Resources::Tools::Policy::PrefixRules.new(
+	            tool_groups: groups,
+	            rules: [
+	              # Allow safe, repeatable exec prefixes
+	              { tools: ["exec"], argument_key: "command", prefixes: ["git status"], decision: { outcome: "allow", reason: "approved_prefix" } },
+	            ],
+	            delegate: AgentCore::Resources::Tools::Policy::ConfirmAll.new,
+	          ),
       ),
   )
 ```

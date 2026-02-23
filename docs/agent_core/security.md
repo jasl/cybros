@@ -19,11 +19,20 @@
 
 AgentCore 内建的 policy 组合（可选）：
 
+- `Policy::ConfirmAll`：工具可见，但所有执行默认进入审批（`awaiting_approval`）
+- `Policy::DenyAllVisible`：工具可见，但所有执行默认拒绝
 - `Policy::Profiled`：控制 tool schema 可见性（profile）
 - `Policy::PatternRules`：按 tool name + arguments（path/url 等）规则化 allow/confirm/deny
+- `Policy::Ruleset`：三段式规则（deny>confirm>allow，first-match-wins）
 - `Policy::PrefixRules`：对 exec/shell 类工具按命令前缀 allowlist（用于持久化“已批准前缀”）
   - 注意：PrefixRules 仅基于 arguments 的字符串/数组做匹配；并不等价于 `execve` 拦截的强语义（若要达到 Codex 等级的保证，需要受控 runtime/MCP shell）。
 - `Policy::ToolGroups`：`group:...` 展开（方便 profile/rules 引用工具集合）
+
+可见性 vs 执行默认（常见组合）：
+
+- `DenyAll`：隐藏工具定义 + 拒绝执行（safe-by-default）
+- `ConfirmAll`：工具定义可见 + 默认需要审批（未命中 allow/deny 时进入 `awaiting_approval`）
+- `DenyAllVisible`：工具定义可见 + 默认拒绝执行（未命中 allow 时直接拒绝）
 
 ### 1.1 Subagent tools（Cybros app 扩展）
 

@@ -22,30 +22,6 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
-  class AlwaysConfirmPolicy < AgentCore::Resources::Tools::Policy::Base
-    def initialize(required:, deny_effect:)
-      @required = required
-      @deny_effect = deny_effect
-    end
-
-    def filter(tools:, context:)
-      _ = context
-      tools
-    end
-
-    def authorize(name:, arguments:, context:)
-      _ = name
-      _ = arguments
-      _ = context
-
-      AgentCore::Resources::Tools::Policy::Decision.confirm(
-        reason: "needs_approval",
-        required: @required,
-        deny_effect: @deny_effect,
-      )
-    end
-  end
-
   class StubMCPClient
     def initialize(result_text:)
       @result_text = result_text
@@ -622,7 +598,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         provider: provider,
         model: "test-model",
         tools_registry: tools_registry,
-        tool_policy: AlwaysConfirmPolicy.new(required: false, deny_effect: nil),
+        tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new(required: false, deny_effect: nil),
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
       )
@@ -722,7 +698,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         provider: provider,
         model: "test-model",
         tools_registry: tools_registry,
-        tool_policy: AlwaysConfirmPolicy.new(required: true, deny_effect: "block"),
+        tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new(required: true, deny_effect: "block"),
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
       )

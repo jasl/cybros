@@ -153,4 +153,39 @@ class AgentCore::Resources::Tools::Policy::PatternRulesTest < Minitest::Test
     allowed = policy.authorize(name: "read", arguments: { "path" => "README.md" }, context: ctx)
     assert allowed.allowed?
   end
+
+  def test_url_host_normalizer_extracts_host
+    delegate = AgentCore::Resources::Tools::Policy::AllowAll.new
+
+    policy =
+      AgentCore::Resources::Tools::Policy::PatternRules.new(
+        delegate: delegate,
+        rules: [
+          {
+            tools: ["webfetch"],
+            arguments: [{ key: "url", equals: "github.com", normalize: "url_host" }],
+            decision: { outcome: "deny", reason: "no_github" },
+          },
+          {
+            tools: ["webfetch"],
+            arguments: [{ key: "url", equals: "localhost", normalize: "url_host" }],
+            decision: { outcome: "deny", reason: "no_localhost" },
+          },
+        ],
+      )
+
+    ctx = AgentCore::ExecutionContext.from(nil)
+
+    denied = policy.authorize(name: "webfetch", arguments: { "url" => "https://github.com/a" }, context: ctx)
+    assert denied.denied?
+    assert_equal "no_github", denied.reason
+
+    denied = policy.authorize(name: "webfetch", arguments: { "url" => "github.com/a" }, context: ctx)
+    assert denied.denied?
+    assert_equal "no_github", denied.reason
+
+    denied = policy.authorize(name: "webfetch", arguments: { "url" => "localhost:3000/x" }, context: ctx)
+    assert denied.denied?
+    assert_equal "no_localhost", denied.reason
+  end
 end
