@@ -118,6 +118,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
               "prompt_mode" => "minimal",
               "memory_search_limit" => 0,
               "tools_allowed" => ["memory_*"],
+              "directives_enabled" => true,
               "repo_docs_enabled" => false,
               "context_turns" => 12,
             },
@@ -161,6 +162,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal 0, runtime.memory_search_limit
     assert_equal 12, runtime.context_turns
     assert_equal [], runtime.prompt_injection_sources
+    assert_equal({}, runtime.directives_config)
 
     ctx = AgentCore::ExecutionContext.new(instrumenter: AgentCore::Observability::NullInstrumenter.new)
 

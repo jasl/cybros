@@ -25,6 +25,7 @@ module AgentCore
         :summary_model,
         :summary_max_tokens,
         :llm_options,
+        :directives_config,
         :tool_call_repair_attempts,
         :tool_call_repair_fallback_models,
         :tool_call_repair_max_output_tokens,
@@ -73,6 +74,7 @@ module AgentCore
           summary_model: nil,
           summary_max_tokens: AgentCore::ContextManagement::Summarizer::DEFAULT_MAX_OUTPUT_TOKENS,
           llm_options: {},
+          directives_config: nil,
           tool_call_repair_attempts: 1,
           tool_call_repair_fallback_models: [],
           tool_call_repair_max_output_tokens: 300,
@@ -149,7 +151,7 @@ module AgentCore
               AgentCore::Resources::Tools::ToolNameResolver.build_normalize_index(tools_registry.tool_names).freeze
             end
 
-          token_counter ||= AgentCore::Resources::TokenCounter::Heuristic.new
+          token_counter ||= default_token_counter_for(model)
 
           raw_context_turns = context_turns
           context_turns = Integer(raw_context_turns, exception: false)
@@ -229,6 +231,19 @@ module AgentCore
           ) if max_steps_per_turn <= 0
 
           llm_options = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
+
+          directives_config =
+            if directives_config.nil?
+              nil
+            elsif directives_config.is_a?(Hash)
+              AgentCore::Utils.deep_symbolize_keys(directives_config).freeze
+            else
+              ValidationError.raise!(
+                "directives_config must be a Hash",
+                code: "agent_core.dag.runtime.directives_config_must_be_a_hash",
+                details: { value_class: directives_config.class.name },
+              )
+            end
 
           raw_tool_call_repair_attempts = tool_call_repair_attempts
           tool_call_repair_attempts = Integer(raw_tool_call_repair_attempts, exception: false)
@@ -503,6 +518,7 @@ module AgentCore
             summary_model: summary_model,
             summary_max_tokens: summary_max_tokens,
             llm_options: llm_options.freeze,
+            directives_config: directives_config,
             tool_call_repair_attempts: tool_call_repair_attempts,
             tool_call_repair_fallback_models: tool_call_repair_fallback_models,
             tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens,
@@ -527,6 +543,15 @@ module AgentCore
         end
 
         private
+
+        def default_token_counter_for(model)
+          AgentCore::Contrib::TokenCounter::Estimator.new(
+            token_estimator: AgentCore::Contrib::TokenEstimator.default,
+            model_hint: model,
+          )
+        rescue LoadError, StandardError
+          AgentCore::Resources::TokenCounter::Heuristic.new
+        end
 
         def validate_tool_name_aliases!(tools_registry, merged_aliases)
           return unless tools_registry.respond_to?(:include?)

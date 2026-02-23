@@ -76,6 +76,7 @@ module Cybros
         memory_search_limit: definition.fetch(:memory_search_limit) { Cybros::AgentProfiles::DEFAULT_MEMORY_SEARCH_LIMIT },
         prompt_injection_sources: prompt_injection_sources,
         include_skill_locations: definition.fetch(:include_skill_locations, false),
+        directives_config: definition.fetch(:directives_config, nil),
         system_prompt_section_overrides: definition.fetch(:system_prompt_section_overrides, {}),
       }
 

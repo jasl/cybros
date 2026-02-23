@@ -12,6 +12,7 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
           "prompt_mode" => "minimal",
           "memory_search_limit" => 0,
           "tools_allowed" => ["memory_*"],
+          "directives_enabled" => true,
           "repo_docs_enabled" => false,
           "repo_docs_max_total_bytes" => 10_000,
           "system_prompt_sections" => {
@@ -26,6 +27,7 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
     assert_equal :minimal, cfg.prompt_mode
     assert_equal 0, cfg.memory_search_limit
     assert_equal ["memory_*"], cfg.tools_allowed
+    assert_equal true, cfg.directives_enabled
     assert_equal false, cfg.repo_docs_enabled
     assert_equal 10_000, cfg.repo_docs_max_total_bytes
     assert_equal(
@@ -43,6 +45,7 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
         "prompt_mode" => "minimal",
         "memory_search_limit" => 0,
         "tools_allowed" => ["memory_*"],
+        "directives_enabled" => true,
         "repo_docs_enabled" => false,
         "repo_docs_max_total_bytes" => 10_000,
         "system_prompt_sections" => {

@@ -14,6 +14,7 @@ module Cybros
       :prompt_mode,
       :memory_search_limit,
       :tools_allowed,
+      :directives_enabled,
       :repo_docs_enabled,
       :repo_docs_max_total_bytes,
       :system_prompt_sections,
@@ -94,6 +95,7 @@ module Cybros
         prompt_mode = parse_prompt_mode(h)
         memory_search_limit = parse_memory_search_limit(h)
         tools_allowed = parse_tools_allowed(h)
+        directives_enabled = parse_directives_enabled(h)
         repo_docs_enabled = parse_repo_docs_enabled(h)
         repo_docs_max_total_bytes = parse_repo_docs_max_total_bytes(h)
         system_prompt_sections = parse_system_prompt_sections(h)
@@ -104,6 +106,7 @@ module Cybros
           prompt_mode: prompt_mode,
           memory_search_limit: memory_search_limit,
           tools_allowed: tools_allowed,
+          directives_enabled: directives_enabled,
           repo_docs_enabled: repo_docs_enabled,
           repo_docs_max_total_bytes: repo_docs_max_total_bytes,
           system_prompt_sections: system_prompt_sections,
@@ -116,6 +119,7 @@ module Cybros
         out["prompt_mode"] = prompt_mode.to_s if prompt_mode
         out["memory_search_limit"] = memory_search_limit if memory_search_limit
         out["tools_allowed"] = tools_allowed if tools_allowed
+        out["directives_enabled"] = directives_enabled unless directives_enabled.nil?
         out["repo_docs_enabled"] = repo_docs_enabled unless repo_docs_enabled.nil?
         out["repo_docs_max_total_bytes"] = repo_docs_max_total_bytes if repo_docs_max_total_bytes
         out["system_prompt_sections"] = self.class.send(:system_prompt_sections_to_metadata, system_prompt_sections) if system_prompt_sections
@@ -151,6 +155,13 @@ module Cybros
 
         out[:prompt_injections] = injections
 
+        if directives_enabled == true
+          existing = out.fetch(:directives_config, nil)
+          out[:directives_config] = existing.is_a?(Hash) ? existing : {}
+        elsif directives_enabled == false
+          out[:directives_config] = nil
+        end
+
         if system_prompt_sections
           base = out.fetch(:system_prompt_section_overrides, {})
           base = base.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base) : {}
@@ -182,6 +193,7 @@ module Cybros
           tools_allowed
           repo_docs_enabled
           repo_docs_max_total_bytes
+          directives_enabled
           system_prompt_sections
         ]
       end
@@ -305,6 +317,21 @@ module Cybros
         end
 
         patterns.freeze
+      end
+
+      private_class_method def self.parse_directives_enabled(h)
+        return nil unless h.key?("directives_enabled")
+
+        value = h.fetch("directives_enabled", nil)
+        if value == true || value == false
+          value
+        else
+          AgentCore::ValidationError.raise!(
+            "directives_enabled must be a boolean",
+            code: "cybros.agent_profile_config.directives_enabled_must_be_a_boolean",
+            details: { value_class: value.class.name },
+          )
+        end
       end
 
       private_class_method def self.parse_repo_docs_enabled(h)

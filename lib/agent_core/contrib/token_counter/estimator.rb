@@ -6,7 +6,7 @@ module AgentCore
       class Estimator < AgentCore::Resources::TokenCounter::Base
         attr_reader :token_estimator, :model_hint, :per_message_overhead
 
-        def initialize(token_estimator:, model_hint: nil, per_message_overhead: 0)
+        def initialize(token_estimator:, model_hint: nil, per_message_overhead: 4)
           unless token_estimator.respond_to?(:estimate)
             ValidationError.raise!(
               "token_estimator must respond to #estimate",

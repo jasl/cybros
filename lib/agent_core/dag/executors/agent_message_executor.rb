@@ -33,10 +33,18 @@ module AgentCore
             streamed_output = llm.fetch(:streamed_output)
             used_model = llm.fetch(:used_model)
             llm_metadata = llm.fetch(:metadata, {})
+            directives = llm.fetch(:directives, nil)
 
             message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
 
-            output_payload = build_agent_output_payload(message, runtime: runtime, stop_reason: stop_reason, model: used_model)
+            output_payload =
+              build_agent_output_payload(
+                message,
+                runtime: runtime,
+                stop_reason: stop_reason,
+                model: used_model,
+                directives: directives,
+              )
 
             if message.has_tool_calls? && !can_expand_tool_loop?(node, runtime: runtime)
               content = "Stopped: exceeded max_steps_per_turn."
@@ -139,6 +147,16 @@ module AgentCore
           end
 
           def call_llm(runtime, built_prompt, stream:, execution_context:)
+            directives_config = runtime.directives_config
+            if directives_config.is_a?(Hash)
+              return call_llm_with_directives(
+                runtime,
+                built_prompt,
+                directives_config: directives_config,
+                execution_context: execution_context,
+              )
+            end
+
             messages = []
 
             system_prompt = built_prompt.system_prompt.to_s
@@ -202,6 +220,114 @@ module AgentCore
             end
           end
 
+          def call_llm_with_directives(runtime, built_prompt, directives_config:, execution_context:)
+            if built_prompt.has_tools?
+              ValidationError.raise!(
+                "directives mode does not support tools",
+                code: "agent_core.dag.agent_message_executor.directives_mode_does_not_support_tools",
+                details: { tools_count: Array(built_prompt.tools).length },
+              )
+            end
+
+            system_prompt = built_prompt.system_prompt.to_s
+
+            history = []
+            built_prompt.messages.each do |msg|
+              unless msg.is_a?(Message)
+                ValidationError.raise!(
+                  "prompt messages must be AgentCore::Message (got #{msg.class})",
+                  code: "agent_core.dag.agent_message_executor.prompt_messages_must_be_agentcore_message_got",
+                  details: { message_class: msg.class.name },
+                )
+              end
+              history << msg
+            end
+
+            llm_options_defaults = built_prompt.options.is_a?(Hash) ? built_prompt.options.dup : {}
+            llm_options_defaults = AgentCore::Utils.deep_symbolize_keys(llm_options_defaults)
+
+            reserved_keys = AgentCore::Contrib::Directives::Runner::RESERVED_LLM_OPTIONS_KEYS
+            reserved_keys.each { |k| llm_options_defaults.delete(k) }
+
+            instrumenter = execution_context.instrumenter
+
+            payload = {
+              run_id: execution_context.run_id,
+              provider: runtime_name(runtime),
+              model: runtime.model,
+              stream: false,
+              directives: true,
+            }
+
+            instrumenter.instrument("agent_core.llm.call", payload) do
+              runner =
+                AgentCore::Contrib::Directives::Runner.new(
+                  provider: runtime.provider,
+                  model: runtime.model,
+                  llm_options_defaults: llm_options_defaults,
+                  directives_config: directives_config,
+                )
+
+              result =
+                runner.run(
+                  history: history,
+                  system: system_prompt,
+                  token_counter: runtime.token_counter,
+                  context_window: runtime.context_window_tokens,
+                  reserved_output_tokens: runtime.reserved_output_tokens,
+                )
+              result = result.is_a?(Hash) ? result : {}
+
+              assistant_text = result.fetch(:assistant_text, result.fetch("assistant_text", "")).to_s
+              directives = Array(result.fetch(:directives, result.fetch("directives", []))).select { |d| d.is_a?(Hash) }
+
+              {
+                message: Message.new(role: :assistant, content: assistant_text),
+                stop_reason: :end_turn,
+                usage: nil,
+                streamed_output: false,
+                used_model: runtime.model,
+                directives: directives,
+                metadata: directives_metadata(result),
+              }
+            end
+          end
+
+          def directives_metadata(result)
+            h = result.is_a?(Hash) ? result : {}
+            ok = h.fetch(:ok, h.fetch("ok", false)) == true
+
+            attempts = Array(h.fetch(:attempts, h.fetch("attempts", [])))
+            warnings = Array(h.fetch(:warnings, h.fetch("warnings", [])))
+
+            error_code = nil
+            unless ok
+              last = attempts.last
+              if last.is_a?(Hash)
+                error = last[:structured_output_error] || last["structured_output_error"]
+                error_code = error[:code] || error["code"] if error.is_a?(Hash)
+                error_code ||= "HTTP_ERROR" if last[:http_error] || last["http_error"]
+              end
+            end
+
+            mode = h.fetch(:mode, h.fetch("mode", nil))
+            elapsed_ms = h.fetch(:elapsed_ms, h.fetch("elapsed_ms", nil))
+
+            {
+              "directives" => {
+                "enabled" => true,
+                "ok" => ok,
+                "mode" => mode&.to_s,
+                "elapsed_ms" => elapsed_ms,
+                "attempts" => attempts.length,
+                "warnings" => warnings.length,
+                "error_code" => error_code&.to_s,
+              }.compact,
+            }
+          rescue StandardError
+            { "directives" => { "enabled" => true, "ok" => false } }
+          end
+
           def stream_chat(enum:, stream:)
             final_message = nil
             stop_reason = nil
@@ -250,10 +376,10 @@ module AgentCore
             }
           end
 
-          def build_agent_output_payload(message, runtime:, stop_reason:, model:)
+          def build_agent_output_payload(message, runtime:, stop_reason:, model:, directives: nil)
             tool_calls = message.has_tool_calls? ? message.tool_calls.map(&:to_h) : []
 
-            {
+            out = {
               "content" => message.text.to_s,
               "message" => message.to_h,
               "tool_calls" => tool_calls,
@@ -261,6 +387,8 @@ module AgentCore
               "model" => model.to_s,
               "provider" => runtime_name(runtime),
             }
+            out["directives"] = AgentCore::Utils.deep_stringify_keys(directives) unless directives.nil?
+            out
           end
 
           def can_expand_tool_loop?(node, runtime:)
