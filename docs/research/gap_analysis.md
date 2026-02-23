@@ -250,7 +250,7 @@
 - ✅ 已落地：章节级可观测写入 `agent_message.metadata["context_cost"]["prompt_sections"]`（prefix/tail bytes/tokens/sha256、每段 bytes/tokens + safe metadata；tools_schema bytes/tokens；preamble_messages 明细）
 - ✅ 已落地：RepoDocs/FileSet 注入写入“文件与预算”metadata（per-file bytes/missing/truncated/max_bytes，及整体 total/max bytes 截断信息）
 - ✅ 已落地：prefix 稳定性测试（memory 变化不影响 prefix）+ prompt_sections shape 测试
-- ⏳ 未落地：更完整的“内建 sections”覆盖（Tooling/Safety/Workspace/Time/Channel 等）与统一的 section-level 配置（目前 injections 有 order/prompt_modes；skills/memory 是固定 section）
+- ✅ 已落地：内建 sections（Safety/Tooling/Workspace/Time/Channel）与统一 section-level 配置（enabled/order/prompt_modes/stability；含 skills/memory；`time/channel/memory` 强制 tail；支持 `agent_profile.system_prompt_sections` 安全 overrides）
 
 ## 3) 三类实验形态的“最小落地集合”
 

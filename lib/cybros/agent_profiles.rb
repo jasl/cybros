@@ -69,6 +69,7 @@ module Cybros
         memory_search_limit: memory_search_limit(key),
         prompt_injections: prompt_injection_specs(key),
         include_skill_locations: false,
+        system_prompt_section_overrides: {},
       }
     rescue StandardError
       {
@@ -77,6 +78,7 @@ module Cybros
         memory_search_limit: DEFAULT_MEMORY_SEARCH_LIMIT,
         prompt_injections: [],
         include_skill_locations: false,
+        system_prompt_section_overrides: {},
       }
     end
 

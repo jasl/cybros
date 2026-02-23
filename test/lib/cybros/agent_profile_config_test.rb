@@ -14,6 +14,10 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
           "tools_allowed" => ["memory_*"],
           "repo_docs_enabled" => false,
           "repo_docs_max_total_bytes" => 10_000,
+          "system_prompt_sections" => {
+            "tooling" => { "enabled" => false, "order" => 100, "prompt_modes" => ["full"], "stability" => "prefix" },
+            "time" => { "enabled" => true },
+          },
         },
       )
 
@@ -24,6 +28,13 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
     assert_equal ["memory_*"], cfg.tools_allowed
     assert_equal false, cfg.repo_docs_enabled
     assert_equal 10_000, cfg.repo_docs_max_total_bytes
+    assert_equal(
+      {
+        "tooling" => { enabled: false, order: 100, prompt_modes: [:full], stability: :prefix },
+        "time" => { enabled: true },
+      },
+      cfg.system_prompt_sections,
+    )
 
     assert_equal(
       {
@@ -34,9 +45,46 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
         "tools_allowed" => ["memory_*"],
         "repo_docs_enabled" => false,
         "repo_docs_max_total_bytes" => 10_000,
+        "system_prompt_sections" => {
+          "tooling" => { "enabled" => false, "order" => 100, "prompt_modes" => ["full"], "stability" => "prefix" },
+          "time" => { "enabled" => true },
+        },
       },
       cfg.to_metadata,
     )
+  end
+
+  def test_rejects_unknown_system_prompt_sections_id
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::AgentProfileConfig.from_value(
+          { "base" => "coding", "system_prompt_sections" => { "wat" => {} } },
+        )
+      end
+
+    assert_equal "cybros.agent_profile_config.system_prompt_sections_unknown_section_id", err.code
+  end
+
+  def test_rejects_unknown_system_prompt_sections_keys
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::AgentProfileConfig.from_value(
+          { "base" => "coding", "system_prompt_sections" => { "tooling" => { "wat" => 1 } } },
+        )
+      end
+
+    assert_equal "cybros.agent_profile_config.system_prompt_sections_entry_contains_unknown_keys", err.code
+  end
+
+  def test_rejects_system_prompt_sections_when_not_an_object
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::AgentProfileConfig.from_value(
+          { "base" => "coding", "system_prompt_sections" => 123 },
+        )
+      end
+
+    assert_equal "cybros.agent_profile_config.system_prompt_sections_must_be_an_object", err.code
   end
 
   def test_rejects_unknown_keys

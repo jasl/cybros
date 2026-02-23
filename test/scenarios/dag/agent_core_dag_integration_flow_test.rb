@@ -1205,7 +1205,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
-        context_window_tokens: 200,
+        context_window_tokens: 350,
         reserved_output_tokens: 0,
         auto_compact: true,
       )

@@ -41,6 +41,7 @@ module AgentCore
         :max_steps_per_turn,
         :include_skill_locations,
         :prompt_mode,
+        :system_prompt_section_overrides,
         :tool_error_mode,
       ) do
         DEFAULT_CONTEXT_TURNS = 50
@@ -86,6 +87,7 @@ module AgentCore
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
           include_skill_locations: false,
           prompt_mode: :full,
+          system_prompt_section_overrides: {},
           tool_error_mode: :safe
         )
           model = model.to_s.strip
@@ -278,6 +280,13 @@ module AgentCore
           prompt_mode = prompt_mode.to_s.strip.downcase.tr("-", "_").to_sym
           prompt_mode = :full unless AgentCore::Resources::PromptInjections::PROMPT_MODES.include?(prompt_mode)
 
+          system_prompt_section_overrides =
+            if system_prompt_section_overrides.is_a?(Hash)
+              AgentCore::Utils.deep_symbolize_keys(system_prompt_section_overrides).freeze
+            else
+              {}.freeze
+            end
+
           tool_error_mode = tool_error_mode.to_s.strip.downcase.tr("-", "_").to_sym
           tool_error_mode = :safe unless %i[safe debug].include?(tool_error_mode)
 
@@ -322,6 +331,7 @@ module AgentCore
             max_steps_per_turn: max_steps_per_turn,
             include_skill_locations: include_skill_locations == true,
             prompt_mode: prompt_mode,
+            system_prompt_section_overrides: system_prompt_section_overrides,
             tool_error_mode: tool_error_mode,
           )
         end

@@ -90,6 +90,13 @@ class AgentCore::DAG::ContextBudgetManagerPromptSectionsTest < ActiveSupport::Te
 
       system_sections = system_prompt.fetch("sections")
       assert system_sections.any? { |s| s.fetch("id") == "base_system_prompt" }
+      assert system_sections.any? { |s| s.fetch("id") == "safety" }
+      assert system_sections.any? { |s| s.fetch("id") == "tooling" }
+      assert system_sections.any? { |s| s.fetch("id") == "workspace" }
+      assert system_sections.any? { |s| s.fetch("id") == "time" }
+
+      time = system_sections.find { |s| s.fetch("id") == "time" }
+      assert_equal "tail", time.fetch("stability")
 
       repo_docs =
         system_sections.find do |s|

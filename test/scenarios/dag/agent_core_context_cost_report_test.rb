@@ -96,7 +96,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
             soft_trim_tail_chars: 4,
             hard_clear_enabled: false,
           ),
-        context_window_tokens: 350,
+        context_window_tokens: 1500,
         reserved_output_tokens: 0,
         token_counter: AgentCore::Resources::TokenCounter::Heuristic.new(chars_per_token: 1.0, non_ascii_chars_per_token: 1.0),
       )
@@ -444,7 +444,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
             hard_clear_min_total_chars: 1,
             hard_clear_placeholder: "[Old tool result content cleared]",
           ),
-        context_window_tokens: 300,
+        context_window_tokens: 700,
         reserved_output_tokens: 0,
         token_counter: AgentCore::Resources::TokenCounter::Heuristic.new(chars_per_token: 1.0, non_ascii_chars_per_token: 1.0),
       )

@@ -16,6 +16,8 @@ class AgentCore::PromptBuilder::ContextTest < Minitest::Test
     assert_nil ctx.tool_policy
     assert_equal :full, ctx.prompt_mode
     assert_equal [], ctx.prompt_injection_items
+    assert_equal({}, ctx.system_prompt_section_overrides)
+    assert ctx.system_prompt_section_overrides.frozen?
   end
 
   def test_custom_values

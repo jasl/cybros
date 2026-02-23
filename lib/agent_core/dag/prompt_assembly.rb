@@ -51,6 +51,7 @@ module AgentCore
             include_skill_locations: @runtime.include_skill_locations,
             prompt_mode: @runtime.prompt_mode,
             prompt_injection_items: prompt_injection_items,
+            system_prompt_section_overrides: @runtime.system_prompt_section_overrides,
           )
 
         PromptBuilder::SimplePipeline.new.build(context: prompt_context)

@@ -16,12 +16,23 @@ module Cybros
       :tools_allowed,
       :repo_docs_enabled,
       :repo_docs_max_total_bytes,
+      :system_prompt_sections,
     ) do
       MAX_CONTEXT_TURNS = 1000
       MAX_MEMORY_SEARCH_LIMIT = 20
       MAX_REPO_DOCS_TOTAL_BYTES = 200_000
       MAX_TOOL_PATTERNS = 200
       MAX_TOOL_PATTERN_BYTES = 128
+      MAX_SYSTEM_PROMPT_SECTIONS = 50
+      SYSTEM_PROMPT_SECTION_IDS = %w[
+        safety
+        tooling
+        workspace
+        available_skills
+        channel
+        time
+        memory_relevant_context
+      ].freeze
 
       def self.from_value(value)
         case value
@@ -85,6 +96,7 @@ module Cybros
         tools_allowed = parse_tools_allowed(h)
         repo_docs_enabled = parse_repo_docs_enabled(h)
         repo_docs_max_total_bytes = parse_repo_docs_max_total_bytes(h)
+        system_prompt_sections = parse_system_prompt_sections(h)
 
         new(
           base_profile: base_profile,
@@ -94,6 +106,7 @@ module Cybros
           tools_allowed: tools_allowed,
           repo_docs_enabled: repo_docs_enabled,
           repo_docs_max_total_bytes: repo_docs_max_total_bytes,
+          system_prompt_sections: system_prompt_sections,
         )
       end
 
@@ -105,6 +118,7 @@ module Cybros
         out["tools_allowed"] = tools_allowed if tools_allowed
         out["repo_docs_enabled"] = repo_docs_enabled unless repo_docs_enabled.nil?
         out["repo_docs_max_total_bytes"] = repo_docs_max_total_bytes if repo_docs_max_total_bytes
+        out["system_prompt_sections"] = self.class.send(:system_prompt_sections_to_metadata, system_prompt_sections) if system_prompt_sections
         out
       end
 
@@ -136,6 +150,26 @@ module Cybros
         end
 
         out[:prompt_injections] = injections
+
+        if system_prompt_sections
+          base = out.fetch(:system_prompt_section_overrides, {})
+          base = base.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base) : {}
+          extra = AgentCore::Utils.deep_symbolize_keys(system_prompt_sections)
+
+          merged = base.dup
+          extra.each do |section_id, cfg|
+            existing = merged[section_id]
+            merged[section_id] =
+              if existing.is_a?(Hash) && cfg.is_a?(Hash)
+                existing.merge(cfg)
+              else
+                cfg
+              end
+          end
+
+          out[:system_prompt_section_overrides] = merged
+        end
+
         out
       end
 
@@ -148,6 +182,7 @@ module Cybros
           tools_allowed
           repo_docs_enabled
           repo_docs_max_total_bytes
+          system_prompt_sections
         ]
       end
 
@@ -308,6 +343,166 @@ module Cybros
         end
 
         value
+      end
+
+      private_class_method def self.parse_system_prompt_sections(h)
+        return nil unless h.key?("system_prompt_sections")
+
+        raw = h.fetch("system_prompt_sections", nil)
+        unless raw.is_a?(Hash)
+          AgentCore::ValidationError.raise!(
+            "system_prompt_sections must be an object",
+            code: "cybros.agent_profile_config.system_prompt_sections_must_be_an_object",
+            details: { value_class: raw.class.name },
+          )
+        end
+
+        if raw.length > MAX_SYSTEM_PROMPT_SECTIONS
+          AgentCore::ValidationError.raise!(
+            "system_prompt_sections is too large (max #{MAX_SYSTEM_PROMPT_SECTIONS})",
+            code: "cybros.agent_profile_config.system_prompt_sections_too_large",
+            details: { system_prompt_sections_count: raw.length },
+          )
+        end
+
+        out = {}
+
+        raw.each do |raw_id, raw_cfg|
+          section_id = raw_id.to_s.strip.downcase.tr("-", "_")
+          unless SYSTEM_PROMPT_SECTION_IDS.include?(section_id)
+            AgentCore::ValidationError.raise!(
+              "system_prompt_sections contains unknown section id: #{section_id}",
+              code: "cybros.agent_profile_config.system_prompt_sections_unknown_section_id",
+              details: { section_id: section_id },
+            )
+          end
+
+          unless raw_cfg.is_a?(Hash)
+            AgentCore::ValidationError.raise!(
+              "system_prompt_sections.#{section_id} must be an object",
+              code: "cybros.agent_profile_config.system_prompt_sections_entry_must_be_an_object",
+              details: { section_id: section_id, value_class: raw_cfg.class.name },
+            )
+          end
+
+          cfg = AgentCore::Utils.deep_stringify_keys(raw_cfg)
+          unknown_keys = cfg.keys - %w[enabled order prompt_modes stability]
+          if unknown_keys.any?
+            AgentCore::ValidationError.raise!(
+              "system_prompt_sections.#{section_id} contains unknown keys: #{unknown_keys.sort.join(", ")}",
+              code: "cybros.agent_profile_config.system_prompt_sections_entry_contains_unknown_keys",
+              details: { section_id: section_id, unknown_keys: unknown_keys.sort },
+            )
+          end
+
+          parsed = {}
+
+          if cfg.key?("enabled")
+            value = cfg.fetch("enabled", nil)
+            if value == true || value == false
+              parsed[:enabled] = value
+            else
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.enabled must be a boolean",
+                code: "cybros.agent_profile_config.system_prompt_sections_enabled_must_be_a_boolean",
+                details: { section_id: section_id, value_class: value.class.name },
+              )
+            end
+          end
+
+          if cfg.key?("order")
+            value = Integer(cfg.fetch("order", nil), exception: false)
+            unless value
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.order must be an Integer",
+                code: "cybros.agent_profile_config.system_prompt_sections_order_must_be_an_integer",
+                details: { section_id: section_id, value_class: cfg.fetch("order", nil).class.name },
+              )
+            end
+
+            if value < -10_000 || value > 10_000
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.order must be between -10000 and 10000",
+                code: "cybros.agent_profile_config.system_prompt_sections_order_out_of_range",
+                details: { section_id: section_id, order: value },
+              )
+            end
+
+            parsed[:order] = value
+          end
+
+          if cfg.key?("prompt_modes")
+            value = cfg.fetch("prompt_modes", nil)
+            unless value.is_a?(Array)
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.prompt_modes must be an Array of Strings",
+                code: "cybros.agent_profile_config.system_prompt_sections_prompt_modes_must_be_an_array_of_strings",
+                details: { section_id: section_id, value_class: value.class.name },
+              )
+            end
+
+            modes =
+              Array(value).map do |entry|
+                entry.to_s.strip.downcase.tr("-", "_")
+              end.uniq
+
+            allowed = AgentCore::Resources::PromptInjections::PROMPT_MODES.map(&:to_s)
+            invalid = modes - allowed
+            if invalid.any?
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.prompt_modes must be one of: #{allowed.sort.join(", ")}",
+                code: "cybros.agent_profile_config.system_prompt_sections_prompt_modes_must_be_one_of",
+                details: { section_id: section_id, invalid_prompt_modes: invalid.sort },
+              )
+            end
+
+            if modes.length > 2
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.prompt_modes is too large (max 2)",
+                code: "cybros.agent_profile_config.system_prompt_sections_prompt_modes_too_large",
+                details: { section_id: section_id, prompt_modes_count: modes.length },
+              )
+            end
+
+            parsed[:prompt_modes] = modes.map(&:to_sym)
+          end
+
+          if cfg.key?("stability")
+            raw_stability = cfg.fetch("stability", nil).to_s.strip.downcase.tr("-", "_")
+            unless %w[prefix tail].include?(raw_stability)
+              AgentCore::ValidationError.raise!(
+                "system_prompt_sections.#{section_id}.stability must be prefix or tail",
+                code: "cybros.agent_profile_config.system_prompt_sections_stability_must_be_prefix_or_tail",
+                details: { section_id: section_id, stability: raw_stability },
+              )
+            end
+
+            parsed[:stability] = raw_stability.to_sym
+          end
+
+          out[section_id] = parsed.freeze
+        end
+
+        out.freeze
+      end
+
+      private_class_method def self.system_prompt_sections_to_metadata(system_prompt_sections)
+        raw = AgentCore::Utils.deep_stringify_keys(system_prompt_sections)
+        return {} unless raw.is_a?(Hash)
+
+        raw.each_with_object({}) do |(section_id, cfg), out|
+          cfg = cfg.is_a?(Hash) ? cfg : {}
+
+          entry = {}
+          entry["enabled"] = cfg.fetch("enabled") if cfg.key?("enabled")
+          entry["order"] = cfg.fetch("order") if cfg.key?("order")
+          entry["prompt_modes"] = Array(cfg.fetch("prompt_modes")).map(&:to_s) if cfg.key?("prompt_modes")
+          entry["stability"] = cfg.fetch("stability").to_s if cfg.key?("stability")
+
+          out[section_id.to_s] = entry
+        end
+      rescue StandardError
+        {}
       end
     end
 end

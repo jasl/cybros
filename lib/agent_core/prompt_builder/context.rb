@@ -11,7 +11,8 @@ module AgentCore
                   :memory_results, :user_message, :variables,
                   :agent_config, :tool_policy, :execution_context,
                   :skills_store, :include_skill_locations,
-                  :prompt_mode, :prompt_injection_items
+                  :prompt_mode, :prompt_injection_items,
+                  :system_prompt_section_overrides
 
       # @param system_prompt [String] The system prompt template
       # @param chat_history [ChatHistory::Base] Conversation history
@@ -26,6 +27,7 @@ module AgentCore
       # @param include_skill_locations [Boolean] Whether to include skill locations in prompt fragments
       # @param prompt_mode [Symbol] :full or :minimal
       # @param prompt_injection_items [Array<Resources::PromptInjections::Item>] Prompt injection items
+      # @param system_prompt_section_overrides [Hash] Optional section config overrides
       def initialize(
         system_prompt: "",
         chat_history: nil,
@@ -39,7 +41,8 @@ module AgentCore
         skills_store: nil,
         include_skill_locations: false,
         prompt_mode: :full,
-        prompt_injection_items: []
+        prompt_injection_items: [],
+        system_prompt_section_overrides: {}
       )
         @system_prompt = system_prompt
         @chat_history = chat_history
@@ -54,6 +57,12 @@ module AgentCore
         @include_skill_locations = include_skill_locations == true
         @prompt_mode = (prompt_mode || :full).to_sym
         @prompt_injection_items = Array(prompt_injection_items).freeze
+        @system_prompt_section_overrides =
+          if system_prompt_section_overrides.is_a?(Hash)
+            system_prompt_section_overrides
+          else
+            {}
+          end.freeze
       end
     end
   end

@@ -33,6 +33,7 @@ module AgentCore
       end
 
       def build_prompt(context_nodes:)
+        @execution_context = with_system_prompt_now_utc(@execution_context)
         prompt_assembly = PromptAssembly.new(runtime: @runtime, execution_context: @execution_context)
 
         context_nodes = without_target_node(normalize_initial_context(context_nodes))
@@ -51,6 +52,17 @@ module AgentCore
       end
 
       private
+        def with_system_prompt_now_utc(context)
+          ctx = ExecutionContext.from(context, instrumenter: @runtime.instrumenter)
+
+          existing = ctx.attributes[:system_prompt_now_utc].to_s.strip
+          return ctx unless existing.empty?
+
+          now_utc = ctx.clock.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+          ExecutionContext.from(ctx, system_prompt_now_utc: now_utc)
+        rescue StandardError
+          ExecutionContext.from(context, instrumenter: @runtime.instrumenter)
+        end
 
         def normalize_initial_context(context_nodes)
           context_nodes = Array(context_nodes)
@@ -396,12 +408,16 @@ module AgentCore
           prompt_context =
             PromptBuilder::Context.new(
               system_prompt: base_system_prompt.to_s,
+              tools_registry: @runtime.tools_registry,
               memory_results: memory_results,
               variables: prompt_variables,
               prompt_mode: @runtime.prompt_mode,
               prompt_injection_items: prepared.prompt_injection_items,
+              tool_policy: @runtime.tool_policy,
               skills_store: @runtime.skills_store,
               include_skill_locations: @runtime.include_skill_locations,
+              execution_context: @execution_context,
+              system_prompt_section_overrides: @runtime.system_prompt_section_overrides,
             )
 
           sections = PromptBuilder::SystemPromptSectionsBuilder.build(context: prompt_context)

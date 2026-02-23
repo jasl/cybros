@@ -24,9 +24,13 @@
   - 将 `system_message/developer_message` 合并为 base system prompt
   - 将 `task` 映射为 `tool_result`（或 error tool_result）
 - `PromptAssembly` / `PromptBuilder::SimplePipeline`：
-  - 注入 memory：`<relevant_context> ... </relevant_context>`（条数由 `runtime.memory_search_limit` 控制）
-  - 注入 prompt_injections（sources.items）
-  - 注入 skills fragment：`<available_skills ... />`
+  - system prompt 由 `PromptBuilder::SystemPromptSectionsBuilder` 章节化组装，并显式区分：
+    - **prefix（尽量跨 turn 稳定）**：`base_system_prompt` + `<safety>` + `<tooling>` + `<workspace>` + `<available_skills>` + `system_section` injections（默认）
+    - **tail（每 turn 可能变化）**：`<time>` +（可选）`<channel>` + `<relevant_context>`（memory；强制 tail）+ stability=tail 的 injections
+    - `prompt_mode=:minimal` 默认仅包含 safety（不包含 tooling/workspace/time/channel/skills；memory 仅当显式提供）
+  - 注入 prompt_injections（sources.items；按 `prompt_mode` 过滤）
+  - 注入 memory：`<relevant_context> ... </relevant_context>`（条数由 `runtime.memory_search_limit` 控制；强制进入 tail）
+  - 注入 skills fragment：`<available_skills ... />`（默认仅 full mode）
   - 过滤 tools：`tool_policy.filter`
 
 ---

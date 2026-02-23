@@ -17,7 +17,7 @@ class AgentCore::PromptBuilder::SimplePipelineTest < Minitest::Test
 
     prompt = @pipeline.build(context: context)
 
-    assert_equal "You are helpful.", prompt.system_prompt
+    assert prompt.system_prompt.start_with?("You are helpful.")
     assert_equal 1, prompt.messages.size
     assert_equal "Hello!", prompt.messages.last.text
     assert_equal :user, prompt.messages.last.role
@@ -70,7 +70,7 @@ class AgentCore::PromptBuilder::SimplePipelineTest < Minitest::Test
 
     prompt = @pipeline.build(context: context)
 
-    assert_equal "Hello Alice, you are a developer.", prompt.system_prompt
+    assert prompt.system_prompt.start_with?("Hello Alice, you are a developer.")
   end
 
   def test_includes_tool_definitions

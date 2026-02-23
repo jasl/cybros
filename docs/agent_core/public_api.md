@@ -28,6 +28,7 @@
 - `agent_profile` 支持两种形状：
   - String：预置 profile 名
   - Object：`{ base: "...", ...overrides }`（安全白名单字段，见 `lib/cybros/agent_profile_config.rb`）
+    - `system_prompt_sections`：内建 system prompt sections 的 section-level overrides（enabled/order/prompt_modes/stability）
 
 ---
 
@@ -63,6 +64,7 @@
 - `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `Heuristic`）
 - `include_skill_locations`：是否在 `<available_skills>` 注入中包含技能 location（默认 `false`）
 - `prompt_mode`：提示词模式（默认 `:full`；`prompt_injections` 可按 mode 过滤）
+- `system_prompt_section_overrides`：system prompt sections 的 overrides（Hash；由 app 侧 profile 或 `agent_profile.system_prompt_sections` 注入；`time/channel/memory` 强制归入 tail）
 
 上下文/预算：
 
