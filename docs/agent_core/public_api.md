@@ -69,8 +69,8 @@
 - `prompt_injection_sources`：`AgentCore::Resources::PromptInjections::Source::*`
 - `instrumenter`：`AgentCore::Observability::Instrumenter`（默认 `NullInstrumenter`）
 - `execution_context_attributes`：执行上下文属性（Hash，Symbol keys；executor 会基于它构建 `ExecutionContext.attributes`，并自动注入 `dag.graph_id/node_id/lane_id/turn_id`；可用于注入 `cwd/workspace_dir/channel/agent/...` 等 app 侧信息）
-- `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `AgentCore::Contrib::TokenCounter::Estimator`，失败时回退到 `Heuristic`）
-- `directives_config`：Hash or nil（nil 表示禁用；Hash 表示启用并使用 `AgentCore::Contrib::Directives::Runner` 进行 envelope 输出；当前不支持 tool calling）
+- `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `AgentCore::Resources::TokenCounter::Estimator`，失败时回退到 `Heuristic`）
+- `directives_config`：Hash or nil（nil 表示禁用；Hash 表示启用并使用 `AgentCore::Directives::Runner` 进行 envelope 输出；当前不支持 tool calling）
 - `include_skill_locations`：是否在 `<available_skills>` 注入中包含技能 location（默认 `false`）
 - `prompt_mode`：提示词模式（默认 `:full`；`prompt_injections` 可按 mode 过滤）
 - `system_prompt_section_overrides`：system prompt sections 的 overrides（Hash；由 app 侧 profile 或 `agent_profile.system_prompt_sections` 注入；`time/channel/memory` 强制归入 tail）

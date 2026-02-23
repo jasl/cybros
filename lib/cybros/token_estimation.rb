@@ -5,7 +5,7 @@ require "pathname"
 module Cybros
   # App-owned token estimation registry and model hint canonicalization.
   #
-  # AgentCore::Contrib only validates registry entries; Cybros owns:
+  # AgentCore::Tokenization::Registry only validates registry entries; Cybros owns:
   # - SOURCES (model hints + HF repos)
   # - tokenizer asset paths
   # - provider-specific model ID canonicalization
@@ -145,7 +145,7 @@ module Cybros
               :tiktoken
             end
 
-          family = AgentCore::Contrib::TokenEstimation.normalize_tokenizer_family(family)
+          family = AgentCore::Tokenization::Registry.normalize_tokenizer_family(family)
 
           entry = {
             hint: hint,
@@ -154,7 +154,7 @@ module Cybros
             source_repo: source.fetch(:hf_repo, nil),
           }
 
-          if AgentCore::Contrib::TokenEstimation.hf_tokenizer_family?(family)
+          if AgentCore::Tokenization::Registry.hf_tokenizer_family?(family)
             path = root_dir.join(tokenizer_relative_path(hint)).to_s
 
             if File.file?(path)
@@ -173,7 +173,7 @@ module Cybros
           entry
         end
 
-      AgentCore::Contrib::TokenEstimation.registry(sources: entries)
+      AgentCore::Tokenization::Registry.registry(sources: entries)
     end
 
     def estimator(tokenizer_root_path: tokenizer_root, strict: false)
@@ -183,7 +183,7 @@ module Cybros
       ESTIMATOR_MUTEX.synchronize do
         @estimators ||= {}
         @estimators[cache_key] ||=
-          AgentCore::Contrib::TokenEstimator.new(
+          AgentCore::Tokenization::TokenEstimator.new(
             registry: registry(tokenizer_root_path: root, strict: strict),
           )
       end

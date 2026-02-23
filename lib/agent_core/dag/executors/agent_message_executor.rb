@@ -246,7 +246,7 @@ module AgentCore
             llm_options_defaults = built_prompt.options.is_a?(Hash) ? built_prompt.options.dup : {}
             llm_options_defaults = AgentCore::Utils.deep_symbolize_keys(llm_options_defaults)
 
-            reserved_keys = AgentCore::Contrib::Directives::Runner::RESERVED_LLM_OPTIONS_KEYS
+            reserved_keys = AgentCore::Directives::Runner::RESERVED_LLM_OPTIONS_KEYS
             reserved_keys.each { |k| llm_options_defaults.delete(k) }
 
             instrumenter = execution_context.instrumenter
@@ -261,7 +261,7 @@ module AgentCore
 
             instrumenter.instrument("agent_core.llm.call", payload) do
               runner =
-                AgentCore::Contrib::Directives::Runner.new(
+                AgentCore::Directives::Runner.new(
                   provider: runtime.provider,
                   model: runtime.model,
                   llm_options_defaults: llm_options_defaults,

@@ -55,7 +55,7 @@
 - Skills store + skills tools（路径安全 + size cap）
 - PromptBuilder + PromptInjections（含 TextStore）
 - Observability（ActiveSupport / OpenTelemetry instrumenter + trace recorder）
-- Contrib（directives / language_policy / openai_history / provider_with_defaults / token_estimation 等）
+- Directives / LanguagePolicy / OpenAI::History / Provider::WithDefaults / Tokenization（等）
 
 ---
 

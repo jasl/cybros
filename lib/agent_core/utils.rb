@@ -91,6 +91,15 @@ module AgentCore
       end
     end
 
+    # Deep-merge many hashes.
+    #
+    # - Hash values are merged recursively.
+    # - Arrays and scalar values are replaced by the right-hand side.
+    # - Non-Hash inputs are treated as {}.
+    def deep_merge_hashes(*hashes)
+      hashes.reduce({}) { |acc, h| deep_merge_two(acc, h) }
+    end
+
     def truncate_utf8_bytes(value, max_bytes:)
       max_bytes = Integer(max_bytes)
       return "" if max_bytes <= 0
@@ -121,6 +130,24 @@ module AgentCore
       str.encode(Encoding::UTF_8, invalid: :replace, undef: :replace, replace: "\uFFFD")
     end
     private_class_method :normalize_utf8
+
+    def deep_merge_two(left, right)
+      lhs = left.is_a?(Hash) ? left : {}
+      rhs = right.is_a?(Hash) ? right : {}
+
+      out = lhs.each_with_object({}) { |(k, v), merged| merged[k] = v }
+
+      rhs.each do |key, value|
+        if out[key].is_a?(Hash) && value.is_a?(Hash)
+          out[key] = deep_merge_two(out[key], value)
+        else
+          out[key] = value
+        end
+      end
+
+      out
+    end
+    private_class_method :deep_merge_two
 
     # Normalize a MIME type string (lowercase, strip parameters).
     #

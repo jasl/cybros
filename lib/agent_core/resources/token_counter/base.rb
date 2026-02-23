@@ -6,7 +6,8 @@ module AgentCore
       # Abstract base class for token counting.
       #
       # The app implements a concrete counter (e.g., tiktoken, HuggingFace
-      # tokenizers). AgentCore ships only a heuristic fallback.
+      # tokenizers). AgentCore ships a heuristic fallback and optional helpers
+      # (e.g., an estimator wrapper) to plug in app-owned tokenization.
       #
       # @example Implementing a counter
       #   class TiktokenCounter < AgentCore::Resources::TokenCounter::Base

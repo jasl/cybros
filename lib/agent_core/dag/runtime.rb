@@ -545,8 +545,8 @@ module AgentCore
         private
 
         def default_token_counter_for(model)
-          AgentCore::Contrib::TokenCounter::Estimator.new(
-            token_estimator: AgentCore::Contrib::TokenEstimator.default,
+          AgentCore::Resources::TokenCounter::Estimator.new(
+            token_estimator: AgentCore::Tokenization::TokenEstimator.default,
             model_hint: model,
           )
         rescue LoadError, StandardError

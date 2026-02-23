@@ -158,4 +158,23 @@ class AgentCore::UtilsTest < Minitest::Test
     assert out.valid_encoding?
     assert out.bytesize <= 1
   end
+
+  def test_deep_merge_hashes_merges_recursively_and_right_wins
+    left = { a: 1, b: { c: 1, d: [1] } }
+    right = { b: { c: 2, d: [2], e: 3 }, f: 9 }
+
+    merged = AgentCore::Utils.deep_merge_hashes(left, right)
+
+    assert_equal({ a: 1, b: { c: 2, d: [2], e: 3 }, f: 9 }, merged)
+  end
+
+  def test_deep_merge_hashes_accepts_many_inputs
+    merged = AgentCore::Utils.deep_merge_hashes({ a: 1 }, { b: 2 }, { a: 3 })
+    assert_equal({ a: 3, b: 2 }, merged)
+  end
+
+  def test_deep_merge_hashes_treats_non_hash_inputs_as_empty
+    merged = AgentCore::Utils.deep_merge_hashes({ a: 1 }, "nope", nil, { b: 2 })
+    assert_equal({ a: 1, b: 2 }, merged)
+  end
 end

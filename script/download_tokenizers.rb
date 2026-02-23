@@ -158,7 +158,7 @@ module DownloadTokenizers
     repo = source.fetch(:hf_repo, "").to_s.strip
     return false if repo.empty?
 
-    AgentCore::Contrib::TokenEstimation.hf_tokenizer_family?(source_tokenizer_family(source))
+    AgentCore::Tokenization::Registry.hf_tokenizer_family?(source_tokenizer_family(source))
   end
 
   def http_download(url, io:, token:)
