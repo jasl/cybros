@@ -243,6 +243,15 @@
 - 对每个 section 做可配置 order + prompt_modes
 - 对 injected files 做 max_bytes/total_max_bytes 与可观测（写到 metadata/usage）
 
+当前状态（2026-02-23）：
+
+- ✅ 已落地：`SystemPromptSectionsBuilder`（稳定 `prefix` / 动态 `tail` 分段；base system prompt + `system_section` injections + skills fragment + `<relevant_context>`；memory 强制进入 tail；支持注入项 `metadata.stability=tail`）
+- ✅ 已落地：`PromptBuilder::SimplePipeline` 使用 sections builder；RepoDocs 注入迁移为 `system_section`（不再是 preamble message）
+- ✅ 已落地：章节级可观测写入 `agent_message.metadata["context_cost"]["prompt_sections"]`（prefix/tail bytes/tokens/sha256、每段 bytes/tokens + safe metadata；tools_schema bytes/tokens；preamble_messages 明细）
+- ✅ 已落地：RepoDocs/FileSet 注入写入“文件与预算”metadata（per-file bytes/missing/truncated/max_bytes，及整体 total/max bytes 截断信息）
+- ✅ 已落地：prefix 稳定性测试（memory 变化不影响 prefix）+ prompt_sections shape 测试
+- ⏳ 未落地：更完整的“内建 sections”覆盖（Tooling/Safety/Workspace/Time/Channel 等）与统一的 section-level 配置（目前 injections 有 order/prompt_modes；skills/memory 是固定 section）
+
 ## 3) 三类实验形态的“最小落地集合”
 
 ### 3.1 Coding agent（Codex/OpenCode/Bub/Accomplish）
