@@ -10,24 +10,47 @@ module Cybros
       conversation = conversation_for(node)
 
       agent_metadata = agent_metadata_for(conversation)
-      policy_profile = Cybros::AgentProfiles.normalize(agent_metadata&.fetch("policy_profile", nil))
+      profile_resolution = resolve_profile(agent_metadata)
+      profile_name = profile_resolution.fetch(:profile_name)
+      definition = profile_resolution.fetch(:definition)
+      profile_config = profile_resolution.fetch(:profile_config)
 
       context_turns =
-        parse_context_turns(
-          agent_metadata&.fetch("context_turns", nil)
-        )
+        if profile_config&.context_turns
+          profile_config.context_turns
+        else
+          parse_context_turns(agent_metadata&.fetch("context_turns", nil))
+        end
 
       base_tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
+
+      delegate =
+        if profile_config&.tools_allowed
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: profile_config.tools_allowed,
+            delegate: base_tool_policy,
+            tool_groups: nil,
+          )
+        else
+          base_tool_policy
+        end
+
       tool_policy =
         AgentCore::Resources::Tools::Policy::Profiled.new(
-          allowed: Cybros::AgentProfiles.allowed_patterns(policy_profile),
-          delegate: base_tool_policy,
+          allowed: Array(definition.fetch(:tool_patterns)),
+          delegate: delegate,
           tool_groups: nil,
         )
 
       provider ||= build_provider
       tools_registry ||= build_tools_registry
       instrumenter ||= build_instrumenter
+
+      prompt_injection_sources =
+        AgentCore::Resources::PromptInjections::Factory.build_sources(
+          specs: definition.fetch(:prompt_injections, []),
+          text_store: nil,
+        )
 
       runtime_kwargs = {
         provider: provider,
@@ -36,6 +59,10 @@ module Cybros
         tools_registry: tools_registry,
         tool_policy: tool_policy,
         instrumenter: instrumenter,
+        prompt_mode: definition.fetch(:prompt_mode, :full),
+        memory_search_limit: definition.fetch(:memory_search_limit) { Cybros::AgentProfiles::DEFAULT_MEMORY_SEARCH_LIMIT },
+        prompt_injection_sources: prompt_injection_sources,
+        include_skill_locations: definition.fetch(:include_skill_locations, false),
       }
 
       runtime_kwargs[:context_turns] = context_turns if context_turns
@@ -47,17 +74,28 @@ module Cybros
       conversation = conversation_for(node)
       agent_metadata = agent_metadata_for(conversation)
 
-      policy_profile = Cybros::AgentProfiles.normalize(agent_metadata&.fetch("policy_profile", nil))
       key = agent_metadata&.fetch("key", nil).to_s.strip
       key = "main" if key.empty?
 
-      context_turns = parse_context_turns(agent_metadata&.fetch("context_turns", nil))
+      profile_resolution = resolve_profile(agent_metadata)
+      profile_name = profile_resolution.fetch(:profile_name)
+      profile_config = profile_resolution.fetch(:profile_config)
 
-      attrs = { key: key, policy_profile: policy_profile }
+      context_turns =
+        if profile_config&.context_turns
+          profile_config.context_turns
+        else
+          parse_context_turns(agent_metadata&.fetch("context_turns", nil))
+        end
+
+      attrs = {
+        key: key,
+        agent_profile: profile_name,
+      }
       attrs[:context_turns] = context_turns if context_turns
       attrs
     rescue StandardError
-      { key: "main", policy_profile: Cybros::AgentProfiles::DEFAULT_PROFILE }
+      { key: "main", agent_profile: Cybros::AgentProfiles::DEFAULT_PROFILE }
     end
 
     def build_tools_registry
@@ -91,13 +129,27 @@ module Cybros
     private_class_method :parse_fallback_models_env
 
     def parse_context_turns(value)
-      i = Integer(value, exception: false)
-      return nil unless i
-      return nil if i < 1 || i > MAX_CONTEXT_TURNS
+      return nil if value.nil?
+
+      stripped = value.to_s.strip
+      return nil if stripped.empty?
+
+      i = Integer(stripped, exception: false)
+      AgentCore::ValidationError.raise!(
+        "context_turns must be an Integer",
+        code: "cybros.agent_runtime_resolver.context_turns_must_be_an_integer",
+        details: { value_class: value.class.name },
+      ) unless i
+
+      if i < 1 || i > MAX_CONTEXT_TURNS
+        AgentCore::ValidationError.raise!(
+          "context_turns must be between 1 and #{MAX_CONTEXT_TURNS}",
+          code: "cybros.agent_runtime_resolver.context_turns_out_of_range",
+          details: { context_turns: i },
+        )
+      end
 
       i
-    rescue StandardError
-      nil
     end
     private_class_method :parse_context_turns
 
@@ -120,6 +172,48 @@ module Cybros
       nil
     end
     private_class_method :agent_metadata_for
+
+    def resolve_profile(agent_metadata)
+      raw = agent_metadata.is_a?(Hash) ? agent_metadata.fetch("agent_profile", nil) : nil
+
+      profile_config =
+        if raw.is_a?(Hash) || (raw.is_a?(String) && raw.lstrip.start_with?("{"))
+          Cybros::AgentProfileConfig.from_value(raw)
+        end
+
+      profile_name = profile_config ? profile_config.base_profile : normalize_profile_name!(raw)
+
+      definition = Cybros::AgentProfiles.definition(profile_name)
+      if profile_config
+        definition = profile_config.apply_overrides(definition)
+      end
+
+      { profile_name: profile_name, definition: definition, profile_config: profile_config }
+    end
+    private_class_method :resolve_profile
+
+    def normalize_profile_name!(value)
+      return Cybros::AgentProfiles::DEFAULT_PROFILE if value.nil?
+
+      unless value.is_a?(String)
+        AgentCore::ValidationError.raise!(
+          "agent_profile must be a String or object",
+          code: "cybros.agent_runtime_resolver.agent_profile_must_be_a_string_or_object",
+          details: { value_class: value.class.name },
+        )
+      end
+
+      s = value.to_s.strip.downcase
+      return Cybros::AgentProfiles::DEFAULT_PROFILE if s.empty?
+
+      return s if Cybros::AgentProfiles.valid?(s)
+
+      AgentCore::ValidationError.raise!(
+        "agent_profile must be one of: #{Cybros::AgentProfiles::PROFILES.keys.sort.join(", ")}",
+        code: "cybros.agent_runtime_resolver.agent_profile_must_be_one_of",
+        details: { agent_profile: s },
+      )
+    end
+    private_class_method :normalize_profile_name!
   end
 end
-

@@ -16,7 +16,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
       Conversation.create!(
         metadata: {
           "agent" => {
-            "policy_profile" => "skills_only",
+            "agent_profile" => "review",
             "context_turns" => 88,
           },
         },
@@ -49,7 +49,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
           },
           agent: {
             key: "main",
-            policy_profile: "skills_only",
+            agent_profile: "review",
             context_turns: 77,
           },
         },
@@ -65,7 +65,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     child = Conversation.find(payload.fetch("child_conversation_id"))
 
     assert_equal "subagent:my_agent", child.metadata.dig("agent", "key")
-    assert_equal "skills_only", child.metadata.dig("agent", "policy_profile")
+    assert_equal "review", child.metadata.dig("agent", "agent_profile")
     assert_equal 77, child.metadata.dig("agent", "context_turns")
     assert_equal parent.id.to_s, child.metadata.dig("subagent", "parent_conversation_id")
     assert_equal graph.id.to_s, child.metadata.dig("subagent", "parent_graph_id")
@@ -110,7 +110,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
           },
           agent: {
             key: "subagent:child",
-            policy_profile: "full",
+            agent_profile: "coding",
             context_turns: 50,
           },
         },
@@ -158,7 +158,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
             lane_id: from_node.lane_id.to_s,
             turn_id: from_node.turn_id.to_s,
           },
-          agent: { key: "main", policy_profile: "full", context_turns: 50 },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
         },
       )
 
@@ -167,6 +167,45 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
       assert result.error?
       assert_includes result.text, "validation failed"
       assert_equal "cybros.subagent_spawn.context_turns_must_be_an_integer", result.metadata.dig(:validation_error, :code)
+    end
+  end
+
+  test "subagent_spawn rejects invalid agent_profile" do
+    parent = Conversation.create!
+    graph = parent.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    from_node = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      from_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "parent",
+          metadata: {},
+        )
+    end
+
+    ctx =
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: from_node.id.to_s,
+            lane_id: from_node.lane_id.to_s,
+            turn_id: from_node.turn_id.to_s,
+          },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
+        },
+      )
+
+    assert_no_difference -> { Conversation.count } do
+      result = spawn_tool.call({ "name" => "child", "prompt" => "hi", "agent_profile" => "wat" }, context: ctx)
+      assert result.error?
+      assert_includes result.text, "validation failed"
+      assert_equal "cybros.subagent_spawn.invalid_agent_profile", result.metadata.dig(:validation_error, :code)
     end
   end
 
@@ -213,11 +252,11 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
             lane_id: from_node.lane_id.to_s,
             turn_id: from_node.turn_id.to_s,
           },
-          agent: { key: "main", policy_profile: "full", context_turns: 50 },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
         },
       )
 
-    spawn = spawn_tool.call({ "name" => "child", "prompt" => "child: hello", "policy_profile" => "minimal" }, context: ctx)
+    spawn = spawn_tool.call({ "name" => "child", "prompt" => "child: hello", "agent_profile" => "subagent" }, context: ctx)
     refute spawn.error?, spawn.text
 
     child_id = JSON.parse(spawn.text).fetch("child_conversation_id")

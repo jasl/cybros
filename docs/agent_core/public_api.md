@@ -22,9 +22,12 @@
 
 - 默认 resolver 委托到 `Cybros::AgentRuntimeResolver.runtime_for(node:)`
 - resolver 会读取 `node.graph.attachable`（通常是 `Conversation`）的 `conversations.metadata["agent"]` 并立刻生效：
-  - `policy_profile`：通过 `Policy::Profiled` 包裹 base policy，影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
+  - `agent_profile`：通过 `Policy::Profiled` 包裹 base policy，影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
   - `context_turns`：覆盖 runtime 的 context turns 窗口（范围 1..1000）
-- profiles 映射见：`lib/cybros/agent_profiles.rb`（`full|minimal|memory_only|skills_only`）
+- profiles 映射见：`lib/cybros/agent_profiles.rb`（`coding|review|subagent|repair`）
+- `agent_profile` 支持两种形状：
+  - String：预置 profile 名
+  - Object：`{ base: "...", ...overrides }`（安全白名单字段，见 `lib/cybros/agent_profile_config.rb`）
 
 ---
 
@@ -170,7 +173,7 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 - `subagent_spawn`
 - `subagent_poll`
 
-并以 `conversations.metadata["agent"]` 控制 child conversation 的 `policy_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
+并以 `conversations.metadata["agent"]` 控制 child conversation 的 `agent_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
 
 安全/限制（当前默认）：
 

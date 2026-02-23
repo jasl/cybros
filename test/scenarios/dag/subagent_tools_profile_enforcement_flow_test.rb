@@ -27,7 +27,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "minimal profile denies tool calls as tool_not_in_profile and subagent_poll returns transcript preview" do
+  test "subagent profile denies tool calls as tool_not_in_profile and subagent_poll returns transcript preview" do
     parent = Conversation.create!
     parent_graph = parent.dag_graph
     parent_turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -54,16 +54,16 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
           dag: {
             graph_id: parent_graph.id.to_s,
             node_id: from_node.id.to_s,
-            lane_id: from_node.lane_id.to_s,
-            turn_id: from_node.turn_id.to_s,
-          },
-          agent: { key: "main", policy_profile: "full", context_turns: 50 },
+          lane_id: from_node.lane_id.to_s,
+          turn_id: from_node.turn_id.to_s,
+        },
+          agent: { key: "main", agent_profile: "coding", context_turns: 50 },
         },
       )
 
     spawn =
       spawn_tool.call(
-        { "name" => "child", "prompt" => "child: hello", "policy_profile" => "minimal" },
+        { "name" => "child", "prompt" => "child: hello", "agent_profile" => "subagent" },
         context: spawn_ctx,
       )
 

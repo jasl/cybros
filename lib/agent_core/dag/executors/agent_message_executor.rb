@@ -119,10 +119,14 @@ module AgentCore
           def build_execution_context(node, runtime:)
             agent_attrs = agent_attributes_for(node)
 
+            workspace_dir = workspace_dir_for_execution_context
+
             ExecutionContext.new(
               run_id: node.turn_id.to_s,
               instrumenter: runtime.instrumenter,
               attributes: {
+                cwd: workspace_dir,
+                workspace_dir: workspace_dir,
                 dag: {
                   graph_id: node.graph_id.to_s,
                   node_id: node.id.to_s,
@@ -134,10 +138,20 @@ module AgentCore
             )
           end
 
+          def workspace_dir_for_execution_context
+            if defined?(Rails) && Rails.respond_to?(:root)
+              Rails.root.to_s
+            else
+              Dir.pwd
+            end
+          rescue StandardError
+            Dir.pwd
+          end
+
           def agent_attributes_for(node)
             Cybros::AgentRuntimeResolver.agent_attributes_for(node)
           rescue NameError, StandardError
-            { key: "main", policy_profile: "full" }
+            { key: "main", agent_profile: "coding" }
           end
 
           def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:)

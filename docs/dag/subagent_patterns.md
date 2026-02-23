@@ -36,7 +36,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 {
   "agent": {
     "key": "subagent:<name>",
-    "policy_profile": "full|minimal|memory_only|skills_only",
+    "agent_profile": "coding|review|subagent|repair",
     "context_turns": 50
   },
   "subagent": {
@@ -50,7 +50,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 
 运行时 profile 生效（关键）：
 
-- `AgentCore::DAG.runtime_resolver` 会读取 `conversation.metadata["agent"]`，并用 `Policy::Profiled` 包裹 base policy，使 `policy_profile/context_turns` 立刻影响该会话的工具可见性与授权判定。
+- `AgentCore::DAG.runtime_resolver` 会读取 `conversation.metadata["agent"]`，并用 `Policy::Profiled` 包裹 base policy，使 `agent_profile/context_turns` 立刻影响该会话的工具可见性与授权判定。
 
 安全约束（当前默认）：
 
@@ -59,8 +59,8 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
   - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
   - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
 - `subagent_poll` 目前按 `child_conversation_id` 直接读取会话，不校验其是否为“本会话 spawn 的 child”；如需更强隔离，可在工具层增加 parent 校验或通过 tool policy 限制可见性。
-- profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `policy_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
-- `context_turns` 仅接受 1..1000；非法值会在 runtime_resolver 中降级为默认值（不会抛出到执行路径）。
+- profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `agent_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
+- `context_turns` 仅接受 1..1000；非法值会触发校验错误（避免 silent coercion）。
 
 ### 1.2) 未来增强（建议，未落地）
 

@@ -10,7 +10,7 @@ module Cybros
       MAX_POLL_LIMIT_TURNS = 50
       TRANSCRIPT_LINE_MAX_BYTES = 1_000
 
-      ALLOWED_POLICY_PROFILES = Cybros::AgentProfiles::PROFILES.keys.freeze
+      ALLOWED_AGENT_PROFILES = Cybros::AgentProfiles::PROFILES.keys.freeze
 
       module_function
 
@@ -28,7 +28,7 @@ module Cybros
             properties: {
               name: { type: "string", description: "Subagent name (used for metadata and default title)." },
               prompt: { type: "string", description: "Initial user prompt for the subagent." },
-              policy_profile: { type: "string", enum: ALLOWED_POLICY_PROFILES },
+              agent_profile: { type: "string", enum: ALLOWED_AGENT_PROFILES },
               context_turns: { type: "integer", minimum: 1, maximum: MAX_CONTEXT_TURNS },
               title: { type: "string", description: "Optional child conversation title." },
             },
@@ -58,13 +58,13 @@ module Cybros
           normalized = normalize_name(name)
           agent_key = normalized.empty? ? "subagent" : "subagent:#{normalized}"
 
-          policy_profile =
-            if args.key?("policy_profile")
-              raw = args.fetch("policy_profile", nil)
-              validate_policy_profile!(raw)
-              raw.to_s
+          profile =
+            if args.key?("agent_profile")
+              raw = args.fetch("agent_profile", nil)
+              validate_agent_profile!(raw)
+              Cybros::AgentProfiles.normalize(raw)
             else
-              inherit_policy_profile(parent) || "full"
+              inherit_agent_profile(parent, context) || Cybros::AgentProfiles::DEFAULT_PROFILE
             end
 
           context_turns =
@@ -89,7 +89,7 @@ module Cybros
                 title: title,
                 metadata: build_child_metadata(
                   agent_key: agent_key,
-                  policy_profile: policy_profile,
+                  profile: profile,
                   context_turns: context_turns,
                   name: name,
                   parent_conversation_id: parent.id.to_s,
@@ -106,7 +106,7 @@ module Cybros
             child_conversation_id: child.id.to_s,
             child_graph_id: child.dag_graph.id.to_s,
             agent_key: agent_key,
-            policy_profile: policy_profile,
+            agent_profile: profile,
             status: "spawned",
           }
 
@@ -249,30 +249,44 @@ module Cybros
       end
       private_class_method :default_title_for
 
-      def validate_policy_profile!(value)
+      def validate_agent_profile!(value)
         s = value.to_s
         return if Cybros::AgentProfiles.valid?(s)
 
         AgentCore::ValidationError.raise!(
-          "policy_profile must be one of: #{ALLOWED_POLICY_PROFILES.join(", ")}",
-          code: "cybros.subagent_spawn.invalid_policy_profile",
-          details: { policy_profile: s },
+          "agent_profile must be one of: #{ALLOWED_AGENT_PROFILES.join(", ")}",
+          code: "cybros.subagent_spawn.invalid_agent_profile",
+          details: { agent_profile: s },
         )
       end
-      private_class_method :validate_policy_profile!
+      private_class_method :validate_agent_profile!
 
-      def inherit_policy_profile(parent_conversation)
+      def inherit_agent_profile_from_parent(parent_conversation)
         meta = parent_conversation.metadata
         agent = meta.is_a?(Hash) ? (meta["agent"] || meta[:agent]) : nil
-        raw = agent.is_a?(Hash) ? (agent["policy_profile"] || agent[:policy_profile]) : nil
+        raw = agent.is_a?(Hash) ? (agent["agent_profile"] || agent[:agent_profile]) : nil
         s = raw.to_s.strip
         return nil if s.empty?
+
+        return nil unless Cybros::AgentProfiles.valid?(s)
 
         Cybros::AgentProfiles.normalize(s)
       rescue StandardError
         nil
       end
-      private_class_method :inherit_policy_profile
+      private_class_method :inherit_agent_profile_from_parent
+
+      def inherit_agent_profile(parent_conversation, context)
+        from_ctx = context.attributes.dig(:agent, :agent_profile).to_s.strip
+        if !from_ctx.empty? && Cybros::AgentProfiles.valid?(from_ctx)
+          return Cybros::AgentProfiles.normalize(from_ctx)
+        end
+
+        inherit_agent_profile_from_parent(parent_conversation)
+      rescue StandardError
+        inherit_agent_profile_from_parent(parent_conversation)
+      end
+      private_class_method :inherit_agent_profile
 
       def inherit_context_turns(parent_conversation, context)
         from_ctx = context.attributes.dig(:agent, :context_turns)
@@ -286,9 +300,9 @@ module Cybros
         parsed = Integer(raw, exception: false)
         return parsed if parsed && parsed >= 1 && parsed <= MAX_CONTEXT_TURNS
 
-        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
+        ::DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
       rescue StandardError
-        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
+        ::DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
       end
       private_class_method :inherit_context_turns
 
@@ -312,7 +326,7 @@ module Cybros
 
       def build_child_metadata(
         agent_key:,
-        policy_profile:,
+        profile:,
         context_turns:,
         name:,
         parent_conversation_id:,
@@ -322,7 +336,7 @@ module Cybros
         {
           "agent" => {
             "key" => agent_key,
-            "policy_profile" => policy_profile,
+            "agent_profile" => profile,
             "context_turns" => context_turns,
           },
           "subagent" => {
