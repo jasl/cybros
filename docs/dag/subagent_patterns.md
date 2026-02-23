@@ -54,7 +54,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 
 安全约束（当前默认）：
 
-- 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 以 `subagent:` 开头时，`subagent_spawn` 直接返回错误。
+- 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 为 `subagent` 或以 `subagent:` 开头时，`subagent_spawn` 直接返回错误。
 - bounded 输出（避免 tool 输出膨胀）：
   - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
   - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
