@@ -220,18 +220,37 @@ module AgentCore
           input_tokens = Integer(usage_hash.fetch("prompt_tokens", 0), exception: false) || 0
           output_tokens = Integer(usage_hash.fetch("completion_tokens", 0), exception: false) || 0
 
-          cached_tokens =
+          details =
             begin
-              details = usage_hash.fetch("prompt_tokens_details", nil)
-              details.is_a?(Hash) ? details.fetch("cached_tokens", nil) : nil
+              d = usage_hash.fetch("prompt_tokens_details", nil)
+              d.is_a?(Hash) ? d : {}
             rescue StandardError
-              nil
+              {}
             end
-          cache_read_tokens = Integer(cached_tokens, exception: false) || 0
+
+          cache_read_raw =
+            details["cached_tokens"] ||
+              details["cache_read_tokens"] ||
+              details["cache_read_input_tokens"] ||
+              usage_hash["cache_read_tokens"] ||
+              usage_hash["cache_read_input_tokens"]
+
+          cache_creation_raw =
+            details["cache_creation_tokens"] ||
+              details["cache_creation_input_tokens"] ||
+              usage_hash["cache_creation_tokens"] ||
+              usage_hash["cache_creation_input_tokens"]
+
+          cache_read_tokens = Integer(cache_read_raw, exception: false) || 0
+          cache_read_tokens = 0 if cache_read_tokens.negative?
+
+          cache_creation_tokens = Integer(cache_creation_raw, exception: false) || 0
+          cache_creation_tokens = 0 if cache_creation_tokens.negative?
 
           Resources::Provider::Usage.new(
             input_tokens: input_tokens,
             output_tokens: output_tokens,
+            cache_creation_tokens: cache_creation_tokens,
             cache_read_tokens: cache_read_tokens,
           )
         end

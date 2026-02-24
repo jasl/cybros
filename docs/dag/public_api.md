@@ -56,6 +56,16 @@ Executor 组装上下文（bounded window；Lane 入口避免 App 直接持有 G
   - 实现细节（重要）：引擎会对 context window 的候选 **nodes/edges** 做内部 hard cap（安全带），超限时 raise `DAG::SafetyLimits::Exceeded`（避免单个 turn 或脏数据导致爆炸扫描）。
   - 可选：通过 ENV 调整（仅引擎内部）：`DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES`
 
+LLM 用量统计（Lane-scoped；App-safe；可用于 tokscale-like 汇总/报表）：
+
+- `DAG::Lane#llm_usage_stats(since: nil, until_time: nil, include_compressed: false, include_deleted: false)`
+  - **用途**：聚合本 Lane 内（可按时间范围过滤）的 LLM token 使用情况，并给出 prompt/prefix cache 命中率相关指标。
+  - **默认语义**：只统计 Active（`compressed_at IS NULL`）且未软删（`deleted_at IS NULL`）的节点；如需包含压缩/软删节点，显式传 `include_compressed: true` / `include_deleted: true`。
+  - 返回（string keys）：
+    - `"totals"`：`calls/input_tokens/output_tokens/cache_creation_tokens/cache_read_tokens/cache_miss_tokens/total_tokens/cache_hit_rate`
+    - `"by_model"`：按 `provider+model` 分组的同结构数组（按 `total_tokens` 逆序）
+    - `"by_day"`：按日期分组（`DATE(COALESCE(finished_at, created_at))`）的同结构数组
+
 ### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
 
 - `DAG::Turn#start_message_node_id(include_deleted: false)`（turn anchor：通常为 `user_message`，也可能是 `agent_message/character_message`）
@@ -69,6 +79,8 @@ Graph 是引擎聚合根（锁/事务边界），但 **全图语义** 的读 API
 - `DAG::Graph#context_closure_for*`（危险：祖先闭包 + topo sort）
 - `DAG::Graph#transcript_closure_for*`（危险：祖先闭包）
 - `DAG::Graph#to_mermaid(...)`（危险：可能扫全图）
+- `DAG::Graph#llm_usage_stats(lane_id: nil, since: nil, until_time: nil, include_compressed: false, include_deleted: false)`
+  - 说明：`lane_id: nil` 会聚合所有 lanes 的用量；可能较重，产品 UI 路径优先走 `DAG::Lane#llm_usage_stats`。
 
 > 说明：Graph 仍提供若干 bounded window 的读 API（例如 `context_for`），但产品层推荐从 `DAG::Lane` 入口调用，以避免“无意间把 Graph 当作 App 的常用入口”。
 

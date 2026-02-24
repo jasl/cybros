@@ -397,6 +397,17 @@ module DAG
       )
     end
 
+    def llm_usage_stats(lane_id: nil, since: nil, until_time: nil, include_compressed: false, include_deleted: false)
+      DAG::UsageStats.call(
+        graph: self,
+        lane_id: lane_id,
+        since: since,
+        until_time: until_time,
+        include_compressed: include_compressed,
+        include_deleted: include_deleted,
+      )
+    end
+
     def turn_anchor_node_types
       node_type_keys_for_hook(:turn_anchor?)
     end

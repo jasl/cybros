@@ -307,6 +307,17 @@ module DAG
       }
     end
 
+    def llm_usage_stats(since: nil, until_time: nil, include_compressed: false, include_deleted: false)
+      DAG::UsageStats.call(
+        graph: graph,
+        lane_id: id,
+        since: since,
+        until_time: until_time,
+        include_compressed: include_compressed,
+        include_deleted: include_deleted,
+      )
+    end
+
     def turn_node_ids(turn_id, include_compressed: false, include_deleted: true)
       scope = include_compressed ? nodes : nodes.active
       scope = scope.where(turn_id: turn_id)

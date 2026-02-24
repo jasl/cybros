@@ -53,6 +53,46 @@ class AgentCore::Resources::Provider::SimpleInferenceProviderTest < Minitest::Te
     assert_equal 2, response.usage.output_tokens
   end
 
+  def test_chat_non_streaming_parses_cache_usage_tokens
+    adapter =
+      StubAdapter.new do |_req|
+        body = {
+          "choices" => [
+            {
+              "index" => 0,
+              "message" => { "role" => "assistant", "content" => "Hello" },
+              "finish_reason" => "stop",
+            },
+          ],
+          "usage" => {
+            "prompt_tokens" => 10,
+            "completion_tokens" => 2,
+            "prompt_tokens_details" => {
+              "cached_tokens" => 7,
+              "cache_creation_tokens" => 3,
+            },
+          },
+        }
+
+        { status: 200, headers: { "content-type" => "application/json" }, body: JSON.generate(body) }
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    response =
+      provider.chat(
+        messages: [AgentCore::Message.new(role: :user, content: "hi")],
+        model: "test-model",
+        stream: false,
+      )
+
+    assert_equal 10, response.usage.input_tokens
+    assert_equal 2, response.usage.output_tokens
+    assert_equal 7, response.usage.cache_read_tokens
+    assert_equal 3, response.usage.cache_creation_tokens
+  end
+
   def test_chat_non_streaming_parses_tool_calls
     adapter =
       StubAdapter.new do |_req|
