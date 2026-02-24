@@ -138,13 +138,18 @@ ExecHub 以“强边界的内部模块”落在同一 Rails app 内：
   - 第一阶段 **不依赖** AgentCore。
   - 最后集成时只增加适配层，把 AgentCore 的 tool calls 转换为 RunSpec / ExecHub API 调用（见第 12 节）。
 
-### 3.4 Runner API 的“多租户路径前缀”兼容
+### 3.4 Runner API 的路径前缀策略
 
-如果 Cybros 采用 URL path-based multi-tenancy（`/{account_id}/...`），Runner API 建议放在 **不需要 account 前缀**的全局路径下，并在多租户 middleware 中白名单跳过，例如：
+结论（Phase 1）：
+
+- 产品层 single-tenant URL **不使用** `/{account_id}` 前缀。
+- Runner API 仍建议放在 **不需要 account 前缀**的全局路径下，例如：
 
 - `POST /_system/exechub/api/v1/...`
 
-理由：
+如果未来引入 URL path-based multi-tenancy（`/{account_id}/...`），Runner API 也应保持全局路径，并在多租户 middleware 中白名单跳过。
+
+理由（通用）：
 - Runner 通过 mTLS 身份可直接映射到 `executor_id`（再映射到 `account_id`），无需在 URL 中携带租户信息。
 - 避免 Runner 需要感知 `external_account_id`，减少配置复杂度与错误率。
 

@@ -1,0 +1,31 @@
+id: cybros-starter-templates
+name: "Cybros Starter Templates"
+version: "0.1.0"
+tier: content
+
+required:
+  cybros: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+
+about: "Starter templates for agents/workflows"
+authors:
+  - name: "Cybros"
+    email: "cybros@localhost"
+
+scopes:
+  install: ["system", "space"]
+  default_install_scope: "system"
+
+capabilities:
+  - "resources:templates"
+
+resources:
+  templates:
+    - type: agent_profile
+      id: "main-coding"
+      path: "resources/agents/main.yml"
+      delivery: "copy_to_repo"
+    - type: workflow
+      id: "presenter-specialist"
+      path: "resources/workflows/presenter_specialist.yml"
+      delivery: "copy_to_repo"
