@@ -1,0 +1,343 @@
+require "test_helper"
+
+class DAG::GraphAuditTest < ActiveSupport::TestCase
+  test "scan detects and repair! fixes turn anchor drift" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node =
+      graph.nodes.create!(
+        node_type: Messages::UserMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        body_input: { "content" => "Hello" },
+        metadata: {}
+      )
+
+    turn = graph.turns.find(node.turn_id)
+    turn.update_columns(
+      anchor_node_id: nil,
+      anchor_created_at: nil,
+      anchor_node_id_including_deleted: nil,
+      anchor_created_at_including_deleted: nil,
+      updated_at: Time.current
+    )
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
+    assert_equal [turn.id], issues.map { |issue| issue.fetch(:subject_id) }
+
+    result = DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
+    assert_equal 1, result.fetch(:repaired).fetch(DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT)
+
+    assert_equal node.id, turn.reload.anchor_node_id
+    assert_equal node.id, turn.reload.anchor_node_id_including_deleted
+    assert_equal [], DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
+  end
+
+  test "scan detects and repair! compresses active edges pointing at inactive nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    edge = graph.edges.create!(from_node_id: a.id, to_node_id: b.id, edge_type: DAG::Edge::SEQUENCE)
+
+    b.update_columns(compressed_at: Time.current, compressed_by_id: a.id, updated_at: Time.current)
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE }
+
+    DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE])
+    assert edge.reload.compressed_at.present?
+  end
+
+  test "repair! deletes visibility patches for inactive nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    patch = DAG::NodeVisibilityPatch.create!(graph: graph, node: node, context_excluded_at: Time.current)
+
+    node.update_columns(compressed_at: Time.current, compressed_by_id: node.id, updated_at: Time.current)
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == patch.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_STALE_VISIBILITY_PATCH
+    end
+
+    DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_STALE_VISIBILITY_PATCH])
+    assert_not DAG::NodeVisibilityPatch.exists?(id: patch.id)
+  end
+
+  test "repair! fixes leaf invariant violations by calling validate_leaf_invariant!" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION }
+
+    DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_LEAF_INVARIANT_VIOLATION])
+    assert graph.nodes.active.exists?(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
+  end
+
+  test "repair! reclaims stale running nodes" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(
+      node_type: Messages::Task.node_type_key,
+      state: DAG::Node::RUNNING,
+      lease_expires_at: 1.minute.ago,
+      metadata: {}
+    )
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_STALE_RUNNING_NODE
+    end
+
+    DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_STALE_RUNNING_NODE])
+    assert_equal DAG::Node::ERRORED, node.reload.state
+    assert_equal "running_lease_expired", node.metadata.fetch("error")
+  end
+
+  test "scan reports misconfigured_graph when graph attachable is missing" do
+    graph = DAG::Graph.create!
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
+    assert_includes problem_codes, "attachable_missing"
+  end
+
+  test "scan reports misconfigured_graph when default_leaf_repair is not unique" do
+    Messages.const_set(
+      :BadLeafRepair,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def default_leaf_repair?
+            true
+          end
+
+          def executable?
+            true
+          end
+
+          def leaf_terminal?
+            true
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
+    assert_includes problem_codes, "default_leaf_repair_not_unique"
+  ensure
+    Messages.send(:remove_const, :BadLeafRepair) if Messages.const_defined?(:BadLeafRepair, false)
+  end
+
+  test "scan reports misconfigured_graph when node_type_key collides" do
+    Messages.const_set(
+      :CollisionOne,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def node_type_key
+            "collision"
+          end
+        end
+      end
+    )
+
+    Messages.const_set(
+      :CollisionTwo,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def node_type_key
+            "collision"
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
+    assert_includes problem_codes, "node_type_key_collision"
+  ensure
+    Messages.send(:remove_const, :CollisionOne) if Messages.const_defined?(:CollisionOne, false)
+    Messages.send(:remove_const, :CollisionTwo) if Messages.const_defined?(:CollisionTwo, false)
+  end
+
+  test "scan reports misconfigured_graph when created_content_destination is invalid" do
+    Messages.const_set(
+      :InvalidDestination,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def created_content_destination
+            [:bogus, "x"]
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
+    assert_includes problem_codes, "invalid_created_content_destination"
+  ensure
+    Messages.send(:remove_const, :InvalidDestination) if Messages.const_defined?(:InvalidDestination, false)
+  end
+
+  test "scan reports misconfigured_graph when a NodeBody hook raises" do
+    Messages.const_set(
+      :HookRaises,
+      Class.new(::DAG::NodeBody) do
+        class << self
+          def default_leaf_repair?
+            raise "boom"
+          end
+        end
+      end
+    )
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    issues = DAG::GraphAudit.scan(graph: graph)
+    misconfigured = issues.find { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_MISCONFIGURED_GRAPH }
+    assert misconfigured
+
+    problem_codes = misconfigured.dig(:details, :problems).map { |problem| problem.fetch(:code) }
+    assert_includes problem_codes, "node_body_hook_error"
+  ensure
+    Messages.send(:remove_const, :HookRaises) if Messages.const_defined?(:HookRaises, false)
+  end
+
+  test "scan reports cycle_detected when active edges form a cycle" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    b = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    c = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    now = Time.current
+    DAG::Edge.insert_all!(
+      [
+        {
+          graph_id: graph.id,
+          from_node_id: a.id,
+          to_node_id: b.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          graph_id: graph.id,
+          from_node_id: b.id,
+          to_node_id: c.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+        {
+          graph_id: graph.id,
+          from_node_id: c.id,
+          to_node_id: a.id,
+          edge_type: DAG::Edge::SEQUENCE,
+          metadata: {},
+          created_at: now,
+          updated_at: now,
+        },
+      ]
+    )
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_CYCLE_DETECTED])
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_CYCLE_DETECTED }
+  end
+
+  test "scan reports toposort_failed when topological sorting raises unexpectedly" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    original_call = DAG::TopologicalSort.method(:call)
+    DAG::TopologicalSort.define_singleton_method(:call) do |node_ids:, edges:|
+      _ = node_ids
+      _ = edges
+      raise "boom"
+    end
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED])
+
+    assert issues.any? { |issue| issue.fetch(:type) == DAG::GraphAudit::ISSUE_TOPOLOGICAL_SORT_FAILED }
+  ensure
+    DAG::TopologicalSort.define_singleton_method(:call, original_call) if original_call
+  end
+
+  test "scan reports node_body_drift when node_type does not match stored NodeBody STI type" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.body.update_column(:type, Messages::UserMessage.name)
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT])
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_NODE_BODY_DRIFT
+    end
+  end
+
+  test "scan reports unknown_node_type when node_type cannot be mapped to a NodeBody class" do
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.update_column(:node_type, "bogus_type")
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE])
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_UNKNOWN_NODE_TYPE
+    end
+  end
+
+  test "scan reports node_type_maps_to_non_node_body when node_type maps to a non-NodeBody constant" do
+    Messages.const_set(:NotABody, Class.new)
+
+    conversation = Conversation.create!
+    graph = conversation.dag_graph
+
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    node.update_column(:node_type, "not_a_body")
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY])
+    assert issues.any? do |issue|
+      issue.fetch(:subject_id) == node.id && issue.fetch(:type) == DAG::GraphAudit::ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY
+    end
+  ensure
+    Messages.send(:remove_const, :NotABody) if Messages.const_defined?(:NotABody, false)
+  end
+end

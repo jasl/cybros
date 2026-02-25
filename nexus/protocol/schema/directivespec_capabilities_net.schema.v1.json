@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cybros.dev/schemas/directivespec/net-capability/v1.json",
+  "title": "DirectiveSpec.capabilities.net (NetCapabilityV1)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "mode"
+  ],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": [
+        "none",
+        "allowlist",
+        "unrestricted"
+      ],
+      "description": "Outbound network policy mode for this directive."
+    },
+    "preset": {
+      "type": "string",
+      "enum": [
+        "off",
+        "loose",
+        "strict",
+        "no_external",
+        "custom"
+      ],
+      "description": "Optional policy preset label for audit/debug. Does not change enforcement semantics."
+    },
+    "allow": {
+      "type": "array",
+      "description": "Allowlist entries. Required when mode=allowlist. Each entry is 'host:port'. Host must be a DNS name (optionally prefixed with '*.'), not an IP literal.",
+      "items": {
+        "$ref": "#/$defs/NetAllowlistEntryV1"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "ttl_seconds": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 86400,
+      "description": "Optional TTL hint (seconds) for elevated network permissions (typically mode=unrestricted). Mothership may use it for approvals/audit; enforcement may be added later."
+    },
+    "x_ext": {
+      "type": "object",
+      "description": "Extension point for forward-compatible metadata. Keys MUST be prefixed with 'x_'.",
+      "propertyNames": {
+        "pattern": "^x_[A-Za-z0-9_]+$"
+      },
+      "additionalProperties": true
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "mode": {
+            "const": "allowlist"
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "allow"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "allow"
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "NetAllowlistEntryV1": {
+      "type": "string",
+      "minLength": 4,
+      "maxLength": 255,
+      "description": "Destination in authority-form 'host:port'. host is a DNS name (ASCII/punycode) optionally with a leading '*.' wildcard, port is 1-65535. Example: 'github.com:443', '*.example.com:443'.",
+      "pattern": "^(localhost|(\\*\\.)?([A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)(\\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+):([0-9]{1,5})$"
+    },
+    "NetDecisionReasonCodeV1": {
+      "type": "string",
+      "enum": [
+        "OK",
+        "NET_MODE_NONE",
+        "NOT_IN_ALLOWLIST",
+        "PORT_NOT_ALLOWED",
+        "INVALID_DESTINATION",
+        "PROXY_REQUIRED",
+        "SNI_MISMATCH",
+        "DNS_DENIED",
+        "POLICY_EXPIRED",
+        "APPROVAL_REQUIRED",
+        "INTERNAL_ERROR",
+        "OTHER"
+      ],
+      "description": "Reason codes for egress decision/audit events. Codes POLICY_EXPIRED/APPROVAL_REQUIRED are reserved for future policy features."
+    },
+    "NetApprovalReasonCodeV1": {
+      "type": "string",
+      "enum": [
+        "NET_UNRESTRICTED_REQUESTED",
+        "NET_NON_DEFAULT_PORT_REQUESTED",
+        "NET_WILDCARD_DOMAIN_REQUESTED",
+        "NET_PRIVATE_DESTINATION_REQUESTED",
+        "NET_CUSTOM_POLICY_REQUESTED"
+      ],
+      "description": "Reason codes used by Mothership to explain why a directive requires approval before enabling requested network capabilities."
+    }
+  }
+}

@@ -1,0 +1,16 @@
+[Unit]
+Description=Cybros Nexus Privileged Helper (nexus-helper)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/var/lib/cybros-nexus
+ExecStart=/usr/local/bin/nexus-helper --mode noop
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

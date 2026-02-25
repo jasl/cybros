@@ -1,0 +1,38 @@
+<% content_for :title, "Directives" %>
+
+<header class="ms-header">
+  <h1 class="ms-title">Directives</h1>
+  <nav class="ms-nav">
+    <%= link_to "Territories", mothership_territories_path, class: "ms-nav__link" %>
+    <%= link_to "Directives", mothership_directives_path, class: "ms-nav__link is-active" %>
+  </nav>
+</header>
+
+<main class="ms-main">
+  <table class="ms-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>State</th>
+        <th>Profile</th>
+        <th>Territory</th>
+        <th>Facility</th>
+        <th>Exit</th>
+        <th>Updated</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @directives.each do |d| %>
+        <tr>
+          <td class="ms-mono"><%= link_to d.id, mothership_directive_path(d) %></td>
+          <td><span class="ms-badge ms-badge--<%= d.state %>"><%= d.state %></span></td>
+          <td class="ms-mono"><%= d.sandbox_profile %></td>
+          <td class="ms-mono"><%= d.territory_id %></td>
+          <td class="ms-mono"><%= d.facility_id %></td>
+          <td class="ms-mono"><%= d.exit_code %></td>
+          <td class="ms-mono"><%= d.updated_at&.iso8601 %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</main>

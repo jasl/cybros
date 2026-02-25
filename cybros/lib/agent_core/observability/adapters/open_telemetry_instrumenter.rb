@@ -1,0 +1,170 @@
+# frozen_string_literal: true
+
+module AgentCore
+  module Observability
+    module Adapters
+      # Instrumenter adapter for OpenTelemetry.
+      #
+      # Soft dependency: OpenTelemetry is only required when the default tracer
+      # is used. Apps can also inject any tracer responding to #in_span.
+      class OpenTelemetryInstrumenter < Instrumenter
+        DEFAULT_MAX_ATTRIBUTE_BYTES = 10_000
+
+        def initialize(tracer: nil, max_attribute_bytes: DEFAULT_MAX_ATTRIBUTE_BYTES)
+          @max_attribute_bytes = Integer(max_attribute_bytes)
+          ValidationError.raise!(
+            "max_attribute_bytes must be positive",
+            code: "agent_core.observability.open_telemetry_instrumenter.max_attribute_bytes_must_be_positive",
+            details: { max_attribute_bytes: @max_attribute_bytes },
+          ) if @max_attribute_bytes <= 0
+
+          @tracer = tracer || default_tracer
+          return if @tracer&.respond_to?(:in_span)
+
+          ValidationError.raise!(
+            "tracer must respond to #in_span (OpenTelemetry not available?)",
+            code: "agent_core.observability.open_telemetry_instrumenter.tracer_must_respond_to_in_span_open_telemetry_not_available",
+            details: { tracer_class: @tracer&.class&.name },
+          )
+        end
+
+        def instrument(name, payload = {})
+          event_name = name.to_s
+          ValidationError.raise!(
+            "name is required",
+            code: "agent_core.observability.open_telemetry_instrumenter.name_is_required",
+          ) if event_name.strip.empty?
+
+          data = payload.is_a?(Hash) ? payload : {}
+          start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          ran = false
+          result = nil
+          block_error = nil
+
+          attributes = otel_attributes(data)
+
+          begin
+            @tracer.in_span(event_name, attributes: attributes) do |span|
+              begin
+                ran = true
+                result = yield if block_given?
+              rescue StandardError => e
+                block_error = e
+                data[:error] ||= { class: e.class.name, message: e.message.to_s }
+                record_exception(span, e)
+                raise
+              ensure
+                duration_ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - start) * 1000.0
+                data[:duration_ms] ||= duration_ms
+                safe_set_attribute(span, "duration_ms", data[:duration_ms])
+                if (err = data[:error]).is_a?(Hash)
+                  safe_set_attribute(span, "error.class", err[:class].to_s) if err[:class]
+                  safe_set_attribute(span, "error.message", err[:message].to_s) if err[:message]
+                end
+              end
+              result
+            end
+          rescue StandardError
+            raise block_error if block_error
+            return result if ran
+
+            return super(event_name, data) { yield if block_given? }
+          end
+
+          result
+        end
+
+        def _publish(name, payload)
+          event_name = name.to_s
+          return nil if event_name.strip.empty?
+
+          data = payload.is_a?(Hash) ? payload : {}
+          attrs = otel_attributes(data)
+
+          @tracer.in_span(event_name, attributes: attrs) do |span|
+            span.set_attribute("duration_ms", data.fetch(:duration_ms, 0.0)) if span.respond_to?(:set_attribute)
+            if (err = data[:error]).is_a?(Hash)
+              span.set_attribute("error.class", err[:class].to_s) if span.respond_to?(:set_attribute) && err[:class]
+              span.set_attribute("error.message", err[:message].to_s) if span.respond_to?(:set_attribute) && err[:message]
+            end
+          end
+
+          nil
+        end
+
+        private
+
+        def default_tracer
+          require "opentelemetry-api"
+          OpenTelemetry.tracer_provider.tracer("agent_core")
+        rescue LoadError
+          nil
+        end
+
+        def record_exception(span, error)
+          return unless span
+
+          span.record_exception(error) if span.respond_to?(:record_exception)
+
+          if span.respond_to?(:status=) && defined?(::OpenTelemetry::Trace::Status)
+            span.status = ::OpenTelemetry::Trace::Status.error(error.message.to_s)
+          end
+        rescue StandardError
+          nil
+        end
+
+        def otel_attributes(payload)
+          out = {}
+
+          payload.each do |k, v|
+            key = k.is_a?(Symbol) ? k.to_s : k.to_s
+            next if key.empty?
+
+            out[key] = otel_value(v)
+          end
+
+          out
+        rescue StandardError
+          {}
+        end
+
+        def otel_value(value)
+          case value
+          when nil, true, false, Integer, Float, String
+            value
+          when Symbol
+            value.to_s
+          when Array
+            value.map { |v| otel_value(v) }
+          when Hash
+            truncate(try_json(value))
+          else
+            truncate(value.to_s)
+          end
+        end
+
+        def try_json(value)
+          require "json"
+          JSON.generate(value)
+        rescue StandardError
+          value.to_s
+        end
+
+        def truncate(str)
+          AgentCore::Utils.truncate_utf8_bytes(str, max_bytes: @max_attribute_bytes)
+        rescue StandardError
+          ""
+        end
+
+        def safe_set_attribute(span, key, value)
+          return nil unless span&.respond_to?(:set_attribute)
+
+          span.set_attribute(key, value)
+          nil
+        rescue StandardError
+          nil
+        end
+      end
+    end
+  end
+end

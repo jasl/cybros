@@ -1,0 +1,39 @@
+# nexus-linux/config.example.yaml
+# Copy to config.yaml and modify as needed.
+
+server_url: "http://localhost:3000"
+territory_id: "territory-local-dev"
+name: "linux-nexus-dev"
+labels:
+  os: "linux"
+  arch: "amd64"
+  profile: "trusted"
+
+work_dir: "./facilities"
+
+tls:
+  # Use true for local dev only; production must use false + CA & client cert
+  insecure_skip_verify: true
+  ca_file: ""
+  client_cert_file: ""
+  client_key_file: ""
+
+poll:
+  long_poll_timeout: "25s"
+  retry_backoff: "2s"
+  max_directives_to_claim: 1
+
+log:
+  max_output_bytes: 2000000
+  chunk_bytes: 16384
+
+heartbeat:
+  interval: "10s"
+
+territory_heartbeat:
+  interval: "30s"
+
+supported_sandbox_profiles:
+  - "trusted"
+  - "host"
+  - "untrusted"

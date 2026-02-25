@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cybros.dev/schemas/directivespec/fs-capability/v1.json",
+  "title": "DirectiveSpec.capabilities.fs (FsCapabilityV1)",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "read": {
+      "type": "array",
+      "description": "Read access selectors. Phase 1 supports workspace-only selectors (e.g., 'workspace:**'). 'host:/...' is reserved for future use and is not guaranteed to be enforced in all profiles.",
+      "items": {
+        "$ref": "#/$defs/FsPathSelectorV1"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "write": {
+      "type": "array",
+      "description": "Write access selectors. Phase 1 supports workspace-only selectors (e.g., 'workspace:**'). 'host:/...' is reserved for future use and is not guaranteed to be enforced in all profiles.",
+      "items": {
+        "$ref": "#/$defs/FsPathSelectorV1"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "writable_roots": {
+      "type": "array",
+      "description": "Phase 2c (Landlock enforcement): host-absolute directory paths where read+write is allowed. Derived from policy resolution. When present, takes precedence over read/write selectors for enforcement; the old fields remain for audit/UI.",
+      "items": {
+        "$ref": "#/$defs/HostAbsolutePathV1"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    },
+    "read_only_subpaths": {
+      "type": "array",
+      "description": "Phase 2c (Landlock enforcement): host-absolute directory paths where only read access is allowed. Derived from policy resolution.",
+      "items": {
+        "$ref": "#/$defs/HostAbsolutePathV1"
+      },
+      "minItems": 0,
+      "uniqueItems": true
+    }
+  },
+  "$defs": {
+    "FsPathSelectorV1": {
+      "type": "string",
+      "minLength": 3,
+      "maxLength": 1024,
+      "description": "Selector syntax: 'workspace:**' (any path under /workspace), 'workspace:/relative/or/absolute/path', or reserved 'host:/absolute/path'.",
+      "pattern": "^(workspace:(\\*\\*|/[^\\s]*)|host:/[^\\s]*)$"
+    },
+    "HostAbsolutePathV1": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "description": "Host-absolute directory path for Landlock enforcement. Must start with '/'. Path traversal components (.. and .) are rejected by the policy resolver.",
+      "pattern": "^/[^\\s]*$"
+    }
+  }
+}

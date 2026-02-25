@@ -1,0 +1,34 @@
+<% content_for :title, "Territories" %>
+
+<header class="ms-header">
+  <h1 class="ms-title">Territories</h1>
+  <nav class="ms-nav">
+    <%= link_to "Territories", mothership_territories_path, class: "ms-nav__link is-active" %>
+    <%= link_to "Directives", mothership_directives_path, class: "ms-nav__link" %>
+  </nav>
+</header>
+
+<main class="ms-main">
+  <table class="ms-table">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Nexus Version</th>
+        <th>Last Heartbeat</th>
+      </tr>
+    </thead>
+    <tbody>
+      <% @territories.each do |t| %>
+        <tr>
+          <td class="ms-mono"><%= t.id %></td>
+          <td><%= t.name %></td>
+          <td><span class="ms-badge ms-badge--<%= t.status %>"><%= t.status %></span></td>
+          <td class="ms-mono"><%= t.nexus_version %></td>
+          <td class="ms-mono"><%= t.last_heartbeat_at&.iso8601 %></td>
+        </tr>
+      <% end %>
+    </tbody>
+  </table>
+</main>

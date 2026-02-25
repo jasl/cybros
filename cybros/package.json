@@ -1,0 +1,23 @@
+{
+  "name": "app",
+  "private": true,
+  "scripts": {
+    "build": "bun bun.config.js",
+    "build:css": "bunx @tailwindcss/cli -i ./app/assets/stylesheets/application.tailwind.css -o ./app/assets/builds/application.css"
+  },
+  "dependencies": {
+    "@hotwired/stimulus": "^3.2.2",
+    "@hotwired/turbo-rails": "^8.0.23",
+    "@iconify-json/lucide": "^1.2.94",
+    "@iconify/tailwind4": "^1.2.1",
+    "@rails/request.js": "^0.0.13",
+    "@tailwindcss/cli": "^4.2.1",
+    "@tailwindcss/typography": "^0.5.19",
+    "daisyui": "^5.5.19",
+    "eslint": "^10.0.2",
+    "globals": "^17.3.0",
+    "marked": "^17.0.3",
+    "tailwindcss": "^4.2.1",
+    "tailwindcss-motion": "^1.1.1"
+  }
+}

@@ -1,0 +1,29 @@
+# Conduits default capabilities (Phase 0/1 scaffolding).
+#
+# This file defines server-side defaults used when a directive omits a capability.
+# Long-term, effective capabilities should be computed by Policy (global/account/user/facility),
+# and sandbox drivers must enforce them.
+#
+# Conventions:
+# - "workspace:**" means "within the facility workspace mount".
+# - Untrusted defaults are intentionally strict (workspace-only).
+
+fs:
+  untrusted:
+    read:
+      - "workspace:**"
+    write:
+      - "workspace:**"
+  trusted:
+    read:
+      - "workspace:**"
+    write:
+      - "workspace:**"
+  host:
+    read: []
+    write: []
+  darwin-automation:
+    read:
+      - "workspace:**"
+    write:
+      - "workspace:**"

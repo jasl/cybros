@@ -1,0 +1,40 @@
+id: cybros-core-example
+name: "Cybros Core Example"
+version: "0.1.0"
+tier: core
+
+required:
+  cybros: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+
+about: "Example core plugin (high trust)"
+authors:
+  - name: "Cybros"
+    email: "cybros@localhost"
+
+scopes:
+  install: ["global"]
+  default_install_scope: "global"
+
+capabilities:
+  - "ui:admin_pages"
+  - "ui:outlets"
+  - "secrets:read"
+
+settings:
+  - key: "example_enabled"
+    type: "bool"
+    scope: "global"
+    default: false
+    description: "Enable example plugin"
+  - key: "example_api_key"
+    type: "string"
+    scope: "global"
+    secret: true
+    description: "API key used by the plugin"
+
+server:
+  entrypoint: "server/plugin.rb"
+
+client:
+  entrypoint: "client/index.js"

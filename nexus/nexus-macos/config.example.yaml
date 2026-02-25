@@ -1,0 +1,38 @@
+# nexus-macos/config.example.yaml
+# Copy to config.yaml and modify as needed.
+#
+# Note: macOS only supports darwin-automation (no container/isolation).
+
+server_url: "http://localhost:3000"
+territory_id: "territory-macos-dev"
+name: "macos-nexus-dev"
+labels:
+  os: "darwin"
+  arch: "arm64"
+  profile: "darwin-automation"
+
+work_dir: "./facilities"
+
+tls:
+  insecure_skip_verify: true
+  ca_file: ""
+  client_cert_file: ""
+  client_key_file: ""
+
+poll:
+  long_poll_timeout: "25s"
+  retry_backoff: "2s"
+  max_directives_to_claim: 1
+
+log:
+  max_output_bytes: 2000000
+  chunk_bytes: 16384
+
+heartbeat:
+  interval: "10s"
+
+territory_heartbeat:
+  interval: "30s"
+
+supported_sandbox_profiles:
+  - "darwin-automation"

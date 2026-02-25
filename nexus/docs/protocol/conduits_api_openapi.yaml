@@ -1,0 +1,431 @@
+openapi: 3.0.3
+info:
+  title: Mothership Conduits API
+  version: v1
+  description: |
+    Nexus-facing API contract (Mothership -> Nexus communication channel).
+    This file is for integration testing and contract tests, not the final public API.
+servers:
+  - url: http://localhost:3000
+    description: Local development (Rails default)
+  - url: https://mothership.example.com
+    description: Production (replace with real domain)
+paths:
+  /conduits/v1/territories/enroll:
+    post:
+      summary: "Enroll territory (Phase 0: enroll token -> territory_id)"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enroll_token]
+              properties:
+                enroll_token: { type: string }
+                name:
+                  type: string
+                  description: Optional friendly name for the territory.
+                labels:
+                  type: object
+                  additionalProperties: true
+                metadata:
+                  type: object
+                  additionalProperties: true
+                  description: |
+                    Optional metadata blob. Phase 0 uses metadata.capacity for quick testing.
+                csr_pem:
+                  type: string
+                  description: |
+                    Optional X.509 CSR (PEM). If provided, Mothership issues an mTLS client certificate and
+                    stores its fingerprint on the territory record for future authentication.
+      responses:
+        "201":
+          description: Enrollment success
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [territory_id, config]
+                properties:
+                  territory_id: { type: string }
+                  mtls_client_cert_pem:
+                    type: string
+                    description: PEM-encoded client certificate issued for the enrolling Nexus (optional; only when csr_pem is provided).
+                  ca_bundle_pem:
+                    type: string
+                    description: |
+                      PEM-encoded CA certificate that issued mtls_client_cert_pem (optional; only when csr_pem is provided).
+                      Intended for the mTLS terminator to validate Nexus client certs; not necessarily the control-plane server CA bundle.
+                  config:
+                    type: object
+                    additionalProperties: true
+                    description: Configuration hints returned by the server.
+        "422":
+          description: Invalid / expired / used enrollment token
+        "429":
+          description: Rate limited (per-IP). Includes Retry-After header.
+  /conduits/v1/territories/heartbeat:
+    post:
+      summary: Territory heartbeat (presence registration)
+      security:
+        - clientCertFingerprint: []
+        - territoryId: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nexus_version: { type: string }
+                running_directives_count: { type: integer, minimum: 0 }
+                labels:
+                  type: object
+                  additionalProperties: true
+                capacity:
+                  type: object
+                  additionalProperties: true
+                telemetry:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  territory_id: { type: string }
+                  upgrade_available:
+                    type: boolean
+                    description: True when a newer Nexus version is available on the server.
+                  latest_version:
+                    type: string
+                    description: The latest Nexus version known to the server (informational).
+                  min_compatible_version:
+                    type: string
+                    description: |
+                      Minimum Nexus version compatible with this server. Nexus SHOULD warn operators
+                      when its version is below this threshold. Informational only — does not block execution.
+  /conduits/v1/polls:
+    post:
+      summary: "Poll for directives (Phase 0: short poll)"
+      security:
+        - clientCertFingerprint: []
+        - territoryId: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                supported_sandbox_profiles:
+                  type: array
+                  items: { type: string }
+                max_directives_to_claim: { type: integer, minimum: 1, maximum: 5 }
+      responses:
+        "200":
+          description: Poll response
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [directives]
+                properties:
+                  directives:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DirectiveLease"
+                  lease_ttl_seconds:
+                    type: integer
+                    minimum: 1
+                  retry_after_seconds:
+                    type: integer
+                    minimum: 1
+  /conduits/v1/directives/{directive_id}/started:
+    post:
+      summary: "Report directive started (idempotent)"
+      security:
+        - clientCertFingerprint: []
+          directiveToken: []
+        - territoryId: []
+          directiveToken: []
+      parameters:
+        - name: directive_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                effective_capabilities_summary: { type: object }
+                sandbox_version: { type: string }
+                nexus_version: { type: string }
+                runtime_ref: { type: string, description: "Opaque driver reference (container ID, VM ID, etc.)" }
+                started_at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Started acknowledged (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, directive_id, state, duplicate]
+                properties:
+                  ok: { type: boolean }
+                  directive_id: { type: string }
+                  state: { type: string }
+                  duplicate: { type: boolean }
+        "409":
+          description: Conflict (invalid state or retry payload mismatch; running/terminal are accepted for idempotent retry)
+  /conduits/v1/directives/{directive_id}/heartbeat:
+    post:
+      summary: Renew lease / report progress
+      security:
+        - clientCertFingerprint: []
+          directiveToken: []
+        - territoryId: []
+          directiveToken: []
+      parameters:
+        - name: directive_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                progress: { type: object }
+                last_output_seq: { type: integer }
+                now: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Lease renewed
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cancel_requested: { type: boolean }
+                  lease_renewed: { type: boolean }
+                  directive_token:
+                    type: string
+                    description: |
+                      Refreshed JWT directive token. Nexus MUST replace the previous token with this one
+                      for all subsequent API calls on this directive. This prevents token expiry during
+                      long-running directives.
+  /conduits/v1/directives/{directive_id}/log_chunks:
+    post:
+      summary: "Upload stdout/stderr chunks (idempotent; accepted in running/terminal; server-side max_output_bytes enforced)"
+      security:
+        - clientCertFingerprint: []
+          directiveToken: []
+        - territoryId: []
+          directiveToken: []
+      parameters:
+        - name: directive_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [stream, seq, bytes]
+              properties:
+                stream: { type: string, enum: [stdout, stderr] }
+                seq: { type: integer, minimum: 0 }
+                bytes:
+                  type: string
+                  description: "base64-encoded chunk (standard base64, not URL-safe)"
+                truncated: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Chunk processed
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - ok
+                  - directive_id
+                  - stream
+                  - seq
+                  - stored
+                  - duplicate
+                  - accepted_bytes
+                  - truncated
+                properties:
+                  ok: { type: boolean }
+                  directive_id: { type: string }
+                  stream: { type: string, enum: [stdout, stderr] }
+                  seq: { type: integer, minimum: 0 }
+                  stored: { type: boolean }
+                  duplicate: { type: boolean }
+                  accepted_bytes: { type: integer, minimum: 0 }
+                  truncated: { type: boolean }
+        "409":
+          description: Conflict (invalid state)
+        "422":
+          description: Invalid parameters (stream/seq/base64)
+  /conduits/v1/directives/{directive_id}/finished:
+    post:
+      summary: "Report directive completed (idempotent; strict base64 for diff)"
+      security:
+        - clientCertFingerprint: []
+          directiveToken: []
+        - territoryId: []
+          directiveToken: []
+      parameters:
+        - name: directive_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                exit_code: { type: integer }
+                status: { type: string, enum: [succeeded, failed, canceled, timed_out] }
+                stdout_truncated: { type: boolean, default: false }
+                stderr_truncated: { type: boolean, default: false }
+                diff_truncated: { type: boolean, default: false }
+                snapshot_before: { type: string }
+                snapshot_after: { type: string }
+                artifacts_manifest: { type: object }
+                diff_base64: { type: string, description: "Optional base64-encoded unified diff patch" }
+                finished_at: { type: string, format: date-time }
+      responses:
+        "200":
+          description: Finished acknowledged (idempotent)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, directive_id, final_state, duplicate]
+                properties:
+                  ok: { type: boolean }
+                  directive_id: { type: string }
+                  final_state: { type: string }
+                  duplicate: { type: boolean }
+        "409":
+          description: Conflict (invalid state or result_hash mismatch)
+        "422":
+          description: Invalid parameters (status/base64/oversize diff; max enforced by limits.max_diff_bytes)
+components:
+  securitySchemes:
+    territoryId:
+      type: apiKey
+      in: header
+      name: X-Nexus-Territory-Id
+      description: |
+        Phase 0 dev-only auth. This header is spoofable and MUST NOT be used in production.
+        Production auth is mTLS (client cert fingerprint -> territory_id mapping) at the edge.
+    clientCertFingerprint:
+      type: apiKey
+      in: header
+      name: X-Nexus-Client-Cert-Fingerprint
+      description: |
+        When running behind a trusted mTLS-terminating proxy, the proxy should inject a verified client certificate
+        fingerprint into this header. Mothership maps it to a territory record (client_cert_fingerprint).
+    directiveToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  schemas:
+    DirectiveLease:
+      type: object
+      required: [directive_id, directive_token, spec]
+      properties:
+        directive_id: { type: string }
+        directive_token: { type: string }
+        spec:
+          $ref: "#/components/schemas/DirectiveSpec"
+    DirectiveSpec:
+      type: object
+      required: [directive_id, facility, command]
+      description: |
+        Full directive specification. Corresponds to Go `protocol.DirectiveSpec` and
+        JSON schemas in docs/protocol/.
+      properties:
+        directive_id: { type: string }
+        facility:
+          type: object
+          required: [id]
+          properties:
+            id: { type: string }
+            mount: { type: string, description: "Workspace mount point (default: /workspace)" }
+            repo_url: { type: string, description: "Clone hint for facility prepare stage (Decision D7/D8)" }
+        sandbox_profile:
+          type: string
+          description: "Execution profile: untrusted, trusted, host, darwin-automation, etc."
+        command: { type: string, description: "Shell command string (not JSON array). Decision D1." }
+        shell: { type: string, description: "Shell to use (default: /bin/sh)" }
+        cwd: { type: string, description: "Working directory (relative to mount)" }
+        timeout_seconds: { type: integer, minimum: 1 }
+        limits:
+          $ref: "#/components/schemas/Limits"
+        capabilities:
+          type: object
+          properties:
+            net:
+              type: object
+              description: "NetCapabilityV1 — see docs/protocol/directivespec_capabilities_net.schema.v1.json"
+            fs:
+              type: object
+              description: "FsCapabilityV1 — see docs/protocol/directivespec_capabilities_fs.schema.v1.json"
+        artifacts:
+          type: object
+          properties:
+            collect:
+              type: array
+              items: { type: string }
+              description: "Glob patterns for artifact collection"
+            always_diff: { type: boolean, default: false }
+    Limits:
+      type: object
+      description: |
+        Resource limits for directive execution. All fields are optional;
+        zero/absent means no limit (use server defaults).
+      properties:
+        cpu:
+          type: integer
+          minimum: 0
+          description: "CPU millicores (e.g., 1000 = 1 core). Enforced via cgroup v2 on Linux."
+        memory_mb:
+          type: integer
+          minimum: 0
+          description: "Memory limit in MiB. Enforced via cgroup v2 on Linux."
+        disk_mb:
+          type: integer
+          minimum: 0
+          description: "Disk quota in MiB (reserved for future enforcement)."
+        max_output_bytes:
+          type: integer
+          minimum: 0
+          description: |
+            Maximum bytes for stdout+stderr combined. Server-side enforcement via log_chunks endpoint.
+            Nexus-side enforcement via logstream truncation. Default: server-configured.
+        max_diff_bytes:
+          type: integer
+          minimum: 0
+          description: |
+            Maximum bytes for the diff blob in the finished request. Server rejects oversized diffs
+            with 422. Default: 1 MiB (1048576).

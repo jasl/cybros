@@ -1,0 +1,26 @@
+# OS
+.DS_Store
+
+# IDE
+/.idea
+/.vscode
+/.cursor
+
+# Build output (make build-linux / make build-macos)
+/dist/
+
+# In-place go build (if someone runs `go build` inside a cmd dir)
+/nexus-linux/cmd/nexusd/nexusd
+/nexus-linux/cmd/nexus-helper/nexus-helper
+/nexus-macos/cmd/nexusd/nexusd
+*.exe
+
+# Local config (copy *.example.yaml to get started)
+/nexus-linux/config.yaml
+/nexus-macos/config.yaml
+
+# mTLS credentials
+*.pem
+*.crt
+*.key
+!*.example.*

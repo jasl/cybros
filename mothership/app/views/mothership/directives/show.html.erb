@@ -1,0 +1,57 @@
+<% content_for :title, "Directive #{@directive.id}" %>
+
+<header class="ms-header">
+  <h1 class="ms-title">Directive</h1>
+  <nav class="ms-nav">
+    <%= link_to "Territories", mothership_territories_path, class: "ms-nav__link" %>
+    <%= link_to "Directives", mothership_directives_path, class: "ms-nav__link" %>
+  </nav>
+</header>
+
+<main class="ms-main">
+  <section class="ms-card">
+    <div class="ms-kv">
+      <div class="ms-kv__row"><div class="ms-kv__k">ID</div><div class="ms-kv__v ms-mono"><%= @directive.id %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">State</div><div class="ms-kv__v"><span class="ms-badge ms-badge--<%= @directive.state %>"><%= @directive.state %></span></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Profile</div><div class="ms-kv__v ms-mono"><%= @directive.sandbox_profile %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Territory</div><div class="ms-kv__v ms-mono"><%= @directive.territory_id %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Facility</div><div class="ms-kv__v ms-mono"><%= @directive.facility_id %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Exit</div><div class="ms-kv__v ms-mono"><%= @directive.exit_code %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Stdout Truncated</div><div class="ms-kv__v ms-mono"><%= @directive.stdout_truncated %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Stderr Truncated</div><div class="ms-kv__v ms-mono"><%= @directive.stderr_truncated %></div></div>
+      <div class="ms-kv__row"><div class="ms-kv__k">Updated</div><div class="ms-kv__v ms-mono"><%= @directive.updated_at&.iso8601 %></div></div>
+    </div>
+
+    <% if @directive.diff_blob.attached? %>
+      <div class="ms-actions">
+        <%= link_to "Download diff", diff_mothership_directive_path(@directive), class: "ms-button" %>
+      </div>
+    <% end %>
+  </section>
+
+  <section class="ms-grid2">
+    <div class="ms-card">
+      <h2 class="ms-subtitle">stdout</h2>
+      <div
+        data-controller="log-viewer"
+        data-log-viewer-directive-id-value="<%= @directive.id %>"
+        data-log-viewer-stream-value="stdout"
+        data-log-viewer-poll-ms-value="800"
+      >
+        <pre class="ms-log" data-log-viewer-target="pre"></pre>
+      </div>
+    </div>
+
+    <div class="ms-card">
+      <h2 class="ms-subtitle">stderr</h2>
+      <div
+        data-controller="log-viewer"
+        data-log-viewer-directive-id-value="<%= @directive.id %>"
+        data-log-viewer-stream-value="stderr"
+        data-log-viewer-poll-ms-value="800"
+      >
+        <pre class="ms-log" data-log-viewer-target="pre"></pre>
+      </div>
+    </div>
+  </section>
+</main>

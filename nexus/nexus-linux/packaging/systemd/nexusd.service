@@ -1,0 +1,28 @@
+[Unit]
+Description=Cybros Nexus Daemon (nexusd)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cybros-nexus
+Group=cybros-nexus
+WorkingDirectory=/var/lib/cybros-nexus
+ExecStart=/usr/local/bin/nexusd --config /etc/cybros-nexus/config.yaml
+Restart=always
+RestartSec=2
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target

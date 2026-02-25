@@ -1,0 +1,37 @@
+id: cybros-sandbox-git
+name: "Cybros Sandbox Git Tools"
+version: "0.1.0"
+tier: sandbox
+
+required:
+  cybros: ">=0.1.0 <0.2.0"
+  plugin_api: ">=0.1.0 <0.2.0"
+
+about: "Git helpers executed in Runner sandbox"
+authors:
+  - name: "Cybros"
+    email: "cybros@localhost"
+
+scopes:
+  install: ["global", "space"]
+  default_install_scope: "space"
+
+capabilities:
+  - "tools:register"
+  - "skills:register"
+  - "sandbox:execute"
+
+settings:
+  - key: "git_default_timeout_s"
+    type: "int"
+    scope: "global"
+    default: 30
+    description: "Default timeout for git tasks"
+
+skills:
+  - id: "git_diff"
+    runtime: "container"
+    image: "ghcr.io/example/cybros-git-skill:0.1.0"
+    entrypoint: ["git-diff"]
+    tool_name: "git_diff"
+    tool_schema_path: "skills/git_diff.schema.json"

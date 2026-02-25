@@ -1,0 +1,94 @@
+module DAG
+  module Visualization
+    class MermaidExporter
+      def initialize(graph:, include_compressed:, max_label_chars:)
+        @graph = graph
+        @include_compressed = include_compressed
+        @max_label_chars = max_label_chars
+      end
+
+      def call
+        nodes = load_nodes
+        bodies = load_bodies(nodes)
+        edges = load_edges(nodes)
+
+        lines = ["flowchart TD"]
+
+        nodes.each do |node|
+          body = bodies[node.body_id]
+          lines << %(#{node_mermaid_id(node.id)}["#{escape(label_for(node, body))}"])
+        end
+
+        edges.each do |edge|
+          lines << %(#{node_mermaid_id(edge.from_node_id)} -->|#{escape(edge_label(edge))}| #{node_mermaid_id(edge.to_node_id)})
+        end
+
+        lines.join("\n")
+      end
+
+      private
+
+        def load_nodes
+          scope = @graph.nodes
+            .select(:id, :node_type, :state, :metadata, :body_id, :compressed_at)
+
+          scope = scope.where(compressed_at: nil) unless @include_compressed
+          scope.order(:id).to_a
+        end
+
+        def load_bodies(nodes)
+          body_ids = nodes.map(&:body_id).compact.uniq
+
+          DAG::NodeBody.where(id: body_ids)
+            .select(:id, :type, :input, :output_preview)
+            .index_by(&:id)
+        end
+
+        def load_edges(nodes)
+          node_ids = nodes.map(&:id).index_with(true)
+
+          scope = @graph.edges.select(:id, :from_node_id, :to_node_id, :edge_type, :metadata, :compressed_at)
+          scope = scope.where(compressed_at: nil) unless @include_compressed
+
+          scope.order(:id).to_a.select do |edge|
+            node_ids.key?(edge.from_node_id) && node_ids.key?(edge.to_node_id)
+          end
+        end
+
+        def node_mermaid_id(node_id)
+          "N_#{node_id.to_s.delete("-")}"
+        end
+
+        def label_for(node, body)
+          snippet = node_snippet(node, body)
+          label = "#{node.node_type}:#{node.state}"
+          label = "#{label} #{snippet}" if snippet.present?
+          label.truncate(@max_label_chars)
+        end
+
+        def node_snippet(node, body)
+          return "" if body.nil?
+
+          body.mermaid_snippet(node: node).to_s.gsub(/\s+/, " ").strip
+        end
+
+        def edge_label(edge)
+          if edge.edge_type == DAG::Edge::BRANCH
+            branch_kinds = edge.metadata["branch_kinds"]
+
+            if branch_kinds.is_a?(Array) && branch_kinds.any?
+              "branch:#{branch_kinds.join(",")}"
+            else
+              "branch"
+            end
+          else
+            edge.edge_type
+          end
+        end
+
+        def escape(text)
+          text.to_s.gsub("\\", "\\\\").gsub("\"", "\\\"")
+        end
+    end
+  end
+end

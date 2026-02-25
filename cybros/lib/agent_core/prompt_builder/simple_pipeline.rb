@@ -1,0 +1,122 @@
+# frozen_string_literal: true
+
+module AgentCore
+  module PromptBuilder
+    # Default prompt pipeline: direct assembly with no macro expansion.
+    #
+    # Builds a prompt by:
+    # 1. Using the system prompt as-is (with optional variable substitution)
+    # 2. Injecting memory results as a system context section
+    # 3. Including chat history messages
+    # 4. Appending the current user message
+    # 5. Collecting tool definitions (filtered by policy if present)
+    class SimplePipeline < Pipeline
+      def build(context:)
+        system = build_system_prompt(context)
+        messages = build_messages(context)
+        tools = build_tools(context)
+        options = context.agent_config.fetch(:llm_options, {})
+
+        BuiltPrompt.new(
+          system_prompt: system,
+          messages: messages,
+          tools: tools,
+          options: options
+        )
+      end
+
+      private
+
+      def build_system_prompt(context)
+        SystemPromptSectionsBuilder.build(context: context).full_text
+      end
+
+      def build_messages(context)
+        messages = []
+
+        Array(context.prompt_injection_items)
+          .select { |item| item.respond_to?(:preamble_message?) && item.preamble_message? }
+          .each_with_index
+          .sort_by { |(item, idx)| [item.order.to_i, idx] }
+          .each do |(item, _)|
+            if item.respond_to?(:allowed_in_prompt_mode?) && !item.allowed_in_prompt_mode?(context.prompt_mode)
+              next
+            end
+
+            role = item.role.to_sym
+            next unless role == :user || role == :assistant
+
+            content = item.content.to_s
+            next if content.strip.empty?
+
+            messages << Message.new(role: role, content: content)
+          end
+
+        # Include chat history
+        if context.chat_history
+          context.chat_history.each { |msg| messages << msg }
+        end
+
+        # Append current user message
+        if context.user_message
+          messages << Message.new(role: :user, content: context.user_message)
+        end
+
+        messages
+      end
+
+      def build_tools(context)
+        return [] unless context.tools_registry
+
+        tools = context.tools_registry.definitions
+
+        policy = context.tool_policy || Resources::Tools::Policy::DenyAll.new
+
+        tools =
+          begin
+            policy.filter(tools: tools, context: context.execution_context)
+          rescue StandardError
+            []
+          end
+
+        Array(tools).map { |tool| strict_normalize_tool_schema(tool) }
+      end
+
+      def strict_normalize_tool_schema(tool)
+        return tool unless tool.is_a?(Hash)
+
+        out = tool.dup
+
+        if out.key?(:parameters) || out.key?("parameters")
+          key = out.key?(:parameters) ? :parameters : "parameters"
+          out[key] = Resources::Tools::StrictJsonSchema.normalize(out[key])
+          return out
+        end
+
+        type = out.fetch(:type, out.fetch("type", "")).to_s
+        if type == "function"
+          fn_key = out.key?(:function) ? :function : "function"
+          fn = out.fetch(fn_key, nil)
+          if fn.is_a?(Hash)
+            fn_out = fn.dup
+            if fn_out.key?(:parameters) || fn_out.key?("parameters")
+              k = fn_out.key?(:parameters) ? :parameters : "parameters"
+              fn_out[k] = Resources::Tools::StrictJsonSchema.normalize(fn_out[k])
+              out[fn_key] = fn_out
+            end
+          end
+          return out
+        end
+
+        if out.key?(:input_schema) || out.key?("input_schema")
+          k = out.key?(:input_schema) ? :input_schema : "input_schema"
+          out[k] = Resources::Tools::StrictJsonSchema.normalize(out[k])
+        end
+
+        out
+      rescue StandardError
+        tool
+      end
+    end
+  end
+end

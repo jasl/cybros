@@ -1,0 +1,416 @@
+# Cybros Core：DAG 工作流引擎设计（里程碑 1）
+
+本文件描述当前 Rails 项目中 “动态 DAG 会话/工作流引擎” 的核心设计与实现约定（仅覆盖里程碑 1 的 scope）。
+
+## 目标与原则
+
+- **动态 DAG**：会话没有固定终点；节点会随着用户对话与 Agent 执行动态新增，但图在任意时刻都必须保持合法。
+- **可观测与可审计**：节点/边与 hooks 投影（例如 `Event`）用于可视化、监控、审计与回放。
+- **并发可调度**：基于 edge gating 判定可执行节点；多 worker 可并发 claim，避免重复执行。
+- **非破坏压缩**：压缩用于节约上下文，原始节点/边不删除，只标记为 `compressed_at`（审计保留）。
+
+## PostgreSQL 约束
+
+- 依赖 PostgreSQL 18 提供的 `uuidv7()` 作为主键默认值（见 `db/schema.rb`）。
+- 所有核心表主键为 `uuid`，并用 `uuidv7()` 生成以获得更好的插入局部性与时间有序性。
+- `dag_nodes.node_type` 不做 DB 枚举约束（允许业务扩展）；对 conversation graphs，严格性由 `attachable.dag_node_body_namespace` + 约定映射（`node_type.camelize` constantize）保证，未知类型默认失败。
+- 可靠性例外：对引擎关键枚举字段在 DB 层增加 check constraint（避免脏数据渗透引擎）：
+  - `dag_nodes.state`：仅允许固定状态集合
+  - `dag_edges.edge_type`：仅允许固定边类型集合
+- 为降低跨图引用导致的脏数据故障面，里程碑 1 在 DB 层引入 **graph-scoped foreign keys**（composite FK）：
+  - `dag_edges (graph_id, from_node_id/to_node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_node_visibility_patches (graph_id, node_id)` → `dag_nodes (graph_id, id)`
+  - `dag_nodes (graph_id, retry_of_id)` → `dag_nodes (graph_id, id)`（禁止跨图 retry lineage 引用）
+  - `dag_nodes (graph_id, compressed_by_id)` → `dag_nodes (graph_id, id)`（禁止跨图压缩归档引用）
+  - `dag_nodes (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Lane 分区一致性；禁止跨图 lane 引用）
+  - `dag_turns (graph_id, lane_id)` → `dag_lanes (graph_id, id)`（Turn 必须属于同一 graph 的某条 lane）
+  - `dag_nodes (graph_id, lane_id, turn_id)` → `dag_turns (graph_id, lane_id, id)`（Turn 一等公民；保证 node 的 turn/lane 一致性）
+- 压缩字段一致性（DB check constraint）：`compressed_at` 与 `compressed_by_id` 必须同为 NULL 或同为 NOT NULL（禁止半边写入导致 Active/Inactive 视图与 lineage 不一致）。
+
+## 领域模型与存储
+
+### 聚合根：`DAG::Graph`
+
+- 模型：`app/models/dag/graph.rb`
+- 责任：
+  - 图变更的事务边界（`mutate!(turn_id: nil)`：可选 turn_id 传播）
+  - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
+  - 语义策略：由 `DAG::Graph` 自身实现（不额外引入 policy 层），包含 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等
+  - 叶子不变量自修复（`validate_leaf_invariant!`）
+  - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
+
+`DAG::Graph` 通过 `attachable`（polymorphic）关联业务对象（当前为 `Conversation`）。业务对象可选提供：
+
+- `dag_node_body_namespace`：返回 NodeBody 命名空间（Module，例如 `Messages`），用于按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`
+- `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
+
+### 分区：`DAG::Lane`
+
+- 模型：`app/models/dag/lane.rb`
+- 表：`dag_lanes`
+- 目的：为同一张图中的所有分支提供“分区/染色”能力（Thread-like）。
+- 关键规则：
+  - **一个 node 只能属于一个 lane**（`dag_nodes.lane_id NOT NULL`）。
+  - 每个 graph 自动拥有且仅拥有一个 `main` lane（用于主线对话）。
+  - `branch` lane 通过 fork 创建：在创建分支的同时创建 lane，并记录分支锚点与子图根节点。
+  - lane 可归档（`archived_at`）：归档后**禁止开启新 turn**（新回合的新节点），但允许同一 turn 的在途执行/工具链继续补节点并跑完（用于“归档但允许收尾”的产品语义）。
+- 结构/索引字段（引擎层）：
+  - `role`：`main|branch`
+  - `parent_lane_id`：lane 树结构（用于 UI 展示对话树；不影响因果语义）
+  - `forked_from_node_id`：该 branch 从哪个 node fork 出来（分支锚点）
+  - `root_node_id`：fork 创建的第一条新 node（子图头）
+  - `merged_into_lane_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source lane 时，用于记录“归档并合并进哪个 lane”）
+  - `next_anchored_seq`：单调计数器（为 turn 的 `anchored_seq` 分配序号）
+  - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Topic`）
+  - `metadata`：JSONB 扩展点
+
+### Turn：`DAG::Turn`（一等公民）
+
+- 模型：`app/models/dag/turn.rb`
+- 表：`dag_turns`
+- 目的：
+  - 为真实产品的“按轮次展示/分页/计数”提供稳定索引（避免每次从 `dag_nodes` 动态聚合）
+  - 支持“无 user 回合的纯角色互聊 / 系统自动消息 / merge/join 等只有 assistant 消息的回合”
+- 关键字段：
+  - `id`：turn_id（UUIDv7）
+  - `graph_id` / `lane_id`：turn 归属（一个 turn 必须属于某条 lane）
+  - `anchored_seq`：该 lane 内的 1-based 序号（物化；只写一次；不回填不重算）
+  - `anchor_node_id` / `anchor_created_at`：该 turn 的“可见锚点”（Active + 非 deleted；由 NodeBody hooks `turn_anchor?` 决定；用于 turn 可见性判定）
+  - `anchor_node_id_including_deleted` / `anchor_created_at_including_deleted`：包含 soft-delete 的锚点（仍不含 compressed）
+  - `metadata`：JSONB 扩展点
+
+### 节点：`DAG::Node`
+
+- 模型：`app/models/dag/node.rb`
+- 表：`dag_nodes`
+- 关键字段：
+  - `node_type`：`user_message | system_message | developer_message | agent_message | character_message | task | summary`
+  - `state`：`pending | awaiting_approval | running | finished | errored | rejected | skipped | stopped`
+  - `turn_id`：对话轮次/span 标识（同一轮产生的节点共享；DB 层外键引用 `dag_turns`）
+  - `lane_id`：Lane 分区（用于 UI 染色、分支索引、只读门禁）
+  - `metadata`：JSONB
+  - `retry_of_id`：重试 lineage
+  - `compressed_at / compressed_by_id`：压缩标记
+  - `context_excluded_at`：从 LLM context（`context_for`）默认输出中排除（纯视图层语义）
+  - `deleted_at`：软删除；从 context/transcript 默认输出中排除（纯视图层语义）
+  - `claimed_at / claimed_by`：被 Scheduler claim 的时间与执行者标识
+  - `lease_expires_at / heartbeat_at`：running lease 过期时间与心跳时间（用于回收卡死 running）
+  - `started_at / finished_at`：Runner 实际开始执行 / 进入终态的时间戳
+
+#### NodeBody 扩展表（STI + JSONB）
+
+为控制 `dag_nodes` 行宽并统一存储“业务重字段”，节点负载从 `dag_nodes` 拆出到扩展表：
+
+- 关联：`DAG::Node belongs_to :body, class_name: "DAG::NodeBody"`
+- 表：`dag_node_bodies`
+  - `type`：Rails STI（按负载类型拆分）
+  - `input`：JSONB（输入侧：用户消息、tool call 参数等）
+  - `output`：JSONB（输出侧：LLM 回复、tool result 等，可能很大）
+  - `output_preview`：JSONB（输出预览：从 `output` 派生的小片段，用于 Context/Mermaid）
+
+> 设计目标：调度器只依赖 `dag_nodes` 的引擎层字段；业务重字段统一落在 body（Context 输出字段名仍为 `payload`），并通过 preview 控制上下文体积。
+
+preview 策略（里程碑 1）：
+
+- 默认上限：`200 chars`（`DAG::NodeBody`）
+- `agent_message/character_message`（`Messages::AgentMessage` 家族）上限更长：`2000 chars`
+- `task`（`Messages::Task`）的 `output_preview["result"]` 对非字符串 result 使用摘要字符串（避免巨大 JSON 的 `to_json` 峰值）
+
+conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `attachable.dag_node_body_namespace` 提供命名空间）：
+
+- `Conversation`（`dag_node_body_namespace => Messages`）：
+  - `system_message` → `Messages::SystemMessage`
+  - `developer_message` → `Messages::DeveloperMessage`
+  - `user_message` → `Messages::UserMessage`
+  - `agent_message` → `Messages::AgentMessage`
+  - `character_message` → `Messages::CharacterMessage`
+  - `task` → `Messages::Task`
+  - `summary` → `Messages::Summary`
+- `dag_node_body_namespace` 是 conversation graphs 的必需扩展点；若缺失或返回非 Module，node 创建会失败（避免悄悄吞掉未知 node_type）。
+
+#### NodeBody semantic hooks（Milestone 1）
+
+为避免 DAG 核心对 `node_type` 做集中 hardcode，里程碑 1 引入一组 **NodeBody 语义 hooks**（class-level），由各 body STI 类型声明自身语义；引擎按需扫描 `dag_node_body_namespace` 下的 `< DAG::NodeBody` 子类并计算策略集合：
+
+- `node_type_key`：默认 `name.demodulize.underscore`（约定 `node_type` ↔ body 类名一对一）
+- `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
+- `turn_anchor?`：默认 `false`（用于 turn 锚点与 transcript 分页；conversation graphs 内置 `user_message/agent_message/character_message` 为 true）
+- `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选；内置 `user/agent/character` 为 true）
+- `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定；内置 `agent_message/character_message` 为 true）
+- `default_leaf_repair?`：默认 `false`（用于 leaf repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true；内置 `agent_message` 为 true、`character_message` 显式为 false）
+- `mermaid_snippet(node:)`：用于 Mermaid label 片段；默认读取 `output_preview["content"]`，各 body 可覆盖（如 system/developer/user 从 `input["content"]`，task 从 `input["name"]`）
+
+#### 状态语义（awaiting_approval/stopped 明确化）
+
+- `pending`：已创建但未执行
+- `awaiting_approval`：等待人工审批/授权（pre-execution gate；不可被 Scheduler claim）
+- `running`：已被 claim，正在执行
+- `finished`：成功完成（依赖满足仅认 `finished`）
+- `errored`：执行失败
+- `rejected`：需要授权但被用户拒绝
+- `skipped`：**仅允许**从 `pending` 迁移，表示任务未开始且不再需要
+- `stopped`：用户 stop 生成/执行（允许 `pending|awaiting_approval|running → stopped`；terminal）
+
+### 边：`DAG::Edge`
+
+- 模型：`app/models/dag/edge.rb`
+- 表：`dag_edges`
+- `edge_type`：
+  - `sequence`（阻塞性）
+  - `dependency`（阻塞性）
+  - `branch`（非阻塞 lineage）
+
+#### Branch metadata 约定
+
+`branch` 边使用 `metadata["branch_kinds"]`（数组）表达 lineage（例如 `["fork"]`、`["retry"]`）。里程碑 1 的压缩（`DAG::Compression`）只会重连 blocking edges（`sequence/dependency`），`branch` 边不会被重连（只会被标记为 `compressed_at`），因此不会发生 “压缩边界去重合并导致 `branch_kinds` 并集” 的行为。
+
+### Hooks（可选）：`DAG::GraphHooks`
+
+> DAG 引擎不直接写入 `Event`（也不写任何业务副作用）；它只在关键动作上调用 hooks（best-effort：异常会被吞掉并 log）。
+
+- 接口：`app/models/dag/graph_hooks.rb`
+  - `record_event(graph:, event_type:, subject_type:, subject_id:, particulars: {})`
+- 注入点：`attachable.dag_graph_hooks`（例如 `Conversation` 返回 `Messages::GraphHooks` 写入 `events` 表）
+- 默认：`DAG::GraphHooks::Noop`（不做任何事）
+- 约束：引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`），建议只使用常量（避免 typo）。
+
+hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compress、leaf repair、node state 迁移，以及可见性 defer/apply（`node_visibility_*`）。完整列表见 `docs/dag/behavior_spec.md` 的第 9 节。
+
+## 图不变量（Invariants）
+
+### 1) 无环（Acyclic）
+
+- 边创建时检查是否引入环：
+  - 对 `DAG::Graph` 行加锁（序列化并发建边）
+  - 通过 recursive CTE 判断 `to_node` 是否可达 `from_node`
+- 实现在：`app/models/dag/edge.rb`
+
+### 2) 叶子不变量（Leaf invariant）
+
+定义 leaf：没有任何未压缩 outgoing **blocking edge**（`sequence/dependency`）指向 active node 的节点（`DAG::Graph#leaf_nodes`）。
+
+规则：每个 leaf 必须满足其一：
+
+- `node_type in {agent_message, character_message}`
+- 或者 `state in {pending, awaiting_approval, running}`（允许执行中的中间态）
+
+修复策略：leaf invariant 的合法性判定与修复动作由 `DAG::Graph` 提供；对 conversation graphs（attachable 提供 `dag_node_body_namespace`）会在 mutation 后发现 leaf 为终态且不是 leaf-terminal 类型时，自动追加一个默认 leaf repair 子节点并以 `sequence` 连接（见 `DAG::Graph#validate_leaf_invariant!`）。
+
+## 调度与执行
+
+### Scheduler：claim executable nodes
+
+- 入口：`DAG::Scheduler.claim_executable_nodes`
+- 实现：`lib/dag/scheduler.rb`
+  - 可执行（executable）判定：
+  - `dag_nodes.state = pending`
+  - 强不变量：只有 `NodeBody.executable? == true` 的节点才允许处于 `pending/awaiting_approval/running`（因此 Scheduler 无需再维护 `node_type IN (...)` 的可执行列表）
+  - incoming 阻塞边满足 edge gating：
+    - `sequence`：父节点为 **terminal**（`finished/errored/rejected/skipped/stopped`）即可 unblock
+    - `dependency`：父节点必须为 **finished** 才 unblock
+- 并发语义：
+  - `SELECT ... FOR UPDATE SKIP LOCKED`
+  - 原子更新为 `running` 并设置 `claimed_at/claimed_by/lease_expires_at`（`started_at` 由 Runner 实际开始执行时写入）
+
+> claim lease 时长由 `graph.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
+
+> 依赖失败传播：对 `dependency` 的父节点若进入失败终态（`errored/rejected/skipped/stopped`），下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
+>
+> 例外（与实现一致）：若父节点为 `rejected` 且 `metadata["reason"] == "approval_denied"` 且 `metadata["approval"]["required"] == true`，FailurePropagation **不会**自动把下游 pending 标记为 skipped（此时图会保持“被拒绝的必需审批阻塞”，需要 App/管理员显式处理该分支）。
+
+> 可观测（hooks）：Scheduler claim 会尝试 emit `node_state_changed`（`pending → running`）。
+
+### Runner：执行与落库
+
+- 实现：`lib/dag/runner.rb`
+- 幂等：
+  - 非 `running` 节点直接 no-op
+  - 状态写入使用“期望状态条件更新”（避免竞态覆盖）
+- 执行流程：
+  1. 组装上下文（默认 `graph.context_for(node.id)`；executor 可声明需要 full context 时使用 `graph.context_for_full(node.id)`；需要全量祖先闭包时用 `context_closure_for*`）
+  2. `DAG.executor_registry.execute(node:, context:, stream:)`
+     - `stream` 为 `DAG::NodeEventStream`：把增量输出/进度/log 以 append-only 的方式写入 `dag_node_events`
+  3. 按结果落库为终态（并尝试 emit `node_state_changed` hooks）
+     - 若 executor 返回 `ExecutionResult.finished_streamed`：Runner 会汇总该 node 的 `output_delta` events 并物化写回 NodeBody.output（最终 output_preview 仍由 output 派生）
+     - node 进入终态后：引擎会清理该 node 的 `output_delta` events 并写入单条 `output_compacted`（用于 retention/审计；避免事件表长期膨胀）
+     - 观测信息：
+       - `dag_nodes.metadata["usage"]`：executor 回传的 tokens/cost usage（一次执行/一次调用）
+       - `dag_nodes.metadata["output_stats"]`：输出体积/结构统计（含 `pg_column_size` 的 DB 侧字节大小；仅 finished 写入）
+       - `dag_nodes.metadata["timing"]`：队列延迟与执行耗时（`queue_latency_ms` / `run_duration_ms`）
+       - `dag_nodes.metadata["worker"]["execute_job_id"]`：执行 job_id（可选，用于排障/审计）
+  4. 执行后触发下一轮 tick
+
+> execution lease 时长由 `graph.execution_lease_seconds_for(node)` 决定；里程碑 1 默认值为 `2.hours`。
+
+> 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。
+
+> 可观测（hooks）：FailurePropagation 会尝试 emit `node_state_changed`（`pending → skipped`）。
+
+### Jobs：推进图执行（Solid Queue / ActiveJob）
+
+- `DAG::TickGraphJob`
+  - 对同一 graph 做 tick 去重（advisory lock try-lock）
+  - 在图锁内执行顺序：`RunningLeaseReclaimer` → `FailurePropagation` → `graph.apply_visibility_patches_if_idle!` → Scheduler claim
+  - claim pending nodes → enqueue `DAG::ExecuteNodeJob`
+- `DAG::ExecuteNodeJob`
+  - 调用 Runner 执行单节点
+  - 会把自身 `job_id` 透传给 Runner（写入 `metadata["worker"]["execute_job_id"]`）
+  - 不负责再 enqueue tick：推进后继由 Runner 在 `ensure` 中统一 `DAG::TickGraphJob.perform_later(node.graph_id)`（避免 job 层遗漏/重复）
+
+相关代码：
+- `app/jobs/dag/tick_graph_job.rb`
+- `app/jobs/dag/execute_node_job.rb`
+
+## 上下文组装（Context Assembly）
+
+入口：
+
+- App-safe（Lane-first）：`DAG::Lane#context_for(target_node_id, limit_turns: 50, mode: :preview|:full, include_excluded: false, include_deleted: false)`（会校验 target 属于 lane；内部调用 `DAG::Graph#context_for`）
+- 引擎内部（安全 bounded window）：`DAG::Graph#context_for(target_node_id, limit_turns: 50, ...)`（Runner 使用）
+- 显式危险（闭包）：`DAG::Graph#context_closure_for(target_node_id, ...)`（ancestor closure；只用于后台/诊断/离线任务）
+
+实现：
+
+- bounded window：`lib/dag/context_window_assembly.rb`
+- ancestor closure：`lib/dag/context_closure_assembly.rb`
+
+### context_for（bounded window）
+
+- 选择与 target 相关的 lanes（target lane 的 parent chain + incoming blocking source nodes（`sequence/dependency`）所在 lanes 的 parent chain），并为每段 lane 计算 cutoff turn
+- 从每段 lane 中取 `turn_id <= cutoff_turn_id` 的 anchored turns（按 `dag_turns.id` keyset；可见性依赖 `dag_turns.anchor_node_id`），合并后取最近 `limit_turns`
+- 强制 pin：
+  - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）
+  - 全图 Active 的 `system_message/developer_message` 与最近 3 个 `summary`
+- 在选中的 nodes 子图内对 `sequence/dependency` 做稳定 topo sort，然后做输出过滤（见下）
+
+### context_closure_for（ancestor closure；危险）
+
+1. Ruby 遍历收集祖先闭包（只走未压缩的 **因果边**）：
+   - 仅包含：`sequence/dependency`
+   - `branch` 为纯 lineage，不参与 context
+   - 实现：先加载该 graph 的 active blocking edges，然后从 target 反向遍历得到 ancestor closure（避免 recursive CTE 的 plan 波动）
+2. 过滤已压缩节点：默认只包含 Active nodes（`compressed_at IS NULL`）
+3. 对闭包内 `sequence/dependency` 做稳定拓扑排序（tie-breaker：`id` 字典序）
+4. 输出结构（默认 preview）：`[{node_id, turn_id, lane_id, node_type, state, payload:{input,output_preview}, metadata}]`
+
+`context_for_full` / `context_closure_for_full` 会额外输出 `payload.output`（用于审计/调试/特殊 executor）。
+
+Context 可见性（视图层）：
+
+- `context_for` / `context_closure_for` 默认会过滤：
+  - `context_excluded_at IS NOT NULL`
+  - `deleted_at IS NOT NULL`
+- 可通过参数显式包含：
+  - `include_excluded:true`
+  - `include_deleted:true`
+- target 节点无论是否被 exclude/delete 都会强制包含在输出中（避免 executor 缺失自身 I/O）。
+- 写入期 gating（里程碑 1）：
+  - 默认策略：仅允许对 terminal 节点设置/清除 `context_excluded_at/deleted_at`，且要求 graph idle（Active 图中不存在任何 `state=running` 的节点）
+  - 决策权：由 `graph.visibility_mutation_error(node:, graph:)` 统一决定（`DAG::Node` 的 strict API 会直接 raise 该 reason）
+  - 目的：避免执行中上下文被改导致不可解释行为
+  - 若需要 “运行中先申请，空闲后生效”，可使用 request API（defer queue）：
+    - `request_exclude_from_context!/request_include_in_context!/request_soft_delete!/request_restore!`
+    - 可能返回 `:deferred` 并写入 `dag_node_visibility_patches`；Tick job 在 graph idle + node terminal 时自动应用并消费队列（详见 behavior spec）。
+
+> 压缩的替代来自“重连”后的边：summary 节点与外部边界相连，因此闭包会包含 summary 而不是被压缩的原始节点。
+
+更完整的 DAG 行为规范见：`docs/dag/behavior_spec.md`。
+
+## Transcript（对话记录视图）
+
+为支持产品侧 “取最近 X 条对话记录 / 分页 / 子话题（lane）” 等需求，DAG 提供 transcript 投影：
+
+- `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
+  - **graph-level**：会跨 lane 混合可见 turns；Lane-first 的产品 UI 通常不应直接使用（除非明确需要“全图最近记录”）。
+  - 读取 `dag_turns` 的 “可见 turn” 索引（`anchor_node_id` / `anchor_node_id_including_deleted`）
+  - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
+  - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
+  - 不依赖 `context_closure_for` 的祖先闭包（适合大图场景的 “最近记录” UI）
+- `lane.message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview, include_deleted: false)`
+  - **lane-scoped**：按 message（transcript candidates）keyset 分页，满足 “取最近 X 条消息” 的经典消息列表体验。
+  - 同样受 transcript 投影规则影响（默认不包含 `system/developer/task/summary`，以及“不可读的中间 agent_message”）。
+- `lane.transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)`
+  - **lane-scoped**：用于 “主线/子话题” 的聊天记录视图（避免多 lane 的 turn 混在一起）
+  - keyset pagination：
+    - 初次加载：不传 `before_turn_id/after_turn_id` → 返回该 lane 最近 N 轮
+    - 上拉更老：传 `before_turn_id`（通常取上一页返回的 `before_turn_id`）→ 返回更早的 N 轮
+    - 下拉更新：传 `after_turn_id`（通常取上一页返回的 `after_turn_id`）→ 返回更新的 N 轮
+  - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
+- `graph.transcript_page(lane_id:, ...)`：对 `lane.transcript_page(...)` 的薄封装（便于调用方只持有 graph）
+- `graph.transcript_for(target_node_id, limit_turns: 50, limit: nil, mode: :preview, include_deleted: false)`（安全默认：bounded window）
+  - 默认只保留 `user_message` 与可读的 `agent_message/character_message`
+  - 默认不包含 `system_message/developer_message/task/summary`，不暴露 prompt 与 tool chain 细节
+  - `context_excluded_at` 不影响 transcript（exclude 是 context-only）
+  - 默认使用 bounded window，并在候选 nodes 内只保留 target 的因果祖先闭包（`sequence/dependency`）+ target，避免把同 turn 的无关 sibling/并行分支混进 thread view
+  - `agent_message/character_message` 可通过 metadata 显式进入 transcript：
+    - `metadata["transcript_visible"] == true`
+    - `metadata["transcript_preview"]`（可选 String，作为展示文本）
+  - 终态可见性强化：当 `agent_message/character_message` 进入终态且 `metadata["reason"]` 或 `metadata["error"]` 存在时，即使没有 content 也应进入 transcript，并以安全预览文本展示（避免 “依赖失败导致下游 skipped 而 UI 空白”）
+  - 决策权：transcript 的过滤/预览覆写由 `graph.transcript_include?` / `graph.transcript_preview_override` 提供（默认实现与行为规范一致；attachable 可覆写）
+- `graph.transcript_closure_for*`（危险）
+  - 祖先闭包 + topo sort 后再做 transcript 投影；仅用于审计/调试/离线任务
+
+> transcript 是视图层 API，不改变 DAG 结构与调度语义。
+> 推荐用法（Lane-first）：UI 取最近记录优先用 `lane.message_page` 或 `lane.transcript_page`；需要 “锚定某个节点的精确视图” 再用 `graph.transcript_for(target)`。
+
+## Subagent（App-level 组合）
+
+里程碑 1 不在 DAG 层引入跨图 edges/嵌套子图调度语义；推荐由 App 域用 “多 Conversation/Graph” 组合出 subagent（子代理/子会话）：
+
+- 见：`docs/dag/subagent_patterns.md`
+
+## 子图压缩（Manual）
+
+入口：`DAG::Graph#compress!`（`Conversation#compress!` delegate）
+
+实现：`lib/dag/compression.rb`
+
+约束（事务内校验）：
+
+- 所选节点必须同一 graph、同一 lane，且均 `finished`
+- 节点/相关边必须尚未压缩
+- summary **不得成为 leaf**：inside 子图必须存在至少一条 outgoing **blocking edge**（`sequence/dependency`）指向 outside（否则压缩后 summary 会成为 leaf）
+
+操作：
+
+1. 创建 summary 节点（`node_type=summary,state=finished`），写入 `metadata["replaces_node_ids"]`
+2. 标记 inside 节点 `compressed_at/compressed_by_id`；标记 inside 相关边 `compressed_at`（incoming/outgoing/internal；**所有 edge_type**）
+3. 识别边界 **blocking edges** 并重连（只处理 `sequence/dependency`）：
+   - incoming blocking boundary：outside → inside ⟶ outside → summary
+   - outgoing blocking boundary：inside → outside ⟶ summary → outside
+   - 去重：按 `(from_node_id, edge_type)`（incoming）与 `(to_node_id, edge_type)`（outgoing）分组，每组只创建 1 条边
+   - metadata：保留被分组边的“公共键值”（intersection），并写入 `metadata["replaces_edge_ids"]`（被合并的边 id 列表，排序后字符串化）
+4. emit hooks：`LANE_COMPRESSED`（`subject=summary_node`），particulars 中包含 `summary_node_id/replaces_node_ids/*_edge_ids`
+5. 刷新受影响 turns 的锚点（`DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）
+
+## 可视化（Mermaid）
+
+入口：`DAG::Graph#to_mermaid`（危险操作；仅用于后台/诊断/离线任务）
+
+实现：`lib/dag/visualization/mermaid_exporter.rb`
+
+- 输出：`flowchart TD`
+- 节点 label：`{type}:{state} {snippet}`
+- `branch` 边 label：`branch:{branch_kinds.join(",")}`
+
+## Bench（非 CI gate）
+
+脚本：`script/bench/dag_engine.rb`
+
+目前覆盖：
+
+- 线性 1k 节点创建
+- fan-out + join 的 context_for
+- scheduler claim 100
+- transcript 分页查询（200 turns 取最近 20）
+
+运行：
+
+```bash
+bin/rails runner script/bench/dag_engine.rb
+```
+
+## 当前已知限制（里程碑 1 范围内）
+
+- executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
+- branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf。分支合并通过在 target lane 创建 `dependency/sequence` join 节点表达；是否归档 source lanes 属于产品选择（见 `DAG::Mutations#merge_lanes!`、`DAG::Mutations#archive_lane!` 与场景测试）。
