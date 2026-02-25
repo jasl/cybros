@@ -1,101 +1,108 @@
-# 产品层（Product Layer）文档索引
+# Cybros Product Definition
 
-本文档集用于记录 Cybros 在 **DAG 引擎** 与 **AgentCore** 之上的“产品层”决策与行为规范。
+## Vision
 
-目标：
+Cybros is an experimental AI agent platform built on an **immutable base + plugins + programmable agents** architecture. The goal is not self-evolution itself, but to unleash LLM and agent capabilities to **morph into any form of software product** — from coding agents to roleplay companions to automation assistants — without permanent forks.
 
-- 把“我们现在认为对的东西”写清楚（可审阅、可推翻）。
-- 把“我们还不确定的地方”显式标出来（开放问题清单）。
-- 保持与引擎层一致的风格：**有边界、有原则、有安全默认值**。
+Key principles:
 
----
+- **Programmable agents over hardcoded behaviors**: Agent behavior is defined by code and config in git-managed repositories, not baked into the platform.
+- **Sandbox-backed execution**: Agents run code in isolated environments. Custom tools, hooks, and prompt programs execute in sandboxes.
+- **Security trade-offs accepted**: Prioritize agent capability and user productivity. Do best-effort security with rollback capability, not enterprise-grade lockdown.
+- **Simplicity over completeness**: Ship working software. Avoid premature abstraction and over-engineering.
+- **Usage-driven improvement**: Comprehensive observability feeds the improve-and-iterate loop.
 
-## 0) 产品层的范围（What / Not What）
+## System Architecture
 
-产品层包含但不限于：
+```
+┌──────────────────────────────────────────────────────────────┐
+│                     Cybros (Rails)                            │
+│                                                              │
+│  ┌─────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ Web UI  │  │ Conversations │  │ Agent Program Loader    │ │
+│  │ Hotwire │  │ DAG Engine   │  │ (reads agent repos)     │ │
+│  └────┬────┘  └──────┬───────┘  └────────────┬────────────┘ │
+│       │              │                        │              │
+│  ┌────┴──────────────┴────────────────────────┴────────────┐ │
+│  │                    AgentCore                             │ │
+│  │  Executors · Tool Loop · Prompt Builder · Context Mgmt  │ │
+│  └────────────────────────┬────────────────────────────────┘ │
+│                           │                                  │
+│  ┌────────────────────────┴────────────────────────────────┐ │
+│  │              Conduits (control plane)                    │ │
+│  │  Territories · Facilities · Directives · Policies       │ │
+│  └────────────────────────┬────────────────────────────────┘ │
+└───────────────────────────┼──────────────────────────────────┘
+                            │ Poll-based (mTLS)
+┌───────────────────────────┼──────────────────────────────────┐
+│                     Nexus (Go daemon)                        │
+│  Polls for directives · Executes in sandbox · Reports back   │
+│                                                              │
+│  Sandbox drivers: host (now) · bwrap · container · microVM   │
+│  Platforms: Linux (amd64/arm64) · macOS (arm64)              │
+└──────────────────────────────────────────────────────────────┘
 
-- 身份/权限：Users、Roles、ACL / Share。
-- 资源管理：MCP、知识库（KB）、Agents、Hosts/Sandboxes、Workspaces、Skills 等。
-- 编排与交互：多 Agent 编排、UI/UX 交互模型、默认工作流。
-- 系统设置：LLM Provider / Models、默认 sandbox、配额/限制等。
-- 可观测性：用量统计（tokens/请求数）、延迟、审计事件、用户看板。
+Mothership (separate Rails app): Lightweight prototype of the Conduits
+control plane. Used for Nexus development and protocol experimentation.
+Not a production component — its functionality is merged into Cybros.
+```
 
-产品层不试图解决（由底层负责或另行设计）：
+Communication is **pull-based**: Nexus polls the control plane (Cybros) via `POST /conduits/v1/polls`. No inbound ports required on the Nexus side.
 
-- DAG 引擎行为规范：见 `docs/dag/*`
-- AgentCore 的 tool/MCP/skills 协议与运行时注入：见 `docs/agent_core/*`
-- 执行与沙箱基础设施（ExecHub + Runner）：见 `docs/execution/*`
+## Current State
 
----
+### What's built and solid
 
-## 1) 当前设想（需要持续质疑）
+| Component | Status | Description |
+|-----------|--------|-------------|
+| DAG Engine | Production-ready | Scheduling, execution, fork/merge, compression, context assembly, streaming, turns. 939+ tests. |
+| AgentCore | Production-ready | LLM execution, tool loop with repair, provider failover, memory (pgvector), skills, subagent orchestration, prompt building with budget management. |
+| Conduits Protocol | Designed & implemented | Pull-based API with lease management, log streaming, facility model. OpenAPI spec. |
+| Nexus | Phase 0.5 | Host driver (no isolation), directive lifecycle, log streaming, facility management. |
+| Mothership | Dev-complete | Prototype Conduits control plane. Full API, policy model, audit events. Used as reference for porting into Cybros. |
 
-服务特征（当前讨论基线）：
+### What's not built
 
-- Self-hosted，**单租户**（single-tenant）。
-- 推荐容器部署；开发/高级用户可 bare metal。
-- 部署建议与 Agent 运行环境隔离（但不强制）。
-- 多用户。
-- 需要最小形态的共享：引入 **Space（工作区）** 作为隔离/协作边界（Phase 1 锁定只有 1 个默认 Space；不实现 Space 管理/切换 UI）。
-  - 个人对话（Conversation）属于隐私，默认且长期保持私有（owner-only；不通过“共享”改变）。
-  - MCP、知识库、Agents、主机与沙箱等资源默认私有；Phase 1/2 不做“在 Space 内共享并协作编辑”能力，主要通过导出/分享（例如 GitHub repo URL）实现协作。
-- 系统全局管理可共享内部数据：例如 prompt cache（见隐私/安全注意）。
-- 存在全局资源：LLM Provider、LLM Models、全局共享/内置 Agent。
-- 系统级设置全局共享：LLM API、各种次数/体积/频率限制、是否提供默认沙箱等。
-- 用户允许少量个性化设置。
-- 每用户有独立用量统计与看板；系统也有聚合统计；LLM 用量可细分到具体模型。
-- 单租户落点选择：**不实现实例内多租户**；资源作用域采用 `scope=global|space|user`（UI 可显示为 “System/Space/Personal”）。未来若要 SaaS 化，推荐通过 supervisor 部署多实例，并通过内部管理 API 远程管理实例。
+- User/auth system
+- LLM provider management
+- Web UI (only bare `home#index`)
+- Conversation management (controllers, views, API)
+- Agent Program framework
+- Nexus integration in Cybros
+- Programmable agent self-modification
+- macOS automation tools
+- Coding agent tools
+- Observability dashboard
+- Plugin/extension system
+- Channel integrations (Telegram, Discord, etc.)
 
-这些设想的“风险点/矛盾点/未定义点”会在各子文档的 **Open questions** 中持续维护。
+## Core Concepts
 
----
+| Concept | Definition |
+|---------|-----------|
+| **Account** | The instance tenant. Holds global configuration (LLM providers, defaults, settings). Single account in Phase 0. |
+| **Identity** | Global user identity (email-based). Enables future OAuth via `UserAssociatedAccount`. |
+| **User** | Account-scoped membership. Belongs to Identity and Account. Has role (owner/admin/member). |
+| **Conversation** | DAG-backed conversation container. Belongs to an Agent Program. |
+| **ConversationRun** | Tracks a single agent execution lifecycle (queued → running → succeeded/failed/canceled). |
+| **Agent Program** | Git-managed repository defining agent behavior: config, prompts, hooks, custom tools. See [Agent Program Framework](agent_program_framework.md). |
+| **LLM Provider** | Configuration for an LLM API endpoint: base URL, API key, model allowlist, priority. |
+| **Persona** | Switchable behavior config within an Agent Program (different system prompt, tool set, voice). |
+| **Territory** | A registered Nexus instance (a host machine). |
+| **Facility** | Persistent workspace directory on a territory. Used for project repos and agent program repos. |
+| **Directive** | A unit of work (shell command) executed in a facility by Nexus. |
 
-## 2) 文档目录
+## Acceptance Targets
 
-- Terminology / Glossary（draft）：`docs/product/terminology.md`
-- Persona switching（draft）：`docs/product/persona_switching.md`
-- Programmable agents（draft）：`docs/product/programmable_agents.md`
-- Prompt programs（draft）：`docs/product/prompt_programs.md`
-- MCP servers（draft）：`docs/product/mcp_servers.md`
-- Channels / Bots（draft）：`docs/product/channels.md`
-- Agent UI / App mode（draft）：`docs/product/agent_ui.md`
-- Channel pairing（draft）：`docs/product/channel_pairing.md`
-- Sandbox requirements（draft）：`docs/product/sandbox_requirements.md`
-- Safe Retrieval（draft）：`docs/product/safe_retrieval.md`
-- Deferred Security Concerns：`docs/product/security_concerns.md`
-- Diagnostics（draft）：`docs/product/diagnostics.md`
-- Behavior spec（draft）：`docs/product/behavior_spec.md`
-- Phase 1 review（draft）：`docs/product/phase_1_review.md`
-- Phase 1 implementation plan（draft）：`docs/product/phase_1_implementation_plan.md`
-- Phase 1 MVP audit（2026-02-24）：`docs/product/audit_phase_1_mvp_2026-02-24.md`
-- Versioning + sync（draft）：`docs/product/versioning_and_sync.md`
-- Tenancy + isolation：`docs/product/tenancy_and_isolation.md`
-- Automations（draft）：`docs/product/automations.md`
-- Extensions / plugin system：`docs/product/extensions.md`
-- Extensions specs + resources（draft）：`docs/product/extensions/README.md`
-- Agents + orchestration：`docs/product/agents.md`
-- Observability + usage accounting：`docs/product/observability.md`
+1. **End-to-end product flow**: Human opens browser → creates conversation → chats with agent → agent uses tools → streaming responses.
+2. **Coding agent**: Codex/OpenCode-like agent that reads files, writes code, runs tests, fixes bugs in a project repo.
+3. **macOS automation**: Agent automates macOS apps via AppleScript, Shortcuts, and system commands.
+4. **Multi-agent / swarm**: Coordinator agent orchestrates specialist agents for complex tasks.
+5. **Multi-persona agent**: Single agent switches personas based on user intent (coder, writer, researcher, etc.).
+6. **Roleplay agent**: RisuAI-like agent with character cards, lorebook, long-term memory, personality.
+7. **Game agent**: Astrology fortune-telling agent with custom tools and structured output.
 
----
+## Documents
 
-## 3) 设计原则（Draft）
-
-- **基座不可变（Upstream-first）**：Cybros 主程序不鼓励/不支持用户私改；扩展通过插件与可配置资源完成。
-- **安全默认值（Deny-by-default）**：默认最小权限、最小可见性、最小网络/执行能力；放权要可审计、可撤销。
-- **可回滚**：用户对 Agent / Prompt / 编排的修改必须可审计、可 diff、可回滚（例如 git/版本记录）。
-- **边界清晰**：产品层不越过 DAG/AgentCore 的 Public API 边界；缺能力则先补 Public API + tests/doc。
-
----
-
-## 4) Quick demo：Agent 自改闭环（MVP）
-
-目标：演示 “在沙箱里修改 Agent repo → 立刻生效 →（若启用 git）可回滚”，并验证“改坏了要 fail-fast + 提示回滚/切换内置 agent”。
-
-步骤：
-
-1. 启动并登录（dev：`admin@example.com` / `Passw0rd`）。
-2. 基于 system 内置模板创建一个 Programmable Agent（生成一个 Agent repo；默认建议初始化为 git）。
-3. 新建 Conversation，选择该 Programmable Agent。
-4. 对 Agent 说：把 `context_turns` 改成 80（或禁用 `repo_docs` 等）。
-5. Agent 在沙箱中编辑 Agent repo 的配置文件；权限交互与 vibe coding 一致（Manual/Cowork）。
-6. 变更立刻生效；若启用 git，UI 可查看历史并一键 revert；若改坏，则 fail-fast 并提示回滚/切换内置 agent。
+- [Agent Program Framework](agent_program_framework.md) — The core differentiator: how agent programs are structured, executed, and self-modified.
+- [Roadmap](roadmap.md) — Phased implementation plan with acceptance criteria.
