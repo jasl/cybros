@@ -46,6 +46,21 @@ bin/rails db:migrate          # Run migrations
 bin/rails db:reset            # Drop, create, and load schema
 ```
 
+### Destructive refactors (allowed)
+
+Cybros is experimental and breaking changes are expected. When doing **destructive DB refactors**, it's OK to:
+
+- Edit existing migrations in place (instead of layering compatibility migrations).
+- Regenerate schema by resetting the DB (`bin/rails db:reset`).
+
+### Enum / state storage
+
+For readability and debuggability, store enums / states as **strings** in the database:
+
+- Prefer `t.string :status` / `t.string :role` columns.
+- Prefer string-backed Rails enums (e.g. `enum :role, ROLES.index_by(&:itself)` or `{ admin: "admin" }`).
+- Avoid integer-backed enums for new fields (and migrate old ones to strings when doing destructive refactors).
+
 ### Other Utilities
 ```bash
 bin/rails dev:email          # Toggle letter_opener for email preview

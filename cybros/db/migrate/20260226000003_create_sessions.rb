@@ -6,8 +6,8 @@ class CreateSessions < ActiveRecord::Migration[8.2]
       t.string :ip_address
       t.string :user_agent
       t.timestamps
-    end
 
-    add_index :sessions, %i[identity_id created_at]
+      t.index %i[identity_id created_at]
+    end
   end
 end

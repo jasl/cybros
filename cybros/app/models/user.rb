@@ -2,8 +2,9 @@ class User < ApplicationRecord
   belongs_to :identity
 
   enum :role, {
-    owner: 0,
-    admin: 1,
-    member: 2,
+    owner: "owner",
+    admin: "admin",
+    member: "member",
+    system: "system",
   }, default: :owner, validate: true
 end

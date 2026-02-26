@@ -7,10 +7,8 @@ class CreateLLMProviders < ActiveRecord::Migration[8.2]
       t.string :api_format, null: false, default: "openai"
       t.jsonb :headers, null: false, default: {}
       t.string :model_allowlist, null: false, default: [], array: true
-      t.integer :priority, null: false, default: 0
+      t.integer :priority, index: true, null: false, default: 0
       t.timestamps
     end
-
-    add_index :llm_providers, :priority
   end
 end
