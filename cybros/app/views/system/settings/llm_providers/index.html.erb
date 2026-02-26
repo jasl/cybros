@@ -1,4 +1,14 @@
-<div class="space-y-6">
+<% content_for :action_bar do %>
+  <div class="breadcrumbs text-sm">
+    <ul>
+      <li><span class="opacity-70">Settings</span></li>
+      <li><span class="opacity-70">System</span></li>
+      <li>LLM Providers</li>
+    </ul>
+  </div>
+<% end %>
+
+<div class="max-w-5xl mx-auto p-6 space-y-6">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold">LLM Providers</h1>
     <%= link_to "New provider", new_system_settings_llm_provider_path, class: "btn btn-primary" %>

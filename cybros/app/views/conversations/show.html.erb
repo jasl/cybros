@@ -42,7 +42,7 @@
           <textarea
             name="content"
             rows="1"
-            class="bg-transparent flex-1 resize-none outline-none py-1.5 text-sm placeholder:opacity-40 min-h-[1.5rem] max-h-48"
+            class="bg-transparent flex-1 resize-none outline-none py-1.5 text-sm placeholder:opacity-40 min-h-6 max-h-48"
             placeholder="Message…"
             data-message-form-target="textarea"
             data-action="keydown->message-form#keydown input->message-form#autoResize"></textarea>
@@ -76,7 +76,7 @@
 
   <% if Rails.env.development? %>
     <div
-      class="fixed bottom-4 right-4 z-[200] hidden"
+      class="fixed bottom-4 right-4 z-200 hidden"
       data-debug-overlay-target="panel">
       <div class="card bg-base-100 border border-base-300 shadow-lg">
         <div class="card-body p-4 space-y-2">

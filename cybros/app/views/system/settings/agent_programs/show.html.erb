@@ -1,8 +1,16 @@
-<div class="space-y-6">
+<% content_for :action_bar do %>
+  <div class="breadcrumbs text-sm">
+    <ul>
+      <li><span class="opacity-70">Settings</span></li>
+      <li><span class="opacity-70">System</span></li>
+      <li><%= link_to "Agent Programs", system_settings_agent_programs_path, class: "link link-hover" %></li>
+      <li class="truncate"><%= @agent_program.name %></li>
+    </ul>
+  </div>
+<% end %>
+
+<div class="max-w-3xl mx-auto p-6 space-y-6">
   <div class="space-y-1">
-    <div class="text-sm opacity-70">
-      <%= link_to "Agent Programs", system_settings_agent_programs_path, class: "link link-hover" %>
-    </div>
     <h1 class="text-2xl font-semibold"><%= @agent_program.name %></h1>
   </div>
 

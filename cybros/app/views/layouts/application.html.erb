@@ -8,6 +8,6 @@
     <%= render "layouts/shared/flash" %>
     <%= content_for?(:content) ? yield(:content) : yield %>
     <%= yield :body %>
-    <div id="toast_container" class="toast toast-top toast-end z-[100] mt-16 flex flex-col gap-2"></div>
+    <div id="toast_container" class="toast toast-top toast-end z-100 mt-16 flex flex-col gap-2"></div>
   </body>
 </html>

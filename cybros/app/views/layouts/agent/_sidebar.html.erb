@@ -1,69 +1,35 @@
 <nav class="h-full flex flex-col is-drawer-close:w-16 is-drawer-open:w-72 transition-[width] duration-200">
-  <div class="p-2 border-b border-base-300 flex items-center gap-2">
-    <%= link_to root_path, class: "btn btn-ghost btn-sm gap-2 flex-1 justify-start" do %>
+  <div class="h-14 px-2 border-b border-base-300 flex items-center gap-2 shrink-0 is-drawer-close:justify-center">
+    <%= link_to root_path, class: "btn btn-ghost btn-sm gap-2 flex-1 justify-start is-drawer-close:hidden" do %>
       <span class="icon-[lucide--bot] size-5"></span>
-      <span class="is-drawer-close:hidden font-semibold">Cybros</span>
+      <span class="font-semibold">Cybros</span>
     <% end %>
 
     <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Toggle sidebar">
-      <label for="left_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle sidebar">
+      <label for="left_drawer" class="btn btn-ghost btn-sm is-drawer-close:btn-square is-drawer-open:px-2" aria-label="Toggle sidebar">
         <span class="icon-[lucide--chevrons-left-right] size-5"></span>
       </label>
     </div>
   </div>
 
-  <div class="p-2">
-    <%= form_with url: conversations_path, method: :post do %>
-      <button type="submit" class="btn btn-primary btn-sm w-full justify-start gap-2">
-        <span class="icon-[lucide--plus] size-4"></span>
-        <span class="is-drawer-close:hidden">New chat</span>
-      </button>
-    <% end %>
-  </div>
+  <%= render "layouts/agent/sidebar_primary_nav" %>
 
-  <ul class="menu menu-sm w-full px-2 gap-1">
-    <li>
-      <%= link_to dashboard_path, class: "gap-2 #{'menu-active' if active_nav?(dashboard_path)}" do %>
-        <span class="icon-[lucide--layout-dashboard] size-4"></span>
-        <span class="is-drawer-close:hidden">Dashboard</span>
-      <% end %>
-    </li>
-    <li>
-      <%= link_to conversations_path, class: "gap-2 #{'menu-active' if active_nav?(conversations_path)}" do %>
-        <span class="icon-[lucide--messages-square] size-4"></span>
-        <span class="is-drawer-close:hidden">Conversations</span>
-      <% end %>
-    </li>
-    <li>
-      <%= link_to agent_programs_path, class: "gap-2 #{'menu-active' if active_nav?(agent_programs_path)}" do %>
-        <span class="icon-[lucide--sparkles] size-4"></span>
-        <span class="is-drawer-close:hidden">Agents</span>
-      <% end %>
-    </li>
-    <li>
-      <%= link_to settings_profile_path, class: "gap-2 #{'menu-active' if active_nav?('/settings', '/system/settings')}" do %>
-        <span class="icon-[lucide--settings] size-4"></span>
-        <span class="is-drawer-close:hidden">Settings</span>
-      <% end %>
-    </li>
-  </ul>
-
-  <div class="px-2 pt-2">
+  <div class="px-2 py-1">
     <div class="divider my-0"></div>
   </div>
 
-  <% next_page_url = @sidebar_has_more && @sidebar_before_cursor.present? ? sidebar_conversations_path(before: @sidebar_before_cursor) : "" %>
-  <div class="flex-1 overflow-auto px-2 py-2 scrollbar-auto-hide"
-    data-controller="infinite-scroll"
-    data-infinite-scroll-url-value="<%= next_page_url %>">
-    <%= render "shared/conversation_list",
-      conversations: (@sidebar_conversations || []),
-      has_more: @sidebar_has_more,
-      before_cursor: @sidebar_before_cursor %>
-  </div>
+  <% sidebar_mode = @left_sidebar_mode.to_sym if @left_sidebar_mode.present? %>
+  <% sidebar_mode ||= :conversations %>
+  <% if sidebar_mode == :settings %>
+    <%= render "layouts/agent/sidebar_settings_section" %>
+  <% else %>
+    <%= render "layouts/agent/sidebar_conversations_section" %>
+  <% end %>
 
-  <div class="border-t border-base-300 p-2">
-    <%= render "shared/user_menu" %>
+  <div class="border-t border-base-300 p-2 is-drawer-close:flex is-drawer-close:justify-center">
+    <div class="is-drawer-close:w-full is-drawer-close:flex is-drawer-close:justify-center">
+      <%= render "shared/user_menu" %>
+    </div>
   </div>
 </nav>
 

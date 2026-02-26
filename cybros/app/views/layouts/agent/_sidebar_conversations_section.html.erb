@@ -1,0 +1,23 @@
+<div class="p-2 is-drawer-close:tooltip is-drawer-close:tooltip-right is-drawer-close:flex is-drawer-close:justify-center" data-tip="New chat">
+  <%= form_with url: conversations_path, method: :post do %>
+    <button type="submit" class="btn btn-primary btn-sm w-full is-drawer-open:justify-start is-drawer-close:justify-center is-drawer-close:btn-square gap-2">
+      <span class="icon-[lucide--plus] size-4"></span>
+      <span class="is-drawer-close:hidden">New chat</span>
+    </button>
+  <% end %>
+</div>
+
+<div class="px-2 pt-2 is-drawer-close:hidden">
+  <div class="divider my-0"></div>
+</div>
+
+<% next_page_url = @sidebar_has_more && @sidebar_before_cursor.present? ? sidebar_conversations_path(before: @sidebar_before_cursor) : "" %>
+<div class="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 scrollbar-auto-hide is-drawer-close:hidden"
+  data-controller="infinite-scroll"
+  data-infinite-scroll-url-value="<%= next_page_url %>">
+  <%= render "shared/conversation_list",
+    conversations: (@sidebar_conversations || []),
+    has_more: @sidebar_has_more,
+    before_cursor: @sidebar_before_cursor %>
+</div>
+

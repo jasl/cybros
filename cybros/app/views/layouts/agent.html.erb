@@ -24,20 +24,23 @@
               </label>
 
               <% if content_for?(:action_bar) %>
-                <%= yield :action_bar %>
+                <div class="min-w-0 h-full flex items-center">
+                  <%= yield :action_bar %>
+                </div>
               <% else %>
                 <div class="text-sm opacity-70">Cybros</div>
               <% end %>
             </div>
 
             <div class="navbar-end gap-2">
-              <label
-                for="right_drawer"
-                class="btn btn-ghost btn-sm btn-square <%= content_for?(:right_panel) ? "" : "btn-disabled" %>"
-                aria-label="Open inspector"
-                <%= "tabindex=\"-1\" aria-disabled=\"true\"".html_safe unless content_for?(:right_panel) %>>
-                <span class="icon-[lucide--panel-right] size-5"></span>
-              </label>
+              <% if content_for?(:right_panel) %>
+                <label
+                  for="right_drawer"
+                  class="btn btn-ghost btn-sm btn-square"
+                  aria-label="Open inspector">
+                  <span class="icon-[lucide--panel-right] size-5"></span>
+                </label>
+              <% end %>
             </div>
           </header>
 
@@ -63,7 +66,7 @@
 
     <div class="drawer-side z-50 h-dvh is-drawer-close:overflow-visible">
       <label for="left_drawer" aria-label="Close navigation" class="drawer-overlay"></label>
-      <aside class="h-dvh bg-base-100 border-r border-base-300 overflow-hidden">
+      <aside class="h-dvh bg-base-100 border-r border-base-300 is-drawer-close:overflow-visible is-drawer-open:overflow-hidden">
         <%= render "layouts/agent/sidebar" %>
       </aside>
     </div>

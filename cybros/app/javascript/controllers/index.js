@@ -7,9 +7,6 @@ import { application } from "./application"
 import SidebarController from "./sidebar_controller"
 application.register("sidebar", SidebarController)
 
-import SettingsNavController from "./settings_nav_controller"
-application.register("settings-nav", SettingsNavController)
-
 import ConversationChannelController from "./conversation_channel_controller"
 application.register("conversation-channel", ConversationChannelController)
 

@@ -1,0 +1,10 @@
+<ul class="menu menu-sm w-full px-2 gap-1">
+  <%= sidebar_nav_item label: "Dashboard", path: dashboard_path, icon_class: "icon-[lucide--layout-dashboard] size-4" %>
+  <%= sidebar_nav_item label: "Conversations", path: conversations_path, icon_class: "icon-[lucide--messages-square] size-4" %>
+  <%= sidebar_nav_item label: "Agents", path: agent_programs_path, icon_class: "icon-[lucide--sparkles] size-4" %>
+  <%= sidebar_nav_item label: "Settings",
+    path: settings_profile_path,
+    icon_class: "icon-[lucide--settings] size-4",
+    active_paths: ["/settings", "/system/settings"] %>
+</ul>
+

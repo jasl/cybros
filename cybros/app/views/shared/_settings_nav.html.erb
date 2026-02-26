@@ -1,0 +1,24 @@
+<nav class="space-y-2" aria-label="Settings navigation">
+  <%= sidebar_section_title "Personal" %>
+  <ul class="menu menu-sm w-full gap-1 px-2">
+    <%= sidebar_nav_item label: "Profile",
+      path: settings_profile_path,
+      icon_class: "icon-[lucide--user] size-4 opacity-70" %>
+    <%= sidebar_nav_item label: "Sessions",
+      path: settings_sessions_path,
+      icon_class: "icon-[lucide--monitor-smartphone] size-4 opacity-70" %>
+  </ul>
+
+  <% if Current.user&.owner? || Current.user&.admin? %>
+    <%= sidebar_section_title "System" %>
+    <ul class="menu menu-sm w-full gap-1 px-2">
+      <%= sidebar_nav_item label: "LLM Providers",
+        path: system_settings_llm_providers_path,
+        icon_class: "icon-[lucide--cpu] size-4 opacity-70" %>
+      <%= sidebar_nav_item label: "Agent Programs",
+        path: system_settings_agent_programs_path,
+        icon_class: "icon-[lucide--sparkles] size-4 opacity-70" %>
+    </ul>
+  <% end %>
+</nav>
+

@@ -17,6 +17,9 @@ Thumbs.db
 *~
 .claude/settings.local.json
 
+# === Temp files ===
+/tmp/
+
 # === MCP temp files ===
 .playwright-mcp/
 
