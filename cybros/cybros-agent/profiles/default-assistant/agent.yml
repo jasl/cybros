@@ -1,0 +1,16 @@
+name: default-assistant
+description: "A helpful assistant"
+
+model:
+  prefer:
+    - "gpt-4o-mini"
+
+tools:
+  allow:
+    - memory_search
+    - memory_store
+    - memory_forget
+    - skills_list
+    - skills_load
+    - skills_read_file
+

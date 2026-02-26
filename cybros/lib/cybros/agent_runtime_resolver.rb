@@ -6,6 +6,17 @@ module Cybros
 
     module_function
 
+    def phase_0_tool_policy(base_tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new)
+      AgentCore::Resources::Tools::Policy::Ruleset.new(
+        allow: [
+          { tools: ["memory_*"], reason: "phase_0_auto_allow_memory_tools" },
+          { tools: ["skills_*"], reason: "phase_0_auto_allow_skills_tools" },
+        ],
+        delegate: base_tool_policy,
+        tool_groups: nil,
+      )
+    end
+
     def channel_for(node:)
       from_node = routing_channel_from_metadata(node&.metadata)
       return from_node if from_node
@@ -23,6 +34,7 @@ module Cybros
       conversation = conversation_for(node)
 
       agent_metadata = agent_metadata_for(conversation)
+      model_resolution = resolve_model_and_provider(agent_metadata)
       profile_resolution = resolve_profile(agent_metadata)
       profile_name = profile_resolution.fetch(:profile_name)
       definition = profile_resolution.fetch(:definition)
@@ -35,7 +47,7 @@ module Cybros
           parse_context_turns(agent_metadata&.fetch("context_turns", nil))
         end
 
-      base_tool_policy ||= AgentCore::Resources::Tools::Policy::DenyAll.new
+      base_tool_policy ||= AgentCore::Resources::Tools::Policy::ConfirmAll.new
 
       delegate =
         if profile_config&.tools_allowed
@@ -49,13 +61,16 @@ module Cybros
         end
 
       tool_policy =
-        AgentCore::Resources::Tools::Policy::Profiled.new(
-          allowed: Array(definition.fetch(:tool_patterns)),
-          delegate: delegate,
-          tool_groups: nil,
+        phase_0_tool_policy(
+          base_tool_policy:
+            AgentCore::Resources::Tools::Policy::Profiled.new(
+              allowed: Array(definition.fetch(:tool_patterns)),
+              delegate: delegate,
+              tool_groups: nil,
+            ),
         )
 
-      provider ||= build_provider
+      provider ||= model_resolution.fetch(:provider)
       tools_registry ||= build_tools_registry
       instrumenter ||= build_instrumenter
 
@@ -67,7 +82,7 @@ module Cybros
 
       runtime_kwargs = {
         provider: provider,
-        model: ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini"),
+        model: model_resolution.fetch(:model),
         fallback_models: parse_fallback_models_env,
         tools_registry: tools_registry,
         tool_policy: tool_policy,
@@ -112,16 +127,142 @@ module Cybros
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::Subagent::Tools.build)
+
+      # Phase 0: always register native memory + skills tools.
+      begin
+        skills_dir = Rails.root.join("skills")
+        if skills_dir.directory?
+          registry.register_skills_store(
+            AgentCore::Resources::Skills::FileSystemStore.new(dirs: [skills_dir.to_s], strict: false)
+          )
+        end
+      rescue StandardError
+        # ignore
+      end
+
+      begin
+        registry.register_memory_store(build_memory_store)
+      rescue StandardError
+        # ignore
+      end
+
       registry
     end
 
-    def build_provider
+    def resolve_model_and_provider(agent_metadata)
+      default_model = ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini").to_s.strip
+      default_model = "gpt-4o-mini" if default_model.empty?
+
+      prefer = model_prefer_from_agent_metadata(agent_metadata)
+      prefer = [default_model] if prefer.empty?
+
+      provider = nil
+      chosen_model = nil
+
+      providers = fetch_llm_providers
+
+      prefer.each do |model|
+        matching = providers.select { |p| Array(p.model_allowlist).include?(model) }
+        next if matching.empty?
+
+        provider = matching.max_by { |p| p.priority.to_i }
+        chosen_model = model
+        break
+      end
+
+      if provider.nil?
+        provider = providers.max_by { |p| p.priority.to_i } if providers.any?
+      end
+
+      if chosen_model.nil?
+        allowlist = Array(provider&.model_allowlist).map(&:to_s).reject(&:blank?)
+        chosen_model =
+          if allowlist.include?(default_model)
+            default_model
+          else
+            allowlist.first || default_model
+          end
+      end
+
+      { provider: build_provider_from_record(provider) || build_default_provider, model: chosen_model }
+    rescue StandardError
+      { provider: build_default_provider, model: default_model }
+    end
+    private_class_method :resolve_model_and_provider
+
+    def fetch_llm_providers
+      return [] unless defined?(LLMProvider)
+
+      LLMProvider.order(priority: :desc).to_a
+    rescue StandardError
+      []
+    end
+    private_class_method :fetch_llm_providers
+
+    def model_prefer_from_agent_metadata(agent_metadata)
+      return [] unless agent_metadata.is_a?(Hash)
+
+      agent_program = agent_metadata.fetch("agent_program", nil)
+      agent_program = agent_program.is_a?(Hash) ? agent_program : {}
+
+      prefer = agent_program.fetch("model_prefer", nil) || agent_program.fetch("model", nil)
+      prefer = prefer.fetch("prefer", nil) if prefer.is_a?(Hash)
+
+      Array(prefer).map { |v| v.to_s.strip }.reject(&:empty?).uniq
+    rescue StandardError
+      []
+    end
+    private_class_method :model_prefer_from_agent_metadata
+
+    def build_provider_from_record(record)
+      return nil unless record
+
+      AgentCore::Resources::Provider::SimpleInferenceProvider.new(
+        base_url: record.base_url,
+        api_key: record.api_key.presence,
+        headers: record.headers || {},
+      )
+    rescue StandardError
+      nil
+    end
+    private_class_method :build_provider_from_record
+
+    def build_default_provider
       AgentCore::Resources::Provider::SimpleInferenceProvider.new(
         base_url: ENV["SIMPLE_INFERENCE_BASE_URL"],
         api_key: ENV["SIMPLE_INFERENCE_API_KEY"],
       )
     end
-    private_class_method :build_provider
+    private_class_method :build_default_provider
+
+    def build_memory_store
+      if Rails.env.test?
+        embedder =
+          Class.new do
+            def embed(text:)
+              _ = text
+              Array.new(1536, 0.0)
+            end
+          end.new
+
+        return AgentCore::Resources::Memory::PgvectorStore.new(embedder: embedder, conversation_id: nil, include_global: true)
+      end
+
+      embed_model = ENV.fetch("AGENT_CORE_EMBEDDING_MODEL", "text-embedding-3-small").to_s.strip
+      embed_model = "text-embedding-3-small" if embed_model.empty?
+
+      embedder =
+        AgentCore::Resources::Memory::Embedder::SimpleInference.new(
+          model: embed_model,
+          base_url: ENV["SIMPLE_INFERENCE_BASE_URL"],
+          api_key: ENV["SIMPLE_INFERENCE_API_KEY"],
+        )
+
+      AgentCore::Resources::Memory::PgvectorStore.new(embedder: embedder, conversation_id: nil, include_global: true)
+    rescue StandardError
+      AgentCore::Resources::Memory::InMemory.new
+    end
+    private_class_method :build_memory_store
 
     def build_instrumenter
       AgentCore::Observability::Adapters::ActiveSupportNotificationsInstrumenter.new

@@ -1,0 +1,24 @@
+<div class="p-6 space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="text-2xl font-semibold">Edit LLM provider</h1>
+    <div class="flex items-center gap-2">
+      <%= button_to "Fetch Models", fetch_models_llm_provider_path(@llm_provider), method: :post, class: "btn btn-secondary" %>
+      <%= button_to "Delete", llm_provider_path(@llm_provider), method: :delete, class: "btn btn-ghost", data: { turbo_confirm: "Delete this provider?" } %>
+    </div>
+  </div>
+
+  <% if flash[:notice].present? %>
+    <div role="alert" class="alert alert-success">
+      <span><%= flash[:notice] %></span>
+    </div>
+  <% end %>
+
+  <% if flash[:alert].present? %>
+    <div role="alert" class="alert alert-error">
+      <span><%= flash[:alert] %></span>
+    </div>
+  <% end %>
+
+  <%= render "form", llm_provider: @llm_provider %>
+</div>
+

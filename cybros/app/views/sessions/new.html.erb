@@ -1,0 +1,32 @@
+<div class="min-h-screen flex items-center justify-center p-6">
+  <div class="card w-full max-w-md bg-base-100 shadow">
+    <div class="card-body">
+      <h1 class="card-title text-2xl">Sign in</h1>
+
+      <% if flash[:alert].present? %>
+        <div role="alert" class="alert alert-error">
+          <span><%= flash[:alert] %></span>
+        </div>
+      <% end %>
+
+      <%= form_with url: session_path, class: "space-y-4" do |f| %>
+        <div class="space-y-2">
+          <%= f.label :email, class: "label" do %>
+            <span class="label-text">Email</span>
+          <% end %>
+          <%= f.email_field :email, required: true, autocomplete: "email", class: "input input-bordered w-full" %>
+        </div>
+
+        <div class="space-y-2">
+          <%= f.label :password, class: "label" do %>
+            <span class="label-text">Password</span>
+          <% end %>
+          <%= f.password_field :password, required: true, autocomplete: "current-password", class: "input input-bordered w-full" %>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block">Sign in</button>
+      <% end %>
+    </div>
+  </div>
+</div>
+

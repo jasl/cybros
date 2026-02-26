@@ -1,0 +1,32 @@
+<div class="p-6 space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">Agents</h1>
+    <%= link_to "New agent", new_agent_program_path, class: "btn btn-primary" %>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Profile</th>
+          <th>Local path</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @agent_programs.each do |program| %>
+          <tr>
+            <td class="font-medium"><%= program.name %></td>
+            <td class="opacity-70"><%= program.profile_source %></td>
+            <td class="opacity-70 font-mono text-xs"><%= program.local_path %></td>
+            <td class="text-right">
+              <%= link_to "View", agent_program_path(program), class: "btn btn-ghost btn-sm" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</div>
+

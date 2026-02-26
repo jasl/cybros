@@ -1,0 +1,34 @@
+<div class="p-6 space-y-6">
+  <div class="flex items-center justify-between">
+    <h1 class="text-2xl font-semibold">LLM Providers</h1>
+    <%= link_to "New provider", new_llm_provider_path, class: "btn btn-primary" %>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="table table-zebra">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Base URL</th>
+          <th class="text-right">Priority</th>
+          <th class="text-right">Models</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        <% @llm_providers.each do |provider| %>
+          <tr>
+            <td class="font-medium"><%= provider.name %></td>
+            <td class="opacity-70"><%= provider.base_url %></td>
+            <td class="text-right"><%= provider.priority %></td>
+            <td class="text-right"><%= provider.model_allowlist.length %></td>
+            <td class="text-right">
+              <%= link_to "Edit", edit_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
+            </td>
+          </tr>
+        <% end %>
+      </tbody>
+    </table>
+  </div>
+</div>
+

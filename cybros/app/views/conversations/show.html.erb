@@ -1,0 +1,57 @@
+<div class="max-w-4xl mx-auto p-6 space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <div class="space-y-1">
+      <div class="text-sm opacity-70">
+        <%= link_to "Conversations", conversations_path, class: "link link-hover" %>
+      </div>
+      <h1 class="text-2xl font-semibold"><%= @conversation.title.presence || "(untitled)" %></h1>
+    </div>
+  </div>
+
+  <div
+    class="card bg-base-100 border"
+    data-controller="conversation-stream"
+    data-conversation-stream-conversation-id-value="<%= @conversation.id %>">
+    <div class="card-body space-y-4">
+      <div class="space-y-3">
+        <% if @transcript.empty? %>
+          <p class="opacity-70">No messages yet.</p>
+        <% else %>
+          <% @transcript.each do |node| %>
+            <% type = node.fetch("node_type") %>
+            <% preview = node.dig("payload", "output_preview", "content").to_s %>
+            <% input = node.dig("payload", "input", "content").to_s %>
+
+            <% if type == Messages::UserMessage.node_type_key %>
+              <div class="chat chat-end">
+                <div class="chat-bubble chat-bubble-primary"><%= input %></div>
+              </div>
+            <% elsif type == Messages::AgentMessage.node_type_key %>
+              <div class="chat chat-start">
+                <% is_latest_agent = (node.fetch("node_id").to_s == @streaming_node_id.to_s) %>
+                <div
+                  class="chat-bubble"
+                  <%= "data-conversation-stream-target=\"agentBubble\"".html_safe if is_latest_agent %>>
+                  <%= preview %>
+                </div>
+              </div>
+            <% end %>
+          <% end %>
+        <% end %>
+      </div>
+
+      <div class="divider"></div>
+
+      <%= form_with url: conversation_messages_path(@conversation), method: :post, class: "flex items-end gap-2" do %>
+        <label class="form-control w-full">
+          <div class="label">
+            <span class="label-text">Message</span>
+          </div>
+          <textarea name="content" class="textarea textarea-bordered w-full" rows="3" placeholder="Say something..."></textarea>
+        </label>
+        <button type="submit" class="btn btn-primary">Send</button>
+      <% end %>
+    </div>
+  </div>
+</div>
+

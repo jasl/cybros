@@ -1,5 +1,24 @@
 Rails.application.routes.draw do
   get "home/index"
+  resource :setup, only: %i[new create]
+  resource :session, only: %i[new create destroy]
+  resources :llm_providers, only: %i[index new create edit update destroy] do
+    post :fetch_models, on: :member
+  end
+  resources :agent_programs, only: %i[index new create show]
+  resources :conversations, only: %i[index show create] do
+    resources :messages, only: %i[create], controller: "conversation_messages"
+  end
+
+  # OpenAI-compatible mock LLM API for development/testing.
+  if Rails.env.development? || Rails.env.test?
+    namespace :mock_llm do
+      namespace :v1 do
+        post "chat/completions", to: "chat_completions#create"
+        get "models", to: "models#index"
+      end
+    end
+  end
   # Define your application routes per the DSL in https://guides.rubyonrails.org/routing.html
 
   # Reveal health status on /up that returns 200 if the app boots with no exceptions, otherwise 500.

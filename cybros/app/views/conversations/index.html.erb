@@ -1,0 +1,43 @@
+<div class="max-w-5xl mx-auto p-6 space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="text-2xl font-semibold">Conversations</h1>
+
+    <%= form_with url: conversations_path, method: :post, class: "flex items-center gap-2" do |f| %>
+      <%= f.text_field :title,
+        name: "conversation[title]",
+        placeholder: "New conversation title",
+        class: "input input-bordered w-full max-w-xs" %>
+      <button type="submit" class="btn btn-primary">New</button>
+    <% end %>
+  </div>
+
+  <div class="card bg-base-100 border">
+    <div class="card-body">
+      <% if @conversations.empty? %>
+        <p class="opacity-70">No conversations yet.</p>
+      <% else %>
+        <div class="overflow-x-auto">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Title</th>
+                <th class="w-0"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <% @conversations.each do |conversation| %>
+                <tr>
+                  <td><%= conversation.title.presence || "(untitled)" %></td>
+                  <td class="text-right">
+                    <%= link_to "Open", conversation_path(conversation), class: "btn btn-ghost btn-sm" %>
+                  </td>
+                </tr>
+              <% end %>
+            </tbody>
+          </table>
+        </div>
+      <% end %>
+    </div>
+  </div>
+</div>
+

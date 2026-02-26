@@ -1,2 +1,11 @@
-<h1>Home#index</h1>
-<p>Find me in app/views/home/index.html.erb</p>
+<div class="min-h-screen flex items-center justify-center p-6">
+  <div class="card w-full max-w-xl bg-base-100 shadow">
+    <div class="card-body">
+      <h1 class="card-title text-2xl">Cybros</h1>
+      <p class="opacity-70">Phase 0 application shell.</p>
+      <div class="card-actions justify-end">
+        <%= button_to "Sign out", session_path, method: :delete, class: "btn btn-ghost" %>
+      </div>
+    </div>
+  </div>
+</div>

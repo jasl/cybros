@@ -6,7 +6,7 @@ This file provides guidance to AI coding agents working with this repository.
 
 Cybros is an experimental AI Agent platform that models agent conversations as dynamic Directed Acyclic Graphs (DAGs). Instead of treating agent interactions as linear chat logs, Cybros represents every action — user messages, agent responses, tool calls, sub-agent tasks, and context summaries — as typed nodes in a DAG. A workflow engine schedules agent execution based on graph topology, enabling parallel task execution, dependency tracking, conversation branching, and lane compression for context management.
 
-The platform is multi-tenant (URL path-based) and designed for observability: the DAG structure makes it possible to visualize, monitor, and audit every step of an agent's reasoning and actions.
+The platform is designed for observability (and future multi-tenancy): the DAG structure makes it possible to visualize, monitor, and audit every step of an agent's reasoning and actions.
 
 ## Development Commands
 
@@ -17,7 +17,8 @@ bin/dev                # Start development server (runs on port 3000)
 ```
 
 Development URL: http://localhost:3000
-Login with: admin@example.com (development fixtures), password: Passw0rd
+
+Phase 0 auth is **email + password**. On first run, complete the setup wizard to create the initial user, then sign in.
 
 ### Testing
 ```bash
@@ -66,24 +67,32 @@ bin/kamal deploy             # Deploy (requires 1Password CLI for secrets)
 
 ## Architecture Overview
 
-### Multi-Tenancy (URL-Based)
+### Account (Phase 0)
 
-Cybros uses **URL path-based multi-tenancy**:
+Phase 0 runs as a **single default Account** and does **not** implement URL path-based multi-tenancy.
+
+- `Account` exists primarily as a **global settings container** (Discourse SiteConfig-style).
+- There is **no** `/{external_account_id}/...` route prefix in Phase 0.
+- Do **not** assume all app tables have `account_id` in Phase 0.
+
+### Multi-Tenancy (future: URL path-based)
+
+Cybros is designed to support URL path-based multi-tenancy in later phases:
 - Each Account (tenant) has a unique `external_account_id` (7+ digits)
 - URLs are prefixed: `/{account_id}/conversations/...`
 - Middleware extracts the account ID from the URL and sets `Current.account`
 - The slug is moved from `PATH_INFO` to `SCRIPT_NAME`, making Rails think it's "mounted" at that path
-- All models include `account_id` for data isolation
 - Background jobs automatically serialize and restore account context
 
-**Key insight**: This architecture allows multi-tenancy without subdomains or separate databases, making local development and testing simpler.
+**Key insight**: This architecture allows multi-tenancy without subdomains or separate databases.
 
-### Authentication & Authorization
+### Authentication & Authorization (Phase 0)
 
-**Passwordless magic link authentication**:
-- Global `Identity` (email-based) can have `Users` in multiple Accounts
-- Users belong to an Account and have roles: owner, admin, member, system
-- Sessions managed via signed cookies
+**Email + password authentication**:
+- Global `Identity` (email + `password_digest`)
+- Cookie `Session` (signed, HTTP-only; SameSite=Lax)
+
+Future phases may add magic links and OAuth.
 
 ### DAG-Based Conversation Engine (Core Domain)
 

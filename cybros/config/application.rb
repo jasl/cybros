@@ -39,12 +39,17 @@ module Cybros
     # Disallow permanent checkout of activerecord connections (request scope):
     config.active_record.permanent_connection_checkout = :disallowed
 
+    # Prefer ENV so local/test can run without credentials files.
+    # Production should still provide real keys via ENV or credentials.
     config.active_record.encryption.primary_key =
-      Rails.app.creds.option(:active_record_encryption, :primary_key)
+      ENV["ACTIVE_RECORD_ENCRYPTION__PRIMARY_KEY"].presence ||
+        Rails.app.creds.option(:active_record_encryption, :primary_key)
     config.active_record.encryption.deterministic_key =
-      Rails.app.creds.option(:active_record_encryption, :deterministic_key)
+      ENV["ACTIVE_RECORD_ENCRYPTION__DETERMINISTIC_KEY"].presence ||
+        Rails.app.creds.option(:active_record_encryption, :deterministic_key)
     config.active_record.encryption.key_derivation_salt =
-      Rails.app.creds.option(:active_record_encryption, :key_derivation_salt)
+      ENV["ACTIVE_RECORD_ENCRYPTION__KEY_DERIVATION_SALT"].presence ||
+        Rails.app.creds.option(:active_record_encryption, :key_derivation_salt)
 
     # Use modern header-based CSRF protection (requires Sec-Fetch-Site header support)
     config.action_controller.forgery_protection_strategy = :header_only

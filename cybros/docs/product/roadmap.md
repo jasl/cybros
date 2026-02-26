@@ -33,9 +33,9 @@ Phase 3 ── Observability ──────── "Understand and improve ag
 
 Based on Fizzy's patterns with Discourse-inspired settings:
 
-- **Account**: The instance tenant. Holds global configuration as JSONB `settings` column (LLM defaults, feature flags). Single default account created in seeds. Future: extract into Discourse-style `AccountSettings` table if needed.
-- **Identity**: Global user identity (email + password_digest). Enables future OAuth via `UserAssociatedAccount` (Discourse pattern). Single identity created via first-run setup wizard.
-- **User**: Account-scoped membership. Belongs to Identity and Account. Has role (owner/admin/member). Single user soft-limit enforced in application logic.
+- **Account**: Phase 0 uses a **single default account** (no URL multi-tenancy). Holds global configuration as JSONB `settings` column (LLM defaults, feature flags). Future phases may add real tenancy.
+- **Identity**: Global user identity (**email + `password_digest`**). Single identity created via first-run setup wizard.
+- **User**: Phase 0 user record for the identity. Belongs to Identity. A `role` field may exist, but Phase 0 assumes a single "owner" user.
 - **Session**: Cookie-based (signed, HTTP-only, SameSite: lax). Modeled after Fizzy's session pattern.
 - **Current**: `ActiveSupport::CurrentAttributes` — `Current.user`, `Current.identity`, `Current.account`, `Current.session`.
 - **LlmProvider**: API endpoint configuration. Fields: `name`, `base_url`, `api_key` (encrypted), `api_format` (default: "openai"), `headers` (JSONB), `model_allowlist` (string array, required — provider only serves models explicitly listed), `priority` (integer, default: 0 — higher wins when multiple providers serve the same model). Modeled after vibe_tavern's LlmProvider, simplified (no LlmModel/LlmPreset tiers). UI includes a "Fetch Models" button that queries the provider's `/v1/models` endpoint to help populate the allowlist (not all providers support this).
@@ -123,6 +123,8 @@ Build the full UI shell in Phase 0, even if some sections are empty:
 - **Settings page**: LLM providers CRUD (with "Fetch Models" button), Account settings, User profile
 - **Mock LLM**: Development-only controller (ported from vibe_tavern) at `/mock_llm/v1/`
 
+> Note: Several ChatGPT-grade UI/UX details (three-pane responsive shell, strict message ordering under rapid interactions, typing indicator/retry/cancel UX, and improved streaming observability) are intentionally deferred to **Phase 0.5** to keep Phase 0 focused on end-to-end plumbing.
+
 ### Bundled Agent Programs
 
 Phase 0 ships only `default-assistant`. The `coder` and `mac-assistant` profiles are added in Phase 1 (they require Nexus).
@@ -152,6 +154,129 @@ default-assistant/
 - [ ] Conversation lifecycle: can archive (soft-delete) and delete conversations
 - [ ] Agent creation from UI: create new agent from bundled profile
 - [ ] Development: `bin/setup` + `bin/dev` + seeds → working instance with default agent
+
+---
+
+## Phase 0.5: UI + Streaming Hardening
+
+**Goal**: Implement a **complete, product-grade UI skeleton** (ChatGPT-style) and make the **chat page transport** (server-push + connectivity + ordering) robust and componentized, so future product shapes (e.g. Telegram bot) can reuse the same streaming/update semantics.
+
+### Guiding principles
+
+- **One UI shell, many surfaces**: Web UI today; other surfaces (Telegram bot, etc.) later should reuse the same *conversation event stream* and *run state model*.
+- **Componentize the hard parts**: message list rendering, streaming bubble, indicator state machine, reconnect/resume logic, and event ordering must be isolated and testable.
+- **Server-push by default**: Phase 0.5 should remove “per-connection 0.25s polling” as the primary mechanism. Keep polling only as a low-frequency fallback.
+
+### Milestones (deliverables)
+
+#### 0.5-A — App Shell (3-pane, responsive)
+
+Build a **three-pane layout** (ChatGPT-inspired) used by all pages:
+
+- **Left sidebar (collapsible)**:
+  - Primary nav: Dashboard / Conversations / Agents / Settings
+  - Conversation list (recency grouping + search)
+  - Collapsed mode: icons only
+- **Main pane**:
+  - Route content (dashboard cards, chat, settings forms)
+- **Right pane (on-demand)**:
+  - Inspector/Context drawer (selected message, run status, provider/model, tool calls, debug)
+  - Opens per selection or route; dismissible
+
+**Responsive acceptance**:
+- **Mobile**: left sidebar as drawer; right pane as modal/drawer; composer always reachable.
+- **Tablet**: left collapsible; right overlays/docks depending on width.
+- **Desktop**: full three-pane; optional resize handles.
+
+#### 0.5-B — Pages (Dashboard + Personal settings + System settings)
+
+Add top-level pages that share the shell (content can be minimal, but layout + routing must be real):
+
+- **Dashboard**:
+  - Recent conversations
+  - Status cards (provider connectivity, model allowlist health, last run summary)
+  - Quick actions
+- **Personal settings**:
+  - Profile (email/password change)
+  - Sessions (sign out all)
+- **System settings**:
+  - LLM providers (existing CRUD, improved inline validation UX)
+  - Agent programs management (existing, plus browsing/search)
+
+#### 0.5-C — Chat transport: server-push + connectivity (reference: tavern_kit/playground)
+
+Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes):
+
+- **Server-push events**:
+  - Prefer broadcasting on `DAG::NodeEvent` creation (and/or stream flush) rather than per-connection polling.
+  - Define a stable event envelope usable by other surfaces (e.g. Telegram):
+    - `conversation_id`, `turn_id` (or run id), `node_id`, `event_id`, `kind`, `text`, `payload`, timestamps.
+- **Connectivity**:
+  - Reconnect, resume-from-cursor, and dedupe without duplicating text.
+  - Explicit “active run node” tracking (do not infer from “latest leaf”).
+- **Ordering invariants** (non-negotiable):
+  - Rapid sends create distinct user bubbles **in order**.
+  - Each user message pairs to the correct assistant bubble.
+  - Out-of-order arrival must not reorder UI; reconcile by `(turn_id, node_id, event_id)`.
+
+#### 0.5-D — Chat UX: indicator + error/retry/cancel (state machine)
+
+- **Streaming indicator**:
+  - Anchored to the currently streaming assistant bubble.
+  - State transitions: idle → streaming → completed / errored / canceled.
+- **Error / retry / cancel**:
+  - Inline errors on the relevant assistant bubble.
+  - Retry generation (new node or rerun semantics, consistent with DAG).
+  - Stop/cancel while streaming.
+- **Stuck detection**:
+  - Heartbeat timeout → show warning + allow cancel/retry.
+
+#### 0.5-E — Observability & debuggability
+
+- **Rate-limited warnings** (no silent stalls).
+- Structured logs for: subscribe, reconnect, cursor advance, event counts by kind.
+- Dev-only debug overlay for stream state (cursor, node id, run state).
+
+### Edge/extreme test matrix (required)
+
+Add system + integration tests that cover:
+
+- **Rapid sends**: 3–10 messages quickly; assert ordering + pairing.
+- **Reconnect**: disconnect/reconnect mid-stream; resume without duplication.
+- **Compaction**: deltas compacted mid-stream; UI remains correct.
+- **Out-of-order events**: simulate reordering; UI stable by reconciliation keys.
+- **Provider/model mismatch**: clear UX when no provider supports preferred models.
+- **Invalid provider config**: invalid headers JSON is 422 with inline errors (no 500).
+- **Long outputs**: large responses; UI remains responsive and bounded.
+
+### Acceptance Criteria
+
+> Project is early-stage. Until the first external beta, **destructive changes are allowed** and plans may evolve; optimize for correctness and product shape over backward compatibility.
+
+- [ ] **App shell**: three-pane layout exists and is used by Dashboard / Conversations / Agents / Settings routes
+- [ ] **Responsive**:
+  - [ ] Mobile: left sidebar is a drawer; right pane is a modal/drawer; composer always reachable
+  - [ ] Tablet: left collapsible; right overlays/docks appropriately
+  - [ ] Desktop: full three-pane; navigation + inspector usable
+- [ ] **Dashboard**: route exists and renders meaningful status cards (can be minimal content)
+- [ ] **Personal settings**: profile + session management routes exist (can be minimal content)
+- [ ] **System settings**: LLM providers + agent programs management usable under shell (existing CRUD integrated)
+- [ ] **Chat transport (server-push)**:
+  - [ ] Server-push is the primary streaming mechanism (polling only low-frequency fallback)
+  - [ ] Stable event envelope exists and is surface-agnostic (usable by future Telegram bot)
+  - [ ] Reconnect/resume-from-cursor works without duplication
+  - [ ] Active run node tracking is explicit (no “latest leaf” inference)
+- [ ] **Ordering invariants**:
+  - [ ] Rapid sends preserve user bubble order
+  - [ ] Each user message pairs to the correct assistant response bubble
+  - [ ] Out-of-order event arrival does not reorder UI; reconciliation key(s) enforced
+- [ ] **Indicator + controls**:
+  - [ ] Typing/streaming indicator anchored to the streaming assistant bubble
+  - [ ] Inline error presentation, retry, cancel/stop generation, and stuck detection all work end-to-end
+- [ ] **Observability**:
+  - [ ] Rate-limited warnings/logs prevent silent stalls
+  - [ ] Dev-only debug overlay shows stream state (cursor/node/run state)
+- [ ] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
 
 ---
 

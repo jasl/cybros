@@ -1,0 +1,63 @@
+<%= form_with model: llm_provider, class: "space-y-4" do |f| %>
+  <div class="grid grid-cols-1 gap-4">
+    <div>
+      <%= f.label :name, class: "label" do %>
+        <span class="label-text">Name</span>
+      <% end %>
+      <%= f.text_field :name, required: true, class: "input input-bordered w-full" %>
+    </div>
+
+    <div>
+      <%= f.label :base_url, class: "label" do %>
+        <span class="label-text">Base URL</span>
+      <% end %>
+      <%= f.url_field :base_url, required: true, class: "input input-bordered w-full", placeholder: "https://openrouter.ai/api/v1" %>
+    </div>
+
+    <div>
+      <%= f.label :api_key, class: "label" do %>
+        <span class="label-text">API key</span>
+      <% end %>
+      <%= f.password_field :api_key, class: "input input-bordered w-full", placeholder: (llm_provider.persisted? ? "(unchanged)" : "") %>
+    </div>
+
+    <div>
+      <%= f.label :headers, class: "label" do %>
+        <span class="label-text">Headers (JSON)</span>
+      <% end %>
+      <% headers_json_value = (defined?(@headers_json) && @headers_json.present?) ? @headers_json : JSON.pretty_generate(llm_provider.headers || {}) %>
+      <%= text_area_tag "llm_provider[headers_json]", headers_json_value, class: "textarea textarea-bordered w-full font-mono", rows: 6, placeholder: "{\n  \"X-Header\": \"value\"\n}" %>
+      <p class="text-xs opacity-70 mt-2">Optional extra HTTP headers sent to the provider.</p>
+    </div>
+
+    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+      <div>
+        <%= f.label :api_format, class: "label" do %>
+          <span class="label-text">API format</span>
+        <% end %>
+        <%= f.select :api_format, [["OpenAI-compatible", "openai"]], {}, class: "select select-bordered w-full" %>
+      </div>
+
+      <div>
+        <%= f.label :priority, class: "label" do %>
+          <span class="label-text">Priority</span>
+        <% end %>
+        <%= f.number_field :priority, class: "input input-bordered w-full" %>
+      </div>
+    </div>
+
+    <div>
+      <%= f.label :model_allowlist, class: "label" do %>
+        <span class="label-text">Model allowlist</span>
+      <% end %>
+      <%= text_area_tag "llm_provider[model_allowlist_text]", llm_provider.model_allowlist.join("\n"), class: "textarea textarea-bordered w-full font-mono", rows: 8, placeholder: "one model id per line" %>
+      <p class="text-xs opacity-70 mt-2">Only models listed here are eligible for selection.</p>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn btn-primary">Save</button>
+    <%= link_to "Back", llm_providers_path, class: "btn btn-ghost" %>
+  </div>
+<% end %>
+

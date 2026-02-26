@@ -10,11 +10,17 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_26_000006) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
   enable_extension "vector"
+
+  create_table "accounts", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.jsonb "settings", default: {}, null: false
+    t.datetime "updated_at", null: false
+  end
 
   create_table "active_storage_attachments", force: :cascade do |t|
     t.bigint "blob_id", null: false
@@ -54,6 +60,33 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
     t.index ["conversation_id"], name: "index_agent_memory_entries_on_conversation_id"
     t.index ["embedding"], name: "index_agent_memory_entries_on_embedding", opclass: :vector_cosine_ops, using: :hnsw
     t.index ["metadata"], name: "index_agent_memory_entries_on_metadata", using: :gin
+  end
+
+  create_table "agent_programs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.string "active_persona"
+    t.jsonb "args", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.text "description"
+    t.string "local_path"
+    t.string "name", null: false
+    t.string "profile_source"
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "conversation_runs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.uuid "dag_node_id", null: false
+    t.jsonb "debug", default: {}, null: false
+    t.jsonb "error", default: {}, null: false
+    t.datetime "finished_at"
+    t.datetime "queued_at", null: false
+    t.datetime "started_at"
+    t.string "state", default: "queued", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "state"], name: "index_conversation_runs_on_conversation_id_and_state"
+    t.index ["conversation_id"], name: "index_conversation_runs_on_conversation_id"
+    t.index ["dag_node_id"], name: "index_conversation_runs_on_dag_node_id"
   end
 
   create_table "conversations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -232,6 +265,38 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
     t.index ["subject_type", "subject_id"], name: "index_events_on_subject"
   end
 
+  create_table "identities", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "email", null: false
+    t.string "password_digest", null: false
+    t.datetime "updated_at", null: false
+    t.index "lower((email)::text)", name: "index_identities_on_lower_email_unique", unique: true
+  end
+
+  create_table "llm_providers", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.string "api_format", default: "openai", null: false
+    t.string "api_key"
+    t.string "base_url", null: false
+    t.datetime "created_at", null: false
+    t.jsonb "headers", default: {}, null: false
+    t.string "model_allowlist", default: [], null: false, array: true
+    t.string "name", null: false
+    t.integer "priority", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["priority"], name: "index_llm_providers_on_priority"
+  end
+
+  create_table "sessions", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "identity_id", null: false
+    t.string "ip_address"
+    t.datetime "last_seen_at"
+    t.datetime "updated_at", null: false
+    t.string "user_agent"
+    t.index ["identity_id", "created_at"], name: "index_sessions_on_identity_id_and_created_at"
+    t.index ["identity_id"], name: "index_sessions_on_identity_id"
+  end
+
   create_table "topics", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
@@ -245,9 +310,18 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
     t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_topics_role_enum"
   end
 
+  create_table "users", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.uuid "identity_id", null: false
+    t.integer "role", default: 0, null: false
+    t.datetime "updated_at", null: false
+    t.index ["identity_id"], name: "index_users_on_identity_id", unique: true
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "agent_memory_entries", "conversations"
+  add_foreign_key "conversation_runs", "conversations"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "to_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_to_node_graph_scoped", on_delete: :cascade
@@ -269,5 +343,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_20_000000) do
   add_foreign_key "dag_turns", "dag_graphs", column: "graph_id", on_delete: :cascade
   add_foreign_key "dag_turns", "dag_lanes", column: ["graph_id", "lane_id"], primary_key: ["graph_id", "id"], name: "fk_dag_turns_lane_graph_scoped", on_delete: :cascade
   add_foreign_key "events", "conversations"
+  add_foreign_key "sessions", "identities"
   add_foreign_key "topics", "conversations"
+  add_foreign_key "users", "identities"
 end
