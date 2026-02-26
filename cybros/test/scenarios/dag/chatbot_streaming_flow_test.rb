@@ -24,7 +24,7 @@ class DAG::ChatbotStreamingFlowTest < ActiveSupport::TestCase
   end
 
   test "chatbot streaming flow: executor streams output deltas, final output is materialized, and node events are queryable" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c012"
 

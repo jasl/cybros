@@ -23,7 +23,7 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
   end
 
   test "graph surgery: deferred visibility changes, compression, edit replacement, and retry replacement keep graph correct" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c030"
 

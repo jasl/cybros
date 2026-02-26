@@ -1,4 +1,6 @@
 class SetupsController < ApplicationController
+  layout "session"
+
   before_action :redirect_if_already_setup
 
   def new

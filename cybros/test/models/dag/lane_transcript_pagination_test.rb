@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   test "transcript_page paginates turns in a lane with before/after cursors" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -81,7 +81,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   end
 
   test "transcript_page validates cursors and limit" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -109,7 +109,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   end
 
   test "transcript_page respects include_deleted when turn has no visible anchor" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -156,7 +156,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   end
 
   test "transcript_page orders turns by turn_id (uuidv7), not by node created_at" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -224,7 +224,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   end
 
   test "transcript_page is lane-scoped (supports topics/subthreads)" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -291,7 +291,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
   end
 
   test "graph.transcript_page delegates to lane.transcript_page" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

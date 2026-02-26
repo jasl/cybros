@@ -1,5 +1,4 @@
-class AgentProgramsController < ApplicationController
-  before_action :require_authentication
+class AgentProgramsController < AgentController
   before_action :set_agent_program, only: %i[show]
 
   def index

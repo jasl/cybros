@@ -9,7 +9,7 @@ class AgentCore::DAG::ContextBudgetManagerPromptSectionsTest < ActiveSupport::Te
       File.write(File.join(dir, "AGENTS.md"), "ROOT AGENTS")
       File.write(File.join(dir, "README.md"), "README BODY")
 
-      conversation = Conversation.create!
+      conversation = create_conversation!
       graph = conversation.dag_graph
 
       turn_id = SecureRandom.uuid

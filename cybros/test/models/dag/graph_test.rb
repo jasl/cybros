@@ -15,7 +15,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
   end
 
   test "turn helpers scope to active nodes and compute stability" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -35,7 +35,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
   end
 
   test "emit_event raises when given an unknown event_type" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -46,7 +46,7 @@ class DAG::GraphTest < ActiveSupport::TestCase
   end
 
   test "destroy purges nodes, edges, and bodies for the graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})

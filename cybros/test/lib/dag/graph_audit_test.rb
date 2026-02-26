@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::GraphAuditTest < ActiveSupport::TestCase
   test "scan detects and repair! fixes turn anchor drift" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node =
@@ -34,7 +34,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "scan detects and repair! compresses active edges pointing at inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -51,7 +51,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "repair! deletes visibility patches for inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -69,7 +69,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "repair! fixes leaf invariant violations by calling validate_leaf_invariant!" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -82,7 +82,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "repair! reclaims stale running nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(
@@ -133,7 +133,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
@@ -169,7 +169,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
@@ -195,7 +195,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
@@ -220,7 +220,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     issues = DAG::GraphAudit.scan(graph: graph)
@@ -234,7 +234,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "scan reports cycle_detected when active edges form a cycle" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -279,7 +279,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "scan reports toposort_failed when topological sorting raises unexpectedly" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -299,7 +299,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "scan reports node_body_drift when node_type does not match stored NodeBody STI type" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -312,7 +312,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   end
 
   test "scan reports unknown_node_type when node_type cannot be mapped to a NodeBody class" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -327,7 +327,7 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
   test "scan reports node_type_maps_to_non_node_body when node_type maps to a non-NodeBody constant" do
     Messages.const_set(:NotABody, Class.new)
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

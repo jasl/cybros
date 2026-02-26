@@ -86,7 +86,7 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   end
 
   test "agent flow: plan -> parallel tool calls -> join -> final transcript" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c010"
 
@@ -156,7 +156,7 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   end
 
   test "tool failure propagation makes skipped message transcript-visible with a safe preview" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c011"
 

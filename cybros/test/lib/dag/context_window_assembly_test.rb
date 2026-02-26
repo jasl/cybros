@@ -20,7 +20,7 @@ class DAG::ContextWindowAssemblyTest < ActiveSupport::TestCase
   end
 
   test "context_for raises when context node hard cap is exceeded" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -40,7 +40,7 @@ class DAG::ContextWindowAssemblyTest < ActiveSupport::TestCase
   end
 
   test "context_for raises when context edge hard cap is exceeded" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

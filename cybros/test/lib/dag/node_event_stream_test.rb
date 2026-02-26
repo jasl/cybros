@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::NodeEventStreamTest < ActiveSupport::TestCase
   test "output_delta! creates an event and patches output_preview" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node =

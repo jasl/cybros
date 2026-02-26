@@ -66,7 +66,7 @@ class DAG::OpencodePlanModeOptionalApprovalFlowTest < ActiveSupport::TestCase
   end
 
   test "opencode plan-mode flow: ask permission for tool, deny, and still produce final via sequence edge" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d200"
 

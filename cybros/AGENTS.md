@@ -27,6 +27,7 @@ bin/rails test test/path/file_test.rb    # Run single test file
 bin/rails test test/path/file_test.rb:42 # Run single test method by line number
 bin/rails test:system                    # Run system tests (Capybara + Selenium)
 bin/ci                                   # Run full CI suite (style, security, tests)
+bin/e2e                                  # Optional Playwright E2E (requires dev server running)
 
 # For parallel test execution issues, use:
 PARALLEL_WORKERS=1 bin/rails test
@@ -106,6 +107,11 @@ Cybros is designed to support URL path-based multi-tenancy in later phases:
 **Email + password authentication**:
 - Global `Identity` (email + `password_digest`)
 - Cookie `Session` (signed, HTTP-only; SameSite=Lax)
+
+**Authorization (Phase 0)**:
+- Conversations are **owned by `User`** (`Conversation belongs_to :user`). There is **no per-account scoping** in Phase 0.
+- All controller loads must scope through the owner (e.g., `Current.user.conversations.find(...)`).
+- ActionCable subscriptions must enforce ownership for `ConversationChannel` (reject if not the owner).
 
 Future phases may add magic links and OAuth.
 
@@ -215,18 +221,18 @@ Database-backed job queue (no Redis):
 ### Core Models
 
 **Account** → The tenant/organization
-- Has users, conversations
-- Multi-tenancy root
+- Phase 0: singleton global settings container (`Account.instance`)
+- Future: multi-tenancy root
 
 **Identity** → Global user (email)
 - Can have Users in multiple Accounts
 
-**User** → Account membership
-- Belongs to Account and Identity
+**User** → Phase 0 app user
+- Belongs to Identity
 - Has role (owner/admin/member/system)
 
 **Conversation** → A DAG-structured agent session
-- Belongs to Account
+- Belongs to User (owner)
 - Has many DAG nodes and edges
 - Tracks overall status and metadata
 
@@ -249,9 +255,18 @@ Database-backed job queue (no Redis):
 ### Chrome MCP (Local Dev)
 
 URL: `http://localhost:3000`
-Login: admin@example.com (passwordless magic link auth - check rails console for link)
+Login: use the email + password created in the setup wizard. (Common test creds: `admin@example.com` / `Passw0rd`.)
 
 Use Chrome MCP tools to interact with the running dev app for UI testing and debugging.
+
+### Playwright E2E (optional)
+
+- E2E tests live in `test/e2e/` and are **not** part of `bin/ci`.
+- Start the dev server (`bin/dev`) then run `bin/e2e`.
+
+### Request throttling (Phase 0.5)
+
+- Controllers may apply lightweight per-user throttling via `RateLimitable` (returns `429 Too Many Requests` when exceeded).
 
 ## Coding Style
 

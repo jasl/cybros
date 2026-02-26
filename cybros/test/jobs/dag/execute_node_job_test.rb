@@ -27,7 +27,7 @@ class DAG::ExecuteNodeJobTest < ActiveJob::TestCase
   end
 
   test "execute job runs the node and advances until the leaf is an agent_message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: { "name" => "t" })
 

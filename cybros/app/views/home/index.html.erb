@@ -1,10 +1,16 @@
-<div class="min-h-screen flex items-center justify-center p-6">
-  <div class="card w-full max-w-xl bg-base-100 shadow">
-    <div class="card-body">
-      <h1 class="card-title text-2xl">Cybros</h1>
-      <p class="opacity-70">Phase 0 application shell.</p>
-      <div class="card-actions justify-end">
-        <%= button_to "Sign out", session_path, method: :delete, class: "btn btn-ghost" %>
+<div class="min-h-dvh flex items-center justify-center p-6">
+  <div class="card w-full max-w-2xl bg-base-100 border shadow-sm">
+    <div class="card-body gap-4">
+      <div class="flex items-center gap-3">
+        <span class="icon-[lucide--bot] size-6"></span>
+        <h1 class="text-2xl font-semibold">Cybros</h1>
+      </div>
+      <p class="opacity-70">
+        Experimental agent platform. Chat UI and streaming hardening in progress.
+      </p>
+
+      <div class="card-actions justify-end gap-2">
+        <%= link_to "Sign in", new_session_path, class: "btn btn-ghost" %>
       </div>
     </div>
   </div>

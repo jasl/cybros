@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::GraphSemanticsTest < ActiveSupport::TestCase
   test "validate_leaf_invariant! repairs leaves for attachable graphs" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     leaf = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -35,7 +35,7 @@ class DAG::GraphSemanticsTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -68,7 +68,7 @@ class DAG::GraphSemanticsTest < ActiveSupport::TestCase
   end
 
   test "scheduler uses graph claim_lease_seconds_for" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

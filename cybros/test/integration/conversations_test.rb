@@ -9,13 +9,13 @@ class ConversationsTest < ActionDispatch::IntegrationTest
         password_confirmation: "Passw0rd",
       )
 
-    User.create!(identity: identity, role: :owner)
+    user = User.create!(identity: identity, role: :owner)
 
     post session_path, params: { email: "admin@example.com", password: "Passw0rd" }
     assert_redirected_to root_path
     assert cookies[:session_token].present?
 
-    identity
+    user
   end
 
   test "requires authentication" do
@@ -24,10 +24,10 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   end
 
   test "index lists conversations" do
-    sign_in_owner!
+    user = sign_in_owner!
 
-    a = Conversation.create!(title: "A", metadata: { "agent" => { "agent_profile" => "coding" } })
-    b = Conversation.create!(title: "B", metadata: { "agent" => { "agent_profile" => "coding" } })
+    a = create_conversation!(user: user, title: "A")
+    b = create_conversation!(user: user, title: "B")
 
     get conversations_path
     assert_response :success
@@ -47,20 +47,20 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   end
 
   test "show renders transcript and message form" do
-    sign_in_owner!
+    user = sign_in_owner!
 
-    conversation = Conversation.create!(title: "Chat", metadata: { "agent" => { "agent_profile" => "coding" } })
+    conversation = create_conversation!(user: user, title: "Chat")
 
     get conversation_path(conversation)
     assert_response :success
     assert_includes response.body, conversation.title
-    assert_includes response.body, "Send"
+    assert_includes response.body, "Message…"
   end
 
   test "create_message appends a finished user_message and leaves a pending agent_message leaf" do
-    sign_in_owner!
+    user = sign_in_owner!
 
-    conversation = Conversation.create!(title: "Chat", metadata: { "agent" => { "agent_profile" => "coding" } })
+    conversation = create_conversation!(user: user, title: "Chat")
 
     assert_difference -> { conversation.dag_graph.nodes.count }, +2 do
       assert_difference -> { ConversationRun.count }, +1 do

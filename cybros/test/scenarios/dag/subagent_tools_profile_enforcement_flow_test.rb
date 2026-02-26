@@ -28,7 +28,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
   end
 
   test "subagent profile denies tool calls as tool_not_in_profile and subagent_poll returns transcript preview" do
-    parent = Conversation.create!
+    parent = create_conversation!
     parent_graph = parent.dag_graph
     parent_turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil

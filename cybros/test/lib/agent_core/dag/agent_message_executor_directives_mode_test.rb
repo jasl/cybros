@@ -47,7 +47,7 @@ class AgentCoreDAGAgentMessageExecutorDirectivesModeTest < ActiveSupport::TestCa
     prev_resolver = AgentCore::DAG.runtime_resolver
     AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
 
-    conversation = Conversation.create!(metadata: { "agent" => { "agent_profile" => "subagent" } })
+    conversation = create_conversation!(metadata: { "agent" => { "agent_profile" => "subagent" } })
     graph = conversation.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 

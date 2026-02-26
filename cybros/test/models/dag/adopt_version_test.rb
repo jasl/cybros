@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::AdoptVersionTest < ActiveSupport::TestCase
   test "adopt_version! switches the active version within a version_set_id" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user =
@@ -54,7 +54,7 @@ class DAG::AdoptVersionTest < ActiveSupport::TestCase
   end
 
   test "adopt_version! does not archive awaiting_approval leaves in the same turn" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000f020"
 

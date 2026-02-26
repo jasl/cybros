@@ -42,7 +42,7 @@ class DAG::AutoRoleplayNoHumanFlowTest < ActiveSupport::TestCase
   end
 
   test "auto without human: alternating character messages across multiple turns with transcript pagination" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

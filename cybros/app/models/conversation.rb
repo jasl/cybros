@@ -1,4 +1,6 @@
 class Conversation < ApplicationRecord
+  belongs_to :user
+
   has_one :dag_graph, class_name: "DAG::Graph", as: :attachable,
           dependent: :destroy, autosave: true
   delegate :mutate!, :compress!, :kick!,

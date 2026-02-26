@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
   test "exports system and developer message snippets from input content" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     system = graph.nodes.create!(
@@ -27,7 +27,7 @@ class DAG::Visualization::MermaidExporterTest < ActiveSupport::TestCase
   end
 
   test "exports branch edges with branch_kinds" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     root = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

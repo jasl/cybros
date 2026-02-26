@@ -9,7 +9,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
   end
 
   test "request_soft_delete! applies immediately when graph is idle and node is terminal" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(
@@ -29,7 +29,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
   end
 
   test "request_exclude_from_context! defers when graph has running nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
@@ -59,7 +59,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
   end
 
   test "request_soft_delete! defers for non-terminal nodes and applies later when terminal and idle" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -89,7 +89,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
   end
 
   test "patch merges exclude and delete requests and applies both" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     running = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
@@ -123,7 +123,7 @@ class DAG::VisibilityPatchesTest < ActiveSupport::TestCase
   end
 
   test "apply_visibility_patches_if_idle! drops patches targeting inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     running = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})

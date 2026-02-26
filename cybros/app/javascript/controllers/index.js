@@ -4,8 +4,23 @@
 
 import { application } from "./application"
 
-import HelloController from "./hello_controller"
-application.register("hello", HelloController)
+import SidebarController from "./sidebar_controller"
+application.register("sidebar", SidebarController)
 
-import ConversationStreamController from "./conversation_stream_controller"
-application.register("conversation-stream", ConversationStreamController)
+import SettingsNavController from "./settings_nav_controller"
+application.register("settings-nav", SettingsNavController)
+
+import ConversationChannelController from "./conversation_channel_controller"
+application.register("conversation-channel", ConversationChannelController)
+
+import MessageFormController from "./message_form_controller"
+application.register("message-form", MessageFormController)
+
+import ChatScrollController from "./chat_scroll_controller"
+application.register("chat-scroll", ChatScrollController)
+
+import TypingIndicatorController from "./typing_indicator_controller"
+application.register("typing-indicator", TypingIndicatorController)
+
+import DebugOverlayController from "./debug_overlay_controller"
+application.register("debug-overlay", DebugOverlayController)

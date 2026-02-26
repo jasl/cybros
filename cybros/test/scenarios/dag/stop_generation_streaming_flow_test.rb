@@ -9,7 +9,7 @@ class DAG::StopGenerationStreamingFlowTest < ActiveSupport::TestCase
   end
 
   test "stop generation while streaming: output deltas are compacted and partial output stays readable via transcript pagination" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
     turn_id = "0194f3c0-0000-7000-8000-00000000e401"

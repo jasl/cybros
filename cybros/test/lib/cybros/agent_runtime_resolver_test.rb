@@ -3,7 +3,7 @@ require "test_helper"
 class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
   test "channel_for reads conversation routing.channel" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "routing" => { "channel" => "web" },
           "agent" => { "agent_profile" => "coding" },
@@ -38,7 +38,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
   test "channel_for prefers node routing.channel over conversation default" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "routing" => { "channel" => "web" },
           "agent" => { "agent_profile" => "coding" },
@@ -73,7 +73,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
   test "channel_for returns nil for empty or invalid routing metadata" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "routing" => "wat",
           "agent" => { "agent_profile" => "coding" },
@@ -108,7 +108,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
   test "agent_profile hash applies prompt and tool restrictions" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => {
@@ -174,7 +174,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
   test "rejects unknown agent_profile string" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "wat",
@@ -221,7 +221,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
   test "rejects invalid context_turns metadata" do
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "coding",

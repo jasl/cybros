@@ -25,7 +25,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
   end
 
   test "context_cost report includes prune_tool_outputs decision when pruning makes prompt fit" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     long_tool_output = "x" * 2_000
@@ -136,7 +136,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
   end
 
   test "context_cost is recorded on ContextWindowExceededError and provider is not called" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     t1 = "0194f3c0-0000-7000-8000-00000000d210"
@@ -208,7 +208,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
   end
 
   test "context_cost records multiple prune_tool_outputs attempts when shrinking turns" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     long_tool_output = "x" * 2_000
@@ -371,7 +371,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
   end
 
   test "hard_clear prunes old tool outputs when soft trim is insufficient" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     long_tool_output = "x" * 2_000

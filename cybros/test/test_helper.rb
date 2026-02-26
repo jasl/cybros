@@ -25,6 +25,7 @@ end
 ENV["RAILS_ENV"] ||= "test"
 require_relative "../config/environment"
 require "rails/test_help"
+require "securerandom"
 
 module ActiveSupport
   class TestCase
@@ -47,5 +48,25 @@ module ActiveSupport
     fixtures :all
 
     # Add more helper methods to be used by all tests here...
+
+    def create_identity!(email: nil, password: "Passw0rd")
+      email ||= "user-#{SecureRandom.hex(6)}@example.com"
+      Identity.create!(
+        email: email,
+        password: password,
+        password_confirmation: password,
+      )
+    end
+
+    def create_user!(role: :owner, email: nil, password: "Passw0rd")
+      identity = create_identity!(email: email, password: password)
+      User.create!(identity: identity, role: role)
+    end
+
+    def create_conversation!(user: nil, title: "Chat", metadata: nil)
+      user ||= create_user!
+      metadata ||= { "agent" => { "agent_profile" => "coding" } }
+      Conversation.create!(user: user, title: title, metadata: metadata)
+    end
   end
 end

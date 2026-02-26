@@ -29,7 +29,7 @@ class DAG::RoleplayGroupChatFlowTest < ActiveSupport::TestCase
   end
 
   test "roleplay flow: multiple executable character_message nodes in one turn, rerun, and transcript views" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c020"
 

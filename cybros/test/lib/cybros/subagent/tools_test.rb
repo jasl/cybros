@@ -11,7 +11,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
 
   test "subagent_spawn creates child conversation and seeds a minimal executable turn" do
     parent =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "review",
@@ -80,7 +80,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_spawn rejects nested spawns" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil
@@ -130,7 +130,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_spawn rejects invalid context_turns" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil
@@ -169,7 +169,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_spawn rejects invalid agent_profile" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil
@@ -208,7 +208,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll returns missing status when child does not exist" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 
@@ -234,7 +234,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll rejects invalid limit_turns when provided" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 
@@ -258,7 +258,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll rejects invalid child_conversation_id format" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 
@@ -282,7 +282,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll rejects polling a non-owned conversation" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil
@@ -312,7 +312,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
         },
       )
 
-    other = Conversation.create!
+    other = create_conversation!
 
     poll = poll_tool.call({ "child_conversation_id" => other.id.to_s, "limit_turns" => 10 }, context: ctx)
     assert poll.error?
@@ -321,7 +321,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_poll returns pending status and transcript preview" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     from_node = nil

@@ -1,0 +1,12 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <h1 class="text-2xl font-semibold">Edit LLM provider</h1>
+    <div class="flex items-center gap-2">
+      <%= button_to "Fetch Models", fetch_models_system_settings_llm_provider_path(@llm_provider), method: :post, class: "btn btn-secondary" %>
+      <%= button_to "Delete", system_settings_llm_provider_path(@llm_provider), method: :delete, class: "btn btn-ghost", data: { turbo_confirm: "Delete this provider?" } %>
+    </div>
+  </div>
+
+  <%= render "form", llm_provider: @llm_provider %>
+</div>
+

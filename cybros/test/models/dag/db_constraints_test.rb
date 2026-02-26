@@ -3,7 +3,7 @@ require "securerandom"
 
 class DAG::DBConstraintsTest < ActiveSupport::TestCase
   test "dag_nodes.state is constrained at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -14,7 +14,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_edges.edge_type is constrained at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     from = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -27,7 +27,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes.deleted_at is constrained to terminal nodes at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -38,10 +38,10 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_node_visibility_patches enforces node graph_id at the database layer" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     node_b = graph_b.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -52,10 +52,10 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes.retry_of_id is constrained to the same graph at the database layer" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     node_a = graph_a.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -67,10 +67,10 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes.lane_id is constrained to the same graph at the database layer" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     lane_a = graph_a.main_lane
@@ -82,10 +82,10 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes.compressed_by_id is constrained to the same graph at the database layer" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     node_a = graph_a.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -97,7 +97,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes compressed fields are constrained for consistency at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -113,7 +113,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_turns anchor fields are constrained for consistency at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -125,10 +125,10 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_turns.lane_id is constrained to the same graph at the database layer" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     lane_b = graph_b.main_lane
@@ -139,7 +139,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes.turn_id is constrained to existing dag_turns at the database layer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -153,7 +153,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
   end
 
   test "dag_nodes cannot change lanes without matching dag_turns row (lane+turn consistency at the database layer)" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     lane_a = graph.main_lane

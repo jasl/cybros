@@ -41,16 +41,39 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     identity
   end
 
+  def sign_in_member!
+    identity =
+      Identity.create!(
+        email: "member@example.com",
+        password: "Passw0rd",
+        password_confirmation: "Passw0rd",
+      )
+
+    User.create!(identity: identity, role: :member)
+
+    post session_path, params: { email: "member@example.com", password: "Passw0rd" }
+    assert_redirected_to root_path
+    assert cookies[:session_token].present?
+
+    identity
+  end
+
   test "requires authentication" do
-    get llm_providers_path
+    get system_settings_llm_providers_path
     assert_redirected_to new_session_path
+  end
+
+  test "requires owner or admin" do
+    sign_in_member!
+    get system_settings_llm_providers_path
+    assert_response :forbidden
   end
 
   test "index lists providers" do
     sign_in_owner!
     provider = LLMProvider.create!(name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", api_key: "sk-test")
 
-    get llm_providers_path
+    get system_settings_llm_providers_path
     assert_response :success
     assert_includes response.body, provider.name
   end
@@ -59,7 +82,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     sign_in_owner!
 
     assert_difference -> { LLMProvider.count }, +1 do
-      post llm_providers_path, params: {
+      post system_settings_llm_providers_path, params: {
         llm_provider: {
           name: "OpenRouter",
           base_url: "https://openrouter.ai/api/v1",
@@ -72,7 +95,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     end
 
     provider = LLMProvider.order(:created_at).last
-    assert_redirected_to edit_llm_provider_path(provider)
+    assert_redirected_to edit_system_settings_llm_provider_path(provider)
     assert_equal "sk-test", provider.api_key
 
     raw =
@@ -90,7 +113,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     sign_in_owner!
     provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, api_format: "openai", priority: 0, model_allowlist: [])
 
-    patch llm_provider_path(provider), params: {
+    patch system_settings_llm_provider_path(provider), params: {
       llm_provider: {
         name: "P2",
         priority: 5,
@@ -98,7 +121,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
       },
     }
 
-    assert_redirected_to edit_llm_provider_path(provider)
+    assert_redirected_to edit_system_settings_llm_provider_path(provider)
     provider.reload
     assert_equal "P2", provider.name
     assert_equal 5, provider.priority
@@ -109,13 +132,14 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     sign_in_owner!
     provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, api_format: "openai", priority: 0, model_allowlist: [], headers: {})
 
-    patch llm_provider_path(provider), params: {
+    patch system_settings_llm_provider_path(provider), params: {
       llm_provider: {
         headers_json: "{",
       },
     }
 
     assert_response :unprocessable_entity
+    assert_includes response.body, "must be valid JSON"
   end
 
   test "destroy removes provider" do
@@ -123,10 +147,10 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil)
 
     assert_difference -> { LLMProvider.count }, -1 do
-      delete llm_provider_path(provider)
+      delete system_settings_llm_provider_path(provider)
     end
 
-    assert_redirected_to llm_providers_path
+    assert_redirected_to system_settings_llm_providers_path
   end
 
   test "fetch_models updates allowlist" do
@@ -134,10 +158,10 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, model_allowlist: [])
 
     with_stubbed_class_method(LLMProviders::ModelFetcher, :model_ids_for, value: ["m1", "m2"]) do
-      post fetch_models_llm_provider_path(provider)
+      post fetch_models_system_settings_llm_provider_path(provider)
     end
 
-    assert_redirected_to edit_llm_provider_path(provider)
+    assert_redirected_to edit_system_settings_llm_provider_path(provider)
     provider.reload
     assert_equal %w[m1 m2], provider.model_allowlist
   end
@@ -151,10 +175,10 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
       :model_ids_for,
       implementation: ->(*) { raise provider_models_error },
     ) do
-      post fetch_models_llm_provider_path(provider)
+      post fetch_models_system_settings_llm_provider_path(provider)
     end
 
-    assert_redirected_to edit_llm_provider_path(provider)
+    assert_redirected_to edit_system_settings_llm_provider_path(provider)
     provider.reload
     assert_equal ["existing"], provider.model_allowlist
   end

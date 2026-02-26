@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
   test "message_page paginates transcript-candidate nodes in a lane with before/after cursors" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -155,7 +155,7 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
   end
 
   test "message_page respects include_deleted and validates cursor visibility" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -207,7 +207,7 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
   end
 
   test "message_page has a scanned-node safety cap (can yield an empty page when many candidates are filtered out)" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -317,7 +317,7 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
   end
 
   test "message_page validates cursors and limit" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     lane = conversation.dag_graph.main_lane
 
     empty = lane.message_page(limit: 0)

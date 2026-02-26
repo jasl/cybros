@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
   test "reclaim! marks expired running nodes as errored" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(

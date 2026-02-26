@@ -63,7 +63,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "runner treats skipped execution results as errors for running nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
@@ -83,7 +83,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "runner writes usage and output_stats for finished nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
@@ -108,7 +108,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "runner executes character_message nodes and writes usage/output_stats" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::CharacterMessage.node_type_key, state: DAG::Node::RUNNING, metadata: { "actor" => "npc" })
 
@@ -132,7 +132,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "output_stats includes array result shape for tool calls" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
@@ -153,7 +153,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "runner records queue latency and execute_job_id when node is claimed" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -181,7 +181,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   end
 
   test "runner does not override a node that was stopped mid-stream, and stop materializes partial output" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 

@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LaneTurnsTest < ActiveSupport::TestCase
   test "anchored_turn_count and anchored_turn_seq include compressed and soft-deleted turns" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -113,7 +113,7 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
   end
 
   test "anchored_turn_page paginates by anchored_seq with before/after cursors" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -204,7 +204,7 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
   end
 
   test "anchored_turn_page validates limit and cursor types" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     lane = conversation.dag_graph.main_lane
 
     error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: "nope") }

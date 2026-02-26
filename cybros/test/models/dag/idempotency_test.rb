@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::IdempotencyTest < ActiveSupport::TestCase
   test "create_node is idempotent within graph+turn+node_type" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000000"
 
@@ -33,7 +33,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
   end
 
   test "create_node raises when idempotency_key collides with different body I/O" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000001"
 
@@ -63,7 +63,7 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
   end
 
   test "create_edge is idempotent for the same endpoints" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000002"
 

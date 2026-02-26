@@ -1,0 +1,11 @@
+<% notice_text = flash[:notice].to_s.presence %>
+<% alert_text = flash[:alert].to_s.presence %>
+
+<% if notice_text || alert_text %>
+  <div class="toast toast-top toast-end z-[100] mt-4">
+    <div role="alert" class="alert shadow <%= alert_text ? "alert-error" : "alert-success" %>">
+      <span><%= notice_text || alert_text %></span>
+    </div>
+  </div>
+<% end %>
+

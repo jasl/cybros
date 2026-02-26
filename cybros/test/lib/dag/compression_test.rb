@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::CompressionTest < ActiveSupport::TestCase
   test "compress! marks nodes and edges compressed and rewires boundary edges through a summary node" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(
@@ -60,7 +60,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
   end
 
   test "compress! deduplicates boundary edges that would collapse into duplicates" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     outside_parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: { "name" => "outside_parent" })
@@ -102,7 +102,7 @@ class DAG::CompressionTest < ActiveSupport::TestCase
   end
 
   test "compress! rejects compressing nodes across multiple lanes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     main = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

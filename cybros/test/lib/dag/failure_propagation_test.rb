@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::FailurePropagationTest < ActiveSupport::TestCase
   test "propagate! skips nodes blocked by failed dependencies and cascades" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -35,7 +35,7 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
   end
 
   test "propagate! skips pending character_message nodes blocked by failed dependencies" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -50,7 +50,7 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
   end
 
   test "propagate! does not skip nodes whose dependency parents are pending" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -63,10 +63,10 @@ class DAG::FailurePropagationTest < ActiveSupport::TestCase
   end
 
   test "propagate! ignores dirty dependency edges whose parents belong to another graph" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     dirty_parent = graph_b.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})

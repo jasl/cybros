@@ -1,0 +1,18 @@
+<div class="space-y-2" data-controller="settings-nav">
+  <div class="text-xs font-semibold opacity-60 px-2">Personal</div>
+  <ul class="menu menu-sm">
+    <li><%= link_to "Profile", settings_profile_path, data: { settings_nav_target: "link" } %></li>
+    <li><%= link_to "Sessions", settings_sessions_path, data: { settings_nav_target: "link" } %></li>
+  </ul>
+
+  <div class="divider my-0"></div>
+
+  <% if Current.user&.owner? || Current.user&.admin? %>
+    <div class="text-xs font-semibold opacity-60 px-2">System</div>
+    <ul class="menu menu-sm">
+      <li><%= link_to "LLM Providers", system_settings_llm_providers_path, data: { settings_nav_target: "link" } %></li>
+      <li><%= link_to "Agent Programs", system_settings_agent_programs_path, data: { settings_nav_target: "link" } %></li>
+    </ul>
+  <% end %>
+</div>
+

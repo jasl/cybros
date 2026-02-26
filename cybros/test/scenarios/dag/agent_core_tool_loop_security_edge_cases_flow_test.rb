@@ -30,7 +30,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
   test "agent tool loop: subagent_poll denies non-owned conversation and does not leak transcript" do
     spawn_tool = Cybros::Subagent::Tools.build.find { |t| t.name == "subagent_spawn" }
 
-    other_parent = Conversation.create!
+    other_parent = create_conversation!
     other_graph = other_parent.dag_graph
     other_turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     other_from_node = nil
@@ -70,7 +70,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
     refute spawn.error?, spawn.text
     child_id = JSON.parse(spawn.text).fetch("child_conversation_id")
 
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     user = nil
@@ -192,7 +192,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
   end
 
   test "agent tool loop: memory_forget invalid uuid surfaces validation_error in task result" do
-    parent = Conversation.create!
+    parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     user = nil

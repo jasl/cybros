@@ -45,7 +45,7 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
   end
 
   test "stale queued reply guard: stale pending agent reply can stop silently based on lane tail anchor and not pollute subsequent context" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

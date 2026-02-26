@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
   test "transcript_recent_turns returns user/agent/character nodes for recent turns without tasks" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     turn_1 = "0194f3c0-0000-7000-8000-000000000100"
@@ -97,7 +97,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       end
     )
 
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000150"
 
@@ -135,7 +135,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
   end
 
   test "transcript_recent_turns uses transcript_visible and transcript_preview overrides" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000200"
 
@@ -167,7 +167,7 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
   end
 
   test "transcript_recent_turns excludes deleted nodes by default but keeps turns visible when another anchor exists" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     turn_1 = "0194f3c0-0000-7000-8000-000000000300"

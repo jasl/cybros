@@ -1,29 +1,13 @@
 <!DOCTYPE html>
-<html>
-  <head>
-    <title><%= content_for(:title) || "Cybros" %></title>
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="application-name" content="Cybros">
-    <meta name="mobile-web-app-capable" content="yes">
-    <%= csrf_meta_tags %>
-    <%= csp_meta_tag %>
+<html lang="<%= I18n.locale %>">
+  <%= render "layouts/shared/head" %>
 
-    <%= yield :head %>
-
-    <%# Enable PWA manifest for installable apps (make sure to enable in config/routes.rb too!) %>
-    <%#= tag.link rel: "manifest", href: pwa_manifest_path(format: :json) %>
-
-    <link rel="icon" href="/icon.png" type="image/png">
-    <link rel="icon" href="/icon.svg" type="image/svg+xml">
-    <link rel="apple-touch-icon" href="/icon.png">
-
-    <%# Includes all stylesheet files in app/assets/stylesheets %>
-    <%= stylesheet_link_tag "application", "data-turbo-track": "reload" %>
-    <%= javascript_include_tag "application", "data-turbo-track": "reload", type: "module" %>
-  </head>
-
-  <body>
-    <%= yield %>
+  <body
+    class="<%= content_for(:body_class) %>"
+    data-layout="<%= content_for?(:layout_name) ? yield(:layout_name) : "application" %>">
+    <%= render "layouts/shared/flash" %>
+    <%= content_for?(:content) ? yield(:content) : yield %>
+    <%= yield :body %>
+    <div id="toast_container" class="toast toast-top toast-end z-[100] mt-16 flex flex-col gap-2"></div>
   </body>
 </html>

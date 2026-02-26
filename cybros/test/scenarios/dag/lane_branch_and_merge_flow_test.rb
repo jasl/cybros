@@ -36,7 +36,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
   end
 
   test "product flow: fork, merge, continue branch, archive, and merge archived branch again" do
-    conversation = Conversation.create!(title: "Demo")
+    conversation = create_conversation!(title: "Demo")
     graph = conversation.dag_graph
 
     main_topic = conversation.ensure_main_topic

@@ -1,7 +1,7 @@
-<div class="p-6 space-y-6">
+<div class="space-y-6">
   <div class="flex items-center justify-between">
     <h1 class="text-2xl font-semibold">LLM Providers</h1>
-    <%= link_to "New provider", new_llm_provider_path, class: "btn btn-primary" %>
+    <%= link_to "New provider", new_system_settings_llm_provider_path, class: "btn btn-primary" %>
   </div>
 
   <div class="overflow-x-auto">
@@ -23,7 +23,7 @@
             <td class="text-right"><%= provider.priority %></td>
             <td class="text-right"><%= provider.model_allowlist.length %></td>
             <td class="text-right">
-              <%= link_to "Edit", edit_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
+              <%= link_to "Edit", edit_system_settings_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
             </td>
           </tr>
         <% end %>

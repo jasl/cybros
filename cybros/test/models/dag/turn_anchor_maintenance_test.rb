@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
   test "edit replaces the turn anchor_node_id to point at the new visible anchor" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -43,7 +43,7 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
   end
 
   test "retry replaces the turn anchor_node_id when the previous anchor is archived" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

@@ -1,4 +1,6 @@
 class SessionsController < ApplicationController
+  layout "session"
+
   before_action :redirect_to_setup_if_needed
   before_action :redirect_authenticated_user, only: %i[new create]
 

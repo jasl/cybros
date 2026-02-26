@@ -1,0 +1,73 @@
+<% content_for(:layout_name, "agent") %>
+<% content_for(:body_class, "h-dvh overflow-hidden bg-base-200") %>
+<% content_for :content do %>
+  <div class="drawer lg:drawer-open h-dvh" data-controller="sidebar" data-sidebar-key-value="left">
+    <input
+      id="left_drawer"
+      type="checkbox"
+      class="drawer-toggle"
+      data-sidebar-target="toggle" />
+
+    <div class="drawer-content h-dvh overflow-hidden">
+      <div class="drawer drawer-end h-dvh" data-controller="sidebar" data-sidebar-key-value="right">
+        <input
+          id="right_drawer"
+          type="checkbox"
+          class="drawer-toggle"
+          data-sidebar-target="toggle" />
+
+        <div class="drawer-content h-dvh overflow-hidden flex flex-col">
+          <header class="navbar min-h-0 h-14 px-4 bg-base-100 border-b border-base-300 shrink-0">
+            <div class="navbar-start gap-2">
+              <label for="left_drawer" class="btn btn-ghost btn-sm btn-square lg:hidden" aria-label="Open navigation">
+                <span class="icon-[lucide--panel-left] size-5"></span>
+              </label>
+
+              <% if content_for?(:action_bar) %>
+                <%= yield :action_bar %>
+              <% else %>
+                <div class="text-sm opacity-70">Cybros</div>
+              <% end %>
+            </div>
+
+            <div class="navbar-end gap-2">
+              <label
+                for="right_drawer"
+                class="btn btn-ghost btn-sm btn-square <%= content_for?(:right_panel) ? "" : "btn-disabled" %>"
+                aria-label="Open inspector"
+                <%= "tabindex=\"-1\" aria-disabled=\"true\"".html_safe unless content_for?(:right_panel) %>>
+                <span class="icon-[lucide--panel-right] size-5"></span>
+              </label>
+            </div>
+          </header>
+
+          <main class="flex-1 min-h-0 overflow-auto">
+            <%= yield %>
+          </main>
+        </div>
+
+        <div class="drawer-side z-40 h-dvh">
+          <label for="right_drawer" aria-label="Close inspector" class="drawer-overlay"></label>
+          <aside class="w-96 max-w-[85vw] h-dvh bg-base-100 border-l border-base-300 overflow-hidden">
+            <div class="h-full overflow-auto p-4">
+              <% if content_for?(:right_panel) %>
+                <%= yield :right_panel %>
+              <% else %>
+                <div class="text-sm opacity-70">No inspector content.</div>
+              <% end %>
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+
+    <div class="drawer-side z-50 h-dvh is-drawer-close:overflow-visible">
+      <label for="left_drawer" aria-label="Close navigation" class="drawer-overlay"></label>
+      <aside class="h-dvh bg-base-100 border-r border-base-300 overflow-hidden">
+        <%= render "layouts/agent/sidebar" %>
+      </aside>
+    </div>
+  </div>
+<% end %>
+
+<%= render template: "layouts/application" %>

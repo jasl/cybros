@@ -53,7 +53,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     LLMProvider.create!(name: "p2", base_url: "http://p2.test/v1", api_key: "k2", model_allowlist: ["m1"], priority: 5, api_format: "openai")
 
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "coding",
@@ -87,7 +87,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     )
 
     conversation =
-      Conversation.create!(
+      create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "coding",

@@ -59,7 +59,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
   end
 
   test "product flow: rerun versions, adopt, and compact the turn context" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
     turn_id = "0194f3c0-0000-7000-8000-00000000f010"

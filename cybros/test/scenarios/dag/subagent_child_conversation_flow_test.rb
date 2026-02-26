@@ -9,7 +9,10 @@ class DAG::SubagentChildConversationFlowTest < ActiveSupport::TestCase
       _ = context
       _ = stream
 
-      child = Conversation.create!
+      owner = User.order(:created_at).first
+      raise "missing User for child conversation" if owner.nil?
+
+      child = Conversation.create!(user: owner)
       child_graph = child.dag_graph
       child_turn_id = "0194f3c0-0000-7000-8000-00000000c100"
 
@@ -84,7 +87,7 @@ class DAG::SubagentChildConversationFlowTest < ActiveSupport::TestCase
   end
 
   test "subagent pattern: parent task creates child conversation, parent agent reads bounded child transcript" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c020"
 

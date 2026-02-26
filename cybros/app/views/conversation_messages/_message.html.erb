@@ -1,0 +1,22 @@
+<% node_id = message.fetch("node_id").to_s %>
+<% type = message.fetch("node_type").to_s %>
+<% payload = message.fetch("payload", {}) %>
+<% payload = {} unless payload.is_a?(Hash) %>
+<% preview = payload.dig("output_preview", "content").to_s %>
+<% input = payload.dig("input", "content").to_s %>
+
+<div id="message_<%= node_id %>" data-message-node-id="<%= node_id %>">
+  <% if type == Messages::UserMessage.node_type_key %>
+    <div class="flex justify-end">
+      <div class="bg-base-200 rounded-3xl px-5 py-3 max-w-[70%]" data-node-id="<%= node_id %>">
+        <p class="whitespace-pre-wrap text-sm"><%= input %></p>
+      </div>
+    </div>
+  <% elsif type == Messages::AgentMessage.node_type_key %>
+    <div data-role="agent-bubble" data-node-id="<%= node_id %>">
+      <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
+      <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle hidden"></span>
+      <div data-role="error" class="mt-2 text-sm text-error hidden"></div>
+    </div>
+  <% end %>
+</div>

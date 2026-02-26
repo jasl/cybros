@@ -14,7 +14,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes claims pending executable nodes whose blocking parents are finished" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -35,7 +35,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes claims pending character_message nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -48,7 +48,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes does not claim nodes blocked by non-finished parents" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -61,7 +61,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes claims nodes blocked only by sequence edges whose parents are terminal" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -74,10 +74,10 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes ignores dirty dependency edges whose parents belong to another graph" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     dirty_parent = graph_b.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -98,7 +98,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   end
 
   test "claim_executable_nodes skips locked rows" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node_1 = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})

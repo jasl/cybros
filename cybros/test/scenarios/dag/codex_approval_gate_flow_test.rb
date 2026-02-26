@@ -41,7 +41,7 @@ class DAG::CodexApprovalGateFlowTest < ActiveSupport::TestCase
   end
 
   test "approval gate flow: awaiting_approval blocks execution, deny required does not skip downstream, retry creates a new awaiting_approval attempt, and approve unblocks" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c020"
 

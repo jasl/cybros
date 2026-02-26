@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::MutationsTest < ActiveSupport::TestCase
   test "create_node(content:) writes content to the NodeBody created_content_destination" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-000000000250"
 

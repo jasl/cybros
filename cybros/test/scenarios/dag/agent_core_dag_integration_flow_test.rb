@@ -85,7 +85,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "LLM basic turn: user_message -> agent_message finished with content" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d100"
 
@@ -158,7 +158,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool_calls expansion: agent_message creates tasks and next agent_message continues" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d101"
 
@@ -302,7 +302,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool_name_repair_loop: repairs tool_not_in_profile to visible tool and continues" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d120"
 
@@ -441,7 +441,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "max_tool_calls_per_turn: truncates tool_calls to avoid task explosion" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d119"
 
@@ -552,7 +552,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "optional approval: deny unblocks next agent_message via sequence edge" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d102"
 
@@ -652,7 +652,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "required approval: deny blocks next agent_message via dependency edge; retry->approve continues" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d103"
 
@@ -758,7 +758,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool failure: task errored still allows next agent_message via sequence edge" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d104"
 
@@ -859,7 +859,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "MCP tool: registry.register_mcp_client + task execution result injected into next LLM call" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d105"
 
@@ -948,7 +948,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "skills tools: available_skills injected; read_file enforces rel_path validation" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d106"
 
@@ -1053,7 +1053,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "memory injection: memory search results are included in system prompt" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d107"
 
@@ -1119,7 +1119,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "auto_compact: over-budget context triggers summarizer + graph.compress!" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     long = "x" * 600
@@ -1216,7 +1216,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "streaming: MessageComplete without TextDelta still persists final content" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d114"
 
@@ -1281,7 +1281,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "streaming: TextDelta output is materialized and deltas are compacted" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d115"
 
@@ -1348,7 +1348,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "invalid tool arguments: creates finished task and continues to next agent_message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d116"
 
@@ -1446,7 +1446,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool_call_repair_loop: repairs invalid_json tool arguments and executes tool" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d120"
 
@@ -1564,7 +1564,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool_call_repair_loop: repairs schema_invalid tool arguments and executes tool" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d122"
 
@@ -1680,7 +1680,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool_call_repair_loop: schema_invalid args do not execute tool when repair is disabled" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d123"
 
@@ -1790,7 +1790,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "provider_failover: retries with fallback model on tool/protocol ProviderError" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d121"
 
@@ -1871,7 +1871,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "tool not found: creates finished task and continues to next agent_message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d117"
 
@@ -1952,7 +1952,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   end
 
   test "max_steps_per_turn: tool loop is not expanded when limit exceeded" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d118"
 

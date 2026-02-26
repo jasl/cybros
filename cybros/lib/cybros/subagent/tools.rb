@@ -84,6 +84,7 @@ module Cybros
           Conversation.transaction do
             child =
               Conversation.create!(
+                user: parent.user,
                 title: title,
                 metadata: build_child_metadata(
                   agent_key: agent_key,
@@ -180,6 +181,14 @@ module Cybros
 
             AgentCore::Resources::Tools::ToolResult.success(text: JSON.generate(payload), metadata: { subagent: payload })
           else
+            unless child.user_id == parent.user_id
+              AgentCore::ValidationError.raise!(
+                "child conversation is not owned by this parent",
+                code: "cybros.subagent_poll.child_conversation_not_owned",
+                details: { child_conversation_id: child.id.to_s },
+              )
+            end
+
             validate_child_ownership!(child, parent_id: parent_id, parent_graph_id: parent_graph_id)
 
             graph = child.dag_graph

@@ -2,18 +2,30 @@ require "test_helper"
 
 class SetupAndSessionsTest < ActionDispatch::IntegrationTest
   test "root redirects to setup when no identities exist" do
+    User.delete_all
     Identity.delete_all
 
     get root_path
     assert_redirected_to new_setup_path
   end
 
+  test "setup wizard uses the session layout" do
+    User.delete_all
+    Identity.delete_all
+
+    get new_setup_path
+    assert_response :success
+    assert_includes response.body, 'data-layout="session"'
+  end
+
   test "setup wizard creates initial identity and signs in" do
+    User.delete_all
     Identity.delete_all
     Session.delete_all
 
     get new_setup_path
     assert_response :success
+    assert_includes response.body, 'data-layout="session"'
 
     assert_difference -> { Identity.count }, +1 do
       assert_difference -> { User.count }, +1 do
@@ -33,7 +45,10 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     assert cookies[:session_token].present?
 
     follow_redirect!
+    assert_response :redirect
+    follow_redirect!
     assert_response :success
+    assert_includes response.body, 'data-layout="agent"'
   end
 
   test "setup wizard is not accessible after initial identity exists" do
@@ -44,10 +59,21 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
   end
 
   test "sessions new redirects to setup when no identities exist" do
+    User.delete_all
     Identity.delete_all
 
     get new_session_path
     assert_redirected_to new_setup_path
+  end
+
+  test "sessions new uses the session layout" do
+    User.delete_all
+    Identity.delete_all
+    Identity.create!(email: "admin@example.com", password: "Passw0rd", password_confirmation: "Passw0rd")
+
+    get new_session_path
+    assert_response :success
+    assert_includes response.body, 'data-layout="session"'
   end
 
   test "sessions create authenticates with email and password and sets cookie" do
@@ -57,6 +83,15 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     post session_path, params: { email: "admin@example.com", password: "Passw0rd" }
     assert_redirected_to root_path
     assert cookies[:session_token].present?
+  end
+
+  test "root renders landing when not authenticated" do
+    identity = Identity.create!(email: "admin@example.com", password: "Passw0rd", password_confirmation: "Passw0rd")
+    User.create!(identity: identity, role: :owner)
+
+    get root_path
+    assert_response :success
+    assert_includes response.body, 'data-layout="landing"'
   end
 
   test "sessions create with invalid credentials re-renders and does not set cookie" do

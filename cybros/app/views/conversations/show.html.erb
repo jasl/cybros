@@ -1,57 +1,100 @@
-<div class="max-w-4xl mx-auto p-6 space-y-6">
-  <div class="flex items-center justify-between gap-4">
-    <div class="space-y-1">
-      <div class="text-sm opacity-70">
-        <%= link_to "Conversations", conversations_path, class: "link link-hover" %>
-      </div>
-      <h1 class="text-2xl font-semibold"><%= @conversation.title.presence || "(untitled)" %></h1>
-    </div>
+<% content_for :action_bar do %>
+  <div class="flex items-center gap-2 min-w-0">
+    <div class="truncate text-sm font-semibold"><%= @conversation.title.presence || "(untitled)" %></div>
+    <span class="badge badge-outline badge-sm opacity-70">Chat</span>
   </div>
+<% end %>
 
+<div
+  class="h-full flex flex-col"
+  data-controller="conversation-channel chat-scroll<%= Rails.env.development? ? " debug-overlay" : "" %>"
+  data-action="conversation-channel:debug->debug-overlay#update"
+  data-conversation-channel-conversation-id-value="<%= @conversation.id %>"
+  data-chat-scroll-load-more-url-value="<%= conversation_messages_path(@conversation) %>">
   <div
-    class="card bg-base-100 border"
-    data-controller="conversation-stream"
-    data-conversation-stream-conversation-id-value="<%= @conversation.id %>">
-    <div class="card-body space-y-4">
-      <div class="space-y-3">
-        <% if @transcript.empty? %>
-          <p class="opacity-70">No messages yet.</p>
-        <% else %>
-          <% @transcript.each do |node| %>
-            <% type = node.fetch("node_type") %>
-            <% preview = node.dig("payload", "output_preview", "content").to_s %>
-            <% input = node.dig("payload", "input", "content").to_s %>
+    class="flex-1 min-h-0 overflow-auto scrollbar-auto-hide bg-base-100"
+    data-conversation-channel-target="scroll"
+    data-chat-scroll-target="scroll">
+    <div class="max-w-3xl mx-auto px-4 py-6 space-y-5">
+      <%= render "conversation_messages/load_more",
+        conversation: @conversation,
+        has_more: @has_more,
+        before_cursor: @before_cursor %>
 
-            <% if type == Messages::UserMessage.node_type_key %>
-              <div class="chat chat-end">
-                <div class="chat-bubble chat-bubble-primary"><%= input %></div>
-              </div>
-            <% elsif type == Messages::AgentMessage.node_type_key %>
-              <div class="chat chat-start">
-                <% is_latest_agent = (node.fetch("node_id").to_s == @streaming_node_id.to_s) %>
-                <div
-                  class="chat-bubble"
-                  <%= "data-conversation-stream-target=\"agentBubble\"".html_safe if is_latest_agent %>>
-                  <%= preview %>
-                </div>
-              </div>
-            <% end %>
-          <% end %>
-        <% end %>
-      </div>
-
-      <div class="divider"></div>
-
-      <%= form_with url: conversation_messages_path(@conversation), method: :post, class: "flex items-end gap-2" do %>
-        <label class="form-control w-full">
-          <div class="label">
-            <span class="label-text">Message</span>
-          </div>
-          <textarea name="content" class="textarea textarea-bordered w-full" rows="3" placeholder="Say something..."></textarea>
-        </label>
-        <button type="submit" class="btn btn-primary">Send</button>
+      <% if @messages.empty? %>
+        <p class="text-center text-sm opacity-50 py-12">No messages yet. Start a conversation below.</p>
+      <% else %>
+        <div id="<%= dom_id(@conversation, :messages_list) %>" data-chat-scroll-target="list" class="space-y-5">
+          <%= render partial: "conversation_messages/message", collection: @messages, as: :message %>
+        </div>
       <% end %>
     </div>
   </div>
-</div>
 
+  <div class="border-t border-base-300 bg-base-100 px-4 py-3">
+    <div class="max-w-3xl mx-auto space-y-2">
+      <div role="alert" class="alert alert-warning text-sm hidden" data-conversation-channel-target="stuckAlert">
+        <span>Streaming seems stuck. You can stop generation and retry.</span>
+      </div>
+
+      <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit" } do %>
+        <div class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2">
+          <textarea
+            name="content"
+            rows="1"
+            class="bg-transparent flex-1 resize-none outline-none py-1.5 text-sm placeholder:opacity-40 min-h-[1.5rem] max-h-48"
+            placeholder="Message…"
+            data-message-form-target="textarea"
+            data-action="keydown->message-form#keydown input->message-form#autoResize"></textarea>
+          <button type="submit" class="btn btn-neutral btn-circle btn-sm shrink-0 mb-0.5" aria-label="Send">
+            <span class="icon-[lucide--arrow-up] size-4"></span>
+          </button>
+        </div>
+
+        <div class="flex items-center gap-1 mt-1.5 pl-2">
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs hidden"
+            data-conversation-channel-target="stopButton"
+            data-action="click->conversation-channel#stop">
+            <span class="icon-[lucide--square] size-3"></span>
+            Stop
+          </button>
+
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs hidden"
+            data-conversation-channel-target="retryButton"
+            data-action="click->conversation-channel#retry">
+            <span class="icon-[lucide--refresh-cw] size-3"></span>
+            Retry
+          </button>
+        </div>
+      <% end %>
+    </div>
+  </div>
+
+  <% if Rails.env.development? %>
+    <div
+      class="fixed bottom-4 right-4 z-[200] hidden"
+      data-debug-overlay-target="panel">
+      <div class="card bg-base-100 border border-base-300 shadow-lg">
+        <div class="card-body p-4 space-y-2">
+          <div class="text-xs font-semibold opacity-70">Stream debug (Ctrl+Shift+D)</div>
+          <div class="text-xs">
+            <span class="opacity-60">cursor</span>
+            <span class="font-mono" data-debug-overlay-target="cursor"></span>
+          </div>
+          <div class="text-xs">
+            <span class="opacity-60">active node</span>
+            <span class="font-mono" data-debug-overlay-target="activeNode"></span>
+          </div>
+          <div class="text-xs">
+            <span class="opacity-60">last event</span>
+            <span class="font-mono" data-debug-overlay-target="lastEvent"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+  <% end %>
+</div>

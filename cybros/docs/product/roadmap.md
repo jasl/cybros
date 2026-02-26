@@ -251,6 +251,24 @@ Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes):
 - Structured logs for: subscribe, reconnect, cursor advance, event counts by kind.
 - Dev-only debug overlay for stream state (cursor, node id, run state).
 
+#### 0.5-F — Authorization + Pagination Hardening
+
+- **Owner-based authorization**:
+  - Conversations are owned by `User` (no multi-tenant `Account` scoping yet).
+  - Controllers and ActionCable must enforce ownership (no cross-user access).
+- **Optional E2E (Playwright)**:
+  - Add an optional Playwright test suite (`bin/e2e`) for end-to-end UI verification.
+  - Keep it out of `bin/ci` by default (dev-only / on-demand).
+- **Cursor pagination**:
+  - Conversations index + sidebar use cursor pagination (UUIDv7 keyset).
+  - Messages list supports: initial \"recent\" load + \"load older\" cursor paging.
+- **Replay batching**:
+  - Reconnect replay transmits missed events as a single batch payload (avoid 100–200 per reconnect).
+- **Broadcast error handling**:
+  - Broadcast failures must not be silently swallowed; add rate-limited warn logs.
+- **Request throttling**:
+  - Add lightweight per-user throttling for high-frequency endpoints (messages create, stop, retry) to prevent abuse/DoS.
+
 ### Edge/extreme test matrix (required)
 
 Add system + integration tests that cover:
@@ -295,6 +313,11 @@ Add system + integration tests that cover:
 - [ ] **Observability**:
   - [ ] Rate-limited warnings/logs prevent silent stalls
   - [ ] Dev-only debug overlay shows stream state (cursor/node/run state)
+- [ ] **Authorization & pagination**:
+  - [ ] Cross-user conversation access is denied (controllers + ActionCable)
+  - [ ] Conversations index is cursor-paginated
+  - [ ] Message history paging works (load older via Turbo Stream)
+  - [ ] Replay batching is used on reconnect
 - [ ] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
 - [ ] **Handoff quality gate (required before acceptance)**:
   - [ ] **Smoke tests**: add a system test suite that visits each top-level page (Home, Dashboard, Conversations, Agents, `/settings`, `/system/settings`) and asserts it loads (no routing typos, no ERB syntax/render exceptions)

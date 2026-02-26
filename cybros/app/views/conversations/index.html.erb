@@ -36,6 +36,20 @@
             </tbody>
           </table>
         </div>
+
+        <div class="flex items-center justify-between gap-2 mt-4">
+          <div class="text-sm opacity-60">
+            <% if params[:before].present? || params[:after].present? %>
+              <%= link_to "Back to latest", conversations_path, class: "link link-hover" %>
+            <% end %>
+          </div>
+
+          <% if @has_more && @before_cursor.present? %>
+            <%= link_to "Older",
+              conversations_path(before: @before_cursor),
+              class: "btn btn-ghost btn-sm" %>
+          <% end %>
+        </div>
       <% end %>
     </div>
   </div>

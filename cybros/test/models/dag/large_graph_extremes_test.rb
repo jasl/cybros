@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LargeGraphExtremesTest < ActiveSupport::TestCase
   test "transcript_page and context_for handle 1000-turn linear chat without loading full graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

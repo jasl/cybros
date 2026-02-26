@@ -2,7 +2,7 @@ require "test_helper"
 
 class ConversationContextTest < ActiveSupport::TestCase
   test "context_for returns preview payload by default and context_for_full includes full output" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -39,7 +39,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "context_for filters excluded nodes by default but include_excluded:true includes them" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -81,7 +81,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "context_for always includes target even if excluded or deleted" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
@@ -99,7 +99,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "context_node_scope_for returns an ActiveRecord::Relation and respects include_excluded" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
@@ -124,7 +124,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "context_for rejects non-positive limit_turns" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -134,7 +134,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "soft deleted nodes are excluded from context by default" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -159,7 +159,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "transcript_for hides tool/task nodes and empty agent_message nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -198,7 +198,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "transcript_for excludes deleted target by default but include_deleted:true includes it" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
@@ -215,7 +215,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "transcript_for includes agent_message when transcript_visible metadata is true and injects transcript_preview content" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     agent = graph.nodes.create!(
@@ -232,7 +232,7 @@ class ConversationContextTest < ActiveSupport::TestCase
   end
 
   test "context_for pins system/developer messages and the most recent summaries across the graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = nil

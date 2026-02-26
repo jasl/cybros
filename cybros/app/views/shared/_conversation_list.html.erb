@@ -1,0 +1,65 @@
+<% conversations = Array(conversations) %>
+<% has_more = !!local_assigns.fetch(:has_more, false) %>
+<% before_cursor = local_assigns.fetch(:before_cursor, nil).to_s.presence %>
+
+<label class="input input-sm w-full mb-2">
+  <span class="label">
+    <span class="icon-[lucide--search] size-4 opacity-60"></span>
+  </span>
+  <input type="search" placeholder="Search" />
+</label>
+
+<% if conversations.empty? %>
+  <div class="text-xs opacity-60 px-2">No conversations yet.</div>
+<% else %>
+  <% today = Date.current %>
+  <% yesterday = today - 1 %>
+  <% cutoff_recent = today - 7 %>
+
+  <% groups = {
+    "Today" => [],
+    "Yesterday" => [],
+    "Previous 7 days" => [],
+    "Older" => [],
+  } %>
+
+  <% conversations.each do |c| %>
+    <% date = c.created_at.to_date %>
+    <% if date == today %>
+      <% groups["Today"] << c %>
+    <% elsif date == yesterday %>
+      <% groups["Yesterday"] << c %>
+    <% elsif date >= cutoff_recent %>
+      <% groups["Previous 7 days"] << c %>
+    <% else %>
+      <% groups["Older"] << c %>
+    <% end %>
+  <% end %>
+
+  <ul class="menu menu-sm">
+    <% groups.each do |label, items| %>
+      <% next if items.empty? %>
+      <li class="menu-title px-2 mt-2">
+        <span><%= label %></span>
+      </li>
+      <% items.each do |conversation| %>
+        <li>
+          <%= link_to conversation_path(conversation), class: "gap-2" do %>
+            <span class="icon-[lucide--message-square] size-4 opacity-70"></span>
+            <span class="is-drawer-close:hidden truncate"><%= conversation.title.presence || "(untitled)" %></span>
+          <% end %>
+        </li>
+      <% end %>
+    <% end %>
+  </ul>
+
+  <% if has_more && before_cursor.present? %>
+    <div class="mt-2 px-2">
+      <% sidebar_href = "#{request.path}?sidebar_before=#{ERB::Util.url_encode(before_cursor)}" %>
+      <%= link_to "Load more",
+        sidebar_href,
+        class: "btn btn-ghost btn-sm w-full" %>
+    </div>
+  <% end %>
+<% end %>
+

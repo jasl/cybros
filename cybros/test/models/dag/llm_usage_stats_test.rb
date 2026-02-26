@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   test "lane.llm_usage_stats returns empty totals when there are no usage nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     lane = conversation.dag_graph.main_lane
 
     stats = lane.llm_usage_stats
@@ -23,7 +23,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   end
 
   test "lane.llm_usage_stats aggregates usage and cache hit rate" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -110,7 +110,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   end
 
   test "lane.llm_usage_stats tolerates invalid usage values without raising" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -151,7 +151,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   end
 
   test "graph.llm_usage_stats can aggregate across lanes and filter by time range" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
     branch_lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
@@ -194,7 +194,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   end
 
   test "graph.llm_usage_stats validates lane_id and time params" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     error =
@@ -211,7 +211,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
   end
 
   test "llm_usage_stats validates until_time is >= since" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     error =

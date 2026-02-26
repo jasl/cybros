@@ -23,7 +23,7 @@ class DAG::ChatbotFlowTest < ActiveSupport::TestCase
   end
 
   test "chatbot flow: system+developer+user context, leaf repair, and transcript excludes system/developer" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000c001"
 

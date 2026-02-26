@@ -2,7 +2,7 @@ require "test_helper"
 
 class ConversationDAGTest < ActiveSupport::TestCase
   test "conversation automatically builds and persists a dag_graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
 
     assert conversation.dag_graph.present?
     assert conversation.dag_graph.persisted?
@@ -10,7 +10,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "mutate! repairs leaf invariant by appending a pending agent_message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     conversation.mutate! do |m|
@@ -38,7 +38,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "context_for returns a topological ordering for a join node" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     task_a = graph.nodes.create!(
@@ -72,7 +72,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "context_for ignores branch edges and relies on causal edges" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     root = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -106,7 +106,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "context_for substitutes summary nodes for compressed lanes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(
@@ -145,7 +145,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "context_for does not traverse through inactive nodes even if edges remain active" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     x = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -164,7 +164,7 @@ class ConversationDAGTest < ActiveSupport::TestCase
   end
 
   test "leaf_nodes ignores blocking edges that point to inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

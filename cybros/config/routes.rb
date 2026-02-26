@@ -2,12 +2,28 @@ Rails.application.routes.draw do
   get "home/index"
   resource :setup, only: %i[new create]
   resource :session, only: %i[new create destroy]
-  resources :llm_providers, only: %i[index new create edit update destroy] do
-    post :fetch_models, on: :member
+
+  get "dashboard", to: "dashboard#show"
+
+  namespace :settings do
+    resource :profile, only: %i[show update]
+    resource :sessions, only: %i[show destroy]
   end
+
+  namespace :system do
+    namespace :settings do
+      resources :llm_providers, only: %i[index new create edit update destroy] do
+        post :fetch_models, on: :member
+      end
+      resources :agent_programs, only: %i[index new create show]
+    end
+  end
+
   resources :agent_programs, only: %i[index new create show]
   resources :conversations, only: %i[index show create] do
-    resources :messages, only: %i[create], controller: "conversation_messages"
+    resources :messages, only: %i[index create], controller: "conversation_messages"
+    post :stop, on: :member
+    post :retry, on: :member
   end
 
   # OpenAI-compatible mock LLM API for development/testing.

@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::TurnMessageHelpersTest < ActiveSupport::TestCase
   test "message_nodes projection determines end_message_node_id" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -42,7 +42,7 @@ class DAG::TurnMessageHelpersTest < ActiveSupport::TestCase
   end
 
   test "running agent_message is included and becomes the end message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -83,7 +83,7 @@ class DAG::TurnMessageHelpersTest < ActiveSupport::TestCase
   end
 
   test "include_deleted affects start_message_node_id and message_nodes visibility" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

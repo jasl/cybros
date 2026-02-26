@@ -19,7 +19,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
   end
 
   test "user input while agent running: queue policy blocks the next reply until the running reply finishes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 
@@ -119,7 +119,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
   end
 
   test "user input while agent running: restart policy stops the in-flight reply and excludes it from context" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
 

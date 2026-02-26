@@ -1,0 +1,24 @@
+<div class="space-y-6">
+  <div class="space-y-1">
+    <div class="text-sm opacity-70">
+      <%= link_to "Agent Programs", system_settings_agent_programs_path, class: "link link-hover" %>
+    </div>
+    <h1 class="text-2xl font-semibold"><%= @agent_program.name %></h1>
+  </div>
+
+  <div class="card bg-base-100 border">
+    <div class="card-body">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs opacity-60">Profile</div>
+          <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Local path</div>
+          <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+

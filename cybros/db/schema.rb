@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_26_000006) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -94,6 +94,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000006) do
     t.jsonb "metadata", default: {}, null: false
     t.string "title"
     t.datetime "updated_at", null: false
+    t.uuid "user_id", null: false
+    t.index ["user_id"], name: "index_conversations_on_user_id"
   end
 
   create_table "dag_edges", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -322,6 +324,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000006) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "agent_memory_entries", "conversations"
   add_foreign_key "conversation_runs", "conversations"
+  add_foreign_key "conversations", "users"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "to_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_to_node_graph_scoped", on_delete: :cascade

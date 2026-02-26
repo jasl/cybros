@@ -1,0 +1,17 @@
+<% has_more = !!has_more %>
+<% before_cursor = before_cursor.to_s.presence %>
+
+<div
+  id="<%= dom_id(conversation, :messages_load_more) %>"
+  data-chat-scroll-target="sentinel"
+  data-chat-scroll-has-more-value="<%= has_more %>"
+  data-chat-scroll-before-cursor-value="<%= before_cursor %>">
+  <% if has_more && before_cursor.present? %>
+    <div class="text-center py-2">
+      <button type="button" class="btn btn-ghost btn-xs opacity-60" data-action="click->chat-scroll#loadOlder">
+        <span class="icon-[lucide--chevrons-up] size-3"></span>
+        Load older messages
+      </button>
+    </div>
+  <% end %>
+</div>

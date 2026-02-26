@@ -1,0 +1,66 @@
+<nav class="h-full flex flex-col is-drawer-close:w-16 is-drawer-open:w-72 transition-[width] duration-200">
+  <div class="p-2 border-b border-base-300 flex items-center gap-2">
+    <%= link_to root_path, class: "btn btn-ghost btn-sm gap-2 flex-1 justify-start" do %>
+      <span class="icon-[lucide--bot] size-5"></span>
+      <span class="is-drawer-close:hidden font-semibold">Cybros</span>
+    <% end %>
+
+    <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Toggle sidebar">
+      <label for="left_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle sidebar">
+        <span class="icon-[lucide--chevrons-left-right] size-5"></span>
+      </label>
+    </div>
+  </div>
+
+  <div class="p-2">
+    <%= form_with url: conversations_path, method: :post do %>
+      <button type="submit" class="btn btn-primary btn-sm w-full justify-start gap-2">
+        <span class="icon-[lucide--plus] size-4"></span>
+        <span class="is-drawer-close:hidden">New chat</span>
+      </button>
+    <% end %>
+  </div>
+
+  <ul class="menu menu-sm px-2">
+    <li>
+      <%= link_to dashboard_path, class: "gap-2" do %>
+        <span class="icon-[lucide--layout-dashboard] size-4"></span>
+        <span class="is-drawer-close:hidden">Dashboard</span>
+      <% end %>
+    </li>
+    <li>
+      <%= link_to conversations_path, class: "gap-2" do %>
+        <span class="icon-[lucide--messages-square] size-4"></span>
+        <span class="is-drawer-close:hidden">Conversations</span>
+      <% end %>
+    </li>
+    <li>
+      <%= link_to agent_programs_path, class: "gap-2" do %>
+        <span class="icon-[lucide--sparkles] size-4"></span>
+        <span class="is-drawer-close:hidden">Agents</span>
+      <% end %>
+    </li>
+    <li>
+      <%= link_to settings_profile_path, class: "gap-2" do %>
+        <span class="icon-[lucide--settings] size-4"></span>
+        <span class="is-drawer-close:hidden">Settings</span>
+      <% end %>
+    </li>
+  </ul>
+
+  <div class="px-2 pt-2">
+    <div class="divider my-0"></div>
+  </div>
+
+  <div class="flex-1 overflow-auto px-2 py-2 scrollbar-auto-hide">
+    <%= render "shared/conversation_list",
+      conversations: (@sidebar_conversations || []),
+      has_more: @sidebar_has_more,
+      before_cursor: @sidebar_before_cursor %>
+  </div>
+
+  <div class="border-t border-base-300 p-2">
+    <%= render "shared/user_menu" %>
+  </div>
+</nav>
+

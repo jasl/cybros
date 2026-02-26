@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+echo "🎭 Running Playwright E2E tests"
+echo "   Make sure dev server is running at ${E2E_BASE_URL:-http://localhost:3000}"
+echo ""
+
+bunx playwright test "$@"

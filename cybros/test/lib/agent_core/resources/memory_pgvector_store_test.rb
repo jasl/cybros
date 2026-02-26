@@ -20,7 +20,7 @@ class AgentCore::Resources::Memory::PgvectorStoreTest < ActiveSupport::TestCase
   setup do
     AgentMemoryEntry.delete_all
 
-    @conversation = Conversation.create!
+    @conversation = create_conversation!
     @embedder = StubEmbedder.new
     @store =
       AgentCore::Resources::Memory::PgvectorStore.new(

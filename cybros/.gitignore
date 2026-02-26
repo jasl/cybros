@@ -99,3 +99,9 @@
 /vendor/simple_inference/spec/reports/
 /vendor/simple_inference/tmp/
 /vendor/simple_inference/*.gem
+
+# Playwright
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/

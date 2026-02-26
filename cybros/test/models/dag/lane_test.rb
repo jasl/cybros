@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::LaneTest < ActiveSupport::TestCase
   test "graph automatically has a unique main lane" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     assert_equal 1, graph.lanes.where(role: DAG::Lane::MAIN).count
@@ -14,11 +14,11 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "lane relationship pointers must not cross graphs" do
-    conversation_a = Conversation.create!
+    conversation_a = create_conversation!
     graph_a = conversation_a.dag_graph
     lane_a = graph_a.main_lane
 
-    conversation_b = Conversation.create!
+    conversation_b = create_conversation!
     graph_b = conversation_b.dag_graph
 
     assert_raises(ActiveRecord::RecordInvalid) do
@@ -27,7 +27,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "root_node_id must belong to the lane" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -48,7 +48,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "nodes default to graph.main_lane for both direct creates and mutation creates" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -63,7 +63,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "lane-scoped context_for rejects target nodes that belong to a different lane" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -80,7 +80,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "create_node inherits lane_id from existing nodes in the same turn" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -104,7 +104,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "fork creates a new branch lane and leaf repair stays within that lane" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -140,7 +140,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "archived lanes block new turns but allow existing turns" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -176,7 +176,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "archive_lane! mode cancel stops running and pending without creating new pending work" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -213,7 +213,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "merge creates a pending join node in the target lane without archiving the source lanes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 
@@ -268,7 +268,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
   end
 
   test "main lane cannot be merged into another lane" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 

@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::NodeTest < ActiveSupport::TestCase
   test "creates the correct body STI class for each node_type by default" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     system = graph.nodes.create!(node_type: Messages::SystemMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -28,7 +28,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "is invalid when body STI does not match node_type" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.new(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -39,7 +39,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "is invalid when node_type is unknown for the graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.new(node_type: "bogus", state: DAG::Node::PENDING, metadata: {})
@@ -53,7 +53,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "is invalid when a non-executable node is pending" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.new(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -63,7 +63,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "exclude_from_context! and soft_delete! reject non-terminal nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -76,7 +76,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "exclude_from_context! and soft_delete! reject mutations while graph has running nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     _running = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
@@ -95,7 +95,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "can_* visibility helpers reflect strict gating and current flags" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(
@@ -124,7 +124,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "can_* mutation helpers match retry/edit/rerun/fork preconditions" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     task = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -160,7 +160,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "retry! rejects attempts when downstream nodes are not pending" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::ERRORED, metadata: {})
@@ -172,7 +172,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "retry! rejects non-retriable node types" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(
@@ -187,7 +187,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "edit! rejects attempts when downstream nodes are pending or running" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, body_input: { "content" => "hi" }, metadata: {})
@@ -199,7 +199,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "rerun! rejects attempts when agent_message is not a leaf" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(
@@ -216,7 +216,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "retry! creates a replacement attempt, rewires outgoing blocking edges, and archives the old node" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -260,7 +260,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "retry! copies body_input and clears output" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(
@@ -281,7 +281,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "retry! clears state-specific metadata fields (error/reason) but preserves custom metadata" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     original = graph.nodes.create!(
@@ -314,7 +314,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "rerun! replaces a finished agent_message leaf" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     user = graph.nodes.create!(
@@ -364,7 +364,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "edit! archives downstream causal lane and creates a new mainline user_message" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(
@@ -428,7 +428,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "mark_stopped! works from running" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     assert node.mark_stopped!(reason: "stopped by user")
@@ -437,7 +437,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "mark_stopped! does not transition from pending" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     assert_not node.mark_stopped!(reason: "cannot stop before running")
@@ -445,7 +445,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "stop! repairs leaf invariant for stopped non-leaf-terminal leaves without creating new pending work" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     task = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
@@ -474,7 +474,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "mark_skipped! works from pending" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
 
     assert node.mark_skipped!(reason: "no longer needed")
@@ -483,7 +483,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "mark_skipped! does not transition from running" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     node = conversation.dag_graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     assert_not node.mark_skipped!(reason: "cannot skip after running")
@@ -491,7 +491,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
   end
 
   test "turn_id cannot span multiple lanes within a graph" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
 

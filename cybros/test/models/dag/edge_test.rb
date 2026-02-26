@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::EdgeTest < ActiveSupport::TestCase
   test "rejects edges that would introduce a cycle" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -18,7 +18,7 @@ class DAG::EdgeTest < ActiveSupport::TestCase
   end
 
   test "rejects active edges that point to inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     from_node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -32,7 +32,7 @@ class DAG::EdgeTest < ActiveSupport::TestCase
   end
 
   test "cycle detection ignores paths through inactive nodes" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     a = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})

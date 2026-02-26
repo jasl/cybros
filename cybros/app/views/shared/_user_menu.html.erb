@@ -1,0 +1,23 @@
+<div class="dropdown dropdown-top w-full">
+  <div tabindex="0" role="button" class="btn btn-ghost btn-sm w-full justify-start gap-2">
+    <span class="icon-[lucide--user] size-4"></span>
+    <span class="is-drawer-close:hidden flex-1 truncate"><%= Current.identity&.email || "Account" %></span>
+    <span class="is-drawer-close:hidden icon-[lucide--chevron-up] size-3"></span>
+  </div>
+  <ul tabindex="0" class="dropdown-content menu bg-base-100/95 backdrop-blur-sm rounded-box z-[60] w-56 p-2 shadow-lg border border-base-300">
+    <li>
+      <%= link_to settings_profile_path, class: "gap-2" do %>
+        <span class="icon-[lucide--settings] size-4"></span>
+        <span>Settings</span>
+      <% end %>
+    </li>
+    <li></li>
+    <li>
+      <%= button_to session_path, method: :delete, class: "text-error gap-2" do %>
+        <span class="icon-[lucide--log-out] size-4"></span>
+        <span>Sign out</span>
+      <% end %>
+    </li>
+  </ul>
+</div>
+

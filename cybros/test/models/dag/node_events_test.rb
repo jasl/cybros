@@ -2,7 +2,7 @@ require "test_helper"
 
 class DAG::NodeEventsTest < ActiveSupport::TestCase
   test "node_event_page_for returns a bounded, keyset-pageable stream" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
 
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, body_output: { "content" => "ok" }, metadata: {})
@@ -34,7 +34,7 @@ class DAG::NodeEventsTest < ActiveSupport::TestCase
   end
 
   test "node_event_page_for rejects non-positive limits and node_event_scope_for is a relation" do
-    conversation = Conversation.create!
+    conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, body_output: { "content" => "ok" }, metadata: {})
 

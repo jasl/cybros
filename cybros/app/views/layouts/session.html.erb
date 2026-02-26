@@ -1,0 +1,8 @@
+<% content_for(:layout_name, "session") %>
+<% content_for(:body_class, "min-h-dvh bg-base-200") %>
+<% content_for :content do %>
+  <%= yield %>
+<% end %>
+
+<%= render template: "layouts/application" %>
+
