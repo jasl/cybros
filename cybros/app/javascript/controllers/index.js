@@ -24,3 +24,6 @@ application.register("typing-indicator", TypingIndicatorController)
 
 import DebugOverlayController from "./debug_overlay_controller"
 application.register("debug-overlay", DebugOverlayController)
+
+import InfiniteScrollController from "./infinite_scroll_controller"
+application.register("infinite-scroll", InfiniteScrollController)

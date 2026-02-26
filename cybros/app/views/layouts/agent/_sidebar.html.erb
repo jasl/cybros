@@ -21,27 +21,27 @@
     <% end %>
   </div>
 
-  <ul class="menu menu-sm px-2">
+  <ul class="menu menu-sm w-full px-2 gap-1">
     <li>
-      <%= link_to dashboard_path, class: "gap-2" do %>
+      <%= link_to dashboard_path, class: "gap-2 #{'menu-active' if active_nav?(dashboard_path)}" do %>
         <span class="icon-[lucide--layout-dashboard] size-4"></span>
         <span class="is-drawer-close:hidden">Dashboard</span>
       <% end %>
     </li>
     <li>
-      <%= link_to conversations_path, class: "gap-2" do %>
+      <%= link_to conversations_path, class: "gap-2 #{'menu-active' if active_nav?(conversations_path)}" do %>
         <span class="icon-[lucide--messages-square] size-4"></span>
         <span class="is-drawer-close:hidden">Conversations</span>
       <% end %>
     </li>
     <li>
-      <%= link_to agent_programs_path, class: "gap-2" do %>
+      <%= link_to agent_programs_path, class: "gap-2 #{'menu-active' if active_nav?(agent_programs_path)}" do %>
         <span class="icon-[lucide--sparkles] size-4"></span>
         <span class="is-drawer-close:hidden">Agents</span>
       <% end %>
     </li>
     <li>
-      <%= link_to settings_profile_path, class: "gap-2" do %>
+      <%= link_to settings_profile_path, class: "gap-2 #{'menu-active' if active_nav?('/settings', '/system/settings')}" do %>
         <span class="icon-[lucide--settings] size-4"></span>
         <span class="is-drawer-close:hidden">Settings</span>
       <% end %>
@@ -52,7 +52,10 @@
     <div class="divider my-0"></div>
   </div>
 
-  <div class="flex-1 overflow-auto px-2 py-2 scrollbar-auto-hide">
+  <% next_page_url = @sidebar_has_more && @sidebar_before_cursor.present? ? sidebar_conversations_path(before: @sidebar_before_cursor) : "" %>
+  <div class="flex-1 overflow-auto px-2 py-2 scrollbar-auto-hide"
+    data-controller="infinite-scroll"
+    data-infinite-scroll-url-value="<%= next_page_url %>">
     <%= render "shared/conversation_list",
       conversations: (@sidebar_conversations || []),
       has_more: @sidebar_has_more,

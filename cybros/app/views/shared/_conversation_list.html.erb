@@ -12,54 +12,13 @@
 <% if conversations.empty? %>
   <div class="text-xs opacity-60 px-2">No conversations yet.</div>
 <% else %>
-  <% today = Date.current %>
-  <% yesterday = today - 1 %>
-  <% cutoff_recent = today - 7 %>
-
-  <% groups = {
-    "Today" => [],
-    "Yesterday" => [],
-    "Previous 7 days" => [],
-    "Older" => [],
-  } %>
-
-  <% conversations.each do |c| %>
-    <% date = c.created_at.to_date %>
-    <% if date == today %>
-      <% groups["Today"] << c %>
-    <% elsif date == yesterday %>
-      <% groups["Yesterday"] << c %>
-    <% elsif date >= cutoff_recent %>
-      <% groups["Previous 7 days"] << c %>
-    <% else %>
-      <% groups["Older"] << c %>
-    <% end %>
-  <% end %>
-
-  <ul class="menu menu-sm">
-    <% groups.each do |label, items| %>
-      <% next if items.empty? %>
-      <li class="menu-title px-2 mt-2">
-        <span><%= label %></span>
-      </li>
-      <% items.each do |conversation| %>
-        <li>
-          <%= link_to conversation_path(conversation), class: "gap-2" do %>
-            <span class="icon-[lucide--message-square] size-4 opacity-70"></span>
-            <span class="is-drawer-close:hidden truncate"><%= conversation.title.presence || "(untitled)" %></span>
-          <% end %>
-        </li>
-      <% end %>
-    <% end %>
+  <ul class="menu menu-sm" data-infinite-scroll-target="list">
+    <%= render "shared/conversation_items", conversations: conversations %>
   </ul>
 
   <% if has_more && before_cursor.present? %>
-    <div class="mt-2 px-2">
-      <% sidebar_href = "#{request.path}?sidebar_before=#{ERB::Util.url_encode(before_cursor)}" %>
-      <%= link_to "Load more",
-        sidebar_href,
-        class: "btn btn-ghost btn-sm w-full" %>
+    <div data-infinite-scroll-target="sentinel" class="flex justify-center py-2">
+      <span class="loading loading-spinner loading-sm"></span>
     </div>
   <% end %>
 <% end %>
-

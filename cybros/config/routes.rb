@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   resource :session, only: %i[new create destroy]
 
   get "dashboard", to: "dashboard#show"
+  get "sidebar_conversations", to: "sidebar_conversations#index"
 
   namespace :settings do
     resource :profile, only: %i[show update]
