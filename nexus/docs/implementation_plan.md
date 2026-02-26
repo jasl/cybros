@@ -1,9 +1,9 @@
 # Implementation Plan & Progress Tracker
 
-Based on the [design document](design/README.md) roadmap (Phase 0-6).
+Based on the [design document](design/README.md) roadmap (Phase 0-7).
 Reference analysis and decision log: [07_reference_analysis.md](design/07_reference_analysis.md)
 
-## Current Status: Phase 6 partial ✓ (observability + reliability + resource governance)
+## Current Status: Phase 7 (7a-7c) ✓ — Universal Device Abstraction
 
 Phase 0 E2E: `cd mothership && RAILS_ENV=test bin/rails test test/integration/conduits_e2e_test.rb`
 
@@ -90,8 +90,6 @@ CommandValidator (two-tier: FORBIDDEN_PATTERNS + APPROVAL_PATTERNS), Landlock sk
 
 ## Phase 6: Production Readiness (partial ✓)
 
-> Detailed plan: `.claude/plans/shiny-popping-unicorn.md`
-
 ### 6a: Observability ✓
 
 | Task | Notes |
@@ -135,6 +133,84 @@ Phase 6 audit: 15 findings (C1-C3, H1-H7, M1-M3, M5, M9) — all fixed with test
 
 ---
 
+## Phase 7: Universal Device Abstraction (7a-7c ✓, 7d deferred)
+
+> Design doc: [`docs/design/09_nexus_universal_device.md`](design/09_nexus_universal_device.md)
+> Goal: Generalize Nexus from "code execution engine" to "unified device capability proxy" via Territory kinds, Command track, Bridge pattern, and WebSocket push.
+
+### Phase 7a: Data Model & Territory Extensions ✓
+
+| Task | Notes |
+|------|-------|
+| Territory kind column (`server\|desktop\|mobile\|bridge`) | Enum column, NOT NULL, validated |
+| Territory device fields | platform, display_name, location, tags (jsonb GIN), capabilities (jsonb GIN), websocket_connected_at, push_token/push_platform |
+| BridgeEntity model | Separate table, territory FK, entity_ref (unique per territory), entity_type, capabilities (GIN), location, state, available |
+| Command model (AASM) | queued → dispatched → completed/failed/timed_out/canceled, has_one_attached :result_attachment, timeout_seconds validation |
+| AuditEvent command FK | command_id column, command event types in EVENT_TYPES |
+| Device Policy dimension | `device` jsonb column on conduits_policies, DevicePolicyV1 (allowed/denied/approval_required with wildcard matching), merge via intersection/union semantics |
+| Territory scopes | with_capability, with_capability_matching, at_location (LIKE-safe), with_tag, websocket_connected, command_capable, directive_capable |
+| BridgeEntity scopes | available, of_type, with_capability, at_location (LIKE-safe) |
+| Enrollment: kind/platform/display_name params | Backward-compatible, defaults to kind=server |
+| Heartbeat: capabilities + bridge_entities sync | BridgeEntitySyncService full-reconcile (transactional) |
+
+### Phase 7b: Command REST API ✓
+
+| Task | Notes |
+|------|-------|
+| CommandTargetResolver | Direct territory_id → capability+location+tag → bridge entity search; deterministic ordering (last_heartbeat_at/last_seen_at DESC) |
+| `GET /conduits/v1/commands/pending` | FOR UPDATE SKIP LOCKED (race-safe), AASM::InvalidTransition rescue |
+| `POST /conduits/v1/commands/:id/result` | JSON result + base64 attachment, idempotent duplicate handling |
+| `POST /conduits/v1/commands/:id/cancel` | Cancel queued/dispatched, already-terminal idempotent |
+| CommandTimeoutJob | Reaps expired commands via Command.expired scope, audit events |
+| E2E test: mobile + bridge + legacy directive flows | 7 integration tests covering full lifecycle |
+
+### Phase 7c: WebSocket Push Channel ✓
+
+| Task | Notes |
+|------|-------|
+| Action Cable Connection (dual auth) | mTLS fingerprint (query param) + territory_id header/param (dev) |
+| TerritoryChannel | stream_for territory, websocket_connected_at tracking, command_result action (base64 error handling) |
+| CommandDispatcher (3-tier) | WebSocket → Push Notification (mocked) → REST Poll; returns dispatch method symbol; error handling with fallback |
+
+### Phase 7 Post-Implementation Audit
+
+Comprehensive audit performed (2026-02-27). Findings and fixes:
+
+| Severity | Finding | Fix |
+|----------|---------|-----|
+| CRITICAL | Missing `device` column on conduits_policies | Migration 20260227000005, Policy model validation + merge_device!, DevicePolicyV1 updated |
+| HIGH | Race condition in pending command dispatch | FOR UPDATE SKIP LOCKED + AASM::InvalidTransition rescue |
+| HIGH | CommandDispatcher no error handling | dispatch! before broadcast, rescue with fallback, return value |
+| MEDIUM | BridgeEntitySyncService no transaction | Wrapped in ActiveRecord::Base.transaction |
+| MEDIUM | LIKE wildcard injection in at_location | sanitize_sql_like() in Territory + BridgeEntity scopes |
+| MEDIUM | Non-deterministic target selection | ORDER BY last_heartbeat_at/last_seen_at DESC, id ASC |
+| MEDIUM | Base64 error handling in TerritoryChannel | ArgumentError rescue, AASM::InvalidTransition rescue |
+
+### Phase 7 Test Coverage
+
+| Test File | Tests | Focus |
+|-----------|-------|-------|
+| territory_device_test.rb | 15 | Kind, capabilities, scopes, heartbeat |
+| bridge_entity_test.rb | 7 | Validation, scopes, bridge-only constraint |
+| command_test.rb | 12 | AASM, validation, capability checks, expired scope |
+| device_policy_v1_test.rb | 14 | Pattern matching, merge semantics, real Policy records |
+| bridge_entity_sync_service_test.rb | 5 | Upsert, reconcile, mark unavailable |
+| command_target_resolver_test.rb | 7 | Direct, capability, location, tag, bridge, priority |
+| command_dispatcher_test.rb | 5 | WebSocket, push, poll, AASM error handling |
+| command_timeout_job_test.rb | 5 | Expired reaping, non-expired skip, audit events |
+| conduits_command_e2e_test.rb | 7 | Full lifecycle (mobile, bridge, legacy directive) |
+| policy_test.rb | +4 | Device dimension validation and merge |
+| **Total new** | **81** | |
+
+### Phase 7d: PoC Simulators (deferred to Phase 8)
+
+Real-machine integration testing completed on 10.0.0.114 (aarch64 server) and 10.0.0.130 (x86_64 desktop):
+- All enrollment, heartbeat, command dispatch, and result submission endpoints validated
+- Existing Go nexusd daemon backward-compatible (polls succeed against updated Mothership)
+- Phase 7d formal PoC simulators deferred; protocol proven end-to-end via integration tests + real machines
+
+---
+
 ## Remaining TODO
 
 Cross-cutting future work items consolidated from all phases.
@@ -169,7 +245,18 @@ Cross-cutting future work items consolidated from all phases.
 | Git tree snapshots | Reference: OpenCode/Codex. Evaluate vs HEAD-based |
 | SSH gateway for interactive facility | Reference: Claude.app |
 
-### Future (Post-Phase 6)
+### Phase 8: Device Clients & Agent Integration (planned)
+
+| Task | Phase | Notes |
+|------|-------|-------|
+| Go Nexus Command support (WebSocket client + command handler) | 8a | Depends on Phase 7 protocol stability |
+| iOS/Android native App | 8b | Enrollment, WebSocket, camera/location/audio |
+| Push Notification real integration (APNs/FCM) | 8c | Depends on mobile App |
+| Bridge SDK + Home Assistant Custom Component | 8d | Python SDK |
+| Agent integration (device_command / list_devices tools) | 8e | Depends on Phase 7 API stability |
+| Device management Web UI | 8f | QR enrollment, device/entity list, status monitoring |
+
+### Future (Post-Phase 8)
 
 | Task | Notes |
 |------|-------|

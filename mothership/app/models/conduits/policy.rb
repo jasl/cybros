@@ -11,6 +11,7 @@ module Conduits
     VALID_SCOPE_TYPES = [nil, "Account", "User", "Conduits::Facility"].freeze
     VALID_NET_MODES = %w[none allowlist unrestricted].freeze
     VALID_APPROVAL_VERDICTS = %w[skip needs_approval forbidden].freeze
+    VALID_DEVICE_KEYS = %w[allowed denied approval_required].freeze
     MAX_PATH_ENTRIES = 100
 
     validates :name, presence: true
@@ -19,6 +20,7 @@ module Conduits
     validate :validate_fs_structure
     validate :validate_net_structure
     validate :validate_approval_structure
+    validate :validate_device_structure
 
     scope :active, -> { where(active: true) }
     scope :by_priority, -> { order(priority: :asc) }
@@ -74,6 +76,7 @@ module Conduits
           merge_secrets!(result, policy)
           merge_sandbox_profile_rules!(result, policy)
           merge_approval!(result, policy)
+          merge_device!(result, policy)
         end
 
         result
@@ -145,6 +148,33 @@ module Conduits
         end
       end
 
+      # Device: uses DevicePolicyV1 merge semantics (intersection for allowed, union for denied)
+      def merge_device!(result, policy)
+        return if policy.device.blank?
+
+        device = policy.device
+        if result[:device].empty?
+          result[:device] = device.deep_dup
+        else
+          # allowed: intersection
+          if device["allowed"].present?
+            result[:device]["allowed"] = if result[:device]["allowed"].nil?
+              Array(device["allowed"])
+            else
+              DevicePolicyV1.send(:intersect_patterns,
+                Array(result[:device]["allowed"]),
+                Array(device["allowed"]))
+            end
+          end
+
+          # denied: union
+          result[:device]["denied"] = (Array(result[:device]["denied"]) | Array(device["denied"])) if device["denied"].present?
+
+          # approval_required: union
+          result[:device]["approval_required"] = (Array(result[:device]["approval_required"]) | Array(device["approval_required"])) if device["approval_required"].present?
+        end
+      end
+
       def empty_result
         {
           fs: {},
@@ -152,7 +182,8 @@ module Conduits
           secrets: {},
           sandbox_profile_rules: {},
           approval: {},
-          policy_ids: []
+          device: {},
+          policy_ids: [],
         }
       end
     end
@@ -168,7 +199,7 @@ module Conduits
       end
 
       extra_keys = fs.keys - %w[read write]
-      errors.add(:fs, "contains unknown keys: #{extra_keys.join(', ')}") if extra_keys.any?
+      errors.add(:fs, "contains unknown keys: #{extra_keys.join(", ")}") if extra_keys.any?
 
       %w[read write].each do |key|
         next unless fs.key?(key)
@@ -193,7 +224,7 @@ module Conduits
       end
 
       if net.key?("mode") && !VALID_NET_MODES.include?(net["mode"])
-        errors.add(:net, "mode must be one of: #{VALID_NET_MODES.join(', ')}")
+        errors.add(:net, "mode must be one of: #{VALID_NET_MODES.join(", ")}")
       end
     end
 
@@ -207,7 +238,27 @@ module Conduits
 
       approval.each do |key, value|
         unless VALID_APPROVAL_VERDICTS.include?(value.to_s)
-          errors.add(:approval, "#{key} must be one of: #{VALID_APPROVAL_VERDICTS.join(', ')}")
+          errors.add(:approval, "#{key} must be one of: #{VALID_APPROVAL_VERDICTS.join(", ")}")
+        end
+      end
+    end
+
+    def validate_device_structure
+      return if device.blank?
+
+      unless device.is_a?(Hash)
+        errors.add(:device, "must be a hash")
+        return
+      end
+
+      extra_keys = device.keys - VALID_DEVICE_KEYS
+      errors.add(:device, "contains unknown keys: #{extra_keys.join(", ")}") if extra_keys.any?
+
+      VALID_DEVICE_KEYS.each do |key|
+        next unless device.key?(key)
+
+        unless device[key].is_a?(Array) && device[key].all? { |v| v.is_a?(String) }
+          errors.add(:device, "#{key} must be an array of strings")
         end
       end
     end

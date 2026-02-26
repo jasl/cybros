@@ -61,7 +61,7 @@ module Conduits
         "fs" => effective_fs,
         "net" => effective_net,
         "secrets" => resolved[:secrets].presence || {},
-        "sandbox_profile_rules" => resolved[:sandbox_profile_rules]
+        "sandbox_profile_rules" => resolved[:sandbox_profile_rules],
       }
     end
 
@@ -94,7 +94,7 @@ module Conduits
         "net" => resolved[:net],
         "secrets" => resolved[:secrets],
         "sandbox_profile_rules" => resolved[:sandbox_profile_rules],
-        "approval" => resolved[:approval]
+        "approval" => resolved[:approval],
       }
     end
   end

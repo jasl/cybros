@@ -94,8 +94,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? returns true for healthy host driver" do
     @territory.capacity = {
       "sandbox_health" => {
-        "host" => { "healthy" => true, "details" => { "driver" => "host" } }
-      }
+        "host" => { "healthy" => true, "details" => { "driver" => "host" } },
+      },
     }
     assert @territory.sandbox_healthy?("host")
   end
@@ -103,8 +103,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? returns false for unhealthy host driver" do
     @territory.capacity = {
       "sandbox_health" => {
-        "host" => { "healthy" => false, "details" => { "error" => "test" } }
-      }
+        "host" => { "healthy" => false, "details" => { "error" => "test" } },
+      },
     }
     assert_not @territory.sandbox_healthy?("host")
   end
@@ -112,8 +112,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? maps untrusted to bwrap by default" do
     @territory.capacity = {
       "sandbox_health" => {
-        "bwrap" => { "healthy" => true }
-      }
+        "bwrap" => { "healthy" => true },
+      },
     }
     assert @territory.sandbox_healthy?("untrusted")
   end
@@ -122,9 +122,9 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
     @territory.capacity = {
       "sandbox_health" => {
         "bwrap" => { "healthy" => true },
-        "firecracker" => { "healthy" => false, "details" => { "error" => "no kvm" } }
+        "firecracker" => { "healthy" => false, "details" => { "error" => "no kvm" } },
       },
-      "untrusted_driver" => "firecracker"
+      "untrusted_driver" => "firecracker",
     }
     # Must check firecracker (the actual driver), not bwrap
     assert_not @territory.sandbox_healthy?("untrusted")
@@ -134,9 +134,9 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
     @territory.capacity = {
       "sandbox_health" => {
         "bwrap" => { "healthy" => false, "details" => { "error" => "namespace test failed" } },
-        "firecracker" => { "healthy" => true }
+        "firecracker" => { "healthy" => true },
       },
-      "untrusted_driver" => "bwrap"
+      "untrusted_driver" => "bwrap",
     }
     # Must check bwrap (the actual driver), not firecracker
     assert_not @territory.sandbox_healthy?("untrusted")
@@ -145,8 +145,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? maps trusted profile to container driver" do
     @territory.capacity = {
       "sandbox_health" => {
-        "container" => { "healthy" => true }
-      }
+        "container" => { "healthy" => true },
+      },
     }
     assert @territory.sandbox_healthy?("trusted")
   end
@@ -155,8 +155,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
     # Trusted maps to container, but container not reported — default true
     @territory.capacity = {
       "sandbox_health" => {
-        "host" => { "healthy" => true }
-      }
+        "host" => { "healthy" => true },
+      },
     }
     assert @territory.sandbox_healthy?("trusted")
   end
@@ -166,9 +166,9 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
       "sandbox_health" => {
         "host" => { "healthy" => true },
         "bwrap" => { "healthy" => false, "details" => { "error" => "namespace failed" } },
-        "container" => { "healthy" => true }
+        "container" => { "healthy" => true },
       },
-      "untrusted_driver" => "bwrap"
+      "untrusted_driver" => "bwrap",
     }
     assert @territory.sandbox_healthy?("host")
     assert_not @territory.sandbox_healthy?("untrusted")
@@ -178,8 +178,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? accepts symbol profile" do
     @territory.capacity = {
       "sandbox_health" => {
-        "host" => { "healthy" => true }
-      }
+        "host" => { "healthy" => true },
+      },
     }
     assert @territory.sandbox_healthy?(:host)
   end
@@ -187,8 +187,8 @@ class Conduits::TerritoryTest < ActiveSupport::TestCase
   test "sandbox_healthy? handles darwin-automation profile" do
     @territory.capacity = {
       "sandbox_health" => {
-        "darwin-automation" => { "healthy" => false }
-      }
+        "darwin-automation" => { "healthy" => false },
+      },
     }
     assert_not @territory.sandbox_healthy?("darwin-automation")
   end

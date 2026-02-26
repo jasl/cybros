@@ -107,7 +107,13 @@ module Conduits
     end
 
     def request_cancel!
-      update!(cancel_requested_at: Time.current) unless cancel_requested?
+      return if cancel_requested?
+
+      update!(cancel_requested_at: Time.current)
+
+      # Push cancel signal via WebSocket for immediate delivery.
+      # Fire-and-forget: Nexus heartbeat is the fallback discovery mechanism.
+      TerritoryChannel.broadcast_directive_cancel(self)
     end
 
     private

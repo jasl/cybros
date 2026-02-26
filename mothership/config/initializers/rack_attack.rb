@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "rack/attack"
 
 # NOTE: This project uses Rack::Attack for minimal API hardening.

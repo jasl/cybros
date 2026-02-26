@@ -54,7 +54,7 @@ class Conduits::ApprovalEvaluatorTest < ActiveSupport::TestCase
     result = evaluate(
       rules: {
         "host_profile" => "needs_approval",
-        "net_unrestricted" => "forbidden"
+        "net_unrestricted" => "forbidden",
       },
       profile: "host",
       caps: { "net" => { "mode" => "unrestricted" } }
@@ -67,7 +67,7 @@ class Conduits::ApprovalEvaluatorTest < ActiveSupport::TestCase
     result = evaluate(
       rules: {
         "host_profile" => "needs_approval",
-        "net_unrestricted" => "skip"
+        "net_unrestricted" => "skip",
       },
       profile: "host",
       caps: { "net" => { "mode" => "unrestricted" } }

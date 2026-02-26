@@ -69,7 +69,7 @@ module Conduits
 
       {
         "read" => intersect_paths(Array(fs_a["read"]), Array(fs_b["read"])),
-        "write" => intersect_paths(Array(fs_a["write"]), Array(fs_b["write"]))
+        "write" => intersect_paths(Array(fs_a["write"]), Array(fs_b["write"])),
       }
     end
 
@@ -99,7 +99,7 @@ module Conduits
         allowed: violations.empty?,
         read: Array(requested_fs["read"]),
         write: Array(requested_fs["write"]),
-        violations: violations
+        violations: violations,
       }
     end
 

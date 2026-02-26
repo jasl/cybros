@@ -190,6 +190,68 @@ class Conduits::PolicyTest < ActiveSupport::TestCase
     assert_equal({ "allow_host" => false }, result[:sandbox_profile_rules])
   end
 
+  # ─── Device dimension ─────────────────────────────────────
+
+  test "validate_device_structure rejects unknown keys" do
+    policy = Conduits::Policy.new(
+      account: @account, name: "bad-device", priority: 0,
+      device: { "allowed" => ["camera.*"], "badkey" => ["x"] }
+    )
+    refute policy.valid?
+    assert policy.errors[:device].any? { |e| e.include?("unknown keys") }
+  end
+
+  test "validate_device_structure rejects non-array values" do
+    policy = Conduits::Policy.new(
+      account: @account, name: "bad-device2", priority: 0,
+      device: { "allowed" => "camera.*" }
+    )
+    refute policy.valid?
+    assert policy.errors[:device].any? { |e| e.include?("must be an array") }
+  end
+
+  test "validate_device_structure accepts valid device policy" do
+    policy = Conduits::Policy.new(
+      account: @account, name: "good-device", priority: 0,
+      device: { "allowed" => ["camera.*"], "denied" => ["camera.record"], "approval_required" => ["sms.send"] }
+    )
+    assert policy.valid?
+  end
+
+  test "effective_for includes device dimension in merge" do
+    create_policy(
+      name: "global-device", priority: 0,
+      scope_type: nil, scope_id: nil,
+      device: { "allowed" => ["camera.*", "audio.*"], "denied" => ["sms.send"] }
+    )
+    create_policy(
+      name: "account-device", priority: 10,
+      scope_type: "Account", scope_id: @account.id,
+      device: { "allowed" => ["camera.snap"], "approval_required" => ["camera.snap"] }
+    )
+
+    result = Conduits::Policy.effective_for(@directive)
+
+    # allowed: intersection of ["camera.*", "audio.*"] and ["camera.snap"] = ["camera.snap"]
+    assert_includes result[:device]["allowed"], "camera.snap"
+    refute_includes(result[:device]["allowed"] || [], "audio.record")
+    # denied: union
+    assert_includes result[:device]["denied"], "sms.send"
+    # approval_required: union
+    assert_includes result[:device]["approval_required"], "camera.snap"
+  end
+
+  test "effective_for returns empty device when no device policies" do
+    create_policy(
+      name: "no-device", priority: 0,
+      scope_type: nil, scope_id: nil,
+      fs: { "read" => ["workspace:**"] }
+    )
+
+    result = Conduits::Policy.effective_for(@directive)
+    assert_equal({}, result[:device])
+  end
+
   private
 
   def create_policy(name:, priority: 0, scope_type: nil, scope_id: nil, active: true, account_id: nil, **caps)
@@ -204,7 +266,8 @@ class Conduits::PolicyTest < ActiveSupport::TestCase
       net: caps[:net] || {},
       secrets: caps[:secrets] || {},
       sandbox_profile_rules: caps[:sandbox_profile_rules] || {},
-      approval: caps[:approval] || {}
+      approval: caps[:approval] || {},
+      device: caps[:device] || {}
     )
   end
 end

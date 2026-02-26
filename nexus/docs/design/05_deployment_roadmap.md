@@ -253,7 +253,31 @@ Nexus 与 Cybros（Mothership）进度可能不同步，建议在 Cybros 仓库�
 - 验收：
   - 一组 territory 在长时间运行下稳定，且出现异常时能定位（日志+指标+审计闭环）。
 
-### 终极形态定义（你最终想要的“安全 + 易用”）
+### Phase 7：万能设备抽象（Universal Device Abstraction）
+
+> 详细设计：[`09_nexus_universal_device.md`](09_nexus_universal_device.md)
+
+- Mothership：
+  - Territory 种类（`server | desktop | mobile | bridge`）：一等列柱，非标签。
+  - 双轨模型：Directive 轨道（代码执行，不变）+ Command 轨道（设备能力，新增）。
+  - Command AASM：`queued → dispatched → completed | failed | timed_out | canceled`。
+  - BridgeEntity 模型：桥接 territory 的子设备，通过 heartbeat 全量同步。
+  - Device Policy 维度：Policy 模型新增 `device` jsonb 列（allowed/denied/approval_required，通配符匹配）。
+  - CommandTargetResolver：直接/能力/位置/标签/桥接实体多维路由。
+  - CommandDispatcher：三级分发（WebSocket → Push Notification → REST Poll）。
+  - Action Cable WebSocket 推送通道（TerritoryChannel）。
+  - Enrollment 扩展：`kind`/`platform`/`display_name` 参数，向后兼容（默认 `kind=server`）。
+  - Heartbeat 扩展：`capabilities` + `bridge_entities` 同步。
+- 安全加固：
+  - `FOR UPDATE SKIP LOCKED` 防止 Command 并发竞态。
+  - `sanitize_sql_like` 防止 LIKE 通配符注入。
+  - AASM 状态机保护（rescue InvalidTransition）。
+  - Base64 解码错误处理。
+- 验收：
+  - 293 测试，933 断言，0 失败。覆盖 Territory device、BridgeEntity、Command、DevicePolicy、CommandDispatcher、CommandTargetResolver、CommandTimeoutJob、E2E 全流程。
+  - 真机集成测试通过（aarch64 server + x86_64 desktop）。
+
+### 终极形态定义（你最终想要的”安全 + 易用”）
 
 - Linux：Untrusted 默认 microVM + 硬 egress + 可回放工件/镜像；Trusted/Host 作为显式选择并受审批约束。
 - macOS：darwin-automation 作为“自动化节点”能力存在，但其风险边界明确、默认最小权限、全量可审计。

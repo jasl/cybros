@@ -81,6 +81,9 @@ class ConduitsE2ETest < ActionDispatch::IntegrationTest
     assert @territory_id.present?, "Territory ID returned"
     assert body.dig("config", "poll_interval_seconds").present?, "Config has poll_interval"
     assert body.dig("config", "lease_ttl_seconds").present?, "Config has lease_ttl"
+    assert body.dig("config", "cable_url").present?, "Config has cable_url"
+    assert_equal 300, body.dig("config", "heartbeat_interval_ws_seconds"), "Config has WS heartbeat interval"
+    assert_equal 30, body.dig("config", "heartbeat_interval_seconds"), "Config has REST heartbeat interval"
 
     @territory_record = Conduits::Territory.find(@territory_id)
     assert_equal "online", @territory_record.status, "Territory is online"
@@ -589,15 +592,36 @@ class ConduitsE2ETest < ActionDispatch::IntegrationTest
     assert_response 200, "Territory heartbeat returns 200"
     body = JSON.parse(response.body)
     assert body["ok"]
+    assert_equal 30, body["next_heartbeat_interval_seconds"], "REST heartbeat interval when WS not connected"
+    assert_equal false, body["websocket_connected"], "WS not connected"
 
     @territory_record.reload
     assert @territory_record.last_heartbeat_at.present?
     assert_equal "0.1.0-e2e", @territory_record.nexus_version
+
+    # Simulate WebSocket connection
+    @territory_record.update!(websocket_connected_at: Time.current)
+
+    post "/conduits/v1/territories/heartbeat",
+         params: { nexus_version: "0.1.0-e2e" },
+         headers: territory_headers,
+         as: :json
+
+    assert_response 200, "Heartbeat with WS connected"
+    body = JSON.parse(response.body)
+    assert_equal 300, body["next_heartbeat_interval_seconds"], "WS heartbeat interval when connected"
+    assert_equal true, body["websocket_connected"], "WS connected"
+
+    # Clean up WS state for subsequent phases
+    @territory_record.update!(websocket_connected_at: nil)
   end
 
   # ─── Phase 12: Edge Cases ─────────────────────────────────
 
   def phase_edge_cases
+    # Reset rate limiter so edge case assertions aren't affected by earlier enrollments
+    Rack::Attack.cache.store.clear
+
     # Invalid enrollment token
     post "/conduits/v1/territories/enroll",
          params: { enroll_token: "invalid-token" },
@@ -613,12 +637,13 @@ class ConduitsE2ETest < ActionDispatch::IntegrationTest
     assert_response 422, "Reused enrollment token returns 422"
 
     # Enrollment rate limiting (10/hour)
-    6.times do |i|
+    # After cache.clear + 2 requests above, need 8 more to reach the limit of 10
+    8.times do |i|
       post "/conduits/v1/territories/enroll",
            params: { enroll_token: "invalid-token-rate-limit-#{i}" },
            as: :json
 
-      assert_response 422, "Rate limit warm-up enroll #{i + 1}/6 returns 422"
+      assert_response 422, "Rate limit warm-up enroll #{i + 1}/8 returns 422"
     end
 
     post "/conduits/v1/territories/enroll",

@@ -32,14 +32,31 @@ bin/rails db:reset     # Drop, create, load schema
 
 The core purpose of Mothership — implements the polling/reporting API that Nexus communicates with:
 
+**Directive track** (code execution):
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/conduits/v1/polls` | Long-poll for directives |
-| POST | `/conduits/v1/territories/enroll` | Register new territory |
+| POST | `/conduits/v1/territories/enroll` | Register new territory (with kind, platform, display_name) |
+| POST | `/conduits/v1/territories/heartbeat` | Territory-level presence, capability, and bridge entity reporting |
 | POST | `/conduits/v1/directives/:id/started` | Report directive started |
 | POST | `/conduits/v1/directives/:id/heartbeat` | Renew lease / report progress |
 | POST | `/conduits/v1/directives/:id/log_chunks` | Upload stdout/stderr chunks |
 | POST | `/conduits/v1/directives/:id/finished` | Report directive completed |
+
+**Command track** (device capabilities):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/conduits/v1/commands/pending` | Poll for pending commands (REST fallback) |
+| POST | `/conduits/v1/commands/:id/result` | Submit command execution result |
+| POST | `/conduits/v1/commands/:id/cancel` | Cancel a command |
+
+**WebSocket** (Action Cable):
+
+| Channel | Description |
+|---------|-------------|
+| `Conduits::TerritoryChannel` | Real-time push for commands and directive wake-ups |
 
 ### Mothership API (Human-facing)
 
@@ -54,23 +71,35 @@ Simple web UI and API for managing territories, directives, facilities, and poli
 
 All under the `Conduits::` namespace:
 
-- **Territory** — A registered Nexus instance
+- **Territory** — A registered Nexus instance (kind: `server`, `desktop`, `mobile`, `bridge`)
 - **Facility** — A persistent workspace on a territory
-- **Directive** — A unit of execution (command + facility + capabilities + timeout)
-- **Policy** — Capability policies scoped at global/account/user/facility level
+- **Directive** — A unit of execution: command + facility + capabilities + timeout (directive track)
+- **Command** — A device-capability invocation: capability + params + timeout (command track)
+- **BridgeEntity** — A sub-device managed by a bridge territory (e.g. light, sensor, camera)
+- **Policy** — Capability policies scoped at global/account/user/facility level, plus device access policies
 - **EnrollmentToken** — One-time tokens for territory registration
 - **LogChunk** — Captured stdout/stderr from directive execution
-- **AuditEvent** — Audit trail for all state changes
+- **AuditEvent** — Audit trail for all state changes (directives and commands)
 
 State machines (via AASM):
 - Directive: `pending → approved → claimed → started → finished/failed/timed_out`
+- Command: `queued → dispatched → completed/failed/timed_out/canceled`
 - Territory: `pending → enrolled → active / suspended`
 
 ### Authentication
 
-- Nexus authenticates via `X-Nexus-Territory-Id` header (dev mode) or mTLS (future)
+- Nexus authenticates via mTLS client certificate fingerprint (`X-Nexus-Client-Cert-Fingerprint` header) or `X-Nexus-Territory-Id` header (dev mode). Configurable via `CONDUITS_TERRITORY_AUTH_MODE` (mtls/header/either).
+- WebSocket (Action Cable) connections authenticate via mTLS fingerprint (production) or territory ID (dev/test)
 - Directive-scoped operations use `Authorization: Bearer <directive_token>` (JWT)
 - Enrollment endpoint is rate-limited (via Rack::Attack)
+
+### Key Services
+
+- **CommandDispatcher** — Three-tier dispatch: WebSocket (preferred) → push notification → REST poll fallback
+- **CommandTargetResolver** — Resolves target territory and optional bridge entity for commands by capability, location, tag, or direct ID
+- **BridgeEntitySyncService** — Full-reconcile sync of bridge entities from territory heartbeat data
+- **DirectiveNotifier** — Broadcasts wake-up notifications to WebSocket-connected territories when directives are available
+- **PolicyResolver** — Merges layered policies (global → account → user → facility) including device access rules
 
 ## Code Style
 

@@ -47,10 +47,14 @@ module Conduits
         CA_DIR.mkpath
 
         if CA_KEY_PATH.exist? && CA_CERT_PATH.exist?
-          return [
-            OpenSSL::PKey.read(CA_KEY_PATH.read),
-            OpenSSL::X509::Certificate.new(CA_CERT_PATH.read),
-          ]
+          begin
+            return [
+              OpenSSL::PKey.read(CA_KEY_PATH.read),
+              OpenSSL::X509::Certificate.new(CA_CERT_PATH.read),
+            ]
+          rescue Errno::ENOENT
+            # TOCTOU: file removed between exist? check and read; fall through to create
+          end
         end
 
         key = OpenSSL::PKey::RSA.new(3072)

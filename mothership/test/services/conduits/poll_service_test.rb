@@ -134,8 +134,8 @@ class Conduits::PollServiceTest < ActiveSupport::TestCase
     @territory.capacity = {
       "sandbox_health" => {
         "host" => { "healthy" => true },
-        "bwrap" => { "healthy" => false, "details" => { "error" => "namespace test failed" } }
-      }
+        "bwrap" => { "healthy" => false, "details" => { "error" => "namespace test failed" } },
+      },
     }
     @territory.save!
 
@@ -154,8 +154,8 @@ class Conduits::PollServiceTest < ActiveSupport::TestCase
     @territory.capacity = {
       "sandbox_health" => {
         "host" => { "healthy" => true },
-        "bwrap" => { "healthy" => true }
-      }
+        "bwrap" => { "healthy" => true },
+      },
     }
     @territory.save!
 

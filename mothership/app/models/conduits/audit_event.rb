@@ -5,6 +5,7 @@ module Conduits
     belongs_to :account
     belongs_to :directive, class_name: "Conduits::Directive", inverse_of: :audit_events,
                optional: true
+    belongs_to :command, class_name: "Conduits::Command", optional: true
     belongs_to :actor, class_name: "User", optional: true
 
     SEVERITIES = %w[info warn critical].freeze
@@ -24,6 +25,16 @@ module Conduits
       directive.finished
       directive.state_changed
       directive.lease_expired
+      command.created
+      command.awaiting_approval
+      command.approved
+      command.rejected
+      command.dispatched
+      command.completed
+      command.failed
+      command.timed_out
+      command.canceled
+      command.policy_denied
     ].freeze
 
     validates :event_type, presence: true

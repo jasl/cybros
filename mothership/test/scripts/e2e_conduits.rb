@@ -1,6 +1,4 @@
 #!/usr/bin/env ruby
-# frozen_string_literal: true
-
 # End-to-end test script for the Conduits subsystem.
 #
 # Exercises the full loop:

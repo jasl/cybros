@@ -2,6 +2,8 @@ module Mothership
   module API
     module V1
       class BaseController < ActionController::API
+        include ParamsConversion
+
         before_action :authenticate_user!
 
         private

@@ -110,7 +110,7 @@ class Conduits::PolicyResolverTest < ActiveSupport::TestCase
       sandbox_profile: "untrusted",
       requested_capabilities: {
         "fs" => { "read" => ["workspace:**"], "write" => ["workspace:**"] },
-        "net" => { "mode" => "unrestricted" }
+        "net" => { "mode" => "unrestricted" },
       }
     )
 

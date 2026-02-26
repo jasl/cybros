@@ -3,7 +3,8 @@ info:
   title: Mothership Conduits API
   version: v1
   description: |
-    Nexus-facing API contract (Mothership -> Nexus communication channel).
+    Nexus-facing API contract (Mothership <-> Nexus communication channel).
+    Two tracks: Directive track (code execution) and Command track (device capabilities).
     This file is for integration testing and contract tests, not the final public API.
 servers:
   - url: http://localhost:3000
@@ -11,9 +12,11 @@ servers:
   - url: https://mothership.example.com
     description: Production (replace with real domain)
 paths:
+  # ─── Territory Lifecycle ──────────────────────────────────────
   /conduits/v1/territories/enroll:
     post:
-      summary: "Enroll territory (Phase 0: enroll token -> territory_id)"
+      summary: "Enroll territory (enroll token -> territory_id)"
+      tags: [Territory]
       requestBody:
         required: true
         content:
@@ -26,6 +29,21 @@ paths:
                 name:
                   type: string
                   description: Optional friendly name for the territory.
+                kind:
+                  type: string
+                  enum: [server, desktop, mobile, bridge]
+                  description: |
+                    Territory kind. Defaults to "server" for backward compatibility.
+                    - server: headless Linux/macOS running directives
+                    - desktop: interactive workstation (directives + commands)
+                    - mobile: phone/tablet (commands only, no directive execution)
+                    - bridge: third-party platform gateway (e.g. Home Assistant)
+                platform:
+                  type: string
+                  description: "OS/platform identifier (e.g. linux-amd64, darwin-arm64, ios, android)."
+                display_name:
+                  type: string
+                  description: "Human-readable display name for UI."
                 labels:
                   type: object
                   additionalProperties: true
@@ -33,7 +51,7 @@ paths:
                   type: object
                   additionalProperties: true
                   description: |
-                    Optional metadata blob. Phase 0 uses metadata.capacity for quick testing.
+                    Optional metadata blob. Uses metadata.capacity for capacity hints.
                 csr_pem:
                   type: string
                   description: |
@@ -49,25 +67,41 @@ paths:
                 required: [territory_id, config]
                 properties:
                   territory_id: { type: string }
+                  kind: { type: string, description: "Echoed territory kind." }
                   mtls_client_cert_pem:
                     type: string
-                    description: PEM-encoded client certificate issued for the enrolling Nexus (optional; only when csr_pem is provided).
+                    description: PEM-encoded client certificate (optional; only when csr_pem is provided).
                   ca_bundle_pem:
                     type: string
                     description: |
-                      PEM-encoded CA certificate that issued mtls_client_cert_pem (optional; only when csr_pem is provided).
-                      Intended for the mTLS terminator to validate Nexus client certs; not necessarily the control-plane server CA bundle.
+                      PEM-encoded CA certificate (optional; only when csr_pem is provided).
                   config:
                     type: object
-                    additionalProperties: true
                     description: Configuration hints returned by the server.
+                    properties:
+                      poll_interval_seconds:
+                        type: integer
+                        description: "Interval (seconds) between REST poll requests."
+                      heartbeat_interval_seconds:
+                        type: integer
+                        description: "Default territory heartbeat interval (seconds) for REST-only mode."
+                      heartbeat_interval_ws_seconds:
+                        type: integer
+                        description: "Territory heartbeat interval (seconds) when WebSocket is connected (longer, since WS provides liveness)."
+                      lease_ttl_seconds:
+                        type: integer
+                        description: "Default lease TTL for claimed directives."
+                      cable_url:
+                        type: string
+                        description: "Action Cable WebSocket URL for real-time communication (e.g. '/cable' or 'wss://host/cable')."
         "422":
           description: Invalid / expired / used enrollment token
         "429":
           description: Rate limited (per-IP). Includes Retry-After header.
   /conduits/v1/territories/heartbeat:
     post:
-      summary: Territory heartbeat (presence registration)
+      summary: Territory heartbeat (presence + capabilities + bridge entity sync)
+      tags: [Territory]
       security:
         - clientCertFingerprint: []
         - territoryId: []
@@ -86,6 +120,34 @@ paths:
                 capacity:
                   type: object
                   additionalProperties: true
+                capabilities:
+                  type: array
+                  items: { type: string }
+                  description: |
+                    Device capabilities this territory supports (two-level dot notation).
+                    Examples: ["camera.snap", "location.get", "iot.light.control"]
+                bridge_entities:
+                  type: array
+                  description: |
+                    Sub-entities for bridge territories. Full-reconcile: entities not in this list
+                    are marked unavailable. Only processed when territory kind is "bridge".
+                  items:
+                    type: object
+                    required: [entity_ref, entity_type]
+                    properties:
+                      entity_ref:
+                        type: string
+                        description: "Unique entity reference within this territory (e.g. 'light.living_room')."
+                      entity_type:
+                        type: string
+                        description: "Entity type (e.g. 'light', 'switch', 'sensor')."
+                      capabilities:
+                        type: array
+                        items: { type: string }
+                      location: { type: string }
+                      state:
+                        type: object
+                        additionalProperties: true
                 telemetry:
                   type: object
                   additionalProperties: true
@@ -99,6 +161,15 @@ paths:
                 properties:
                   ok: { type: boolean }
                   territory_id: { type: string }
+                  next_heartbeat_interval_seconds:
+                    type: integer
+                    description: |
+                      Recommended interval (seconds) before the next heartbeat.
+                      30 when REST-only, 300 when WebSocket is connected.
+                  websocket_connected:
+                    type: boolean
+                    description: |
+                      Whether this territory currently has an active WebSocket connection.
                   upgrade_available:
                     type: boolean
                     description: True when a newer Nexus version is available on the server.
@@ -108,11 +179,12 @@ paths:
                   min_compatible_version:
                     type: string
                     description: |
-                      Minimum Nexus version compatible with this server. Nexus SHOULD warn operators
-                      when its version is below this threshold. Informational only — does not block execution.
+                      Minimum Nexus version compatible with this server. Informational only.
+  # ─── Directive Track (code execution) ─────────────────────────
   /conduits/v1/polls:
     post:
-      summary: "Poll for directives (Phase 0: short poll)"
+      summary: "Poll for directives (short poll)"
+      tags: [Directive]
       security:
         - clientCertFingerprint: []
         - territoryId: []
@@ -149,6 +221,7 @@ paths:
   /conduits/v1/directives/{directive_id}/started:
     post:
       summary: "Report directive started (idempotent)"
+      tags: [Directive]
       security:
         - clientCertFingerprint: []
           directiveToken: []
@@ -185,10 +258,11 @@ paths:
                   state: { type: string }
                   duplicate: { type: boolean }
         "409":
-          description: Conflict (invalid state or retry payload mismatch; running/terminal are accepted for idempotent retry)
+          description: Conflict (invalid state or retry payload mismatch)
   /conduits/v1/directives/{directive_id}/heartbeat:
     post:
       summary: Renew lease / report progress
+      tags: [Directive]
       security:
         - clientCertFingerprint: []
           directiveToken: []
@@ -222,12 +296,11 @@ paths:
                   directive_token:
                     type: string
                     description: |
-                      Refreshed JWT directive token. Nexus MUST replace the previous token with this one
-                      for all subsequent API calls on this directive. This prevents token expiry during
-                      long-running directives.
+                      Refreshed JWT directive token. Nexus MUST replace the previous token with this one.
   /conduits/v1/directives/{directive_id}/log_chunks:
     post:
-      summary: "Upload stdout/stderr chunks (idempotent; accepted in running/terminal; server-side max_output_bytes enforced)"
+      summary: "Upload stdout/stderr chunks (idempotent)"
+      tags: [Directive]
       security:
         - clientCertFingerprint: []
           directiveToken: []
@@ -259,15 +332,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required:
-                  - ok
-                  - directive_id
-                  - stream
-                  - seq
-                  - stored
-                  - duplicate
-                  - accepted_bytes
-                  - truncated
+                required: [ok, directive_id, stream, seq, stored, duplicate, accepted_bytes, truncated]
                 properties:
                   ok: { type: boolean }
                   directive_id: { type: string }
@@ -283,7 +348,8 @@ paths:
           description: Invalid parameters (stream/seq/base64)
   /conduits/v1/directives/{directive_id}/finished:
     post:
-      summary: "Report directive completed (idempotent; strict base64 for diff)"
+      summary: "Report directive completed (idempotent)"
+      tags: [Directive]
       security:
         - clientCertFingerprint: []
           directiveToken: []
@@ -328,7 +394,128 @@ paths:
         "409":
           description: Conflict (invalid state or result_hash mismatch)
         "422":
-          description: Invalid parameters (status/base64/oversize diff; max enforced by limits.max_diff_bytes)
+          description: Invalid parameters (status/base64/oversize diff)
+  # ─── Command Track (device capabilities) ──────────────────────
+  /conduits/v1/commands/pending:
+    get:
+      summary: "Poll for pending commands (REST fallback)"
+      tags: [Command]
+      description: |
+        Territory polls for queued commands. Commands are atomically transitioned
+        to "dispatched" state using FOR UPDATE SKIP LOCKED for race safety.
+        Primary dispatch is via WebSocket push; this endpoint is the REST fallback.
+      security:
+        - clientCertFingerprint: []
+        - territoryId: []
+      parameters:
+        - name: max
+          in: query
+          required: false
+          schema: { type: integer, minimum: 1, maximum: 20, default: 5 }
+          description: Maximum number of commands to claim.
+      responses:
+        "200":
+          description: Pending commands (may be empty)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [commands, retry_after_seconds]
+                properties:
+                  commands:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/PendingCommand"
+                  retry_after_seconds:
+                    type: integer
+                    description: "Suggested poll interval (shorter when commands were returned)."
+  /conduits/v1/commands/{command_id}/result:
+    post:
+      summary: "Submit command execution result"
+      tags: [Command]
+      description: |
+        Territory reports the outcome of a command. Supports JSON result payload
+        and optional base64-encoded binary attachment. Idempotent for terminal commands.
+      security:
+        - clientCertFingerprint: []
+        - territoryId: []
+      parameters:
+        - name: command_id
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [completed, failed]
+                result:
+                  type: object
+                  additionalProperties: true
+                  description: "Structured result data (capability-specific)."
+                error_message: { type: string }
+                attachment_base64:
+                  type: string
+                  description: "Base64-encoded binary attachment (e.g. photo, audio recording)."
+                attachment_filename: { type: string }
+                attachment_content_type: { type: string }
+      responses:
+        "200":
+          description: Result accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, command_id, final_state]
+                properties:
+                  ok: { type: boolean }
+                  command_id: { type: string }
+                  final_state: { type: string }
+                  duplicate: { type: boolean }
+        "403":
+          description: Territory mismatch
+        "404":
+          description: Command not found
+        "422":
+          description: Invalid parameters (bad status or invalid base64)
+  /conduits/v1/commands/{command_id}/cancel:
+    post:
+      summary: "Cancel a queued or dispatched command"
+      tags: [Command]
+      description: |
+        Cancel a command that hasn't reached a terminal state.
+        Idempotent for already-terminal commands.
+      security:
+        - clientCertFingerprint: []
+        - territoryId: []
+      parameters:
+        - name: command_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Command canceled (or already terminal)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok, command_id, final_state]
+                properties:
+                  ok: { type: boolean }
+                  command_id: { type: string }
+                  final_state: { type: string }
+                  already_terminal: { type: boolean }
+        "403":
+          description: Territory mismatch
+        "404":
+          description: Command not found
 components:
   securitySchemes:
     territoryId:
@@ -336,15 +523,15 @@ components:
       in: header
       name: X-Nexus-Territory-Id
       description: |
-        Phase 0 dev-only auth. This header is spoofable and MUST NOT be used in production.
+        Dev-only auth. This header is spoofable and MUST NOT be used in production.
         Production auth is mTLS (client cert fingerprint -> territory_id mapping) at the edge.
     clientCertFingerprint:
       type: apiKey
       in: header
       name: X-Nexus-Client-Cert-Fingerprint
       description: |
-        When running behind a trusted mTLS-terminating proxy, the proxy should inject a verified client certificate
-        fingerprint into this header. Mothership maps it to a territory record (client_cert_fingerprint).
+        When running behind a trusted mTLS-terminating proxy, the proxy injects a verified client
+        certificate fingerprint into this header. Mothership maps it to a territory record.
     directiveToken:
       type: http
       scheme: bearer
@@ -372,11 +559,11 @@ components:
           properties:
             id: { type: string }
             mount: { type: string, description: "Workspace mount point (default: /workspace)" }
-            repo_url: { type: string, description: "Clone hint for facility prepare stage (Decision D7/D8)" }
+            repo_url: { type: string, description: "Clone hint for facility prepare stage" }
         sandbox_profile:
           type: string
           description: "Execution profile: untrusted, trusted, host, darwin-automation, etc."
-        command: { type: string, description: "Shell command string (not JSON array). Decision D1." }
+        command: { type: string, description: "Shell command string (not JSON array)." }
         shell: { type: string, description: "Shell to use (default: /bin/sh)" }
         cwd: { type: string, description: "Working directory (relative to mount)" }
         timeout_seconds: { type: integer, minimum: 1 }
@@ -387,10 +574,10 @@ components:
           properties:
             net:
               type: object
-              description: "NetCapabilityV1 — see docs/protocol/directivespec_capabilities_net.schema.v1.json"
+              description: "NetCapabilityV1 — see directivespec_capabilities_net.schema.v1.json"
             fs:
               type: object
-              description: "FsCapabilityV1 — see docs/protocol/directivespec_capabilities_fs.schema.v1.json"
+              description: "FsCapabilityV1 — see directivespec_capabilities_fs.schema.v1.json"
         artifacts:
           type: object
           properties:
@@ -399,6 +586,26 @@ components:
               items: { type: string }
               description: "Glob patterns for artifact collection"
             always_diff: { type: boolean, default: false }
+    PendingCommand:
+      type: object
+      required: [command_id, capability, timeout_seconds, created_at]
+      description: |
+        A command dispatched to a territory for execution. Part of the Command track
+        (device capabilities), separate from the Directive track (code execution).
+      properties:
+        command_id: { type: string }
+        capability:
+          type: string
+          description: "Two-level dot notation capability (e.g. camera.snap, location.get)."
+        params:
+          type: object
+          additionalProperties: true
+          description: "Capability-specific parameters."
+        bridge_entity_ref:
+          type: string
+          description: "Target bridge entity reference (for bridge territories only)."
+        timeout_seconds: { type: integer, minimum: 1 }
+        created_at: { type: string, format: date-time }
     Limits:
       type: object
       description: |
@@ -422,10 +629,8 @@ components:
           minimum: 0
           description: |
             Maximum bytes for stdout+stderr combined. Server-side enforcement via log_chunks endpoint.
-            Nexus-side enforcement via logstream truncation. Default: server-configured.
         max_diff_bytes:
           type: integer
           minimum: 0
           description: |
-            Maximum bytes for the diff blob in the finished request. Server rejects oversized diffs
-            with 422. Default: 1 MiB (1048576).
+            Maximum bytes for the diff blob in the finished request. Default: 1 MiB (1048576).

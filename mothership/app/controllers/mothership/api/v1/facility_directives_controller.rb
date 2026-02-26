@@ -108,6 +108,9 @@ module Mothership
               "policies_applied" => evaluation.policies_applied,
             })
 
+            # Wake up WebSocket-connected territories
+            Conduits::DirectiveNotifier.new.notify(directive)
+
             render json: {
               directive_id: directive.id,
               state: directive.state,
@@ -145,6 +148,9 @@ module Mothership
           audit_for(directive).record("directive.approved", payload: {
             "approved_by_user_id" => current_user.id,
           })
+
+          # Wake up WebSocket-connected territories
+          Conduits::DirectiveNotifier.new.notify(directive)
 
           render json: {
             directive_id: directive.id,
@@ -283,14 +289,6 @@ module Mothership
             created_at: directive.created_at,
             updated_at: directive.updated_at,
           }
-        end
-
-        # Convert ActionController::Parameters to a plain hash.
-        def params_to_h(value, default = {})
-          return default if value.nil?
-          return value.to_unsafe_h if value.respond_to?(:to_unsafe_h)
-
-          value
         end
 
         # Combine two verdicts — most restrictive wins.

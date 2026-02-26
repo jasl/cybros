@@ -1,27 +1,32 @@
 module Conduits
   # Structured recording of audit events for policy decisions,
-  # directive lifecycle, and security-relevant actions.
+  # directive lifecycle, command lifecycle, and security-relevant actions.
   #
   # Usage:
   #   Conduits::AuditService.new(account: account, directive: directive, actor: user)
   #     .record("directive.created", payload: { command: "echo hello" })
+  #
+  #   Conduits::AuditService.new(account: account, command: command, actor: user)
+  #     .record("command.created", payload: { capability: "camera.snap" })
   class AuditService
-    def initialize(account:, directive: nil, actor: nil, context: {})
+    def initialize(account:, directive: nil, command: nil, actor: nil, context: {})
       @account = account
       @directive = directive
+      @command = command
       @actor = actor
       @context = context
     end
 
     # Record a single audit event.
     #
-    # @param event_type [String] e.g. "directive.created", "directive.policy_forbidden"
+    # @param event_type [String] e.g. "directive.created", "command.policy_denied"
     # @param severity [String] "info", "warn", or "critical"
     # @param payload [Hash] event-specific data
     def record(event_type, severity: "info", payload: {})
       AuditEvent.create!(
         account: @account,
         directive: @directive,
+        command: @command,
         actor: @actor,
         event_type: event_type,
         severity: severity,

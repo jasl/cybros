@@ -26,6 +26,17 @@ module Conduits
     def lease_directives(skip_locked:)
       leases = []
 
+      # Load-aware: skip poll entirely if territory reports full capacity
+      unless @territory.has_capacity?
+        return Result.new(
+          directives: [],
+          lease_ttl_seconds: DEFAULT_LEASE_TTL,
+          retry_after_seconds: DEFAULT_RETRY_AFTER
+        )
+      end
+
+      remaining_slots = @territory.max_concurrent - @territory.running_directives_count
+
       Directive.transaction do
         scope = Directive
           .assignable
@@ -33,7 +44,7 @@ module Conduits
           .where(account_id: @territory.account_id)
           .where(sandbox_profile: @supported_profiles)
           .order(:created_at)
-          .limit(@max_claims)
+          .limit([@max_claims, remaining_slots].min)
 
         scope = scope.lock("FOR UPDATE SKIP LOCKED") if skip_locked
 

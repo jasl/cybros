@@ -1,6 +1,4 @@
 #!/usr/bin/env ruby
-# frozen_string_literal: true
-
 # Smoke-check that the OpenAPI contract file stays aligned with Rails routes.
 #
 # This is intentionally lightweight (no OpenAPI validator gem dependency).

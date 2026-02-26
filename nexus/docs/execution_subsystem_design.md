@@ -1,6 +1,6 @@
 # Cybros Execution Subsystem（Mothership + Nexus）设计方案（v0.6）
 
-> **本文件已拆分为 [`docs/design/`](design/README.md) 下的 7 个主题文件，此处仅保留索引。**
+> **本文件已拆分为 [`docs/design/`](design/README.md) 下的多个主题文件，此处仅保留索引。**
 
 ## 目标
 
@@ -21,9 +21,11 @@
 | [02_security_profiles.md](design/02_security_profiles.md) | §5-6 | 执行 Profile（Untrusted/Trusted/Host/darwin-automation）、Nexus 注册与 mTLS |
 | [03_network_filesystem.md](design/03_network_filesystem.md) | §7-8 | 网络 Egress 策略、allowlist、代理实现、审计、文件系统与 IO 控制 |
 | [04_protocol_reliability.md](design/04_protocol_reliability.md) | §9-10 | DirectiveSpec 协议、可靠性清单（NAT/Lease/日志/凭据/Secrets） |
-| [05_deployment_roadmap.md](design/05_deployment_roadmap.md) | §11-14 | 部署形态、安装分发、AgentCore 集成、路线图（Phase 0-6） |
+| [05_deployment_roadmap.md](design/05_deployment_roadmap.md) | §11-14 | 部署形态、安装分发、AgentCore 集成、路线图（Phase 0-7） |
 | [06_operations.md](design/06_operations.md) | §15-22 | API 草案、调度与资源、UX 规则、Monorepo 组织、主机能力标注、Provisioning、监控、踩坑清单 |
 | [07_reference_analysis.md](design/07_reference_analysis.md) | 附录 | 10 个开源 Agent 项目 + Claude.app 对比分析 |
+| [08_firecracker.md](design/08_firecracker.md) | — | Firecracker microVM 沙箱设计 |
+| [09_nexus_universal_device.md](design/09_nexus_universal_device.md) | — | 万能设备抽象：Territory 种类、Command 轨道、Bridge 模式、WebSocket、Device Policy |
 
 ## 协议 Schema
 

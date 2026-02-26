@@ -22,6 +22,17 @@ Rails.application.routes.draw do
           post :finished
         end
       end
+
+      # Command track (device capabilities)
+      resources :commands, only: [] do
+        collection do
+          get :pending
+        end
+        member do
+          post :result
+          post :cancel
+        end
+      end
     end
   end
 
@@ -48,6 +59,14 @@ Rails.application.routes.draw do
               post :approve
               post :reject
             end
+          end
+        end
+
+        # Command track: create, approve/reject, show, list
+        resources :commands, only: [:create, :show, :index] do
+          member do
+            post :approve
+            post :reject
           end
         end
       end

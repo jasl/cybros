@@ -29,7 +29,9 @@ Communication is **pull-based**: Nexus polls the control plane for work via `POS
 | Term | Description |
 |------|-------------|
 | **Directive** | A unit of execution: a command to run with a facility, capabilities, and timeout. Rails model: `Conduits::Directive`. |
-| **Territory** | A registered Nexus instance (execution node). Authenticated via mTLS. Rails model: `Conduits::Territory`. |
+| **Command** | A device-capability invocation (e.g. `camera.snap`, `iot.light.control`). Dispatched via WebSocket/push/REST poll. Rails model: `Conduits::Command`. |
+| **Territory** | A registered Nexus instance. Has a `kind`: `server`, `desktop`, `mobile`, or `bridge`. Authenticated via mTLS. Rails model: `Conduits::Territory`. |
+| **Bridge Entity** | A sub-device managed by a bridge territory (e.g. a light, sensor, camera behind Home Assistant). Rails model: `Conduits::BridgeEntity`. |
 | **Facility** | A persistent working directory attached to a territory. Rails model: `Conduits::Facility`. |
 | **Account** | A tenant. All Conduits resources are scoped by account for multi-tenancy isolation. |
 | **Sandbox Profile** | The isolation level: `untrusted` (microVM), `trusted` (container), `host` (no isolation), `darwin-automation` (macOS only). |
@@ -46,7 +48,7 @@ nexus/                         # This directory (Go module root)
 │
 ├── docs/
 │   ├── execution_subsystem_design.md   # Full design document
-│   ├── design/                         # Split design docs (7 topic files + index)
+│   ├── design/                         # Split design docs (9 topic files + index)
 │   └── protocol/
 │       ├── conduits_api_openapi.yaml                        # OpenAPI spec for Conduits API
 │       └── directivespec_capabilities_net.schema.v1.json    # Network capability JSON Schema
@@ -114,28 +116,49 @@ bin/rails server       # Start dev server on :3000
 
 ### API Endpoints (Conduits V1)
 
+**Directive track** (code execution):
+
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/conduits/v1/polls` | Long-poll for directives |
 | POST | `/conduits/v1/territories/enroll` | Register new territory (mTLS enrollment) |
+| POST | `/conduits/v1/territories/heartbeat` | Territory-level presence and capability reporting |
 | POST | `/conduits/v1/directives/:id/started` | Report directive started |
 | POST | `/conduits/v1/directives/:id/heartbeat` | Renew lease / report progress |
 | POST | `/conduits/v1/directives/:id/log_chunks` | Upload stdout/stderr chunks |
 | POST | `/conduits/v1/directives/:id/finished` | Report directive completed |
 
+**Command track** (device capabilities):
+
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/conduits/v1/commands/pending` | Poll for pending commands (REST fallback) |
+| POST | `/conduits/v1/commands/:id/result` | Submit command execution result |
+| POST | `/conduits/v1/commands/:id/cancel` | Cancel a command |
+
+**WebSocket** (Action Cable):
+
+| Channel | Description |
+|---------|-------------|
+| `Conduits::TerritoryChannel` | Real-time push for commands and directive wake-ups |
+
 ### Authentication
 
-- Nexus authenticates to Mothership via mTLS (future) or `X-Nexus-Territory-Id` header (dev mode).
+- Nexus authenticates to Mothership via mTLS client certificate fingerprint or `X-Nexus-Territory-Id` header (dev mode). Configurable via `CONDUITS_TERRITORY_AUTH_MODE` (mtls/header/either).
 - Directive-scoped operations use `Authorization: Bearer <directive_token>`.
+- WebSocket connections authenticate territories via mTLS fingerprint (production) or territory ID (dev/test).
 
 ## Design Decisions
 
-1. **Pull model**: Nexus polls for work — no inbound ports, NAT/firewall friendly.
-2. **Deny-by-default**: Network access is denied unless explicitly allowed via allowlist.
-3. **Privilege separation**: `nexusd` runs unprivileged; `nexus-helper` handles minimal privileged operations.
-4. **Cross-platform consistency**: Allowlist parsing logic must behave identically in Go and Ruby.
-5. **MVP scope**: Only the host driver (no isolation) is implemented. MicroVM and container drivers are future work.
-6. **UUIDv7 primary keys**: All tables use UUID primary keys for cross-instance compatibility.
+1. **Dual-track model**: Directives handle code execution; Commands handle device capabilities. Both coexist on the same territory.
+2. **Pull model**: Nexus polls for work — no inbound ports, NAT/firewall friendly.
+3. **WebSocket-first push**: Commands are dispatched via Action Cable (WebSocket) with fallback to push notification then REST poll.
+4. **Bridge pattern**: Third-party IoT platforms (e.g. Home Assistant) connect as bridge territories, exposing sub-devices as `BridgeEntity` records.
+5. **Deny-by-default**: Network access is denied unless explicitly allowed via allowlist.
+6. **Privilege separation**: `nexusd` runs unprivileged; `nexus-helper` handles minimal privileged operations.
+7. **Cross-platform consistency**: Allowlist parsing logic must behave identically in Go and Ruby.
+8. **MVP scope**: Only the host driver (no isolation) is implemented. MicroVM and container drivers are future work.
+9. **UUIDv7 primary keys**: All tables use UUID primary keys for cross-instance compatibility.
 
 ## Code Style
 
@@ -164,12 +187,15 @@ When adding a new sandbox driver:
 ```
 Account (global)                    # Multi-tenancy root
   ├── User                          # belongs_to :account (optional)
-  ├── Conduits::Policy              # Scoped capability policy (global/account/user/facility)
+  ├── Conduits::Policy              # Scoped capability policy (global/account/user/facility + device)
   │
-  └── Conduits::Territory           # Execution node
+  └── Conduits::Territory           # Execution node (kind: server/desktop/mobile/bridge)
         ├── Conduits::Facility      # Persistent workspace
-        │     └── Conduits::Directive  # Unit of execution
-        └── Conduits::Directive
+        │     └── Conduits::Directive  # Unit of execution (directive track)
+        ├── Conduits::Directive
+        ├── Conduits::Command       # Device capability invocation (command track)
+        └── Conduits::BridgeEntity  # Sub-device for bridge territories
+              └── Conduits::Command
 ```
 
-Tables use `conduits_` prefix: `conduits_territories`, `conduits_facilities`, `conduits_directives`, `conduits_policies`.
+Tables use `conduits_` prefix: `conduits_territories`, `conduits_facilities`, `conduits_directives`, `conduits_policies`, `conduits_commands`, `conduits_bridge_entities`.
