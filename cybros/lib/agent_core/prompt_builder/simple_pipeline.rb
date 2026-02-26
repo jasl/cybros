@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module PromptBuilder
     # Default prompt pipeline: direct assembly with no macro expansion.

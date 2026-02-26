@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Audio content block.
   class AudioContent

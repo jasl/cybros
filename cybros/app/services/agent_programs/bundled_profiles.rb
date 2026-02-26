@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentPrograms
   module BundledProfiles
     PROFILE_ROOT = Rails.root.join("cybros-agent", "profiles").freeze
@@ -27,4 +25,3 @@ module AgentPrograms
     end
   end
 end
-

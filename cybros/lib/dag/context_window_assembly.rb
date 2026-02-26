@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module DAG
   class ContextWindowAssembly
     DEFAULT_CONTEXT_TURNS = 50

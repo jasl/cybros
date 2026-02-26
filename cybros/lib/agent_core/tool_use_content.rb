@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Tool use content block (in assistant messages).
   class ToolUseContent

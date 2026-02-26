@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class ConversationRun < ApplicationRecord
   STATES = %w[queued running succeeded failed canceled].freeze
 
@@ -34,4 +32,3 @@ class ConversationRun < ApplicationRecord
     update!(state: "canceled", finished_at: at) if running? || queued?
   end
 end
-

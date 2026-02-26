@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class AgentProgram < ApplicationRecord
   validates :name, presence: true
 
@@ -7,4 +5,3 @@ class AgentProgram < ApplicationRecord
     profile_source.to_s.strip != ""
   end
 end
-

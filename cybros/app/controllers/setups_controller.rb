@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class SetupsController < ApplicationController
   before_action :redirect_if_already_setup
 
@@ -25,6 +23,7 @@ class SetupsController < ApplicationController
   end
 
   private
+
     def redirect_if_already_setup
       redirect_to root_path if Identity.exists?
     end
@@ -33,4 +32,3 @@ class SetupsController < ApplicationController
       params.expect(identity: %i[email password password_confirmation])
     end
 end
-

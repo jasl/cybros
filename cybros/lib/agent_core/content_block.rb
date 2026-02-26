@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Base module for content blocks.
   module ContentBlock

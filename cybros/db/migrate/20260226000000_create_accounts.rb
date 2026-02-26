@@ -6,4 +6,3 @@ class CreateAccounts < ActiveRecord::Migration[8.2]
     end
   end
 end
-

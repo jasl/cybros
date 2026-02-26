@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class ApplicationCable::ConnectionTest < ActionCable::Connection::TestCase
@@ -24,4 +22,3 @@ class ApplicationCable::ConnectionTest < ActionCable::Connection::TestCase
     assert_equal identity.id, connection.current_identity_id
   end
 end
-

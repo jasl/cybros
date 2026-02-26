@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 # Top-level namespace for DAG-first agent primitives.
 module AgentCore
   def self.config

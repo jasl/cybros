@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class AgentProgramsTest < ActionDispatch::IntegrationTest
@@ -63,4 +61,3 @@ class AgentProgramsTest < ActionDispatch::IntegrationTest
     assert (abs / "prompts" / "system.md.liquid").file?
   end
 end
-

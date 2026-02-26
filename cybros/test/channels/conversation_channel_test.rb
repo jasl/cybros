@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class ConversationChannelTest < ActionCable::Channel::TestCase
@@ -131,4 +129,3 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
     assert_equal "Compacted: Hello", compacted.fetch("text")
   end
 end
-

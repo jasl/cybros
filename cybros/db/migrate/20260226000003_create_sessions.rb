@@ -11,4 +11,3 @@ class CreateSessions < ActiveRecord::Migration[8.2]
     add_index :sessions, %i[identity_id created_at]
   end
 end
-

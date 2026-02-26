@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class SessionsController < ApplicationController
   before_action :redirect_to_setup_if_needed
   before_action :redirect_authenticated_user, only: %i[new create]
@@ -30,6 +28,7 @@ class SessionsController < ApplicationController
   end
 
   private
+
     def redirect_to_setup_if_needed
       redirect_to new_setup_path if Identity.none?
     end
@@ -38,4 +37,3 @@ class SessionsController < ApplicationController
       redirect_to root_path if authenticated?
     end
 end
-

@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module MockLLM
   module V1
     class ModelsController < ApplicationController
@@ -21,4 +19,3 @@ module MockLLM
     end
   end
 end
-

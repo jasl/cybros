@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class SetupAndSessionsTest < ActionDispatch::IntegrationTest
@@ -82,4 +80,3 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     assert_not cookies[:session_token].present?
   end
 end
-

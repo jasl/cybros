@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class LLMProvider < ApplicationRecord
   encrypts :api_key
 
@@ -12,6 +10,7 @@ class LLMProvider < ApplicationRecord
   validate :model_allowlist_must_be_strings
 
   private
+
     def headers_must_be_a_hash
       errors.add(:headers, "must be an object") unless headers.is_a?(Hash)
     end
@@ -22,4 +21,3 @@ class LLMProvider < ApplicationRecord
       errors.add(:model_allowlist, "must be an array of strings")
     end
 end
-

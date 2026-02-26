@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module MockLLM
   module V1
     class ChatCompletionsController < ApplicationController
@@ -178,4 +176,3 @@ module MockLLM
     end
   end
 end
-

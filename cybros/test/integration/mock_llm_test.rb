@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class MockLlmTest < ActionDispatch::IntegrationTest
@@ -117,4 +115,3 @@ class MockLlmTest < ActionDispatch::IntegrationTest
     assert last.fetch("usage").is_a?(Hash)
   end
 end
-

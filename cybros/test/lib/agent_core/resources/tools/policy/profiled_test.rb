@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class AgentCore::Resources::Tools::Policy::ProfiledTest < Minitest::Test

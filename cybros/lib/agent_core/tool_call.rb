@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # A tool call requested by the assistant.
   class ToolCall

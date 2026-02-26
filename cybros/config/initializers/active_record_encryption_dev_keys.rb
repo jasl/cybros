@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 # Ensure development can run without credentials by providing stable
 # Active Record Encryption keys when none are configured.
 #
@@ -52,4 +50,3 @@ if Rails.env.development?
     File.chmod(0o600, path)
   end
 end
-

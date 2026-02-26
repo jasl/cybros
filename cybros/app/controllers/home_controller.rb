@@ -5,6 +5,7 @@ class HomeController < ApplicationController
   end
 
   private
+
     def bootstrap_or_require_auth
       if Identity.none?
         redirect_to new_setup_path

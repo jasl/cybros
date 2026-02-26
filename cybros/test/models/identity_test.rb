@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class IdentityTest < ActiveSupport::TestCase
@@ -32,4 +30,3 @@ class IdentityTest < ActiveSupport::TestCase
     assert dupe.errors.added?(:email, :taken) || dupe.errors[:email].any?
   end
 end
-

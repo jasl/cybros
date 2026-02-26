@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class Current < ActiveSupport::CurrentAttributes
   attribute :session, :user, :identity, :account
   attribute :http_method, :request_id, :user_agent, :ip_address, :referrer
@@ -14,4 +12,3 @@ class Current < ActiveSupport::CurrentAttributes
     self.user = value&.user
   end
 end
-

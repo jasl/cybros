@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class LLMProvidersController < ApplicationController
   before_action :require_authentication
   before_action :set_llm_provider, only: %i[edit update destroy fetch_models]
@@ -66,6 +64,7 @@ class LLMProvidersController < ApplicationController
   end
 
   private
+
     def set_llm_provider
       @llm_provider = LLMProvider.find(params[:id])
     end
@@ -118,4 +117,3 @@ class LLMProvidersController < ApplicationController
       [attrs.symbolize_keys, errors]
     end
 end
-

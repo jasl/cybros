@@ -9,4 +9,3 @@ class CreateIdentities < ActiveRecord::Migration[8.2]
     add_index :identities, "lower(email)", unique: true, name: "index_identities_on_lower_email_unique"
   end
 end
-

@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 # Ensure tests can run without credentials files by providing deterministic
 # Active Record Encryption keys when none are configured.
 #
@@ -13,4 +11,3 @@ if Rails.env.test?
   config.deterministic_key ||= SecureRandom.alphanumeric(32)
   config.key_derivation_salt ||= SecureRandom.alphanumeric(32)
 end
-

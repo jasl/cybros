@@ -7,4 +7,3 @@ class CreateUsers < ActiveRecord::Migration[8.2]
     end
   end
 end
-

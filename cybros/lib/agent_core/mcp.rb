@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 # MCP (Model Context Protocol) namespace.
 #
 # All MCP components are Zeitwerk-autoloaded from `lib/agent_core/mcp/**`.

@@ -7,6 +7,7 @@ class ApplicationController < ActionController::Base
   before_action :resume_session
 
   private
+
     def set_current_request_context
       Current.http_method = request.method
       Current.request_id = request.uuid

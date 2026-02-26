@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class LlmProvidersTest < ActionDispatch::IntegrationTest
@@ -161,4 +159,3 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
     assert_equal ["existing"], provider.model_allowlist
   end
 end
-

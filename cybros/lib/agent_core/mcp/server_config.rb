@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module MCP
     # Immutable configuration for an MCP server connection.

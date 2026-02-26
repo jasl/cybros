@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class ConversationChannel < ApplicationCable::Channel
   include ActionCable::Channel::PeriodicTimers
 
@@ -107,6 +105,7 @@ class ConversationChannel < ApplicationCable::Channel
   end
 
   private
+
     def rate_limited_warn(error)
       @last_warn_at ||= Time.at(0)
       now = Time.current
@@ -122,4 +121,3 @@ class ConversationChannel < ApplicationCable::Channel
       nil
     end
 end
-

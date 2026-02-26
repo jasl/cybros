@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class Cybros::AgentRuntimeResolverToolPolicyTest < ActiveSupport::TestCase
@@ -27,4 +25,3 @@ class Cybros::AgentRuntimeResolverToolPolicyTest < ActiveSupport::TestCase
     assert_equal :confirm, confirmed.outcome
   end
 end
-

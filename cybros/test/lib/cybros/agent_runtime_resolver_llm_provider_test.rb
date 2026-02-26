@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
@@ -105,4 +103,3 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     end
   end
 end
-

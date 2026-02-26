@@ -14,4 +14,3 @@ class CreateLLMProviders < ActiveRecord::Migration[8.2]
     add_index :llm_providers, :priority
   end
 end
-

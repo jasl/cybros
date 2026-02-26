@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module Support
     # Simple bounded LRU cache using Ruby's ordered Hash.

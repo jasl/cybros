@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class Identity < ApplicationRecord
   has_secure_password
 
@@ -13,6 +11,7 @@ class Identity < ApplicationRecord
   validate :email_must_be_valid
 
   private
+
     def email_must_be_valid
       address = email.to_s.strip
       return errors.add(:email, :blank) if address.blank?
@@ -21,4 +20,3 @@ class Identity < ApplicationRecord
       errors.add(:email, :invalid) unless address.include?("@") && address.include?(".")
     end
 end
-

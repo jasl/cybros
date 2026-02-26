@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Document content block (PDF, plain text, HTML, CSV, etc.).
   class DocumentContent

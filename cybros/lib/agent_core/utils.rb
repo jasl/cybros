@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module Utils
     module_function

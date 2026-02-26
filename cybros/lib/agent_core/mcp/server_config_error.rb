@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module MCP
     # Raised when an MCP server configuration is invalid or inconsistent for the

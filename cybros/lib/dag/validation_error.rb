@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module DAG
   # Raised when user/business input validation fails for DAG operations
   # (invalid arguments, illegal state transitions, etc.).

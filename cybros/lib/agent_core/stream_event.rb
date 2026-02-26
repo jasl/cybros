@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Events emitted during streaming LLM responses and agent execution.
   #

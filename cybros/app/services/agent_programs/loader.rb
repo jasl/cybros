@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "yaml"
 
 module AgentPrograms
@@ -35,6 +33,7 @@ module AgentPrograms
     end
 
     private
+
       def safe_yaml(rel)
         raw = safe_text(rel)
         return {} if raw.strip.empty?
@@ -66,4 +65,3 @@ module AgentPrograms
       end
   end
 end
-

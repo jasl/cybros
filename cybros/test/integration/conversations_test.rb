@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class ConversationsTest < ActionDispatch::IntegrationTest
@@ -93,4 +91,3 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert run.queued_at
   end
 end
-

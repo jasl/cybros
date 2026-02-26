@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class AgentProgramsController < ApplicationController
   before_action :require_authentication
   before_action :set_agent_program, only: %i[show]
@@ -38,8 +36,8 @@ class AgentProgramsController < ApplicationController
   end
 
   private
+
     def set_agent_program
       @agent_program = AgentProgram.find(params[:id])
     end
 end
-

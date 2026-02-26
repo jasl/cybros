@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module PromptBuilder
     # Context bag passed to the pipeline during prompt building.

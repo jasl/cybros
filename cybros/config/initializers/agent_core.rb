@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 Rails.application.config.to_prepare do
   AgentCore::DAG.runtime_resolver ||= lambda do |node:|
     Cybros::AgentRuntimeResolver.runtime_for(node: node)

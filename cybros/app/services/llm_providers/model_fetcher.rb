@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module LLMProviders
   class ModelFetcher
     DEFAULT_TIMEOUT_S = 5
@@ -19,4 +17,3 @@ module LLMProviders
     end
   end
 end
-

@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class ConversationMessagesController < ApplicationController
   before_action :require_authentication
   before_action :set_conversation
@@ -51,8 +49,8 @@ class ConversationMessagesController < ApplicationController
   end
 
   private
+
     def set_conversation
       @conversation = Conversation.find(params[:conversation_id])
     end
 end
-

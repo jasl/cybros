@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 class CreateConversationRuns < ActiveRecord::Migration[8.2]
   def change
     create_table :conversation_runs, id: :uuid, default: -> { "uuidv7()" } do |t|
@@ -21,4 +19,3 @@ class CreateConversationRuns < ActiveRecord::Migration[8.2]
     add_index :conversation_runs, %i[conversation_id state]
   end
 end
-

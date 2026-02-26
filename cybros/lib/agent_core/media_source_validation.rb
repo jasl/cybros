@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   # Shared validation logic for media content blocks (image, document, audio).
   #

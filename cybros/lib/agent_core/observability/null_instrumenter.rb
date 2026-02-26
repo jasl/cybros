@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module AgentCore
   module Observability
     # No-op instrumenter used by default.

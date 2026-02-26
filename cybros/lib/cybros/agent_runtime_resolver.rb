@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module AgentRuntimeResolver
     MAX_CONTEXT_TURNS = 1000
