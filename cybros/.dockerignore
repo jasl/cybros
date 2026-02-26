@@ -48,8 +48,19 @@
 # MCP temp files
 /.playwright-mcp
 
+# Playwright (optional E2E)
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+/playwright.config.ts
+/bin/e2e
+
 # Ignore node_modules
 /node_modules
+
+# Tests (not needed in production image)
+/test/
 
 # Simple-cov
 /coverage/
