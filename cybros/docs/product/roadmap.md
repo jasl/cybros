@@ -169,9 +169,23 @@ default-assistant/
 
 ### Milestones (deliverables)
 
-#### 0.5-A — App Shell (3-pane, responsive)
+#### 0.5-A0 — Rails layouts & surfaces (landing / agent / settings)
 
-Build a **three-pane layout** (ChatGPT-inspired) used by all pages:
+Prepare **three Rails layouts** so each surface has a clean, consistent UI skeleton:
+
+- **`landing` layout** (unauthenticated):
+  - Update the current **Home page** to become the product landing page (visual polish + clear CTA).
+  - Keep it independent from the authenticated app shell (no 3-pane constraint).
+- **`agent` layout** (authenticated chat surface):
+  - Used by the chat UI (the “left / center / right” 3-column layout described below).
+  - Optimized for conversation flows and inspection/debug context.
+- **`settings` layout** (authenticated dashboard surface):
+  - Used by **Dashboard**, **`/settings`**, and **`/system/settings`** pages.
+  - Optimized for forms, tables, CRUD workflows; can be simpler than the chat surface (no always-on inspector).
+
+#### 0.5-A — Agent layout: App Shell (3-pane, responsive)
+
+Build a **three-pane layout** (ChatGPT-inspired) used by authenticated **agent surfaces** (not the landing page):
 
 - **Left sidebar (collapsible)**:
   - Primary nav: Dashboard / Conversations / Agents / Settings
@@ -188,18 +202,18 @@ Build a **three-pane layout** (ChatGPT-inspired) used by all pages:
 - **Tablet**: left collapsible; right overlays/docks depending on width.
 - **Desktop**: full three-pane; optional resize handles.
 
-#### 0.5-B — Pages (Dashboard + Personal settings + System settings)
+#### 0.5-B — Pages (Dashboard + `/settings` + `/system/settings`)
 
-Add top-level pages that share the shell (content can be minimal, but layout + routing must be real):
+Add top-level pages across the layouts (content can be minimal, but layout + routing must be real):
 
 - **Dashboard**:
   - Recent conversations
   - Status cards (provider connectivity, model allowlist health, last run summary)
   - Quick actions
-- **Personal settings**:
+- **`/settings` (Personal settings)**:
   - Profile (email/password change)
   - Sessions (sign out all)
-- **System settings**:
+- **`/system/settings` (System settings, in `System` namespace)**:
   - LLM providers (existing CRUD, improved inline validation UX)
   - Agent programs management (existing, plus browsing/search)
 
@@ -253,14 +267,19 @@ Add system + integration tests that cover:
 
 > Project is early-stage. Until the first external beta, **destructive changes are allowed** and plans may evolve; optimize for correctness and product shape over backward compatibility.
 
-- [ ] **App shell**: three-pane layout exists and is used by Dashboard / Conversations / Agents / Settings routes
+- [ ] **Rails layouts**:
+  - [ ] `landing` / `agent` / `settings` layouts exist
+  - [ ] **Home** uses `landing`
+  - [ ] **Conversations + Agents** use `agent`
+  - [ ] **Dashboard + `/settings` + `/system/settings`** use `settings`
+- [ ] **App shell (agent layout)**: three-pane layout exists and is used by authenticated agent surfaces
 - [ ] **Responsive**:
   - [ ] Mobile: left sidebar is a drawer; right pane is a modal/drawer; composer always reachable
   - [ ] Tablet: left collapsible; right overlays/docks appropriately
   - [ ] Desktop: full three-pane; navigation + inspector usable
 - [ ] **Dashboard**: route exists and renders meaningful status cards (can be minimal content)
-- [ ] **Personal settings**: profile + session management routes exist (can be minimal content)
-- [ ] **System settings**: LLM providers + agent programs management usable under shell (existing CRUD integrated)
+- [ ] **`/settings`**: profile + session management routes exist (can be minimal content)
+- [ ] **`/system/settings`**: system settings live under `System` namespace and are usable (LLM providers + agent programs management; existing CRUD integrated)
 - [ ] **Chat transport (server-push)**:
   - [ ] Server-push is the primary streaming mechanism (polling only low-frequency fallback)
   - [ ] Stable event envelope exists and is surface-agnostic (usable by future Telegram bot)
@@ -277,6 +296,9 @@ Add system + integration tests that cover:
   - [ ] Rate-limited warnings/logs prevent silent stalls
   - [ ] Dev-only debug overlay shows stream state (cursor/node/run state)
 - [ ] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
+- [ ] **Handoff quality gate (required before acceptance)**:
+  - [ ] **Smoke tests**: add a system test suite that visits each top-level page (Home, Dashboard, Conversations, Agents, `/settings`, `/system/settings`) and asserts it loads (no routing typos, no ERB syntax/render exceptions)
+  - [ ] **Browser verification**: manually verify in a real browser that each page’s layout/styles are correct and that key UI interactions work (navigation, drawer/collapse behavior, forms/CRUD flows, chat composer/send)
 
 ---
 
