@@ -1,52 +1,45 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li>Agent Programs</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">Agent Programs</h2>
+      <%= link_to "New agent", new_system_settings_agent_program_path, class: "btn btn-primary btn-sm" %>
+    </div>
+
+    <%= form_with url: system_settings_agent_programs_path, method: :get, class: "flex items-center gap-2" do %>
+      <input
+        type="search"
+        name="q"
+        value="<%= @q %>"
+        placeholder="Search name or profile"
+        class="input input-bordered input-sm w-full max-w-md" />
+      <button type="submit" class="btn btn-ghost btn-sm">Search</button>
+    <% end %>
+
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body p-0 overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Profile</th>
+              <th>Local path</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @agent_programs.each do |program| %>
+              <tr class="hover:bg-base-200/50 transition-colors">
+                <td class="font-medium"><%= program.name %></td>
+                <td class="opacity-70"><%= program.profile_source %></td>
+                <td class="opacity-70 font-mono text-xs"><%= program.local_path %></td>
+                <td class="text-right">
+                  <%= link_to "View", system_settings_agent_program_path(program), class: "btn btn-ghost btn-sm" %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 <% end %>
-
-<div class="max-w-5xl mx-auto p-6 space-y-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold">Agent Programs</h1>
-    <%= link_to "New agent", new_system_settings_agent_program_path, class: "btn btn-primary" %>
-  </div>
-
-  <%= form_with url: system_settings_agent_programs_path, method: :get, class: "flex items-center gap-2" do %>
-    <input
-      type="search"
-      name="q"
-      value="<%= @q %>"
-      placeholder="Search name or profile"
-      class="input input-bordered input-sm w-full max-w-md" />
-    <button type="submit" class="btn btn-ghost btn-sm">Search</button>
-  <% end %>
-
-  <div class="overflow-x-auto">
-    <table class="table table-zebra">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Profile</th>
-          <th>Local path</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <% @agent_programs.each do |program| %>
-          <tr>
-            <td class="font-medium"><%= program.name %></td>
-            <td class="opacity-70"><%= program.profile_source %></td>
-            <td class="opacity-70 font-mono text-xs"><%= program.local_path %></td>
-            <td class="text-right">
-              <%= link_to "View", system_settings_agent_program_path(program), class: "btn btn-ghost btn-sm" %>
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  </div>
-</div>
-

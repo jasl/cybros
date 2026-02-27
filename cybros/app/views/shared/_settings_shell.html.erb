@@ -1,0 +1,31 @@
+<div class="flex-1 overflow-y-auto p-4 md:p-8 w-full max-w-5xl mx-auto">
+  <div class="flex items-center gap-3 mb-8">
+    <h1 class="text-2xl md:text-3xl font-bold">Settings</h1>
+  </div>
+
+  <div class="flex flex-col md:flex-row gap-8">
+    <ul class="menu bg-base-200/50 w-full md:w-64 rounded-2xl shrink-0 h-fit border border-base-300 shadow-sm p-3 gap-1">
+      <li class="menu-title"><span>Personal</span></li>
+      <%= settings_nav_item label: "Profile",
+        path: settings_profile_path,
+        icon_class: "icon-[lucide--user] size-4 opacity-70" %>
+      <%= settings_nav_item label: "Sessions",
+        path: settings_sessions_path,
+        icon_class: "icon-[lucide--monitor-smartphone] size-4 opacity-70" %>
+
+      <% if Current.user&.owner? || Current.user&.admin? %>
+        <li class="menu-title mt-2"><span>System</span></li>
+        <%= settings_nav_item label: "LLM Providers",
+          path: system_settings_llm_providers_path,
+          icon_class: "icon-[lucide--cpu] size-4 opacity-70" %>
+        <%= settings_nav_item label: "Agent Programs",
+          path: system_settings_agent_programs_path,
+          icon_class: "icon-[lucide--sparkles] size-4 opacity-70" %>
+      <% end %>
+    </ul>
+
+    <div class="flex-1 min-w-0">
+      <%= yield %>
+    </div>
+  </div>
+</div>

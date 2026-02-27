@@ -2,14 +2,9 @@ class AgentController < ApplicationController
   layout "agent"
 
   before_action :require_authentication
-  before_action :set_left_sidebar_mode
   before_action :load_sidebar_conversations
 
   private
-
-    def set_left_sidebar_mode
-      @left_sidebar_mode = :conversations
-    end
 
     def load_sidebar_conversations
       before = params[:sidebar_before].to_s.presence

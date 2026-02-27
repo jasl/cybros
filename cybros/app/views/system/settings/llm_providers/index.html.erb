@@ -1,44 +1,37 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li>LLM Providers</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between">
+      <h2 class="text-lg font-semibold">LLM Providers</h2>
+      <%= link_to "New provider", new_system_settings_llm_provider_path, class: "btn btn-primary btn-sm" %>
+    </div>
+
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body p-0 overflow-x-auto">
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Base URL</th>
+              <th class="text-right">Priority</th>
+              <th class="text-right">Models</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <% @llm_providers.each do |provider| %>
+              <tr class="hover:bg-base-200/50 transition-colors">
+                <td class="font-medium"><%= provider.name %></td>
+                <td class="opacity-70"><%= provider.base_url %></td>
+                <td class="text-right"><%= provider.priority %></td>
+                <td class="text-right"><%= provider.model_allowlist.length %></td>
+                <td class="text-right">
+                  <%= link_to "Edit", edit_system_settings_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
+                </td>
+              </tr>
+            <% end %>
+          </tbody>
+        </table>
+      </div>
+    </div>
   </div>
 <% end %>
-
-<div class="max-w-5xl mx-auto p-6 space-y-6">
-  <div class="flex items-center justify-between">
-    <h1 class="text-2xl font-semibold">LLM Providers</h1>
-    <%= link_to "New provider", new_system_settings_llm_provider_path, class: "btn btn-primary" %>
-  </div>
-
-  <div class="overflow-x-auto">
-    <table class="table table-zebra">
-      <thead>
-        <tr>
-          <th>Name</th>
-          <th>Base URL</th>
-          <th class="text-right">Priority</th>
-          <th class="text-right">Models</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody>
-        <% @llm_providers.each do |provider| %>
-          <tr>
-            <td class="font-medium"><%= provider.name %></td>
-            <td class="opacity-70"><%= provider.base_url %></td>
-            <td class="text-right"><%= provider.priority %></td>
-            <td class="text-right"><%= provider.model_allowlist.length %></td>
-            <td class="text-right">
-              <%= link_to "Edit", edit_system_settings_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
-            </td>
-          </tr>
-        <% end %>
-      </tbody>
-    </table>
-  </div>
-</div>
-

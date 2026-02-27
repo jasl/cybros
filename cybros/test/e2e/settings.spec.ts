@@ -10,7 +10,7 @@ test.describe("Settings", () => {
     await page.goto("/settings/profile")
 
     await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible()
-    await expect(page.getByText("admin@example.com")).toBeVisible()
+    await expect(page.locator("main").getByText("admin@example.com")).toBeVisible()
   })
 
   test("profile page shows email and password sections", async ({ page }) => {

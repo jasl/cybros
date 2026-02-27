@@ -28,5 +28,25 @@ module NavigationHelper
       content_tag(:div, text, class: "text-[11px] font-semibold tracking-wide opacity-60 is-drawer-close:hidden")
     end
   end
+
+  def settings_nav_item(label:, path:, icon_class:, active_paths: [path])
+    link_classes = [
+      "rounded-xl",
+      "font-medium",
+      "gap-2",
+      ("menu-active" if active_nav?(*Array(active_paths)))
+    ].compact.join(" ")
+
+    content_tag(:li) do
+      link_to(path, class: link_classes) do
+        safe_join(
+          [
+            content_tag(:span, "", class: icon_class),
+            content_tag(:span, label)
+          ]
+        )
+      end
+    end
+  end
 end
 

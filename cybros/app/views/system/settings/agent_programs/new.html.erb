@@ -1,42 +1,32 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li><%= link_to "Agent Programs", system_settings_agent_programs_path, class: "link link-hover" %></li>
-      <li>New</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <h2 class="text-lg font-semibold">New agent</h2>
+
+    <% if flash[:alert].present? %>
+      <div role="alert" class="alert alert-error">
+        <span><%= flash[:alert] %></span>
+      </div>
+    <% end %>
+
+    <%= form_with url: system_settings_agent_programs_path, scope: :agent_program, class: "space-y-4 max-w-xl" do |f| %>
+      <div>
+        <%= f.label :name, class: "label" do %>
+          <span class="label-text">Name</span>
+        <% end %>
+        <%= f.text_field :name, required: true, class: "input input-bordered w-full" %>
+      </div>
+
+      <div>
+        <%= f.label :profile_source, class: "label" do %>
+          <span class="label-text">Bundled profile</span>
+        <% end %>
+        <%= f.select :profile_source, @profiles, {}, class: "select select-bordered w-full" %>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <%= link_to "Back", system_settings_agent_programs_path, class: "btn btn-ghost" %>
+      </div>
+    <% end %>
   </div>
 <% end %>
-
-<div class="max-w-3xl mx-auto p-6 space-y-6">
-  <h1 class="text-2xl font-semibold">New agent</h1>
-
-  <% if flash[:alert].present? %>
-    <div role="alert" class="alert alert-error">
-      <span><%= flash[:alert] %></span>
-    </div>
-  <% end %>
-
-  <%= form_with url: system_settings_agent_programs_path, scope: :agent_program, class: "space-y-4 max-w-xl" do |f| %>
-    <div>
-      <%= f.label :name, class: "label" do %>
-        <span class="label-text">Name</span>
-      <% end %>
-      <%= f.text_field :name, required: true, class: "input input-bordered w-full" %>
-    </div>
-
-    <div>
-      <%= f.label :profile_source, class: "label" do %>
-        <span class="label-text">Bundled profile</span>
-      <% end %>
-      <%= f.select :profile_source, @profiles, {}, class: "select select-bordered w-full" %>
-    </div>
-
-    <div class="flex items-center gap-3">
-      <button type="submit" class="btn btn-primary">Create</button>
-      <%= link_to "Back", system_settings_agent_programs_path, class: "btn btn-ghost" %>
-    </div>
-  <% end %>
-</div>
-

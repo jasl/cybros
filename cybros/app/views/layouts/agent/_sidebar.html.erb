@@ -1,30 +1,41 @@
 <nav class="h-full flex flex-col is-drawer-close:w-16 is-drawer-open:w-72 transition-[width] duration-200">
-  <div class="h-14 px-2 border-b border-base-300 flex items-center gap-2 shrink-0 is-drawer-close:justify-center">
-    <%= link_to root_path, class: "btn btn-ghost btn-sm gap-2 flex-1 justify-start is-drawer-close:hidden" do %>
-      <span class="icon-[lucide--bot] size-5"></span>
-      <span class="font-semibold">Cybros</span>
-    <% end %>
+  <div class="h-14 px-2 flex items-center shrink-0 is-drawer-close:justify-center is-drawer-open:gap-2">
+    <div class="is-drawer-close:hidden">
+      <%= form_with url: conversations_path, method: :post do %>
+        <button type="submit" class="btn btn-ghost btn-square" aria-label="New chat">
+          <span class="icon-[lucide--square-pen] size-5"></span>
+        </button>
+      <% end %>
+    </div>
+
+    <div class="flex-1 is-drawer-close:hidden"></div>
 
     <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Toggle sidebar">
-      <label for="left_drawer" class="btn btn-ghost btn-sm is-drawer-close:btn-square is-drawer-open:px-2" aria-label="Toggle sidebar">
-        <span class="icon-[lucide--chevrons-left-right] size-5"></span>
+      <label for="left_drawer" class="btn btn-ghost btn-square" aria-label="Toggle sidebar">
+        <span class="icon-[lucide--panel-left] size-5"></span>
       </label>
+    </div>
+  </div>
+
+  <div class="px-2 is-drawer-open:hidden is-drawer-close:flex is-drawer-close:justify-center">
+    <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="New chat">
+      <%= form_with url: conversations_path, method: :post do %>
+        <button type="submit" class="btn btn-ghost btn-square" aria-label="New chat">
+          <span class="icon-[lucide--square-pen] size-5"></span>
+        </button>
+      <% end %>
     </div>
   </div>
 
   <%= render "layouts/agent/sidebar_primary_nav" %>
 
-  <div class="px-2 py-1">
+  <div class="px-2 py-1 is-drawer-close:hidden">
     <div class="divider my-0"></div>
   </div>
 
-  <% sidebar_mode = @left_sidebar_mode.to_sym if @left_sidebar_mode.present? %>
-  <% sidebar_mode ||= :conversations %>
-  <% if sidebar_mode == :settings %>
-    <%= render "layouts/agent/sidebar_settings_section" %>
-  <% else %>
-    <%= render "layouts/agent/sidebar_conversations_section" %>
-  <% end %>
+  <%= render "layouts/agent/sidebar_conversations_section" %>
+
+  <div class="flex-1 is-drawer-open:hidden"></div>
 
   <div class="border-t border-base-300 p-2 is-drawer-close:flex is-drawer-close:justify-center">
     <div class="is-drawer-close:w-full is-drawer-close:flex is-drawer-close:justify-center">
@@ -32,4 +43,3 @@
     </div>
   </div>
 </nav>
-

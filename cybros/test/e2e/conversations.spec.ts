@@ -9,7 +9,7 @@ test.describe("Conversations", () => {
   test("index page renders with conversation list", async ({ page }) => {
     await page.goto("/conversations")
 
-    await expect(page.getByRole("heading", { name: "Conversations" })).toBeVisible()
+    await expect(page.locator("main").getByRole("heading", { name: "Conversations" })).toBeVisible()
     await expect(page.getByRole("table")).toBeVisible()
   })
 
@@ -27,8 +27,8 @@ test.describe("Conversations", () => {
   test("creating a new conversation from index", async ({ page }) => {
     await page.goto("/conversations")
 
-    await page.getByPlaceholder("New conversation title").fill("E2E Test Conversation")
-    await page.getByRole("button", { name: "New" }).click()
+    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Test Conversation")
+    await page.locator("main").getByRole("button", { name: "New" }).click()
 
     await expect(page).toHaveURL(/\/conversations\//)
   })
@@ -36,8 +36,8 @@ test.describe("Conversations", () => {
   test("conversation show page renders chat interface", async ({ page }) => {
     await page.goto("/conversations")
 
-    await page.getByPlaceholder("New conversation title").fill("E2E Chat Test")
-    await page.getByRole("button", { name: "New" }).click()
+    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Chat Test")
+    await page.locator("main").getByRole("button", { name: "New" }).click()
     await expect(page).toHaveURL(/\/conversations\//)
 
     await expect(page.getByPlaceholder("Message…")).toBeVisible()
@@ -47,8 +47,8 @@ test.describe("Conversations", () => {
   test("send a message and verify it appears", async ({ page }) => {
     await page.goto("/conversations")
 
-    await page.getByPlaceholder("New conversation title").fill("E2E Message Test")
-    await page.getByRole("button", { name: "New" }).click()
+    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Message Test")
+    await page.locator("main").getByRole("button", { name: "New" }).click()
     await expect(page).toHaveURL(/\/conversations\//)
 
     await page.getByPlaceholder("Message…").fill("Hello from Playwright E2E test")

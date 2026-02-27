@@ -25,13 +25,13 @@ test.describe("Dashboard", () => {
   })
 
   test("'New chat' button creates a conversation", async ({ page }) => {
-    await page.getByRole("button", { name: "New chat" }).click()
+    await page.getByTestId("dashboard-page").getByRole("button", { name: "New chat" }).click()
 
     await expect(page).toHaveURL(/\/conversations\//)
   })
 
   test("'Agents' link navigates to agent programs", async ({ page }) => {
-    await page.getByRole("link", { name: "Agents" }).click()
+    await page.getByTestId("dashboard-page").getByRole("link", { name: "Agents" }).click()
 
     await expect(page).toHaveURL(/\/agent_programs/)
   })

@@ -1,60 +1,52 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li>Sessions</li>
-    </ul>
-  </div>
-<% end %>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <div>
+      <h2 class="text-lg font-semibold">Sessions</h2>
+      <p class="text-sm opacity-70">Manage your active sessions.</p>
+    </div>
 
-<div class="max-w-5xl mx-auto p-6 space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Sessions</h1>
-    <p class="text-sm opacity-70">Manage your active sessions.</p>
-  </div>
-
-  <div class="card bg-base-100 border">
-    <div class="card-body">
-      <div class="flex items-center justify-between gap-4">
-        <div class="text-sm opacity-70">
-          Signed in as <span class="font-mono"><%= Current.identity.email %></span>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="flex items-center justify-between gap-4">
+          <div class="text-sm opacity-70">
+            Signed in as <span class="font-mono"><%= Current.identity.email %></span>
+          </div>
+          <%= button_to "Sign out all", settings_sessions_path, method: :delete, class: "btn btn-error btn-sm", data: { turbo_confirm: "Sign out all sessions?" } %>
         </div>
-        <%= button_to "Sign out all", settings_sessions_path, method: :delete, class: "btn btn-error btn-sm", data: { turbo_confirm: "Sign out all sessions?" } %>
-      </div>
 
-      <div class="divider"></div>
+        <div class="divider"></div>
 
-      <% if @sessions.empty? %>
-        <p class="opacity-70">No active sessions.</p>
-      <% else %>
-        <div class="overflow-x-auto">
-          <table class="table table-zebra">
-            <thead>
-              <tr>
-                <th>Last seen</th>
-                <th>IP</th>
-                <th>User agent</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <% @sessions.each do |session| %>
+        <% if @sessions.empty? %>
+          <p class="opacity-70">No active sessions.</p>
+        <% else %>
+          <div class="overflow-x-auto">
+            <table class="table table-zebra">
+              <thead>
                 <tr>
-                  <td class="whitespace-nowrap"><%= (session.last_seen_at || session.created_at).to_fs(:short) %></td>
-                  <td class="font-mono text-xs"><%= session.ip_address %></td>
-                  <td class="text-xs opacity-70"><%= session.user_agent %></td>
-                  <td class="text-right">
-                    <% if session.id.to_s == Current.session&.id.to_s %>
-                      <span class="badge badge-primary badge-sm">This device</span>
-                    <% end %>
-                  </td>
+                  <th>Last seen</th>
+                  <th>IP</th>
+                  <th>User agent</th>
+                  <th></th>
                 </tr>
-              <% end %>
-            </tbody>
-          </table>
-        </div>
-      <% end %>
+              </thead>
+              <tbody>
+                <% @sessions.each do |session| %>
+                  <tr>
+                    <td class="whitespace-nowrap"><%= (session.last_seen_at || session.created_at).to_fs(:short) %></td>
+                    <td class="font-mono text-xs"><%= session.ip_address %></td>
+                    <td class="text-xs opacity-70"><%= session.user_agent %></td>
+                    <td class="text-right">
+                      <% if session.id.to_s == Current.session&.id.to_s %>
+                        <span class="badge badge-primary badge-sm">This device</span>
+                      <% end %>
+                    </td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
     </div>
   </div>
-</div>
-
+<% end %>

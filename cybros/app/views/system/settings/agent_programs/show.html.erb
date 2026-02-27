@@ -1,32 +1,20 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li><%= link_to "Agent Programs", system_settings_agent_programs_path, class: "link link-hover" %></li>
-      <li class="truncate"><%= @agent_program.name %></li>
-    </ul>
-  </div>
-<% end %>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <h2 class="text-lg font-semibold"><%= @agent_program.name %></h2>
 
-<div class="max-w-3xl mx-auto p-6 space-y-6">
-  <div class="space-y-1">
-    <h1 class="text-2xl font-semibold"><%= @agent_program.name %></h1>
-  </div>
-
-  <div class="card bg-base-100 border">
-    <div class="card-body">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <div class="text-xs opacity-60">Profile</div>
-          <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
-        </div>
-        <div>
-          <div class="text-xs opacity-60">Local path</div>
-          <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-xs opacity-60">Profile</div>
+            <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Local path</div>
+            <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-</div>
-
+<% end %>

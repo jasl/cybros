@@ -1,23 +1,13 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li><%= link_to "LLM Providers", system_settings_llm_providers_path, class: "link link-hover" %></li>
-      <li>Edit</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <div class="flex items-center justify-between gap-4">
+      <h2 class="text-lg font-semibold">Edit LLM provider</h2>
+      <div class="flex items-center gap-2">
+        <%= button_to "Fetch Models", fetch_models_system_settings_llm_provider_path(@llm_provider), method: :post, class: "btn btn-secondary btn-sm" %>
+        <%= button_to "Delete", system_settings_llm_provider_path(@llm_provider), method: :delete, class: "btn btn-ghost btn-sm", data: { turbo_confirm: "Delete this provider?" } %>
+      </div>
+    </div>
+
+    <%= render "form", llm_provider: @llm_provider %>
   </div>
 <% end %>
-
-<div class="max-w-3xl mx-auto p-6 space-y-6">
-  <div class="flex items-center justify-between gap-4">
-    <h1 class="text-2xl font-semibold">Edit LLM provider</h1>
-    <div class="flex items-center gap-2">
-      <%= button_to "Fetch Models", fetch_models_system_settings_llm_provider_path(@llm_provider), method: :post, class: "btn btn-secondary" %>
-      <%= button_to "Delete", system_settings_llm_provider_path(@llm_provider), method: :delete, class: "btn btn-ghost", data: { turbo_confirm: "Delete this provider?" } %>
-    </div>
-  </div>
-
-  <%= render "form", llm_provider: @llm_provider %>
-</div>
-

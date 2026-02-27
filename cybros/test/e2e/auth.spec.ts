@@ -24,15 +24,16 @@ test.describe("Authentication", () => {
     await page.getByLabel("Password").fill("wrong-password")
     await page.getByRole("button", { name: "Sign in" }).click()
 
-    await expect(page.getByRole("alert")).toBeVisible()
+    await expect(page.getByRole("alert").first()).toBeVisible()
   })
 
   test("sign out returns to home page", async ({ page }) => {
     await signIn(page)
 
+    await page.locator("details.dropdown summary").click()
     await page.getByRole("button", { name: /sign out/i }).click()
 
-    await expect(page).toHaveURL("/")
+    await expect(page).toHaveURL(/\/session\/new/)
   })
 
   test("unauthenticated user is redirected to sign in", async ({ page }) => {

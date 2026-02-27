@@ -1,84 +1,76 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li>Profile</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <div>
+      <h2 class="text-lg font-semibold">Profile</h2>
+      <p class="text-sm opacity-70">Manage your account details.</p>
+    </div>
+
+    <% if @identity&.errors&.any? %>
+      <div role="alert" class="alert alert-error">
+        <span><%= @identity.errors.full_messages.first %></span>
+      </div>
+    <% end %>
+
+    <div class="space-y-6">
+      <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+        <div class="card-body space-y-4">
+          <h3 class="font-semibold">Email</h3>
+
+          <%= form_with url: settings_profile_path, method: :patch, scope: :identity, class: "space-y-4" do |f| %>
+            <div class="space-y-1">
+              <div class="text-xs opacity-60">Current</div>
+              <div class="font-mono text-sm"><%= @identity.email %></div>
+            </div>
+
+            <div class="space-y-2">
+              <%= f.label :email, class: "label" do %>
+                <span class="label-text">New email</span>
+              <% end %>
+              <%= f.email_field :email, class: "input input-bordered w-full", autocomplete: "email" %>
+            </div>
+
+            <div class="space-y-2">
+              <label class="label">
+                <span class="label-text">Current password</span>
+              </label>
+              <%= password_field_tag "identity[current_password]", "", class: "input input-bordered w-full", autocomplete: "current-password", required: true %>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Update email</button>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+        <div class="card-body space-y-4">
+          <h3 class="font-semibold">Password</h3>
+
+          <%= form_with url: settings_profile_path, method: :patch, scope: :identity, class: "space-y-4" do |f| %>
+            <div class="space-y-2">
+              <label class="label">
+                <span class="label-text">Current password</span>
+              </label>
+              <%= password_field_tag "identity[current_password]", "", class: "input input-bordered w-full", autocomplete: "current-password", required: true %>
+            </div>
+
+            <div class="space-y-2">
+              <%= f.label :password, class: "label" do %>
+                <span class="label-text">New password</span>
+              <% end %>
+              <%= f.password_field :password, class: "input input-bordered w-full", autocomplete: "new-password", minlength: 8, required: true %>
+            </div>
+
+            <div class="space-y-2">
+              <%= f.label :password_confirmation, class: "label" do %>
+                <span class="label-text">Confirm new password</span>
+              <% end %>
+              <%= f.password_field :password_confirmation, class: "input input-bordered w-full", autocomplete: "new-password", minlength: 8, required: true %>
+            </div>
+
+            <button type="submit" class="btn btn-primary">Update password</button>
+          <% end %>
+        </div>
+      </div>
+    </div>
   </div>
 <% end %>
-
-<div class="max-w-5xl mx-auto p-6 space-y-6">
-  <div>
-    <h1 class="text-2xl font-semibold">Profile</h1>
-    <p class="text-sm opacity-70">Manage your account details.</p>
-  </div>
-
-  <% if @identity&.errors&.any? %>
-    <div role="alert" class="alert alert-error">
-      <span><%= @identity.errors.full_messages.first %></span>
-    </div>
-  <% end %>
-
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="card bg-base-100 border">
-      <div class="card-body space-y-4">
-        <h2 class="card-title">Email</h2>
-
-        <%= form_with url: settings_profile_path, method: :patch, scope: :identity, class: "space-y-4" do |f| %>
-          <div class="space-y-1">
-            <div class="text-xs opacity-60">Current</div>
-            <div class="font-mono text-sm"><%= @identity.email %></div>
-          </div>
-
-          <div class="space-y-2">
-            <%= f.label :email, class: "label" do %>
-              <span class="label-text">New email</span>
-            <% end %>
-            <%= f.email_field :email, class: "input input-bordered w-full", autocomplete: "email" %>
-          </div>
-
-          <div class="space-y-2">
-            <label class="label">
-              <span class="label-text">Current password</span>
-            </label>
-            <%= password_field_tag "identity[current_password]", "", class: "input input-bordered w-full", autocomplete: "current-password", required: true %>
-          </div>
-
-          <button type="submit" class="btn btn-primary">Update email</button>
-        <% end %>
-      </div>
-    </div>
-
-    <div class="card bg-base-100 border">
-      <div class="card-body space-y-4">
-        <h2 class="card-title">Password</h2>
-
-        <%= form_with url: settings_profile_path, method: :patch, scope: :identity, class: "space-y-4" do |f| %>
-          <div class="space-y-2">
-            <label class="label">
-              <span class="label-text">Current password</span>
-            </label>
-            <%= password_field_tag "identity[current_password]", "", class: "input input-bordered w-full", autocomplete: "current-password", required: true %>
-          </div>
-
-          <div class="space-y-2">
-            <%= f.label :password, class: "label" do %>
-              <span class="label-text">New password</span>
-            <% end %>
-            <%= f.password_field :password, class: "input input-bordered w-full", autocomplete: "new-password", minlength: 8, required: true %>
-          </div>
-
-          <div class="space-y-2">
-            <%= f.label :password_confirmation, class: "label" do %>
-              <span class="label-text">Confirm new password</span>
-            <% end %>
-            <%= f.password_field :password_confirmation, class: "input input-bordered w-full", autocomplete: "new-password", minlength: 8, required: true %>
-          </div>
-
-          <button type="submit" class="btn btn-primary">Update password</button>
-        <% end %>
-      </div>
-    </div>
-  </div>
-</div>
-

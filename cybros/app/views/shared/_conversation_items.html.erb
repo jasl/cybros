@@ -1,39 +1,9 @@
 <% conversations = Array(conversations) %>
-<% today = Date.current %>
-<% yesterday = today - 1 %>
-<% cutoff_recent = today - 7 %>
 
-<% groups = {
-  "Today" => [],
-  "Yesterday" => [],
-  "Previous 7 days" => [],
-  "Older" => [],
-} %>
-
-<% conversations.each do |c| %>
-  <% date = c.created_at.to_date %>
-  <% if date == today %>
-    <% groups["Today"] << c %>
-  <% elsif date == yesterday %>
-    <% groups["Yesterday"] << c %>
-  <% elsif date >= cutoff_recent %>
-    <% groups["Previous 7 days"] << c %>
-  <% else %>
-    <% groups["Older"] << c %>
-  <% end %>
-<% end %>
-
-<% groups.each do |label, items| %>
-  <% next if items.empty? %>
-  <li class="menu-title px-2 mt-2">
-    <span><%= label %></span>
+<% conversations.each do |conversation| %>
+  <li>
+    <%= link_to conversation_path(conversation), class: "truncate #{'menu-active' if active_nav?(conversation_path(conversation))}" do %>
+      <span class="truncate"><%= conversation.title.presence || "(untitled)" %></span>
+    <% end %>
   </li>
-  <% items.each do |conversation| %>
-    <li>
-      <%= link_to conversation_path(conversation), class: "gap-2 #{'menu-active' if active_nav?(conversation_path(conversation))}" do %>
-        <span class="icon-[lucide--message-square] size-4 opacity-70"></span>
-        <span class="is-drawer-close:hidden truncate"><%= conversation.title.presence || "(untitled)" %></span>
-      <% end %>
-    </li>
-  <% end %>
 <% end %>

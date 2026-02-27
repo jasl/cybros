@@ -24,3 +24,12 @@ application.register("debug-overlay", DebugOverlayController)
 
 import InfiniteScrollController from "./infinite_scroll_controller"
 application.register("infinite-scroll", InfiniteScrollController)
+
+import DetailsDropdownController from "./details_dropdown_controller"
+application.register("details-dropdown", DetailsDropdownController)
+
+import SectionToggleController from "./section_toggle_controller"
+application.register("section-toggle", SectionToggleController)
+
+import ConversationSearchController from "./conversation_search_controller"
+application.register("conversation-search", ConversationSearchController)

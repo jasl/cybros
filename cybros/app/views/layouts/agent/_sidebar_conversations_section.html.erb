@@ -1,23 +1,45 @@
-<div class="p-2 is-drawer-close:tooltip is-drawer-close:tooltip-right is-drawer-close:flex is-drawer-close:justify-center" data-tip="New chat">
-  <%= form_with url: conversations_path, method: :post do %>
-    <button type="submit" class="btn btn-primary btn-sm w-full is-drawer-open:justify-start is-drawer-close:justify-center is-drawer-close:btn-square gap-2">
-      <span class="icon-[lucide--plus] size-4"></span>
-      <span class="is-drawer-close:hidden">New chat</span>
+<% conversations = @sidebar_conversations || [] %>
+<% has_more = !!@sidebar_has_more %>
+<% before_cursor = @sidebar_before_cursor.to_s.presence %>
+<% next_page_url = has_more && before_cursor.present? ? sidebar_conversations_path(before: before_cursor) : "" %>
+
+<div class="flex-1 flex flex-col min-h-0 is-drawer-close:hidden"
+  data-controller="section-toggle conversation-search"
+  data-section-toggle-open-value="true">
+
+  <div class="px-3 py-1.5 flex items-center">
+    <button data-action="section-toggle#toggle" class="flex items-center gap-1.5 opacity-70 hover:opacity-100 transition-opacity">
+      <span data-section-toggle-target="icon" class="icon-[lucide--chevron-down] size-3 transition-transform"></span>
+      <span class="text-xs font-semibold tracking-wide">Conversations</span>
     </button>
-  <% end %>
-</div>
+  </div>
 
-<div class="px-2 pt-2 is-drawer-close:hidden">
-  <div class="divider my-0"></div>
-</div>
+  <div data-section-toggle-target="content" class="flex-1 flex flex-col min-h-0">
+    <div class="px-2 pb-1.5">
+      <label class="input input-sm w-full px-3">
+        <span class="icon-[lucide--search] size-4 opacity-60"></span>
+        <input type="search" placeholder="Search"
+          data-conversation-search-target="input"
+          data-action="input->conversation-search#filter" />
+      </label>
+    </div>
 
-<% next_page_url = @sidebar_has_more && @sidebar_before_cursor.present? ? sidebar_conversations_path(before: @sidebar_before_cursor) : "" %>
-<div class="flex-1 overflow-y-auto overflow-x-hidden px-2 py-2 scrollbar-auto-hide is-drawer-close:hidden"
-  data-controller="infinite-scroll"
-  data-infinite-scroll-url-value="<%= next_page_url %>">
-  <%= render "shared/conversation_list",
-    conversations: (@sidebar_conversations || []),
-    has_more: @sidebar_has_more,
-    before_cursor: @sidebar_before_cursor %>
-</div>
+    <div class="flex-1 overflow-y-auto overflow-x-hidden scrollbar-auto-hide"
+      data-controller="infinite-scroll"
+      data-infinite-scroll-url-value="<%= next_page_url %>">
+      <% if conversations.empty? %>
+        <div class="text-sm opacity-60 px-3 py-2">No conversations yet.</div>
+      <% else %>
+        <ul class="menu w-full px-2" data-infinite-scroll-target="list" data-conversation-search-target="list">
+          <%= render "shared/conversation_items", conversations: conversations %>
+        </ul>
 
+        <% if has_more && before_cursor.present? %>
+          <div data-infinite-scroll-target="sentinel" class="flex justify-center py-2">
+            <span class="loading loading-spinner loading-sm"></span>
+          </div>
+        <% end %>
+      <% end %>
+    </div>
+  </div>
+</div>

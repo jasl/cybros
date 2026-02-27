@@ -1,16 +1,6 @@
-<% content_for :action_bar do %>
-  <div class="breadcrumbs text-sm">
-    <ul>
-      <li><span class="opacity-70">Settings</span></li>
-      <li><span class="opacity-70">System</span></li>
-      <li><%= link_to "LLM Providers", system_settings_llm_providers_path, class: "link link-hover" %></li>
-      <li>New</li>
-    </ul>
+<%= render layout: "shared/settings_shell" do %>
+  <div class="space-y-6">
+    <h2 class="text-lg font-semibold">New LLM provider</h2>
+    <%= render "form", llm_provider: @llm_provider %>
   </div>
 <% end %>
-
-<div class="max-w-3xl mx-auto p-6 space-y-6">
-  <h1 class="text-2xl font-semibold">New LLM provider</h1>
-  <%= render "form", llm_provider: @llm_provider %>
-</div>
-
