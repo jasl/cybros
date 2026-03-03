@@ -3,12 +3,6 @@
     <div class="card-body">
       <h1 class="card-title text-2xl">Sign in</h1>
 
-      <% if flash[:alert].present? %>
-        <div role="alert" class="alert alert-error">
-          <span><%= flash[:alert] %></span>
-        </div>
-      <% end %>
-
       <%= form_with url: session_path, class: "space-y-4" do |f| %>
         <div class="space-y-2">
           <%= f.label :email, class: "label" do %>

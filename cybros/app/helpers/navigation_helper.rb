@@ -1,4 +1,19 @@
 module NavigationHelper
+  def settings_section_active?(section)
+    case section
+    when :profile
+      controller_path.start_with?("settings/profiles")
+    when :sessions
+      controller_path.start_with?("settings/sessions")
+    when :llm_providers
+      controller_path.start_with?("system/settings/llm_providers")
+    when :agent_programs
+      controller_path.start_with?("system/settings/agent_programs")
+    else
+      false
+    end
+  end
+
   def sidebar_nav_item(label:, path:, icon_class:, active_paths: [path], data: {}, tooltip: label)
     li_classes = "is-drawer-close:tooltip is-drawer-close:tooltip-right is-drawer-close:flex is-drawer-close:justify-center"
     link_classes = [

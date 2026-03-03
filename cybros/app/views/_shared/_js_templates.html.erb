@@ -1,0 +1,77 @@
+<template id="toast_template">
+  <div data-controller="toast"
+       data-toast-duration-value="5000"
+       data-toast-auto-dismiss-value="true"
+       class="w-full max-w-sm">
+    <div class="alert shadow-lg" data-toast-target="alert">
+      <span class="icon-[lucide--info] size-5 shrink-0" data-toast-icon></span>
+      <span class="flex-1" data-toast-message></span>
+      <button type="button"
+              class="btn btn-ghost btn-xs btn-square"
+              data-action="toast#dismiss"
+              aria-label="Dismiss">
+        <span class="icon-[lucide--x] size-4"></span>
+      </button>
+    </div>
+  </div>
+</template>
+
+<template id="alert_box_template">
+  <div class="alert">
+    <span class="icon-[lucide--info] size-5 shrink-0" data-alert-icon></span>
+    <div class="flex-1">
+      <p class="font-medium" data-alert-title></p>
+      <p class="text-sm opacity-80" data-alert-message></p>
+    </div>
+  </div>
+</template>
+
+<dialog id="hotkeys_help_modal" class="modal">
+  <div class="modal-box max-w-lg">
+    <div class="flex items-center justify-between mb-4">
+      <h3 class="font-bold text-lg flex items-center gap-2">
+        <span class="icon-[lucide--keyboard] size-5"></span>
+        Keyboard Shortcuts
+      </h3>
+      <form method="dialog">
+        <button class="btn btn-ghost btn-sm btn-circle" aria-label="Close">
+          <span class="icon-[lucide--x] size-4"></span>
+        </button>
+      </form>
+    </div>
+
+    <div class="space-y-4">
+      <div>
+        <h4 class="text-sm font-semibold text-base-content/60 mb-2">Chat</h4>
+        <ul class="space-y-2 text-sm">
+          <li class="flex justify-between items-center">
+            <span>Send message</span>
+            <kbd class="kbd kbd-sm">Enter</kbd>
+          </li>
+          <li class="flex justify-between items-center">
+            <span>Stop generation</span>
+            <kbd class="kbd kbd-sm">Esc</kbd>
+          </li>
+        </ul>
+      </div>
+
+      <div>
+        <h4 class="text-sm font-semibold text-base-content/60 mb-2">Navigation</h4>
+        <ul class="space-y-2 text-sm">
+          <li class="flex justify-between items-center">
+            <span>Toggle left sidebar</span>
+            <kbd class="kbd kbd-sm">[</kbd>
+          </li>
+          <li class="flex justify-between items-center">
+            <span>Toggle right sidebar</span>
+            <kbd class="kbd kbd-sm">]</kbd>
+          </li>
+        </ul>
+      </div>
+    </div>
+  </div>
+  <form method="dialog" class="modal-backdrop">
+    <button>close</button>
+  </form>
+</dialog>
+

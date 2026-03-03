@@ -20,12 +20,14 @@ class SessionsController < ApplicationController
     Current.session = session
     cookies.signed.permanent[:session_token] = { value: session.id, httponly: true, same_site: :lax }
 
+    flash[:notice] = "Signed in"
     redirect_to root_path
   end
 
   def destroy
     Current.session&.destroy
     cookies.delete(:session_token)
+    flash[:notice] = "Signed out"
     redirect_to new_session_path
   end
 

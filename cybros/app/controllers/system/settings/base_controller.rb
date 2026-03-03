@@ -1,6 +1,8 @@
 module System
   module Settings
-    class BaseController < AgentController
+    class BaseController < AuthenticatedController
+      layout "settings"
+
       before_action :require_system_settings_access
 
       private

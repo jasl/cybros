@@ -1,13 +1,15 @@
 <!DOCTYPE html>
-<html lang="<%= I18n.locale %>">
+<html lang="<%= I18n.locale %>" data-theme="light">
   <%= render "layouts/shared/head" %>
 
   <body
     class="<%= content_for(:body_class) %>"
     data-layout="<%= content_for?(:layout_name) ? yield(:layout_name) : "application" %>">
-    <%= render "layouts/shared/flash" %>
     <%= content_for?(:content) ? yield(:content) : yield %>
     <%= yield :body %>
-    <div id="toast_container" class="toast toast-top toast-end z-100 mt-16 flex flex-col gap-2"></div>
+    <%= render "_shared/js_templates" %>
+    <div id="toast_container" class="toast toast-top toast-end z-100 mt-16 flex flex-col gap-2">
+      <%= render "layouts/shared/flash" %>
+    </div>
   </body>
 </html>

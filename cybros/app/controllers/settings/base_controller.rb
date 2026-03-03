@@ -1,4 +1,5 @@
 module Settings
-  class BaseController < AgentController
+  class BaseController < AuthenticatedController
+    layout "settings"
   end
 end

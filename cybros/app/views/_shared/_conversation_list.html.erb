@@ -13,7 +13,7 @@
   <div class="text-xs opacity-60 px-2">No conversations yet.</div>
 <% else %>
   <ul class="menu menu-sm" data-infinite-scroll-target="list">
-    <%= render "shared/conversation_items", conversations: conversations %>
+    <%= render "_shared/conversation_items", conversations: conversations %>
   </ul>
 
   <% if has_more && before_cursor.present? %>

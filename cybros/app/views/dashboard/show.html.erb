@@ -18,22 +18,24 @@
     <% end %>
   </div>
 
-  <div class="stats stats-vertical lg:stats-horizontal shadow bg-base-100 border border-base-300">
-    <div class="stat">
+  <div class="overflow-x-auto">
+    <div class="stats stats-horizontal w-full shadow bg-base-100 border border-base-300">
+      <div class="stat min-w-64">
       <div class="stat-title">LLM providers</div>
       <div class="stat-value text-xl"><%= @provider_count %></div>
       <div class="stat-desc opacity-60">Configured providers</div>
-    </div>
-    <div class="stat">
+      </div>
+      <div class="stat min-w-64">
       <div class="stat-title">Agent programs</div>
       <div class="stat-value text-xl"><%= @agent_program_count %></div>
       <div class="stat-desc opacity-60">Available agents</div>
-    </div>
-    <div class="stat">
+      </div>
+      <div class="stat min-w-64">
       <div class="stat-title">Runs</div>
       <div class="stat-value text-xl"><%= @run_state_counts.values.sum %></div>
       <div class="stat-desc opacity-60">
         <%= @run_state_counts.fetch("running", 0) %> running · <%= @run_state_counts.fetch("failed", 0) %> failed
+      </div>
       </div>
     </div>
   </div>

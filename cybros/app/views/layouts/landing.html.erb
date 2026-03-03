@@ -1,7 +1,13 @@
 <% content_for(:layout_name, "landing") %>
 <% content_for(:body_class, "min-h-dvh bg-base-200") %>
 <% content_for :content do %>
-  <%= yield %>
+  <div class="min-h-dvh flex flex-col">
+    <%= render "layouts/navbar" %>
+
+    <main class="flex-1 <%= content_for(:main_class) %>">
+      <%= yield %>
+    </main>
+  </div>
 <% end %>
 
 <%= render template: "layouts/application" %>

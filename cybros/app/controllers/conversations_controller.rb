@@ -20,7 +20,7 @@ class ConversationsController < AgentController
       return
     end
 
-    page_size = 50
+    page_size = 10
     scope = Current.user.conversations.order(id: :desc)
     scope = scope.where("id < ?", before) if before.present?
     scope = scope.where("id > ?", after) if after.present?

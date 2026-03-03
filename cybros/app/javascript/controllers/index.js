@@ -33,3 +33,12 @@ application.register("section-toggle", SectionToggleController)
 
 import ConversationSearchController from "./conversation_search_controller"
 application.register("conversation-search", ConversationSearchController)
+
+import ThemeController from "./theme_controller"
+application.register("theme", ThemeController)
+
+import ToastController from "./toast_controller"
+application.register("toast", ToastController)
+
+import DialogController from "./dialog_controller"
+application.register("dialog", DialogController)

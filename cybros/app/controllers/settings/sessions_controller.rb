@@ -8,6 +8,7 @@ module Settings
       Current.identity.sessions.destroy_all
       Current.session = nil
       cookies.delete(:session_token)
+      flash[:notice] = "Signed out"
       redirect_to new_session_path
     end
   end

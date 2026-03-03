@@ -16,7 +16,7 @@ export default class extends Controller {
     if (stored == null) {
       const isDesktop = window.matchMedia?.("(min-width: 1024px)")?.matches
       if (isDesktop) {
-        this.toggleTarget.checked = this.keyValue !== "right"
+        this.toggleTarget.checked = true
       }
     }
 
@@ -34,7 +34,7 @@ export default class extends Controller {
   }
 
   #storageKey() {
-    return `cybros:sidebar:${this.keyValue}`
+    return `cybros:sidebar:v2:${this.keyValue}`
   }
 }
 

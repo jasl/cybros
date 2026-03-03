@@ -1,4 +1,4 @@
-<nav class="h-full flex flex-col is-drawer-close:w-16 is-drawer-open:w-72 transition-[width] duration-200">
+<nav class="h-full flex flex-col w-full">
   <div class="h-14 px-2 flex items-center shrink-0 is-drawer-close:justify-center is-drawer-open:gap-2">
     <div class="is-drawer-close:hidden">
       <%= form_with url: conversations_path, method: :post do %>
@@ -37,9 +37,19 @@
 
   <div class="flex-1 is-drawer-open:hidden"></div>
 
-  <div class="border-t border-base-300 p-2 is-drawer-close:flex is-drawer-close:justify-center">
-    <div class="is-drawer-close:w-full is-drawer-close:flex is-drawer-close:justify-center">
-      <%= render "shared/user_menu" %>
+  <div class="border-t border-base-300 p-2">
+    <div class="flex items-center gap-2 is-drawer-close:flex-col is-drawer-close:items-center">
+      <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Toggle theme">
+        <label class="btn btn-ghost btn-square swap swap-rotate" data-controller="theme" aria-label="Toggle theme">
+          <input type="checkbox" data-theme-target="checkbox" data-action="change->theme#toggle" />
+          <span class="icon-[lucide--sun] size-5 swap-off"></span>
+          <span class="icon-[lucide--moon] size-5 swap-on"></span>
+        </label>
+      </div>
+
+      <div class="flex-1 w-full is-drawer-close:flex is-drawer-close:justify-center">
+        <%= render "_shared/user_menu" %>
+      </div>
     </div>
   </div>
 </nav>

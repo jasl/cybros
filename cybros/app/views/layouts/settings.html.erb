@@ -1,0 +1,90 @@
+<% content_for(:layout_name, "settings") %>
+<% content_for(:body_class, "min-h-dvh bg-base-100") %>
+<% content_for :content do %>
+  <%= render "layouts/navbar" %>
+
+  <main class="w-full max-w-7xl mx-auto px-4 md:px-6 lg:px-8 py-6 md:py-8">
+    <div class="flex flex-col lg:flex-row gap-6">
+      <aside class="lg:w-64 shrink-0">
+        <div class="lg:hidden mb-4">
+          <div class="tabs tabs-box w-full">
+            <%= link_to settings_profile_path,
+                        class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:profile) ? "tab-active" : ""}" do %>
+              <span class="icon-[lucide--user] size-4"></span>
+              Profile
+            <% end %>
+
+            <%= link_to settings_sessions_path,
+                        class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:sessions) ? "tab-active" : ""}" do %>
+              <span class="icon-[lucide--monitor-smartphone] size-4"></span>
+              Sessions
+            <% end %>
+
+            <% if Current.user&.owner? || Current.user&.admin? %>
+              <%= link_to system_settings_llm_providers_path,
+                          class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:llm_providers) ? "tab-active" : ""}" do %>
+                <span class="icon-[lucide--cpu] size-4"></span>
+                LLM
+              <% end %>
+
+              <%= link_to system_settings_agent_programs_path,
+                          class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:agent_programs) ? "tab-active" : ""}" do %>
+                <span class="icon-[lucide--sparkles] size-4"></span>
+                Agents
+              <% end %>
+            <% end %>
+          </div>
+        </div>
+
+        <nav class="hidden lg:block sticky top-20">
+          <ul class="menu bg-base-200 rounded-box w-full gap-1">
+            <li class="menu-title text-xs uppercase tracking-wider">
+              Personal
+            </li>
+            <li>
+              <%= link_to settings_profile_path,
+                          class: "gap-3 transition-colors #{settings_section_active?(:profile) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                <span class="icon-[lucide--user] size-5"></span>
+                Profile
+              <% end %>
+            </li>
+            <li>
+              <%= link_to settings_sessions_path,
+                          class: "gap-3 transition-colors #{settings_section_active?(:sessions) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                <span class="icon-[lucide--monitor-smartphone] size-5"></span>
+                Sessions
+              <% end %>
+            </li>
+
+            <% if Current.user&.owner? || Current.user&.admin? %>
+              <li class="menu-title text-xs uppercase tracking-wider mt-4">
+                System
+              </li>
+              <li>
+                <%= link_to system_settings_llm_providers_path,
+                            class: "gap-3 transition-colors #{settings_section_active?(:llm_providers) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                  <span class="icon-[lucide--cpu] size-5"></span>
+                  LLM Providers
+                <% end %>
+              </li>
+              <li>
+                <%= link_to system_settings_agent_programs_path,
+                            class: "gap-3 transition-colors #{settings_section_active?(:agent_programs) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                  <span class="icon-[lucide--sparkles] size-5"></span>
+                  Agent Programs
+                <% end %>
+              </li>
+            <% end %>
+          </ul>
+        </nav>
+      </aside>
+
+      <div class="flex-1 min-w-0">
+        <%= yield %>
+      </div>
+    </div>
+  </main>
+<% end %>
+
+<%= render template: "layouts/application" %>
+

@@ -1,7 +1,6 @@
-class AgentController < ApplicationController
+class AgentController < AuthenticatedController
   layout "agent"
 
-  before_action :require_authentication
   before_action :load_sidebar_conversations
 
   private
@@ -12,7 +11,7 @@ class AgentController < ApplicationController
         before = nil
       end
 
-      page_size = 50
+      page_size = 10
       scope = Current.user.conversations.order(id: :desc)
       scope = scope.where("id < ?", before) if before.present?
 

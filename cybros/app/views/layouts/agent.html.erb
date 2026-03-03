@@ -2,72 +2,97 @@
 <% content_for(:body_class, "h-dvh overflow-hidden bg-base-200") %>
 <% content_for :content do %>
   <div class="drawer lg:drawer-open h-dvh" data-controller="sidebar" data-sidebar-key-value="left">
-    <input
-      id="left_drawer"
-      type="checkbox"
-      class="drawer-toggle"
-      data-sidebar-target="toggle" />
+    <input id="left_drawer" type="checkbox" class="drawer-toggle" data-sidebar-target="toggle" />
 
-    <div class="drawer-content h-dvh overflow-hidden">
-      <div class="drawer drawer-end h-dvh" data-controller="sidebar" data-sidebar-key-value="right">
-        <input
-          id="right_drawer"
-          type="checkbox"
-          class="drawer-toggle"
-          data-sidebar-target="toggle" />
+    <div class="drawer-content flex flex-col h-dvh overflow-hidden">
+      <% if content_for?(:right_sidebar) %>
+        <div class="drawer drawer-end h-full" data-controller="sidebar" data-sidebar-key-value="right">
+          <input id="right_drawer" type="checkbox" class="drawer-toggle" data-sidebar-target="toggle" />
 
-        <div class="drawer-content h-dvh overflow-hidden flex flex-col">
+          <div class="drawer-content h-full flex flex-col overflow-hidden">
+            <header class="navbar min-h-0 h-14 px-4 bg-base-100 border-b border-base-300 shrink-0">
+              <div class="navbar-start">
+                <label for="left_drawer" class="btn btn-ghost btn-sm btn-square lg:hidden" aria-label="Open navigation">
+                  <span class="icon-[lucide--panel-left] size-5"></span>
+                </label>
+
+                <% if content_for?(:action_bar) %>
+                  <%= yield :action_bar %>
+                <% else %>
+                  <div class="text-sm opacity-70">Cybros</div>
+                <% end %>
+              </div>
+
+              <div class="navbar-end gap-2">
+                <button type="button"
+                        class="btn btn-ghost btn-sm btn-square"
+                        data-controller="dialog"
+                        data-dialog-id-value="hotkeys_help_modal"
+                        data-action="click->dialog#open"
+                        title="Keyboard shortcuts (?)">
+                  <span class="icon-[lucide--help-circle] size-5"></span>
+                </button>
+
+                <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square", title: "Home" do %>
+                  <span class="icon-[lucide--home] size-5"></span>
+                <% end %>
+
+                <label for="right_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Open settings">
+                  <span class="icon-[lucide--settings] size-5"></span>
+                </label>
+              </div>
+            </header>
+
+            <main class="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <%= yield %>
+            </main>
+          </div>
+
+          <div class="drawer-side z-40 h-full">
+            <label for="right_drawer" aria-label="Close settings" class="drawer-overlay"></label>
+            <aside class="w-96 max-w-[85vw] h-full bg-base-100 flex flex-col border-l border-base-300 overflow-hidden">
+              <%= yield :right_sidebar %>
+            </aside>
+          </div>
+        </div>
+      <% else %>
+        <div class="h-full flex flex-col overflow-hidden">
           <header class="navbar min-h-0 h-14 px-4 bg-base-100 border-b border-base-300 shrink-0">
-            <div class="navbar-start gap-2">
+            <div class="navbar-start">
               <label for="left_drawer" class="btn btn-ghost btn-sm btn-square lg:hidden" aria-label="Open navigation">
                 <span class="icon-[lucide--panel-left] size-5"></span>
               </label>
 
               <% if content_for?(:action_bar) %>
-                <div class="min-w-0 h-full flex items-center">
-                  <%= yield :action_bar %>
-                </div>
+                <%= yield :action_bar %>
               <% else %>
                 <div class="text-sm opacity-70">Cybros</div>
               <% end %>
             </div>
 
             <div class="navbar-end gap-2">
-              <% if content_for?(:right_panel) %>
-                <label
-                  for="right_drawer"
-                  class="btn btn-ghost btn-sm btn-square"
-                  aria-label="Open inspector">
-                  <span class="icon-[lucide--panel-right] size-5"></span>
-                </label>
-              <% end %>
+              <button type="button"
+                      class="btn btn-ghost btn-sm btn-square"
+                      data-controller="dialog"
+                      data-dialog-id-value="hotkeys_help_modal"
+                      data-action="click->dialog#open"
+                      title="Keyboard shortcuts (?)">
+                <span class="icon-[lucide--help-circle] size-5"></span>
+              </button>
             </div>
           </header>
 
-          <main class="flex-1 min-h-0 overflow-auto">
+          <main class="flex-1 flex flex-col min-h-0 overflow-hidden">
             <%= yield %>
           </main>
         </div>
-
-        <div class="drawer-side z-40 h-dvh">
-          <label for="right_drawer" aria-label="Close inspector" class="drawer-overlay"></label>
-          <aside class="w-96 max-w-[85vw] h-dvh bg-base-100 border-l border-base-300 overflow-hidden">
-            <div class="h-full overflow-auto p-4">
-              <% if content_for?(:right_panel) %>
-                <%= yield :right_panel %>
-              <% else %>
-                <div class="text-sm opacity-70">No inspector content.</div>
-              <% end %>
-            </div>
-          </aside>
-        </div>
-      </div>
+      <% end %>
     </div>
 
-    <div class="drawer-side z-50 h-dvh is-drawer-close:overflow-visible">
-      <label for="left_drawer" aria-label="Close navigation" class="drawer-overlay"></label>
-      <aside class="h-dvh bg-base-100 border-r border-base-300 is-drawer-close:overflow-visible is-drawer-open:overflow-hidden">
-        <%= render "layouts/agent/sidebar" %>
+    <div class="drawer-side z-50 h-full is-drawer-close:overflow-visible">
+      <label for="left_drawer" aria-label="Close navigation" class="drawer-overlay lg:hidden"></label>
+      <aside class="is-drawer-close:w-16 is-drawer-open:w-80 max-w-[85vw] h-full bg-base-100 flex flex-col border-r border-base-300 overflow-visible transition-[width] duration-200">
+        <%= content_for?(:left_sidebar) ? yield(:left_sidebar) : render("layouts/agent/sidebar") %>
       </aside>
     </div>
   </div>

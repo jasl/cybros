@@ -1,0 +1,16 @@
+<%# Canonical account dropdown (matches settings navbar). %>
+<%# locals: (placement_classes:, trigger_classes:, email_classes: nil, chevron_icon_class: nil, user_icon_size_class: "size-4") %>
+<div class="dropdown <%= placement_classes %>">
+  <div tabindex="0" role="button" class="<%= trigger_classes %>">
+    <span class="icon-[lucide--user] <%= local_assigns[:user_icon_size_class] || "size-4" %>"></span>
+    <span class="<%= local_assigns[:email_classes].presence || "hidden sm:inline" %>"><%= Current.identity&.email %></span>
+    <% if local_assigns[:chevron_icon_class].present? %>
+      <span class="<%= chevron_icon_class %> size-3"></span>
+    <% end %>
+  </div>
+
+  <ul tabindex="0" class="dropdown-content menu bg-base-100/95 backdrop-blur-sm rounded-box z-60 w-52 p-2 shadow-lg border border-base-300">
+    <%= render "_shared/account_menu_items" %>
+  </ul>
+</div>
+

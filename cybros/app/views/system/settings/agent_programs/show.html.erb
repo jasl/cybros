@@ -1,20 +1,18 @@
-<%= render layout: "shared/settings_shell" do %>
-  <div class="space-y-6">
-    <h2 class="text-lg font-semibold"><%= @agent_program.name %></h2>
+<div class="space-y-6">
+  <h2 class="text-lg font-semibold"><%= @agent_program.name %></h2>
 
-    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
-      <div class="card-body">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <div class="text-xs opacity-60">Profile</div>
-            <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
-          </div>
-          <div>
-            <div class="text-xs opacity-60">Local path</div>
-            <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
-          </div>
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs opacity-60">Profile</div>
+          <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Local path</div>
+          <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
         </div>
       </div>
     </div>
   </div>
-<% end %>
+</div>

@@ -1,3 +1,46 @@
+<% content_for :left_sidebar do %>
+  <%= render "layouts/agent/sidebar" %>
+<% end %>
+
+<% content_for :right_sidebar do %>
+  <div class="p-4 space-y-4">
+    <div>
+      <div class="text-xs font-semibold tracking-wide opacity-60">Settings</div>
+      <div class="text-sm font-semibold">Quick links</div>
+    </div>
+
+    <ul class="menu bg-base-200 rounded-box w-full">
+      <li>
+        <%= link_to settings_profile_path, class: "gap-2" do %>
+          <span class="icon-[lucide--user] size-4"></span>
+          Profile
+        <% end %>
+      </li>
+      <li>
+        <%= link_to settings_sessions_path, class: "gap-2" do %>
+          <span class="icon-[lucide--monitor-smartphone] size-4"></span>
+          Sessions
+        <% end %>
+      </li>
+      <% if Current.user&.owner? || Current.user&.admin? %>
+        <li class="menu-title mt-2"><span>System</span></li>
+        <li>
+          <%= link_to system_settings_llm_providers_path, class: "gap-2" do %>
+            <span class="icon-[lucide--cpu] size-4"></span>
+            LLM Providers
+          <% end %>
+        </li>
+        <li>
+          <%= link_to system_settings_agent_programs_path, class: "gap-2" do %>
+            <span class="icon-[lucide--sparkles] size-4"></span>
+            Agent Programs
+          <% end %>
+        </li>
+      <% end %>
+    </ul>
+  </div>
+<% end %>
+
 <% content_for :action_bar do %>
   <div class="flex items-center gap-2 min-w-0">
     <div class="truncate text-sm font-semibold"><%= @conversation.title.presence || "(untitled)" %></div>
