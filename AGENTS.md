@@ -120,3 +120,43 @@ When making changes to the Conduits protocol (the API between Nexus and its cont
 - Go project uses standard Go modules
 - All Rails apps expect PostgreSQL
 - Development credentials: see each project's AGENTS.md
+
+## Cursor Cloud specific instructions
+
+### System dependencies (pre-installed in snapshot)
+
+- **Ruby 4.0.1** at `/usr/local/ruby-4.0.1/bin` (built from source via ruby-build)
+- **Bundler 4.0.7** + **foreman** gem (installed globally)
+- **Bun** at `/home/ubuntu/.bun/bin`
+- **Go 1.25** at `/usr/local/go/bin`
+- **PostgreSQL 18** with pgvector extension (`postgresql-18`, `postgresql-18-pgvector`)
+- **libvips** for image processing
+- All runtimes are on PATH via `~/.bashrc`
+
+### Starting PostgreSQL
+
+PostgreSQL does not auto-start. Before running any Rails app or tests:
+
+```bash
+sudo pg_ctlcluster 18 main start
+```
+
+### Running the projects
+
+Refer to each sub-project's AGENTS.md for standard dev commands (`bin/dev`, `bin/rails test`, `make test`, etc.).
+
+Key caveats:
+
+- **cybros and mothership both default to port 3000** — run them on different ports if you need both simultaneously (e.g. `PORT=3001 bin/rails server` for mothership).
+- **cybros `bin/dev`** uses foreman to start Puma + Solid Queue + Bun watchers. Use `bin/dev --verbose` to see foreman output.
+- On first run of cybros, complete the setup wizard at `/setup/new` to create the initial owner account. Common test creds: `admin@example.com` / `Passw0rd`.
+- System tests (`bin/rails test:system`) require Chrome/Chromium (not pre-installed in cloud).
+
+### Quick verification
+
+```bash
+# All three projects:
+cd /workspace/cybros && bin/rails test     # 1042+ tests
+cd /workspace/mothership && bin/rails test # 323+ tests
+cd /workspace/nexus && make test           # All Go packages
+```
