@@ -1,5 +1,4 @@
 class DashboardController < AgentController
-
   def show
     @recent_conversations = Current.user.conversations.order(created_at: :desc).limit(10)
     @agent_program_count = AgentProgram.count

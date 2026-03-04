@@ -23,7 +23,7 @@ module NavigationHelper
       "is-drawer-close:justify-center",
       "is-drawer-close:px-0",
       "is-drawer-close:btn-square",
-      ("menu-active" if active_nav?(*Array(active_paths)))
+      ("menu-active" if active_nav?(*Array(active_paths))),
     ].compact.join(" ")
 
     content_tag(:li, class: li_classes, data: { tip: tooltip }) do
@@ -31,7 +31,7 @@ module NavigationHelper
         safe_join(
           [
             content_tag(:span, "", class: icon_class),
-            content_tag(:span, label, class: "is-drawer-close:hidden")
+            content_tag(:span, label, class: "is-drawer-close:hidden"),
           ]
         )
       end
@@ -49,7 +49,7 @@ module NavigationHelper
       "rounded-xl",
       "font-medium",
       "gap-2",
-      ("menu-active" if active_nav?(*Array(active_paths)))
+      ("menu-active" if active_nav?(*Array(active_paths))),
     ].compact.join(" ")
 
     content_tag(:li) do
@@ -57,11 +57,10 @@ module NavigationHelper
         safe_join(
           [
             content_tag(:span, "", class: icon_class),
-            content_tag(:span, label)
+            content_tag(:span, label),
           ]
         )
       end
     end
   end
 end
-
