@@ -1,6 +1,6 @@
 <li>
-  <%= link_to settings_profile_path, class: "gap-2" do %>
-    <span class="icon-[lucide--settings] size-4"></span>
+  <%= link_to settings_profile_path, class: "flex items-center gap-2" do %>
+    <span class="icon-[lucide--settings] size-4 shrink-0"></span>
     <span>Settings</span>
   <% end %>
 </li>
@@ -8,8 +8,8 @@
 <li></li>
 
 <li>
-  <%= link_to session_path, data: { turbo_method: :delete }, class: "gap-2 text-error" do %>
-    <span class="icon-[lucide--log-out] size-4"></span>
+  <%= link_to session_path, data: { turbo_method: :delete }, class: "flex items-center gap-2 text-error" do %>
+    <span class="icon-[lucide--log-out] size-4 shrink-0"></span>
     <span>Sign out</span>
   <% end %>
 </li>

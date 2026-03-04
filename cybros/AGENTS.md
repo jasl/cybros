@@ -81,6 +81,24 @@ bin/kamal deploy             # Deploy (requires 1Password CLI for secrets)
 - **Icons**: Lucide (via @iconify/tailwind4)
 - **i18n**: English + Chinese (zh-CN), with fallbacks
 
+## Frontend UI consistency (important)
+
+When making UI changes, keep style tokens and component structure consistent across pages.
+
+- Prefer **daisyUI components** + Tailwind layout composition.
+- Standardize `z-index`, surface recipes (card/border/shadow), spacing, radius, opacity, and semantic colors.
+- Avoid custom z-index tiers and arbitrary `z-[...]` values.
+- Extract repeated patterns to partials under `app/views/_shared/` and `app/views/layouts/**`.
+- When writing UI JS (Stimulus):
+  - Prefer **`<template>` + `cloneNode`** for repeated UI elements (no HTML string building).
+  - Insert user-provided content with **`textContent`** (avoid XSS; avoid `innerHTML`).
+  - Toasts must go through the global **`toast:show`** event into the single `#toast_container`.
+  - No inline JS in views (`onclick=...`); dialogs use Stimulus `dialog_controller`.
+  - Treat HTTP Turbo Stream responses as UI truth; ActionCable is best-effort.
+
+Doc: `docs/frontend_ui_consistency.md`
+Review gate: see **Hard gates (PR checklist)** at the top of that doc.
+
 ## Architecture Overview
 
 ### Account (Phase 0)

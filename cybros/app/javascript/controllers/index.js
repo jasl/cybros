@@ -16,17 +16,11 @@ application.register("message-form", MessageFormController)
 import ChatScrollController from "./chat_scroll_controller"
 application.register("chat-scroll", ChatScrollController)
 
-import TypingIndicatorController from "./typing_indicator_controller"
-application.register("typing-indicator", TypingIndicatorController)
-
 import DebugOverlayController from "./debug_overlay_controller"
 application.register("debug-overlay", DebugOverlayController)
 
 import InfiniteScrollController from "./infinite_scroll_controller"
 application.register("infinite-scroll", InfiniteScrollController)
-
-import DetailsDropdownController from "./details_dropdown_controller"
-application.register("details-dropdown", DetailsDropdownController)
 
 import SectionToggleController from "./section_toggle_controller"
 application.register("section-toggle", SectionToggleController)
