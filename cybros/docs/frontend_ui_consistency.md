@@ -178,7 +178,8 @@ Slots:
 
 - `content_for(:left_sidebar)` optional override; default renders `layouts/agent/sidebar`
 - `content_for(:right_sidebar)` optional
-- `content_for(:action_bar)` optional (header start area)
+- `content_for(:header_content)` optional (header start area)
+- `content_for(:header_actions)` optional (header end area; before right drawer toggle)
 
 ### Agent header (`app/views/layouts/agent/_header.html.erb`)
 
@@ -221,17 +222,24 @@ Pages should only “plug in” content via slots; do not restructure the shells
 
 #### Agent layout: typical page
 
-- `content_for(:action_bar)`: small header label/breadcrumb/title
+- `content_for(:header_content)`: small header label/breadcrumb/title
+- `content_for(:header_actions)`: optional icon buttons / per-page actions
 - `content_for(:left_sidebar)`: optional override (rare; default should be used)
 - `content_for(:right_sidebar)`: optional; when present enables right drawer + settings button
 
 Example shape:
 
 ```erb
-<% content_for :action_bar do %>
+<% content_for :header_content do %>
   <div class="flex items-center gap-2 min-w-0">
     <div class="truncate text-sm font-semibold">Page title</div>
   </div>
+<% end %>
+
+<% content_for :header_actions do %>
+  <button type="button" class="btn btn-ghost btn-sm btn-square" aria-label="Keyboard shortcuts">
+    <span class="icon-[lucide--help-circle] size-5" aria-hidden="true"></span>
+  </button>
 <% end %>
 
 <% content_for :right_sidebar do %>

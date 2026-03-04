@@ -4,35 +4,38 @@
 
 import { application } from "./application"
 
-import SidebarController from "./sidebar_controller"
-application.register("sidebar", SidebarController)
+import ChatScrollController from "./chat_scroll_controller"
+application.register("chat-scroll", ChatScrollController)
 
 import ConversationChannelController from "./conversation_channel_controller"
 application.register("conversation-channel", ConversationChannelController)
 
-import MessageFormController from "./message_form_controller"
-application.register("message-form", MessageFormController)
-
-import ChatScrollController from "./chat_scroll_controller"
-application.register("chat-scroll", ChatScrollController)
+import ConversationSearchController from "./conversation_search_controller"
+application.register("conversation-search", ConversationSearchController)
 
 import DebugOverlayController from "./debug_overlay_controller"
 application.register("debug-overlay", DebugOverlayController)
 
+import DialogController from "./dialog_controller"
+application.register("dialog", DialogController)
+
+import DrawerToggleController from "./drawer_toggle_controller"
+application.register("drawer-toggle", DrawerToggleController)
+
 import InfiniteScrollController from "./infinite_scroll_controller"
 application.register("infinite-scroll", InfiniteScrollController)
+
+import MessageFormController from "./message_form_controller"
+application.register("message-form", MessageFormController)
 
 import SectionToggleController from "./section_toggle_controller"
 application.register("section-toggle", SectionToggleController)
 
-import ConversationSearchController from "./conversation_search_controller"
-application.register("conversation-search", ConversationSearchController)
+import SidebarController from "./sidebar_controller"
+application.register("sidebar", SidebarController)
 
 import ThemeController from "./theme_controller"
 application.register("theme", ThemeController)
 
 import ToastController from "./toast_controller"
 application.register("toast", ToastController)
-
-import DialogController from "./dialog_controller"
-application.register("dialog", DialogController)

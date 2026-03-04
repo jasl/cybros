@@ -1,30 +1,37 @@
 <%# locals: (show_right_sidebar_toggle: false) %>
 <header class="navbar min-h-0 h-14 px-4 bg-base-100 border-b border-base-300 shrink-0">
   <div class="navbar-start">
-    <label for="left_drawer" class="btn btn-ghost btn-sm btn-square lg:hidden" aria-label="Open navigation">
-      <span class="icon-[lucide--panel-left] size-5"></span>
+    <label for="left_drawer"
+           class="btn btn-ghost btn-sm btn-square lg:hidden"
+           aria-label="Open navigation"
+           role="button"
+           tabindex="0"
+           data-controller="drawer-toggle"
+           data-action="keydown->drawer-toggle#onKeydown">
+      <span class="icon-[lucide--panel-left] size-5" aria-hidden="true"></span>
     </label>
 
-    <% if content_for?(:action_bar) %>
-      <%= content_for(:action_bar) %>
+    <% if content_for?(:header_content) %>
+      <%= content_for(:header_content) %>
     <% else %>
       <div class="text-sm opacity-70">Cybros</div>
     <% end %>
   </div>
 
   <div class="navbar-end gap-2">
-    <button type="button"
-            class="btn btn-ghost btn-sm btn-square"
-            data-controller="dialog"
-            data-dialog-id-value="hotkeys_help_modal"
-            data-action="click->dialog#open"
-            title="Keyboard shortcuts (?)">
-      <span class="icon-[lucide--help-circle] size-5"></span>
-    </button>
+    <% if content_for?(:header_actions) %>
+      <%= content_for(:header_actions) %>
+    <% end %>
 
     <% if local_assigns.fetch(:show_right_sidebar_toggle, false) %>
-      <label for="right_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle settings">
-        <span class="icon-[lucide--settings] size-5"></span>
+      <label for="right_drawer"
+             class="btn btn-ghost btn-sm btn-square"
+             aria-label="Toggle settings"
+             role="button"
+             tabindex="0"
+             data-controller="drawer-toggle"
+             data-action="keydown->drawer-toggle#onKeydown">
+        <span class="icon-[lucide--settings] size-5" aria-hidden="true"></span>
       </label>
     <% end %>
   </div>

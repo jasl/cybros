@@ -38,7 +38,7 @@
     <div class="drawer-side z-50 h-full is-drawer-close:overflow-visible">
       <label for="left_drawer" aria-label="Close navigation" class="drawer-overlay lg:hidden"></label>
       <aside class="is-drawer-close:w-16 is-drawer-open:w-80 max-w-[85vw] h-full bg-base-100 flex flex-col border-r border-base-300 overflow-visible transition-[width] duration-200">
-        <%= content_for?(:left_sidebar) ? yield(:left_sidebar) : render("layouts/agent/sidebar") %>
+        <%= render("layouts/agent/sidebar") %>
       </aside>
     </div>
   </div>
