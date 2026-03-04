@@ -8,7 +8,11 @@
     <%= content_for?(:content) ? yield(:content) : yield %>
     <%= yield :body %>
     <%= render "_shared/js_templates" %>
-    <div id="toast_container" class="toast toast-top toast-end z-50 <%= yield(:layout_name) == "session" ? "mt-1" : "mt-12" %> flex flex-col gap-2">
+    <div
+      id="toast_container"
+      role="status"
+      aria-live="polite"
+      class="toast toast-top toast-end z-50 <%= yield(:layout_name) == "session" ? "mt-1" : "mt-12" %> flex flex-col gap-2">
       <%= render "layouts/shared/flash" %>
     </div>
   </body>

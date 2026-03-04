@@ -54,6 +54,8 @@
   </button>
 <% end %>
 
+<%= turbo_stream_from [@conversation, :messages] %>
+
 <div
   class="h-full flex flex-col"
   data-controller="conversation-channel chat-scroll<%= Rails.env.development? ? " debug-overlay" : "" %>"
@@ -70,13 +72,15 @@
         has_more: @has_more,
         before_cursor: @before_cursor %>
 
-      <% if @messages.empty? %>
-        <p class="text-center text-sm opacity-50 py-12">No messages yet. Start a conversation below.</p>
-      <% else %>
-        <div id="<%= dom_id(@conversation, :messages_list) %>" data-chat-scroll-target="list" class="space-y-5">
-          <%= render partial: "conversation_messages/message", collection: @messages, as: :message %>
-        </div>
-      <% end %>
+      <p
+        id="<%= dom_id(@conversation, :messages_empty_state) %>"
+        class="text-center text-sm opacity-50 py-12 <%= @messages.empty? ? "" : "hidden" %>">
+        No messages yet. Start a conversation below.
+      </p>
+
+      <div id="<%= dom_id(@conversation, :messages_list) %>" data-chat-scroll-target="list" class="space-y-5">
+        <%= render partial: "conversation_messages/message", collection: @messages, as: :message %>
+      </div>
     </div>
   </div>
 
@@ -87,11 +91,11 @@
       </div>
 
       <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit" } do %>
-        <div class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2">
+        <div class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
           <textarea
             name="content"
             rows="1"
-            class="bg-transparent flex-1 resize-none outline-none py-1.5 text-sm placeholder:opacity-40 min-h-6 max-h-48"
+            class="bg-transparent flex-1 resize-none py-1.5 text-sm placeholder:opacity-40 min-h-6 max-h-48 focus-visible:outline-none"
             placeholder="Message…"
             aria-label="Message"
             data-message-form-target="textarea"

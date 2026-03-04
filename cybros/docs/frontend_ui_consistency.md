@@ -16,6 +16,7 @@ These are the frozen “bones” of the app. Feature pages can evolve, but these
 - No inline JS (`onclick=...` etc). Dialogs must use Stimulus `dialog_controller`.
 - No HTML string concatenation in JS for repeated UI; use `<template>` + `cloneNode`.
 - Always treat Turbo Stream HTTP responses as UI truth; ActionCable is best-effort.
+- Do not remove the global Turbo Stream buffer (`app/javascript/lib/turbo_stream_buffer.js`): it prevents `turbo_stream replace` targeting `message_*` from being dropped when the replace arrives before the placeholder wrapper exists.
 
 ## Hard gates (PR checklist)
 
@@ -445,6 +446,29 @@ Core rule:
 
 - **HTTP Turbo Stream = source of truth** for any state-changing action (success and failure must show UI feedback).
 - **ActionCable = best-effort acceleration** (streaming previews, typing indicator, cross-client sync). Losing ActionCable must not permanently drift UI.
+
+#### Conversation dual-channel contract (frozen)
+
+Conversation UI uses a dual-channel model:
+
+- **Turbo Streams**: durable message DOM (append/replace/remove). Must be sufficient to reconstruct correct UI after refresh/reconnect.
+- **ActionCable**: best-effort acceleration for ephemeral progress + streaming deltas. It must be safe to lose without permanent drift.
+
+Message DOM contracts (treated as API):
+
+- Messages stream subscription: `turbo_stream_from [@conversation, :messages]`
+- Messages list target: `id=dom_id(@conversation, :messages_list)` (must exist even when empty)
+- Empty state: `id=dom_id(@conversation, :messages_empty_state)` (removed/hidden when first message appears)
+- Per-message wrapper: `id="message_<node_id>"`
+- Agent bubble selector: `[data-role="agent-bubble"][data-node-id="<node_id>"]`
+- Agent bubble subtargets (non-terminal messages):
+  - `[data-role="progress"]` for `progress/log` events (in-place update)
+  - `[data-role="text"]` for `output_delta/output_compacted` streaming
+  - `[data-role="spinner"]`, `[data-role="error"]`
+
+Durability rule:
+
+- **Finalization must occur via Turbo Stream `replace`** targeting `message_<node_id>` so refresh/reconnect always yields correct DOM.
 
 Server-side rules:
 

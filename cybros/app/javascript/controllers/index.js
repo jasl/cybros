@@ -25,6 +25,9 @@ application.register("drawer-toggle", DrawerToggleController)
 import InfiniteScrollController from "./infinite_scroll_controller"
 application.register("infinite-scroll", InfiniteScrollController)
 
+import MarkdownController from "./markdown_controller"
+application.register("markdown", MarkdownController)
+
 import MessageFormController from "./message_form_controller"
 application.register("message-form", MessageFormController)
 

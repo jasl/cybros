@@ -1,5 +1,6 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer from "../channels/consumer"
+import { boundedPush, compareEventIds, sortEventsByEventId } from "../lib/event_id"
 
 export default class extends Controller {
   static values = {
@@ -17,6 +18,14 @@ export default class extends Controller {
     this.activeNodeId = null
     this.lastErroredNodeId = null
     this.lastEventAt = null
+    this.pendingEventsByNodeId = new Map()
+    this.pendingNodeStateByNodeId = new Map()
+    this.pendingFlushTimerByNodeId = new Map()
+    this.postAppendRefreshTimerByNodeId = new Map()
+    this.mutationObserver = new MutationObserver((mutations) => this.#onMutations(mutations))
+    this.mutationObserver.observe(this.element, { childList: true, subtree: true })
+
+    this.element.setAttribute("data-conversation-channel-connected", "false")
 
     this.subscription = consumer.subscriptions.create(
       {
@@ -25,19 +34,39 @@ export default class extends Controller {
         cursor: this.cursor || undefined,
       },
       {
+        connected: () => this.element.setAttribute("data-conversation-channel-connected", "true"),
+        disconnected: () => this.element.setAttribute("data-conversation-channel-connected", "false"),
         received: (data) => this.#received(data),
       },
     )
 
     this.stuckTimer = window.setInterval(() => this.#checkStuck(), 1000)
+
+    // Best-effort convergence for control visibility (Stop/Retry) even when realtime node_state is missed.
+    this.#reconcileControlsFromDom()
   }
 
   disconnect() {
     if (this.subscription) consumer.subscriptions.remove(this.subscription)
     this.subscription = null
+    this.element.setAttribute("data-conversation-channel-connected", "false")
 
     if (this.stuckTimer) window.clearInterval(this.stuckTimer)
     this.stuckTimer = null
+
+    if (this.mutationObserver) this.mutationObserver.disconnect()
+    this.mutationObserver = null
+
+    for (const id of this.pendingFlushTimerByNodeId.values()) {
+      window.clearTimeout(id)
+    }
+    for (const id of this.postAppendRefreshTimerByNodeId.values()) {
+      window.clearTimeout(id)
+    }
+    this.pendingFlushTimerByNodeId.clear()
+    this.postAppendRefreshTimerByNodeId.clear()
+    this.pendingEventsByNodeId.clear()
+    this.pendingNodeStateByNodeId.clear()
   }
 
   stop() {
@@ -90,7 +119,7 @@ export default class extends Controller {
 
     if (data.type === "node_event") {
       const eventId = String(data.event_id || "")
-      if (this.cursor && eventId && this.#compareEventIds(eventId, this.cursor) <= 0) return
+      if (this.cursor && eventId && compareEventIds(eventId, this.cursor) <= 0) return
 
       const nodeId = String(data.node_id || "")
       const bubble = this.#findAgentBubble(nodeId)
@@ -102,9 +131,11 @@ export default class extends Controller {
           this.#showStop()
         }
         this.#maybeScrollToBottom()
+      } else if (nodeId) {
+        this.#bufferNodeEvent(nodeId, data)
       }
 
-      if (eventId && (!this.cursor || this.#compareEventIds(eventId, this.cursor) > 0)) {
+      if (eventId && (!this.cursor || compareEventIds(eventId, this.cursor) > 0)) {
         this.cursor = eventId
         window.localStorage.setItem(this.#cursorKey(), this.cursor)
       }
@@ -121,39 +152,230 @@ export default class extends Controller {
       const to = String(data.to || "")
 
       const bubble = this.#findAgentBubble(nodeId)
-      if (to === "running") {
-        this.activeNodeId = nodeId
-        this.lastErroredNodeId = null
-        this.lastEventAt = Date.now()
-        this.#showSpinner(bubble)
-        this.#showStop()
-        this.#hideRetry()
-        this.#hideStuck()
-        this.#emitDebug()
+      if (!bubble && nodeId) {
+        // Turbo append/replace can race with ActionCable delivery. Buffer the latest node_state and
+        // apply once the bubble exists in the DOM.
+        this.pendingNodeStateByNodeId.set(nodeId, to)
         return
       }
 
-      if (["finished", "errored", "stopped", "rejected", "skipped"].includes(to)) {
-        if (this.activeNodeId === nodeId) this.activeNodeId = null
-        this.#hideSpinner(bubble)
-        this.#hideStop()
-        if (to === "errored") {
-          this.lastErroredNodeId = nodeId
-          this.#showRetry()
+      this.#applyNodeState(bubble, nodeId, to)
+      return
+    }
+  }
+
+  #bufferNodeEvent(nodeId, event) {
+    // Turbo append/replace can race with ActionCable delivery. Buffer briefly so we can
+    // apply once the bubble exists in the DOM.
+    const arr = this.pendingEventsByNodeId.get(nodeId) || []
+    boundedPush(arr, event, 300)
+
+    this.pendingEventsByNodeId.set(nodeId, arr)
+
+    if (!this.pendingFlushTimerByNodeId.has(nodeId)) {
+      const timerId =
+        window.setTimeout(() => {
+          this.pendingFlushTimerByNodeId.delete(nodeId)
+          this.#flushPendingFor(nodeId)
+        }, 50)
+      this.pendingFlushTimerByNodeId.set(nodeId, timerId)
+    }
+  }
+
+  #flushPendingFor(nodeId) {
+    const bubble = this.#findAgentBubble(nodeId)
+    if (!bubble) return
+
+    const events = this.pendingEventsByNodeId.get(nodeId) || []
+    if (events.length === 0) return
+
+    this.pendingEventsByNodeId.delete(nodeId)
+
+    // Ensure deterministic order in case buffered out-of-order.
+    const ordered = sortEventsByEventId(events)
+
+    for (const ev of ordered) {
+      this.#applyNodeEvent(bubble, ev)
+      if (String(ev.kind || "") === "output_delta") {
+        this.activeNodeId = nodeId
+        this.#showSpinner(bubble)
+        this.#showStop()
+      }
+    }
+
+    this.#maybeScrollToBottom()
+  }
+
+  #onMutations(mutations) {
+    // When a new agent bubble appears, flush any buffered events.
+    for (const m of mutations) {
+      const added = Array.from(m.addedNodes || [])
+      for (const node of added) {
+        if (!(node instanceof Element)) continue
+        const bubbles =
+          node.matches?.('[data-role="agent-bubble"][data-node-id]')
+            ? [node]
+            : Array.from(node.querySelectorAll?.('[data-role="agent-bubble"][data-node-id]') || [])
+        for (const bubble of bubbles) {
+          const nodeId = bubble.getAttribute("data-node-id") || ""
+          if (nodeId) {
+            this.#flushPendingFor(nodeId)
+            this.#flushPendingNodeStateFor(nodeId)
+            this.#schedulePostAppendRefresh(nodeId)
+            this.#reconcileControlsFromDom()
+          }
         }
-        if (to === "errored") this.#showError(bubble, "Generation failed")
-        this.#emitDebug()
-        return
       }
     }
   }
 
+  #schedulePostAppendRefresh(nodeId) {
+    if (!nodeId) return
+    if (this.postAppendRefreshTimerByNodeId.has(nodeId)) return
+
+    // If both realtime deliveries are missed (page load races), converge from durable HTTP truth.
+    const timerId =
+      window.setTimeout(() => {
+        this.postAppendRefreshTimerByNodeId.delete(nodeId)
+        this.#refreshMessage(nodeId)
+      }, 750)
+    this.postAppendRefreshTimerByNodeId.set(nodeId, timerId)
+  }
+
+  #refreshMessage(nodeId) {
+    const bubble = this.#findAgentBubble(nodeId)
+    if (!bubble) return
+    if (!window.Turbo?.renderStreamMessage) return
+
+    const state = String(bubble.getAttribute("data-node-state") || "")
+    if (["finished", "errored", "stopped", "rejected", "skipped"].includes(state)) {
+      this.#reconcileControlsFromDom()
+      return
+    }
+
+    const url = `/conversations/${encodeURIComponent(this.conversationIdValue)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
+    fetch(url, {
+      method: "GET",
+      headers: { Accept: "text/vnd.turbo-stream.html" },
+      credentials: "same-origin",
+    })
+      .then((res) => (res.ok ? res.text() : ""))
+      .then((html) => {
+        if (!html) return
+        window.Turbo.renderStreamMessage(html)
+        this.#reconcileControlsFromDom()
+      })
+      .catch(() => {})
+  }
+
+  #reconcileControlsFromDom() {
+    const bubbles = Array.from(this.element.querySelectorAll('[data-role="agent-bubble"][data-node-id]'))
+    const last = bubbles[bubbles.length - 1]
+    if (!last) return
+
+    const state = String(last.getAttribute("data-node-state") || "")
+    const nodeId = String(last.getAttribute("data-node-id") || "")
+
+    if (state === "running" || state === "pending") {
+      this.activeNodeId = nodeId || this.activeNodeId
+      this.#showStop()
+      this.#hideRetry()
+      return
+    }
+
+    this.#hideStop()
+
+    if (state === "errored") {
+      this.lastErroredNodeId = nodeId || this.lastErroredNodeId
+      this.#showRetry()
+    } else {
+      this.#hideRetry()
+    }
+  }
+
+  #flushPendingNodeStateFor(nodeId) {
+    const bubble = this.#findAgentBubble(nodeId)
+    if (!bubble) return
+
+    const to = this.pendingNodeStateByNodeId.get(nodeId)
+    if (!to) return
+
+    this.pendingNodeStateByNodeId.delete(nodeId)
+    this.#applyNodeState(bubble, nodeId, to)
+  }
+
+  #applyNodeState(bubble, nodeId, to) {
+    if (to === "running") {
+      this.activeNodeId = nodeId
+      this.lastErroredNodeId = null
+      this.lastEventAt = Date.now()
+      if (bubble) bubble.setAttribute("data-node-state", "running")
+      this.#showSpinner(bubble)
+      this.#showStop()
+      this.#hideRetry()
+      this.#hideStuck()
+      this.#emitDebug()
+      return
+    }
+
+    if (["finished", "errored", "stopped", "rejected", "skipped"].includes(to)) {
+      if (this.activeNodeId === nodeId) this.activeNodeId = null
+      if (bubble) bubble.setAttribute("data-node-state", to)
+      this.#hideSpinner(bubble)
+      this.#hideStop()
+      if (to === "errored") {
+        this.lastErroredNodeId = nodeId
+        this.#showRetry()
+      }
+      if (to === "errored") this.#showError(bubble, "Generation failed")
+      this.#maybeRefreshTerminalMessage(nodeId, bubble)
+      this.#reconcileControlsFromDom()
+      this.#emitDebug()
+    }
+  }
+
+  #maybeRefreshTerminalMessage(nodeId, bubble) {
+    // If the Turbo::StreamsChannel `replace` is missed (cable reconnect, early broadcast),
+    // converge via an explicit HTTP turbo-stream fetch for the terminal message.
+    if (!nodeId || !bubble) return
+    if (bubble.querySelector('[data-controller="markdown"]')) return
+
+    window.setTimeout(() => {
+      if (bubble.querySelector('[data-controller="markdown"]')) return
+      if (!window.Turbo?.renderStreamMessage) return
+
+      const url = `/conversations/${encodeURIComponent(this.conversationIdValue)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
+      fetch(url, {
+        method: "GET",
+        headers: { Accept: "text/vnd.turbo-stream.html" },
+        credentials: "same-origin",
+      })
+        .then((res) => (res.ok ? res.text() : ""))
+        .then((html) => {
+          if (html) window.Turbo.renderStreamMessage(html)
+        })
+        .catch(() => {})
+    }, 250)
+  }
+
   #applyNodeEvent(bubble, event) {
     const kind = String(event.kind || "")
+    const progressEl = bubble.querySelector("[data-role='progress']")
+
+    if (kind === "progress" || kind === "log") {
+      if (!progressEl) return
+      const text = String(event.text || "").trim()
+      progressEl.textContent = text
+      if (text) progressEl.classList.remove("hidden")
+      else progressEl.classList.add("hidden")
+      return
+    }
+
     const textEl = bubble.querySelector("[data-role='text']")
     if (!textEl) return
 
     if (kind === "output_delta") {
+      progressEl?.classList.add("hidden")
       const delta = String(event.text || "")
       if (delta) textEl.appendChild(document.createTextNode(delta))
       return
@@ -237,24 +459,6 @@ export default class extends Controller {
 
   #cursorKey() {
     return `cybros:conversation:${this.conversationIdValue}:cursor`
-  }
-
-  #compareEventIds(a, b) {
-    const aStr = String(a || "")
-    const bStr = String(b || "")
-    if (!aStr && !bStr) return 0
-    if (!aStr) return -1
-    if (!bStr) return 1
-
-    if (/^\d+$/.test(aStr) && /^\d+$/.test(bStr)) {
-      const aInt = BigInt(aStr)
-      const bInt = BigInt(bStr)
-      if (aInt < bInt) return -1
-      if (aInt > bInt) return 1
-      return 0
-    }
-
-    return aStr.localeCompare(bStr)
   }
 
   #uuidLike(value) {

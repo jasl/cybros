@@ -114,4 +114,73 @@ class MockLlmTest < ActionDispatch::IntegrationTest
     assert_equal "stop", last.dig("choices", 0, "finish_reason")
     assert last.fetch("usage").is_a?(Hash)
   end
+
+  test "markdown mode returns deterministic markdown content" do
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: "!md hi" }],
+           stream: false,
+         },
+         as: :json
+
+    assert_response :success
+
+    body = JSON.parse(response.body)
+    content = body.dig("choices", 0, "message", "content").to_s
+    assert_includes content, "# Mock Markdown"
+    assert_includes content, "**Prompt:**"
+  end
+
+  test "mock directive can force OpenAI-compatible errors" do
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: '!mock error=429 message="rate limited" -- hello' }],
+           stream: false,
+         },
+         as: :json
+
+    assert_response 429
+
+    body = JSON.parse(response.body)
+    assert_equal "rate_limit_error", body.dig("error", "type")
+    assert_equal "rate limited", body.dig("error", "message")
+  end
+
+  test "mock directive errors return JSON even when stream=true" do
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: "!mock error=401 -- hello" }],
+           stream: true,
+         },
+         as: :json
+
+    assert_response 401
+    assert_includes response.headers.fetch("content-type"), "application/json"
+
+    body = JSON.parse(response.body)
+    assert_equal "authentication_error", body.dig("error", "type")
+    assert_equal "mock error", body.dig("error", "message")
+  end
+
+  test "mock directive strips controls from streaming output" do
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: "!mock slow=0.001 -- Hello" }],
+           stream: true,
+           stream_options: { include_usage: true },
+         },
+         as: :json
+
+    assert_response :success
+    assert_includes response.headers.fetch("content-type"), "text/event-stream"
+    assert_includes response.body, "[DONE]"
+
+    events = parse_sse_events(response.body)
+    deltas = events.map { |e| e.dig("choices", 0, "delta", "content") }.compact.join
+    assert_equal "Mock: Hello", deltas
+  end
 end

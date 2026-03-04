@@ -25,14 +25,14 @@
   data-toast-auto-dismiss-value="true"
   class="w-full max-w-sm">
   <div class="alert <%= alert_class %> shadow-lg" data-toast-target="alert">
-    <span class="<%= icon_class %> size-5 shrink-0"></span>
+    <span class="<%= icon_class %> size-5 shrink-0" aria-hidden="true"></span>
     <span class="flex-1"><%= message %></span>
     <button
       type="button"
       class="btn btn-ghost btn-xs btn-square"
       data-action="toast#dismiss"
       aria-label="Dismiss">
-      <span class="icon-[lucide--x] size-4"></span>
+      <span class="icon-[lucide--x] size-4" aria-hidden="true"></span>
     </button>
   </div>
 </div>

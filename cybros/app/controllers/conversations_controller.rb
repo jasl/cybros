@@ -48,7 +48,7 @@ class ConversationsController < AgentController
     graph = @conversation.dag_graph
     lane = graph.main_lane
 
-    page = lane.message_page(limit: 30, mode: :preview)
+    page = lane.message_page(limit: 30, mode: :full)
     @messages = page.fetch("messages")
     @before_cursor = page.fetch("before_message_id", nil).to_s.presence
 

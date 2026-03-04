@@ -11,7 +11,12 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
 
   test "unauthenticated home loads" do
     get root_path
-    assert_response :success
+    # Root may render publicly once an owner exists, but a fresh install redirects to setup.
+    if Identity.exists?
+      assert_response :success
+    else
+      assert_redirected_to new_setup_path
+    end
   end
 
   test "authenticated top-level pages load" do
@@ -45,4 +50,3 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
     assert_response :success
   end
 end
-

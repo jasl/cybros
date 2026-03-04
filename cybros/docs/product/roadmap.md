@@ -244,12 +244,24 @@ Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes):
   - Stop/cancel while streaming.
 - **Stuck detection**:
   - Heartbeat timeout → show warning + allow cancel/retry.
+- **TavernKit “production feel” parity (follow-up)**:
+  - Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent).
+  - Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent).
+  - Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration).
 
 #### 0.5-E — Observability & debuggability
 
 - **Rate-limited warnings** (no silent stalls).
 - Structured logs for: subscribe, reconnect, cursor advance, event counts by kind.
 - Dev-only debug overlay for stream state (cursor, node id, run state).
+
+#### 0.5-G — UI framework stabilization backlog (non-blocking)
+
+- **Turbo Stream buffering performance**:
+  - Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers).
+  - Keep eviction (TTL/max-size) to prevent unbounded retention.
+- **Roadmap/documentation consistency**:
+  - Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals.
 
 #### 0.5-F — Authorization + Pagination Hardening
 

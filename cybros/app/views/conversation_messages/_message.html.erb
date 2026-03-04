@@ -1,9 +1,18 @@
 <% node_id = message.fetch("node_id").to_s %>
 <% type = message.fetch("node_type").to_s %>
+<% state = message.fetch("state", "").to_s %>
 <% payload = message.fetch("payload", {}) %>
 <% payload = {} unless payload.is_a?(Hash) %>
+<% metadata = message.fetch("metadata", {}) %>
+<% metadata = {} unless metadata.is_a?(Hash) %>
 <% preview = payload.dig("output_preview", "content").to_s %>
+<% output = payload.dig("output", "content").to_s %>
 <% input = payload.dig("input", "content").to_s %>
+<% terminal = DAG::Node::TERMINAL_STATES.include?(state) %>
+<% markdown_source = output.presence || preview %>
+<% markdown_source = markdown_source.to_s.truncate(20_000, omission: "\n\n… (truncated)") %>
+<% error_text = metadata.fetch("error", "").to_s %>
+<% reason_text = metadata.fetch("reason", "").to_s %>
 
 <div id="message_<%= node_id %>" data-message-node-id="<%= node_id %>">
   <% if type == Messages::UserMessage.node_type_key %>
@@ -13,9 +22,24 @@
       </div>
     </div>
   <% elsif type == Messages::AgentMessage.node_type_key %>
-    <div data-role="agent-bubble" data-node-id="<%= node_id %>">
-      <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
-      <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle hidden"></span>
+    <div data-role="agent-bubble" data-node-id="<%= node_id %>" data-node-state="<%= state %>">
+      <% if terminal && state == DAG::Node::ERRORED && error_text.present? %>
+        <div class="text-sm text-error"><%= error_text %></div>
+      <% elsif terminal && state == DAG::Node::STOPPED && reason_text.present? %>
+        <div class="text-sm opacity-70"><%= reason_text %></div>
+      <% elsif terminal && markdown_source.present? %>
+        <div data-controller="markdown">
+          <template data-markdown-target="content"><%= markdown_source %></template>
+          <div data-markdown-target="output" class="prose prose-sm max-w-none">
+            <%= simple_format(markdown_source) %>
+          </div>
+        </div>
+      <% else %>
+        <% spinner_hidden = ![DAG::Node::PENDING, DAG::Node::RUNNING].include?(state) %>
+        <div data-role="progress" class="text-xs opacity-60 mb-1 hidden"></div>
+        <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
+        <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle <%= spinner_hidden ? "hidden" : "" %>"></span>
+      <% end %>
       <div data-role="error" class="mt-2 text-sm text-error hidden"></div>
     </div>
   <% end %>

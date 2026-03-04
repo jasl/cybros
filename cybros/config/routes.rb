@@ -22,7 +22,9 @@ Rails.application.routes.draw do
 
   resources :agent_programs, only: %i[index new create show]
   resources :conversations, only: %i[index show create] do
-    resources :messages, only: %i[index create], controller: "conversation_messages"
+    resources :messages, only: %i[index create], controller: "conversation_messages" do
+      get :refresh, on: :collection
+    end
     post :stop, on: :member
     post :retry, on: :member
   end

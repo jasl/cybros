@@ -19,7 +19,7 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    page = lane.message_page(limit: 20, before_message_id: before, after_message_id: after, mode: :preview)
+    page = lane.message_page(limit: 20, before_message_id: before, after_message_id: after, mode: :full)
     @messages = page.fetch("messages")
 
     before_cursor = page.fetch("before_message_id", nil).to_s.presence
@@ -71,12 +71,40 @@ class ConversationMessagesController < ApplicationController
     end
   end
 
+  def refresh
+    node_id = params.fetch(:node_id, "").to_s
+    raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(node_id)
+
+    graph = @conversation.dag_graph
+    node = graph.nodes.find_by(id: node_id)
+    raise ActiveRecord::RecordNotFound if node.nil?
+
+    projection = DAG::TranscriptProjection.new(graph: graph)
+    message = projection.project(node_records: [node], mode: :full).first
+    raise ActiveRecord::RecordNotFound unless message.is_a?(Hash)
+
+    respond_to do |format|
+      format.turbo_stream do
+        render turbo_stream: turbo_stream.replace(
+          "message_#{node.id}",
+          partial: "conversation_messages/message",
+          locals: { message: message },
+        )
+      end
+
+      format.html { redirect_to conversation_path(@conversation) }
+    end
+  end
+
   def create
     content = params.fetch(:content, "").to_s
     content = content.strip
 
     if content.blank?
-      redirect_to conversation_path(@conversation)
+      respond_to do |format|
+        format.turbo_stream { head :no_content }
+        format.html { redirect_to conversation_path(@conversation) }
+      end
       return
     end
 
@@ -91,8 +119,11 @@ class ConversationMessagesController < ApplicationController
         .last
     turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
 
+    user_node = nil
+    agent_node = nil
+
     graph.mutate!(turn_id: turn_id) do |m|
-      user =
+      user_node =
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
@@ -100,7 +131,7 @@ class ConversationMessagesController < ApplicationController
           metadata: {},
         )
 
-      agent =
+      agent_node =
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING,
@@ -108,21 +139,21 @@ class ConversationMessagesController < ApplicationController
         )
 
       if prev_leaf
-        m.create_edge(from_node: prev_leaf, to_node: user, edge_type: DAG::Edge::SEQUENCE)
+        m.create_edge(from_node: prev_leaf, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
       end
-      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
       if prev_agent_leaf && !prev_agent_leaf.terminal?
         m.create_edge(
           from_node: prev_agent_leaf,
-          to_node: agent,
+          to_node: agent_node,
           edge_type: DAG::Edge::DEPENDENCY,
           metadata: { "generated_by" => "queue_policy" }
         )
       end
     end
 
-    agent_leaf = graph.leaf_nodes.order(:id).last
+    agent_leaf = agent_node || graph.leaf_nodes.order(:id).last
     ConversationRun.create!(
       conversation: @conversation,
       dag_node_id: agent_leaf.id,
@@ -134,7 +165,26 @@ class ConversationMessagesController < ApplicationController
 
     graph.kick!
 
-    redirect_to conversation_path(@conversation)
+    respond_to do |format|
+      format.turbo_stream do
+        projection = DAG::TranscriptProjection.new(graph: graph)
+        created_messages = projection.project(node_records: [user_node, agent_node].compact, mode: :preview)
+
+        list_id = helpers.dom_id(@conversation, :messages_list)
+        empty_state_id = helpers.dom_id(@conversation, :messages_empty_state)
+
+        render turbo_stream: [
+          turbo_stream.append(
+            list_id,
+            partial: "conversation_messages/messages_batch",
+            locals: { messages: created_messages }
+          ),
+          turbo_stream.remove(empty_state_id),
+        ]
+      end
+
+      format.html { redirect_to conversation_path(@conversation) }
+    end
   end
 
   private

@@ -8,6 +8,7 @@ class DAG::TickGraphJobTest < ActiveJob::TestCase
 
   teardown do
     Event.delete_all
+    ConversationRun.delete_all
     DAG::Edge.delete_all
     DAG::Node.delete_all
     DAG::NodeBody.delete_all

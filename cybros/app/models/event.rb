@@ -23,6 +23,25 @@ class Event < ApplicationRecord
           "occurred_at" => created_at&.iso8601,
         }
       )
+
+      to = particulars.is_a?(Hash) ? particulars["to"].to_s : ""
+      return unless DAG::Node::TERMINAL_STATES.include?(to)
+
+      node = subject
+      return unless node.is_a?(DAG::Node)
+      return unless node.node_type.to_s == Messages::AgentMessage.node_type_key
+
+      graph = conversation.dag_graph
+      projection = DAG::TranscriptProjection.new(graph: graph)
+      message = projection.project(node_records: [node], mode: :full).first
+      return unless message.is_a?(Hash)
+
+      Turbo::StreamsChannel.broadcast_replace_to(
+        [conversation, :messages],
+        target: "message_#{node.id}",
+        partial: "conversation_messages/message",
+        locals: { message: message },
+      )
     rescue StandardError => e
       Cybros::RateLimitedLog.warn(
         "event.broadcast_node_state_change",

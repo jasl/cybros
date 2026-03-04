@@ -193,6 +193,106 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
     assert_equal "B", events.last.fetch("text")
   end
 
+  test "subscribing without cursor uses preview to avoid replay duplication" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    # If preview exists, the channel initializes cursor to the latest event id.
+    DAG::NodeBody.where(id: agent.body_id).update_all(
+      output_preview: { "content" => "Preview already has text" },
+      updated_at: Time.current,
+    )
+
+    DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "A", payload: {})
+    DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "B", payload: {})
+
+    transmissions.clear
+    subscribe conversation_id: conversation.id, node_id: agent.id
+    assert subscription.confirmed?
+
+    # Should not transmit a replay_batch because cursor was set to the latest event.
+    assert transmissions.empty?, "expected no replay transmissions when preview content is present"
+  end
+
+  test "replay_batch includes preview text for output_compacted events when text is blank" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    DAG::NodeBody.where(id: agent.body_id).update_all(
+      output_preview: { "content" => "Compacted preview" },
+      updated_at: Time.current,
+    )
+
+    first = DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "A", payload: {})
+    DAG::NodeEvent.create!(
+      graph: graph,
+      node: agent,
+      kind: DAG::NodeEvent::OUTPUT_COMPACTED,
+      text: "",
+      payload: { "source_kind" => DAG::NodeEvent::OUTPUT_DELTA },
+    )
+
+    transmissions.clear
+    subscribe conversation_id: conversation.id, node_id: agent.id, cursor: first.id
+    assert subscription.confirmed?
+
+    assert transmissions.any?, "expected replay transmissions"
+    payload = transmissions.last
+    assert_equal "replay_batch", payload.fetch("type")
+    events = payload.fetch("events")
+    assert_equal 1, events.length
+    assert_equal "output_compacted", events.last.fetch("kind")
+    assert_equal "Compacted preview", events.last.fetch("text")
+  end
+
   test "broadcasts node_state changes" do
     user = sign_in_owner!
 
@@ -282,5 +382,119 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
     assert_equal 1, events.length
     assert_equal "node_event", events.last.fetch("type")
     assert_equal "B", events.last.fetch("text")
+  end
+
+  test "replay_batch events are ordered by event_id and cursor prevents older replays" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    ids = 5.times.map do |i|
+      DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "t#{i}", payload: {}).id.to_s
+    end
+
+    cursor = ids[1]
+
+    transmissions.clear
+    subscribe conversation_id: conversation.id, node_id: agent.id, cursor: cursor
+    assert subscription.confirmed?
+
+    payload = transmissions.last
+    assert_equal "replay_batch", payload.fetch("type")
+    events = payload.fetch("events")
+    assert_equal 3, events.length
+
+    event_ids = events.map { |e| e.fetch("event_id") }
+    assert_equal ids[2..], event_ids
+
+    # After cursor advances, poll_fallback should replay only newly-created events.
+    transmissions.clear
+    DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "new", payload: {})
+    perform :poll_fallback
+    assert transmissions.any?, "expected replay transmissions for newly-created event"
+    payload = transmissions.last
+    assert_equal "replay_batch", payload.fetch("type")
+    events = payload.fetch("events")
+    assert_equal 1, events.length
+    assert_equal "new", events.last.fetch("text")
+  end
+
+  test "poll_fallback batches replay in chunks of 200 and resumes on next poll" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first = DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "0", payload: {})
+
+    subscribe conversation_id: conversation.id, node_id: agent.id, cursor: first.id
+    assert subscription.confirmed?
+
+    transmissions.clear
+    249.times do |i|
+      DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: (i + 1).to_s, payload: {})
+    end
+
+    transmissions.clear
+    perform :poll_fallback
+    assert transmissions.any?, "expected replay transmissions"
+
+    payload = transmissions.last
+    assert_equal "replay_batch", payload.fetch("type")
+    events = payload.fetch("events")
+    assert_equal 200, events.length
+
+    # Second poll should send the remainder (49).
+    transmissions.clear
+    perform :poll_fallback
+    payload = transmissions.last
+    assert_equal "replay_batch", payload.fetch("type")
+    events = payload.fetch("events")
+    assert_equal 49, events.length
   end
 end

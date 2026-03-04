@@ -1,0 +1,78 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+export RAILS_ENV="${RAILS_ENV:-development}"
+
+PORT="${E2E_PORT:-3100}"
+export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
+
+echo "🎭 CI E2E: starting server + jobs"
+echo "   base url: ${E2E_BASE_URL}"
+
+bundle exec ruby -v >/dev/null
+
+bin/rails runner - <<'RUBY'
+identity = Identity.find_by(email: "admin@example.com")
+if identity.nil?
+  identity = Identity.create!(email: "admin@example.com", password: "Passw0rd", password_confirmation: "Passw0rd")
+end
+User.find_or_create_by!(identity: identity) { |u| u.role = :owner }
+RUBY
+
+cleanup() {
+  echo ""
+  echo "🧹 CI E2E: stopping server + jobs"
+  for pid in "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+    [[ -n "${pid}" ]] || continue
+    kill "${pid}" 2>/dev/null || true
+  done
+
+  for pid in "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+    [[ -n "${pid}" ]] || continue
+    for _ in {1..40}; do
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill -9 "${pid}" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT INT TERM
+
+mkdir -p tmp
+
+bin/jobs >tmp/ci_e2e_jobs.log 2>&1 &
+JOBS_PID="$!"
+
+PIDFILE="tmp/pids/server-e2e-${PORT}.pid"
+mkdir -p tmp/pids
+rm -f "${PIDFILE}"
+
+bin/rails server -b 127.0.0.1 -p "${PORT}" -P "${PIDFILE}" >tmp/ci_e2e_server.log 2>&1 &
+SERVER_PID="$!"
+
+echo "⏳ waiting for ${E2E_BASE_URL}/up"
+for i in {1..60}; do
+  if curl -fsS "${E2E_BASE_URL}/up" >/dev/null 2>&1; then
+    echo "✅ server is up"
+    break
+  fi
+  sleep 0.5
+done
+
+if ! curl -fsS "${E2E_BASE_URL}/up" >/dev/null 2>&1; then
+  echo "❌ server did not become ready"
+  echo ""
+  echo "--- server log (tail) ---"
+  tail -n 200 tmp/ci_e2e_server.log || true
+  echo ""
+  echo "--- jobs log (tail) ---"
+  tail -n 200 tmp/ci_e2e_jobs.log || true
+  exit 1
+fi
+
+echo "🎭 running Playwright"
+bunx playwright install chromium >/dev/null 2>&1 || true
+bunx playwright test "$@"
+

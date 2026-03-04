@@ -24,14 +24,14 @@ test.describe("Authentication", () => {
     await page.getByLabel("Password").fill("wrong-password")
     await page.getByRole("button", { name: "Sign in" }).click()
 
-    await expect(page.getByRole("alert").first()).toBeVisible()
+    await expect(page.locator("#toast_container")).toContainText("Invalid email or password")
   })
 
   test("sign out returns to home page", async ({ page }) => {
     await signIn(page)
 
-    await page.locator("details.dropdown summary").click()
-    await page.getByRole("button", { name: /sign out/i }).click()
+    await page.locator(".dropdown [role=\"button\"]").first().click()
+    await page.getByText("Sign out", { exact: true }).click()
 
     await expect(page).toHaveURL(/\/session\/new/)
   })

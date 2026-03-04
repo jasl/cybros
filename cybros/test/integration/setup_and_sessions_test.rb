@@ -1,17 +1,33 @@
 require "test_helper"
 
 class SetupAndSessionsTest < ActionDispatch::IntegrationTest
-  test "root redirects to setup when no identities exist" do
+  def reset_install_state!
+    # Some tests disable transactions and can leave rows behind; this suite needs a truly empty
+    # "fresh install" state (no identities) without tripping foreign keys.
+    ConversationRun.delete_all
+    Event.delete_all
+    Topic.delete_all
+    Conversation.delete_all
+    Session.delete_all
     User.delete_all
     Identity.delete_all
+
+    DAG::NodeEvent.delete_all
+    DAG::Edge.delete_all
+    DAG::Node.delete_all
+    DAG::NodeBody.delete_all
+    DAG::Graph.delete_all
+  end
+
+  test "root redirects to setup when no identities exist" do
+    reset_install_state!
 
     get root_path
     assert_redirected_to new_setup_path
   end
 
   test "setup wizard uses the session layout" do
-    User.delete_all
-    Identity.delete_all
+    reset_install_state!
 
     get new_setup_path
     assert_response :success
@@ -19,9 +35,7 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
   end
 
   test "setup wizard creates initial identity and signs in" do
-    User.delete_all
-    Identity.delete_all
-    Session.delete_all
+    reset_install_state!
 
     get new_setup_path
     assert_response :success
@@ -59,16 +73,14 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
   end
 
   test "sessions new redirects to setup when no identities exist" do
-    User.delete_all
-    Identity.delete_all
+    reset_install_state!
 
     get new_session_path
     assert_redirected_to new_setup_path
   end
 
   test "sessions new uses the session layout" do
-    User.delete_all
-    Identity.delete_all
+    reset_install_state!
     Identity.create!(email: "admin@example.com", password: "Passw0rd", password_confirmation: "Passw0rd")
 
     get new_session_path

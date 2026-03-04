@@ -5,10 +5,16 @@ CI.run do
 
   step "Style: Ruby", "bin/rubocop"
 
+  step "Style: JS", "bun run lint:js"
+
   step "Security: Gem audit", "bin/bundler-audit"
   step "Security: Brakeman code analysis", "bin/brakeman --quiet --no-pager --exit-on-warn --exit-on-error"
+
+  step "Tests: JS", "bun run test:js"
   step "Tests: Rails", "bin/rails test"
   step "Tests: Seeds", "env RAILS_ENV=test bin/rails db:seed:replant"
+
+  step "Tests: E2E (Playwright)", "bin/ci_e2e"
 
   # Optional: Run system tests
   # step "Tests: System", "bin/rails test:system"
