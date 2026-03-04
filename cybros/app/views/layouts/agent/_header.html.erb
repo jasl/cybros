@@ -22,12 +22,8 @@
       <span class="icon-[lucide--help-circle] size-5"></span>
     </button>
 
-    <%= link_to conversations_path, class: "btn btn-ghost btn-sm btn-square", title: "Home" do %>
-      <span class="icon-[lucide--home] size-5"></span>
-    <% end %>
-
     <% if local_assigns.fetch(:show_right_sidebar_toggle, false) %>
-      <label for="right_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Open settings">
+      <label for="right_drawer" class="btn btn-ghost btn-sm btn-square" aria-label="Toggle settings">
         <span class="icon-[lucide--settings] size-5"></span>
       </label>
     <% end %>

@@ -2,7 +2,7 @@
 
 <% conversations.each do |conversation| %>
   <li>
-    <%= link_to conversation_path(conversation), class: "truncate #{'menu-active' if active_nav?(conversation_path(conversation))}" do %>
+    <%= link_to conversation_path(conversation), class: "truncate" do %>
       <span class="truncate"><%= conversation.title.presence || "(untitled)" %></span>
     <% end %>
   </li>

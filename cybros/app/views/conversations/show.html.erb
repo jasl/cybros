@@ -3,12 +3,10 @@
 <% end %>
 
 <% content_for :right_sidebar do %>
-  <div class="p-4 space-y-4">
-    <div>
-      <div class="text-xs font-semibold tracking-wide opacity-60">Settings</div>
-      <div class="text-sm font-semibold">Quick links</div>
-    </div>
+  <div class="h-14 px-2 border-b border-base-300 bg-base-100">
+  </div>
 
+  <div class="p-4 space-y-4">
     <ul class="menu bg-base-200 rounded-box w-full">
       <li>
         <%= link_to settings_profile_path, class: "gap-2" do %>

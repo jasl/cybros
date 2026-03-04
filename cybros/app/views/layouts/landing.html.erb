@@ -2,7 +2,7 @@
 <% content_for(:body_class, "min-h-dvh bg-base-200") %>
 <% content_for :content do %>
   <div class="min-h-dvh flex flex-col">
-    <%= render "layouts/navbar" %>
+    <%= render "layouts/landing/navbar" %>
 
     <main class="flex-1 <%= content_for(:main_class) %>">
       <%= yield %>

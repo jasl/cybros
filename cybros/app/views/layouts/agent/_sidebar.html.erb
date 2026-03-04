@@ -1,5 +1,5 @@
 <nav class="h-full flex flex-col w-full">
-  <div class="h-14 px-2 flex items-center shrink-0 is-drawer-close:justify-center is-drawer-open:gap-2">
+  <div class="h-14 px-2 border-b border-base-300 flex items-center shrink-0 is-drawer-close:justify-center is-drawer-open:gap-2">
     <div class="is-drawer-close:hidden">
       <%= form_with url: conversations_path, method: :post do %>
         <button type="submit" class="btn btn-ghost btn-square" aria-label="New chat">
@@ -48,7 +48,14 @@
       </div>
 
       <div class="flex-1 w-full is-drawer-close:flex is-drawer-close:justify-center">
-        <%= render "_shared/user_menu" %>
+        <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right is-drawer-close:w-full is-drawer-close:flex is-drawer-close:justify-center" data-tip="Account">
+          <%= render "_shared/account_dropdown",
+                     placement_classes: "dropdown-top dropdown-end w-full",
+                     trigger_classes: "btn btn-ghost btn-sm w-full gap-2 is-drawer-open:justify-start is-drawer-close:justify-center is-drawer-close:px-0 is-drawer-close:btn-square",
+                     email_classes: "is-drawer-close:hidden flex-1 truncate text-left",
+                     chevron_icon_class: "is-drawer-close:hidden icon-[lucide--chevron-up]",
+                     user_icon_size_class: "size-5" %>
+        </div>
       </div>
     </div>
   </div>

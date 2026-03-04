@@ -6,7 +6,7 @@
 
     <div class="drawer-content flex flex-col h-dvh overflow-hidden">
       <% if content_for?(:right_sidebar) %>
-        <div class="drawer drawer-end h-full" data-controller="sidebar" data-sidebar-key-value="right">
+        <div class="drawer drawer-end lg:drawer-open h-full" data-controller="sidebar" data-sidebar-key-value="right">
           <input id="right_drawer" type="checkbox" class="drawer-toggle" data-sidebar-target="toggle" />
 
           <div class="drawer-content h-full flex flex-col overflow-hidden">
@@ -18,8 +18,8 @@
           </div>
 
           <div class="drawer-side z-40 h-full">
-            <label for="right_drawer" aria-label="Close settings" class="drawer-overlay"></label>
-            <aside class="w-96 max-w-[85vw] h-full bg-base-100 flex flex-col border-l border-base-300 overflow-hidden">
+            <label for="right_drawer" aria-label="Close settings" class="drawer-overlay lg:hidden"></label>
+            <aside class="is-drawer-open:w-96 is-drawer-close:w-0 max-w-[85vw] h-full bg-base-100 flex flex-col border-l border-base-300 overflow-hidden transition-[width,opacity] duration-200 is-drawer-close:opacity-0 is-drawer-close:pointer-events-none is-drawer-close:border-l-0">
               <%= yield :right_sidebar %>
             </aside>
           </div>

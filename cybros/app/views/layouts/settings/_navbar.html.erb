@@ -1,0 +1,49 @@
+<header class="navbar sticky top-0 z-40 h-14 px-4 md:px-8 border-b bg-base-100 border-base-300">
+  <div class="navbar-start">
+    <%= link_to root_path, class: "btn btn-ghost text-xl font-bold gap-2" do %>
+      <span class="icon-[lucide--message-circle] size-6 text-primary"></span>
+      Cybros
+    <% end %>
+  </div>
+
+  <div class="navbar-center hidden md:flex">
+    <% if Current.user.present? %>
+      <ul class="menu menu-horizontal gap-1">
+        <li>
+          <%= link_to dashboard_path, class: "gap-2" do %>
+            <span class="icon-[lucide--layout-dashboard] size-4"></span>
+            Dashboard
+          <% end %>
+        </li>
+        <li>
+          <%= link_to conversations_path, class: "gap-2" do %>
+            <span class="icon-[lucide--messages-square] size-4"></span>
+            Conversations
+          <% end %>
+        </li>
+        <li>
+          <%= link_to agent_programs_path, class: "gap-2" do %>
+            <span class="icon-[lucide--sparkles] size-4"></span>
+            Agents
+          <% end %>
+        </li>
+      </ul>
+    <% end %>
+  </div>
+
+  <div class="navbar-end gap-2">
+    <label class="btn btn-ghost btn-sm btn-square swap swap-rotate" data-controller="theme" aria-label="Toggle theme">
+      <input type="checkbox" data-theme-target="checkbox" data-action="change->theme#toggle" />
+      <span class="icon-[lucide--sun] size-5 swap-off"></span>
+      <span class="icon-[lucide--moon] size-5 swap-on"></span>
+    </label>
+
+    <% if Current.user.present? %>
+      <%= render "_shared/account_dropdown",
+                 placement_classes: "dropdown-end",
+                 trigger_classes: "btn btn-ghost btn-sm gap-2",
+                 chevron_icon_class: "icon-[lucide--chevron-down]" %>
+    <% end %>
+  </div>
+</header>
+
