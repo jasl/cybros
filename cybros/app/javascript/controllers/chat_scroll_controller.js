@@ -94,13 +94,22 @@ export default class extends Controller {
         this.sentinelTarget.dataset.chatScrollBeforeCursorValue = ""
         return
       }
-      if (!res.ok) return
 
       const html = await res.text()
-      if (!html) return
+      if (!html) {
+        if (!res.ok) this.#toastError(`Failed to load older messages (${res.status})`)
+        return
+      }
 
-      if (window.Turbo?.renderStreamMessage) {
-        window.Turbo.renderStreamMessage(html)
+      // Hard gate: Non-2xx Turbo Streams must still render so errors are visible in UI.
+      if (html.includes("<turbo-stream")) {
+        window.Turbo?.renderStreamMessage?.(html)
+        return
+      }
+
+      if (!res.ok) {
+        this.#toastError(html)
+        return
       }
     } finally {
       requestAnimationFrame(() => {
@@ -111,6 +120,18 @@ export default class extends Controller {
         this.loading = false
       })
     }
+  }
+
+  #toastError(message) {
+    const msg = String(message || "").trim()
+    if (!msg) return
+    window.dispatchEvent(
+      new CustomEvent("toast:show", {
+        detail: { message: msg, type: "error" },
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
   }
 
   #onMutations(mutations) {
