@@ -77,9 +77,11 @@ Adopt TavernKit's proven streaming architecture:
 - [x] **Conversation list**: Sidebar with conversation titles, ordered by last activity.
 - [x] **Message stream**: Messages rendered from `Conversation`'s message/transcript projection (DAG-backed internally). Markdown rendering.
 - [x] **Input**: Text input with send button. Keyboard shortcuts.
-- [ ] **Streaming**: ActionCable `ConversationChannel` for ephemeral events (implemented via stable `node_event` / `node_state` envelope in Phase 0.5)
-  - [ ] `typing_start` / `typing_stop`: Show/hide typing indicator
-  - [ ] `stream_chunk`: Update typing indicator with accumulated content
+- [x] **Streaming**: ActionCable `ConversationChannel` for ephemeral events (implemented via stable `node_event` / `node_state` envelope in Phase 0.5)
+  - [x] `node_event.output_delta`: append-only streaming text
+  - [x] `node_state`: terminal transitions drive indicator + controls convergence
+  - [ ] (deferred) `typing_start` / `typing_stop`: explicit typing events (current UI derives from state)
+  - [ ] (deferred) `stream_chunk`: legacy chunk event (replaced by `output_delta`)
   - [ ] `stream_complete`: Signal that streaming is done
 - [x] **Message creation**: Turbo Stream `append` when `Conversation#append_user_message!` creates the user message + the paired placeholder assistant bubble. Durable message updates converge via Turbo Stream `replace` when the assistant message becomes terminal (or swipes/regenerates).
 - [x] **Error handling**: ConversationRun failure → show error in UI, allow retry.
@@ -210,7 +212,7 @@ Add top-level pages across the layouts (content can be minimal, but layout + rou
 
 - [x] **Dashboard**
   - [x] Recent conversations
-  - [ ] Status cards (provider connectivity, model allowlist health, last run summary) (connectivity/health TBD; last run summary exists)
+  - [x] Status cards (provider base_url/api_key/allowlist health + last run summary)
   - [x] Quick actions
 - [x] **`/settings` (Personal settings)**
   - [x] Profile (email/password change)
@@ -300,7 +302,7 @@ This section is written as a **Conversation façade API checklist** so the App n
 - [ ] **TavernKit “production feel” parity (follow-up)**
   - [x] Message action layer: copy / regenerate / swipe / branch (`message_actions_controller` equivalent)
   - [x] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
-  - [ ] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
+  - [x] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
 
 #### 0.5-E — Observability & debuggability
 
@@ -313,8 +315,8 @@ This section is written as a **Conversation façade API checklist** so the App n
 - [x] **Turbo Stream buffering performance**
   - [x] Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers)
   - [x] Keep eviction (TTL/max-size) to prevent unbounded retention
-- [ ] **Roadmap/documentation consistency**
-  - [ ] Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals
+- [x] **Roadmap/documentation consistency**
+  - [x] Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals
 
 #### 0.5-F — Authorization + Pagination Hardening
 

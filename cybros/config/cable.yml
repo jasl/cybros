@@ -4,8 +4,8 @@ development:
   connects_to:
     database:
       writing: cable
-  polling_interval: 0.1
-  message_retention: 86400
+  polling_interval: "0.1.seconds"
+  message_retention: "86400.seconds"
 
 test:
   adapter: test
@@ -15,5 +15,5 @@ production:
   connects_to:
     database:
       writing: cable
-  polling_interval: 0.1
-  message_retention: 86400
+  polling_interval: "0.1.seconds"
+  message_retention: "86400.seconds"

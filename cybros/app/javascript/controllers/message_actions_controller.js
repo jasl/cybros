@@ -1,4 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
+import { postAndTurboVisit } from "../lib/post_and_turbo_visit"
 
 const registryByList = new WeakMap()
 
@@ -127,7 +128,7 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/regenerate`
-    await this.#postAndVisit(url, { agent_node_id: nodeId })
+    await postAndTurboVisit(url, { agent_node_id: nodeId })
   }
 
   async swipeLeft(event) {
@@ -147,7 +148,7 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/branch`
-    await this.#postAndVisit(url, { from_node_id: nodeId, title: "Branch", user_content: "" })
+    await postAndTurboVisit(url, { from_node_id: nodeId, title: "Branch", user_content: "" })
   }
 
   async #swipe(direction) {
@@ -156,40 +157,7 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/swipe`
-    await this.#postAndVisit(url, { agent_node_id: nodeId, direction })
-  }
-
-  async #postAndVisit(url, params) {
-    const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
-    if (!token) return
-
-    const body = new URLSearchParams()
-    for (const [k, v] of Object.entries(params || {})) body.set(k, String(v ?? ""))
-
-    let res
-    try {
-      res = await fetch(url, {
-        method: "POST",
-        headers: {
-          "X-CSRF-Token": token,
-          "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
-          Accept: "text/html",
-        },
-        body,
-        credentials: "same-origin",
-        redirect: "follow",
-      })
-    } catch (_e) {
-      return
-    }
-
-    if (!res || !res.ok) return
-
-    const nextUrl = res.url || ""
-    if (!nextUrl) return
-
-    if (window.Turbo?.visit) window.Turbo.visit(nextUrl)
-    else window.location.href = nextUrl
+    await postAndTurboVisit(url, { agent_node_id: nodeId, direction })
   }
 
   #extractCopyText() {
@@ -210,4 +178,3 @@ export default class extends Controller {
     return ""
   }
 }
-

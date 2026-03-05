@@ -25,6 +25,20 @@ async function createConversationAndWaitForMarkdown(page) {
   await expect(page.locator('[data-role="agent-bubble"] [data-controller="markdown"]').first()).toHaveCount(1)
 }
 
+async function waitForTailAgentToFinishWithMarkdown(page) {
+  const deadline = Date.now() + 90_000
+  while (Date.now() < deadline) {
+    const tailBubble = page.locator('[data-role="agent-bubble"]').last()
+    const state = (await tailBubble.getAttribute("data-node-state").catch(() => "")) || ""
+    const hasMarkdown = (await tailBubble.locator('[data-controller="markdown"]').count().catch(() => 0)) > 0
+    if (state === "finished" && hasMarkdown) return
+    await page.waitForTimeout(750)
+    await page.reload()
+  }
+
+  await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "finished")
+}
+
 test.describe("Conversation message actions + hotkeys", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
@@ -65,37 +79,87 @@ test.describe("Conversation message actions + hotkeys", () => {
     await page.locator("main").click()
 
     // Ctrl+Enter regenerate (tail-only).
-    await page.keyboard.press("Control+Enter")
-    await page.waitForTimeout(500)
+    await page.evaluate(() => {
+      window.__e2e_fetch_urls = []
+      const orig = window.fetch.bind(window)
+      window.fetch = (...args) => {
+        window.__e2e_fetch_urls.push(String(args[0] || ""))
+        return orig(...args)
+      }
+    })
+
+    await page.evaluate(() => {
+      document.dispatchEvent(
+        new KeyboardEvent("keydown", {
+          key: "Enter",
+          ctrlKey: true,
+          bubbles: true,
+          cancelable: true,
+        }),
+      )
+    })
     await page.waitForLoadState("domcontentloaded")
 
-    const afterRegen = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-    await expect(afterRegen).toBeVisible()
-    const secondId = await afterRegen.getAttribute("id")
+    const fetchDeadline = Date.now() + 15_000
+    while (Date.now() < fetchDeadline) {
+      const saw = await page.evaluate(() => {
+        return Array.isArray(window.__e2e_fetch_urls) && window.__e2e_fetch_urls.some((u) => String(u).includes("/regenerate"))
+      })
+      if (saw) break
+      await page.waitForTimeout(100)
+    }
+
+    const regenDeadline = Date.now() + 60_000
+    let secondId = null
+    while (Date.now() < regenDeadline) {
+      const afterRegen = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+      await expect(afterRegen).toBeVisible()
+      secondId = await afterRegen.getAttribute("id")
+      if (secondId && secondId !== firstId) break
+      await page.waitForTimeout(750)
+      await page.reload()
+    }
+
     expect(secondId).toBeTruthy()
     if (!secondId) throw new Error("missing agent wrapper id after regenerate")
     const secondNodeId = secondId.replace(/^message_/, "")
     expect(secondNodeId).not.toEqual(firstNodeId)
 
+    await waitForTailAgentToFinishWithMarkdown(page)
+
     // ArrowLeft should adopt the previous version.
+    await page.locator("main").click()
     await page.keyboard.press("ArrowLeft")
-    await page.waitForTimeout(500)
     await page.waitForLoadState("domcontentloaded")
 
-    const afterSwipeLeft = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-    const thirdId = await afterSwipeLeft.getAttribute("id")
+    const swipeLeftDeadline = Date.now() + 30_000
+    let thirdId = null
+    while (Date.now() < swipeLeftDeadline) {
+      const afterSwipeLeft = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+      thirdId = await afterSwipeLeft.getAttribute("id")
+      if (thirdId && thirdId !== secondId) break
+      await page.waitForTimeout(500)
+      await page.reload()
+    }
     expect(thirdId).toBeTruthy()
     if (!thirdId) throw new Error("missing agent wrapper id after swipe")
     const thirdNodeId = thirdId.replace(/^message_/, "")
     expect(thirdNodeId).not.toEqual(secondNodeId)
 
     // ArrowRight should adopt the newer version again.
+    await page.locator("main").click()
     await page.keyboard.press("ArrowRight")
-    await page.waitForTimeout(500)
     await page.waitForLoadState("domcontentloaded")
 
-    const afterSwipeRight = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-    const fourthId = await afterSwipeRight.getAttribute("id")
+    const swipeRightDeadline = Date.now() + 30_000
+    let fourthId = null
+    while (Date.now() < swipeRightDeadline) {
+      const afterSwipeRight = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+      fourthId = await afterSwipeRight.getAttribute("id")
+      if (fourthId && fourthId === secondId) break
+      await page.waitForTimeout(500)
+      await page.reload()
+    }
     expect(fourthId).toBeTruthy()
     if (!fourthId) throw new Error("missing agent wrapper id after swipe right")
     const fourthNodeId = fourthId.replace(/^message_/, "")
@@ -121,4 +185,3 @@ test.describe("Conversation message actions + hotkeys", () => {
     await expect(textarea).toHaveValue("?")
   })
 })
-

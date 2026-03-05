@@ -10,6 +10,9 @@ application.register("chat-scroll", ChatScrollController)
 import ConversationChannelController from "./conversation_channel_controller"
 application.register("conversation-channel", ConversationChannelController)
 
+import ConnectivityHealthController from "./connectivity_health_controller"
+application.register("connectivity-health", ConnectivityHealthController)
+
 import ConversationSearchController from "./conversation_search_controller"
 application.register("conversation-search", ConversationSearchController)
 
@@ -36,9 +39,6 @@ application.register("message-form", MessageFormController)
 
 import MessageActionsController from "./message_actions_controller"
 application.register("message-actions", MessageActionsController)
-
-import TouchSwipeController from "./touch_swipe_controller"
-application.register("touch-swipe", TouchSwipeController)
 
 import SectionToggleController from "./section_toggle_controller"
 application.register("section-toggle", SectionToggleController)
