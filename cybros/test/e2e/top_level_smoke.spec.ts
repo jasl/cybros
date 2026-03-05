@@ -26,4 +26,3 @@ test.describe("Top-level pages smoke", () => {
     await expect(page.getByRole("heading", { name: "LLM Providers" })).toBeVisible()
   })
 })
-

@@ -10,4 +10,3 @@ export function shouldShowStuckWarning({ lastEventAtMs, nowMs, thresholdSeconds 
   const elapsedSeconds = (now - last) / 1000
   return elapsedSeconds >= threshold
 }
-

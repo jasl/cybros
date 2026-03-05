@@ -86,4 +86,3 @@ Create `docs/plans/2026-03-05-phase-0-5-gap-table.md` containing:
 - The primary gap table (Acceptance + Test matrix items)
 - A short “current status summary” (counts of ✅/🟡/❌ by section)
 - A “worklist” derived from sorting the ❌/🟡 items by prioritization rules above
-

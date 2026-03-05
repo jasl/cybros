@@ -49,4 +49,3 @@ test.describe("Conversation rapid sends ordering", () => {
     expect(indices[2]).toBeGreaterThan(indices[1])
   })
 })
-

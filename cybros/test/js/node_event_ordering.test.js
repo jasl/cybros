@@ -13,4 +13,3 @@ describe("orderNodeEventsForFlush", () => {
     expect(ordered.map((e) => e.event_id)).toEqual(["1", "2", "3"])
   })
 })
-

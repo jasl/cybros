@@ -340,11 +340,11 @@ Add system + integration tests that cover:
 
 - [x] **Rapid sends**: 3–10 messages quickly; assert ordering + pairing.
 - [x] **Reconnect**: disconnect/reconnect mid-stream; resume without duplication.
-- [ ] **Compaction**: deltas compacted mid-stream; UI remains correct.
+- [x] **Compaction**: deltas compacted mid-stream; UI remains correct.
 - [x] **Out-of-order events**: simulate reordering; UI stable by reconciliation keys.
-- [ ] **Provider/model mismatch**: clear UX when no provider supports preferred models.
+- [x] **Provider/model mismatch**: clear UX when no provider supports preferred models.
 - [x] **Invalid provider config**: invalid headers JSON is 422 with inline errors (no 500).
-- [ ] **Long outputs**: large responses; UI remains responsive and bounded.
+- [x] **Long outputs**: large responses; UI remains responsive and bounded.
 
 ### Acceptance Criteria
 
@@ -383,9 +383,9 @@ Add system + integration tests that cover:
   - [x] Conversations index is cursor-paginated
   - [x] Message history paging works (load older via Turbo Stream)
   - [x] Replay batching is used on reconnect
-- [ ] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
+- [x] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
 - [ ] **Handoff quality gate (required before acceptance)**:
-  - [ ] **Smoke tests**: add a system test suite that visits each top-level page (Home, Dashboard, Conversations, Agents, `/settings`, `/system/settings`) and asserts it loads (no routing typos, no ERB syntax/render exceptions)
+  - [x] **Smoke tests**: add a system test suite that visits each top-level page (Home, Dashboard, Conversations, Agents, `/settings`, `/system/settings`) and asserts it loads (no routing typos, no ERB syntax/render exceptions)
   - [ ] **Browser verification**: manually verify in a real browser that each page’s layout/styles are correct and that key UI interactions work (navigation, drawer/collapse behavior, forms/CRUD flows, chat composer/send)
 
 ---

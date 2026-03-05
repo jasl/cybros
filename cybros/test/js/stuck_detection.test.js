@@ -15,4 +15,3 @@ describe("shouldShowStuckWarning", () => {
     expect(shouldShowStuckWarning({ lastEventAtMs: 0, nowMs: 45_000, thresholdSeconds: 30 })).toBe(true)
   })
 })
-

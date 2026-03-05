@@ -124,4 +124,3 @@ Optional follow-ups (post-acceptance / non-blocking):
 | Provider/model mismatch has clear UX | ✅ | Agent placeholder includes a warning banner sourced from node metadata | — | — | `test/integration/conversation_messages_dual_channel_test.rb` |
 | Invalid provider config (headers JSON) is 422 with inline error | ✅ | Controller validates + renders errors | — | — | `test/integration/llm_providers_test.rb` |
 | Long outputs remain responsive/bounded | ✅ | Terminal markdown truncates extremely long output | No browser perf test | OK for Phase 0.5 | `test/integration/conversation_long_output_test.rb` |
-

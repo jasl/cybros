@@ -54,4 +54,3 @@ test.describe("Conversation reconnect/resume (no duplication)", () => {
     expect(second).toBe(-1)
   })
 })
-

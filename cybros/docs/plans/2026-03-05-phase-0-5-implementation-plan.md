@@ -234,4 +234,3 @@
   - `bun run lint:js`
 - E2E (optional/on-demand):
   - `bin/e2e` (new)
-
