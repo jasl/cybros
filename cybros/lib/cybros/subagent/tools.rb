@@ -471,7 +471,11 @@ module Cybros
 
       def leaf_for_main_lane(graph)
         lane = graph.main_lane
-        leaf = graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
+        scope = graph.leaf_nodes.where(lane_id: lane.id)
+        visible = scope.where(context_excluded_at: nil, deleted_at: nil)
+
+        leaf =
+          visible.order(:id).last || scope.order(:id).last
         return nil if leaf.nil?
 
         { node_id: leaf.id.to_s, state: leaf.state.to_s }

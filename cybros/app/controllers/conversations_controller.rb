@@ -1,7 +1,15 @@
 class ConversationsController < AgentController
   include RateLimitable
 
-  before_action :set_conversation, only: %i[show stop retry]
+  rescue_from ArgumentError, DAG::ValidationError, DAG::OperationNotAllowedError, Cybros::Error do |e|
+    respond_to do |format|
+      format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
+      format.html { render plain: e.message, status: :unprocessable_entity }
+      format.json { render json: { ok: false, error: e.class.name, message: e.message }, status: :unprocessable_entity }
+    end
+  end
+
+  before_action :set_conversation, only: %i[show stop retry branch regenerate swipe clear_translations]
   before_action -> { throttle!(key: "stop_retry", limit: 10, period: 60) }, only: %i[stop retry]
 
   def index
@@ -45,8 +53,8 @@ class ConversationsController < AgentController
   end
 
   def show
-    graph = @conversation.dag_graph
-    lane = graph.main_lane
+    graph = @conversation.root_graph
+    lane = @conversation.chat_lane
 
     page = lane.message_page(limit: 30, mode: :full)
     @messages = page.fetch("messages")
@@ -60,9 +68,52 @@ class ConversationsController < AgentController
       end
   end
 
+  def branch
+    from_node_id = params.fetch(:from_node_id, "").to_s
+    raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(from_node_id)
+
+    title = params.fetch(:title, "").to_s
+
+    child =
+      @conversation.create_child!(
+        from_node_id: from_node_id,
+        kind: "branch",
+        title: title.presence || "Branch",
+        user_content: params.fetch(:user_content, "").to_s,
+      )
+
+    redirect_to conversation_path(child)
+  end
+
+  def regenerate
+    agent_node_id = params.fetch(:agent_node_id, "").to_s
+    raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(agent_node_id)
+
+    result = @conversation.regenerate!(agent_node_id: agent_node_id)
+    if result.fetch(:mode) == :branched
+      redirect_to conversation_path(result.fetch(:conversation))
+    else
+      redirect_to conversation_path(@conversation)
+    end
+  end
+
+  def swipe
+    agent_node_id = params.fetch(:agent_node_id, "").to_s
+    raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(agent_node_id)
+
+    direction = params.fetch(:direction, "").to_s
+    @conversation.select_swipe!(agent_node_id: agent_node_id, direction: direction)
+    redirect_to conversation_path(@conversation)
+  end
+
+  def clear_translations
+    @conversation.clear_translations!
+    redirect_to conversation_path(@conversation)
+  end
+
   def stop
     node_id = params[:node_id].to_s
-    node = @conversation.dag_graph.nodes.find_by(id: node_id)
+    node = @conversation.root_graph.nodes.find_by(id: node_id)
     render json: { ok: false, error: "node_not_found" }, status: :not_found and return if node.nil?
 
     render json: { ok: false, error: "node_not_running" }, status: :unprocessable_entity and return unless node.running?
@@ -73,7 +124,7 @@ class ConversationsController < AgentController
   end
 
   def retry
-    graph = @conversation.dag_graph
+    graph = @conversation.root_graph
 
     failed_node_id = params[:node_id].to_s
     failed_node = graph.nodes.find_by(id: failed_node_id)

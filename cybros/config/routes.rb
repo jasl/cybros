@@ -22,6 +22,18 @@ Rails.application.routes.draw do
 
   resources :agent_programs, only: %i[index new create show]
   resources :conversations, only: %i[index show create] do
+    post :branch, on: :member
+    post :regenerate, on: :member
+    post :swipe, on: :member
+    post :clear_translations, on: :member
+
+    resources :nodes, only: %i[destroy], controller: "conversation_nodes" do
+      post :exclude, on: :member
+      post :include, on: :member
+      post :restore, on: :member
+      post :translate, on: :member
+    end
+
     resources :messages, only: %i[index create], controller: "conversation_messages" do
       get :refresh, on: :collection
     end

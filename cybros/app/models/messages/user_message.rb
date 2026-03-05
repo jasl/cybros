@@ -18,6 +18,14 @@ module Messages
       end
     end
 
+    def deletable?
+      true
+    end
+
+    def forkable?
+      true
+    end
+
     def mermaid_snippet(node:)
       _ = node
       input = self.input.is_a?(Hash) ? self.input : {}

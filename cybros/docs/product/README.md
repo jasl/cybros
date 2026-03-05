@@ -106,3 +106,4 @@ Communication is **pull-based**: Nexus polls the control plane (Cybros) via `POS
 
 - [Agent Program Framework](agent_program_framework.md) — The core differentiator: how agent programs are structured, executed, and self-modified.
 - [Roadmap](roadmap.md) — Phased implementation plan with acceptance criteria.
+- [Conversation Behavior Spec](conversation_behavior_spec.md) — App-facing conversation semantics (branch/fork, swipe, exclude, soft delete + stop/cancel).

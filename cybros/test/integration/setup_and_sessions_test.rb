@@ -6,7 +6,6 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     # "fresh install" state (no identities) without tripping foreign keys.
     ConversationRun.delete_all
     Event.delete_all
-    Topic.delete_all
     Conversation.delete_all
     Session.delete_all
     User.delete_all

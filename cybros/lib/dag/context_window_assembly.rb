@@ -2,6 +2,7 @@ module DAG
   class ContextWindowAssembly
     DEFAULT_CONTEXT_TURNS = 50
     SUMMARY_PIN_LIMIT = 3
+    MAX_SEGMENTS = 50
 
     PINNED_NODE_TYPES = %w[system_message developer_message].freeze
 
@@ -119,7 +120,14 @@ module DAG
           segments.concat(lane_chain_segments(cutoff_node: source))
         end
 
-        segments.uniq { |segment| [segment.lane_id.to_s, segment.cutoff_turn_id.to_s] }
+        segments = segments.uniq { |segment| [segment.lane_id.to_s, segment.cutoff_turn_id.to_s] }
+
+        if segments.length > MAX_SEGMENTS
+          raise DAG::SafetyLimits::Exceeded,
+                "context segments limit exceeded (segments=#{segments.length}, max=#{MAX_SEGMENTS})"
+        end
+
+        segments
       end
 
       def incoming_blocking_source_nodes(target_id:)

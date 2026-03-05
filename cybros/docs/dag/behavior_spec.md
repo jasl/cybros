@@ -17,7 +17,7 @@
 
 `compressed_at` 是 DAG 的统一“活跃视图（active view）”开关，用于两类场景：
 
-1) **子图压缩**（Compression）：用 `summary` 节点替代一个已完成子图。  
+1) **子图压缩**（Compression）：用 `summary` 节点替代一个已完成子图。
 2) **版本替换/改写**（Replace/Rewrites）：`retry/rerun/edit` 产生新版本并归档旧版本。
 
 > 关键点：Active/Inactive 是“视图层语义”，不是数据删除；Inactive 仍可用于审计、回放与 UI 版本浏览。
@@ -26,7 +26,7 @@
 
 为了保证 Scheduler/Context/Leaf 等逻辑可以只看 Active 图：
 
-- **Active edge 的端点必须都是 Active node**。  
+- **Active edge 的端点必须都是 Active node**。
   换句话说，归档（archive）任何节点时，必须同时归档所有 incident edges（无论 edge_type）。
 
 实现要求：
@@ -463,6 +463,8 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 
 补充规则：
 
+- 重要语义提醒（产品层常见误解）：由于 `stopped` 属于 terminal state，**它会像 `errored/rejected/skipped` 一样 unblock `sequence`**。
+  因此，“对某个节点 stop”并不等价于“自动取消其 `sequence` 下游”。若产品想实现“stop generating / 回滚到稳定 head”的语义，必须在产品层显式 stop/skip 下游节点，或使用 `dependency` 边把下游绑定为“必须 finished 才能继续”。（见第 6 节 FailurePropagation 与第 7 节改图约束。）
 - **Inactive edge**（`compressed_at IS NOT NULL`）视为不存在。
 - **Inactive parent node** 不应出现在 Active edge 的端点上（第 1 节结构性要求）；若出现，实现需在 Leaf/Context 层做防御性过滤，但该情况视为 bug。
 
@@ -804,7 +806,7 @@ Active 版本确定规则：
 - `old.body.retriable? == true`（当前：`task`/`agent_message`/`character_message`）
 - `old.state in {errored, rejected, stopped}`
 - `old` 为 Active
-- old 的 **Active causal descendants（不含 old）必须全部为 pending**  
+- old 的 **Active causal descendants（不含 old）必须全部为 pending**
   （即：下游允许存在，但必须全部未执行；禁止出现 running/terminal，以避免改写已执行语义）
 
 行为差异点：

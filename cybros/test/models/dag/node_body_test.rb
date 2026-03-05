@@ -1,6 +1,17 @@
 require "test_helper"
 
 class DAG::NodeBodyTest < ActiveSupport::TestCase
+  test "deletable? is an instance method and default policy is conservative" do
+    assert_equal true, Messages::UserMessage.new.deletable?
+    assert_equal true, Messages::AgentMessage.new.deletable?
+    assert_equal true, Messages::CharacterMessage.new.deletable?
+
+    assert_equal false, Messages::Task.new.deletable?
+    assert_equal false, Messages::SystemMessage.new.deletable?
+    assert_equal false, Messages::DeveloperMessage.new.deletable?
+    assert_equal false, Messages::Summary.new.deletable?
+  end
+
   test "task output_preview truncates long string results" do
     long_result = "a" * (DAG::NodeBody::PREVIEW_MAX_CHARS + 50)
     payload = Messages::Task.create!(output: { "result" => long_result })

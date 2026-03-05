@@ -6,7 +6,7 @@ class ConversationMessagesController < ApplicationController
   before_action -> { throttle!(key: "messages", limit: 20, period: 60) }, only: :create
 
   def index
-    lane = @conversation.dag_graph.main_lane
+    lane = @conversation.chat_lane
 
     before = params[:before].to_s.presence
     after = params[:after].to_s.presence
@@ -75,7 +75,7 @@ class ConversationMessagesController < ApplicationController
     node_id = params.fetch(:node_id, "").to_s
     raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(node_id)
 
-    graph = @conversation.dag_graph
+    graph = @conversation.root_graph
     node = graph.nodes.find_by(id: node_id)
     raise ActiveRecord::RecordNotFound if node.nil?
 
@@ -108,62 +108,10 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    graph = @conversation.dag_graph
-    lane = graph.main_lane
-    prev_leaf = graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
-    prev_agent_leaf =
-      graph
-        .leaf_nodes
-        .where(lane_id: lane.id, node_type: Messages::AgentMessage.node_type_key)
-        .order(:id)
-        .last
-    turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
-
-    user_node = nil
-    agent_node = nil
-
-    graph.mutate!(turn_id: turn_id) do |m|
-      user_node =
-        m.create_node(
-          node_type: Messages::UserMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          content: content,
-          metadata: {},
-        )
-
-      agent_node =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: {},
-        )
-
-      if prev_leaf
-        m.create_edge(from_node: prev_leaf, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
-      end
-      m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
-
-      if prev_agent_leaf && !prev_agent_leaf.terminal?
-        m.create_edge(
-          from_node: prev_agent_leaf,
-          to_node: agent_node,
-          edge_type: DAG::Edge::DEPENDENCY,
-          metadata: { "generated_by" => "queue_policy" }
-        )
-      end
-    end
-
-    agent_leaf = agent_node || graph.leaf_nodes.order(:id).last
-    ConversationRun.create!(
-      conversation: @conversation,
-      dag_node_id: agent_leaf.id,
-      state: "queued",
-      queued_at: Time.current,
-      debug: {},
-      error: {},
-    )
-
-    graph.kick!
+    graph = @conversation.root_graph
+    result = @conversation.append_user_message!(content: content)
+    user_node = result&.fetch(:user_node, nil)
+    agent_node = result&.fetch(:agent_node, nil)
 
     respond_to do |format|
       format.turbo_stream do

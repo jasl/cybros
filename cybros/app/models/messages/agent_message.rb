@@ -71,6 +71,18 @@ module Messages
       end
     end
 
+    def deletable?
+      true
+    end
+
+    def forkable?
+      true
+    end
+
+    def swipable?
+      true
+    end
+
     def retriable?
       true
     end

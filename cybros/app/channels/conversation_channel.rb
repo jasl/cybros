@@ -37,14 +37,13 @@ class ConversationChannel < ApplicationCable::Channel
     @cursor = nil unless @cursor.present? && AgentCore::Utils.uuid_like?(@cursor)
 
     if @node_id.blank?
-      lane = @conversation.dag_graph.main_lane
-      leaf = @conversation.dag_graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
+      leaf = @conversation.chat_head_leaf
       @node_id = leaf&.id&.to_s
     end
 
     if @cursor.blank? && @node_id.present?
-      lane = @conversation.dag_graph.main_lane
-      node = lane.graph.nodes.find_by(id: @node_id)
+      lane = @conversation.chat_lane
+      node = @conversation.root_graph.nodes.find_by(id: @node_id)
       preview = node&.body_output_preview
       preview = preview.is_a?(Hash) ? preview : {}
 
@@ -98,14 +97,19 @@ class ConversationChannel < ApplicationCable::Channel
     private
 
       def envelope_for(conversation, node_event)
-        node = node_event.node
-        return nil if node.nil?
+        node_id = node_event.node_id.to_s
+        return nil if node_id.blank?
 
         kind = node_event.kind.to_s
         text = node_event.text.to_s
 
         if kind == DAG::NodeEvent::OUTPUT_COMPACTED && text.blank?
-          output_preview = DAG::NodeBody.where(id: node.body_id).pick(:output_preview)
+          body_id = node_event.respond_to?(:body_id) ? node_event.body_id : nil
+          if body_id.blank?
+            body_id = DAG::Node.where(graph_id: conversation.root_graph.id, id: node_id).pick(:body_id)
+          end
+
+          output_preview = body_id.present? ? DAG::NodeBody.where(id: body_id).pick(:output_preview) : {}
           output_preview = output_preview.is_a?(Hash) ? output_preview : {}
           text = output_preview.fetch("content", "").to_s
         end
@@ -113,8 +117,8 @@ class ConversationChannel < ApplicationCable::Channel
         {
           "type" => "node_event",
           "conversation_id" => conversation.id.to_s,
-          "turn_id" => node.turn_id.to_s,
-          "node_id" => node.id.to_s,
+          "turn_id" => (node_event.respond_to?(:turn_id) ? node_event.turn_id : nil).to_s,
+          "node_id" => node_id,
           "event_id" => node_event.id,
           "kind" => kind,
           "text" => text,
@@ -151,8 +155,8 @@ class ConversationChannel < ApplicationCable::Channel
       return if @conversation.nil?
       return if @node_id.blank?
 
-      lane = @conversation.dag_graph.main_lane
-      node = lane.graph.nodes.find_by(id: @node_id)
+      lane = @conversation.chat_lane
+      node = @conversation.root_graph.nodes.find_by(id: @node_id)
       output_preview = DAG::NodeBody.where(id: node&.body_id).pick(:output_preview)
       output_preview = output_preview.is_a?(Hash) ? output_preview : {}
 

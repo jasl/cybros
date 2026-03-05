@@ -54,13 +54,31 @@ module DAG
       false
     end
 
-      def editable?
-        false
-      end
+    # Product policy hook: whether this node body instance may be soft-deleted
+    # by user-facing APIs. Default is conservative.
+    def deletable?
+      false
+    end
 
-      def rerunnable?
-        false
-      end
+    def editable?
+      false
+    end
+
+    # Product policy hook: whether this node body instance may be used as a fork
+    # point (branch root) by user-facing APIs. Default is conservative.
+    def forkable?
+      false
+    end
+
+    # Product policy hook: whether this node body instance may be "swiped" (have
+    # an alternative version adopted) by user-facing APIs. Default is conservative.
+    def swipable?
+      false
+    end
+
+    def rerunnable?
+      false
+    end
 
     def executable?
       self.class.executable?

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_05_000003) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -91,10 +91,19 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
 
   create_table "conversations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.uuid "forked_from_node_id"
+    t.string "kind", default: "root", null: false
     t.jsonb "metadata", default: {}, null: false
+    t.uuid "parent_conversation_id"
+    t.uuid "root_conversation_id"
+    t.text "summary"
     t.string "title"
     t.datetime "updated_at", null: false
     t.uuid "user_id", null: false
+    t.index ["forked_from_node_id"], name: "index_conversations_on_forked_from_node_id"
+    t.index ["kind"], name: "index_conversations_on_kind"
+    t.index ["parent_conversation_id"], name: "index_conversations_on_parent_conversation_id"
+    t.index ["root_conversation_id"], name: "index_conversations_on_root_conversation_id"
     t.index ["user_id"], name: "index_conversations_on_user_id"
   end
 
@@ -164,12 +173,14 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
   end
 
   create_table "dag_node_events", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "body_id"
     t.datetime "created_at", null: false
     t.uuid "graph_id", null: false
     t.string "kind", null: false
     t.uuid "node_id", null: false
     t.jsonb "payload", default: {}, null: false
     t.text "text"
+    t.uuid "turn_id"
     t.index ["graph_id", "node_id", "id"], name: "index_dag_node_events_graph_node_id_id"
     t.index ["graph_id", "node_id", "kind", "id"], name: "index_dag_node_events_graph_node_kind_id"
     t.index ["graph_id"], name: "index_dag_node_events_on_graph_id"
@@ -247,6 +258,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
     t.index ["graph_id", "lane_id", "anchored_seq"], name: "index_dag_turns_graph_lane_anchored_seq_unique", unique: true, where: "(anchored_seq IS NOT NULL)"
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_id_unique", unique: true
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible", where: "(anchor_node_id IS NOT NULL)"
+    t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible_including_deleted", where: "(anchor_node_id_including_deleted IS NOT NULL)"
     t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane"
     t.index ["graph_id"], name: "index_dag_turns_on_graph_id"
     t.check_constraint "(anchor_node_id IS NULL) = (anchor_created_at IS NULL)", name: "check_dag_turns_anchor_fields_consistent"
@@ -299,19 +311,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
     t.index ["identity_id"], name: "index_sessions_on_identity_id"
   end
 
-  create_table "topics", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.uuid "conversation_id", null: false
-    t.datetime "created_at", null: false
-    t.jsonb "metadata", default: {}, null: false
-    t.string "role", null: false
-    t.text "summary"
-    t.string "title"
-    t.datetime "updated_at", null: false
-    t.index ["conversation_id"], name: "index_topics_main_per_conversation", unique: true, where: "((role)::text = 'main'::text)"
-    t.index ["conversation_id"], name: "index_topics_on_conversation_id"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_topics_role_enum"
-  end
-
   create_table "users", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
     t.uuid "identity_id", null: false
@@ -324,6 +323,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "agent_memory_entries", "conversations"
   add_foreign_key "conversation_runs", "conversations"
+  add_foreign_key "conversations", "conversations", column: "parent_conversation_id", on_delete: :nullify
+  add_foreign_key "conversations", "conversations", column: "root_conversation_id", on_delete: :nullify
   add_foreign_key "conversations", "users"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
@@ -347,6 +348,5 @@ ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
   add_foreign_key "dag_turns", "dag_lanes", column: ["graph_id", "lane_id"], primary_key: ["graph_id", "id"], name: "fk_dag_turns_lane_graph_scoped", on_delete: :cascade
   add_foreign_key "events", "conversations"
   add_foreign_key "sessions", "identities"
-  add_foreign_key "topics", "conversations"
   add_foreign_key "users", "identities"
 end

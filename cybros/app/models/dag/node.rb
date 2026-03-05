@@ -74,6 +74,12 @@ module DAG
       deleted_at.present?
     end
 
+    # Returns IDs (including self) for causal descendants reachable via active
+    # sequence/dependency edges within the active graph.
+    def causal_descendant_ids
+      active_causal_descendant_ids
+    end
+
     def usage
       metadata.is_a?(Hash) ? metadata["usage"] : nil
     end
@@ -728,7 +734,7 @@ module DAG
               SELECT e.to_node_id
               FROM dag_edges e
               JOIN descendants d ON e.from_node_id = d.node_id
-              JOIN dag_nodes n ON n.id = e.to_node_id
+              JOIN dag_nodes n ON n.graph_id = e.graph_id AND n.id = e.to_node_id
               WHERE e.graph_id = #{graph_quoted}
                 AND e.compressed_at IS NULL
                 AND e.edge_type IN ('sequence', 'dependency')

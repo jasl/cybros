@@ -7,7 +7,6 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
   teardown do
     ConversationRun.delete_all
     Event.delete_all
-    Topic.delete_all
     Conversation.delete_all
     Session.delete_all
     User.delete_all

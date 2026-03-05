@@ -241,7 +241,7 @@ module DAG
       candidate_types = graph.transcript_candidate_node_types
       return empty_message_page if candidate_types.empty?
 
-      scope = nodes.active.where(node_type: candidate_types)
+      scope = graph.nodes.active.where(lane_id: id, node_type: candidate_types)
       scope = scope.where(deleted_at: nil) unless include_deleted
 
       cursor_message_id = before_message_id || after_message_id

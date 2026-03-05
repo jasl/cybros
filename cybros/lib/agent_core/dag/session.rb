@@ -63,7 +63,10 @@ module AgentCore
           end
         end
 
-        graph.leaf_nodes.where(lane_id: effective_lane_id).order(:id).last
+        scope = graph.leaf_nodes.where(lane_id: effective_lane_id)
+        visible = scope.where(context_excluded_at: nil, deleted_at: nil)
+
+        visible.order(:id).last || scope.order(:id).last
       end
 
       private

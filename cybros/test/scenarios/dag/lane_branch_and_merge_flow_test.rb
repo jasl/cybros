@@ -38,11 +38,10 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
   test "product flow: fork, merge, continue branch, archive, and merge archived branch again" do
     conversation = create_conversation!(title: "Demo")
     graph = conversation.dag_graph
-
-    main_topic = conversation.ensure_main_topic
-    main_lane = main_topic.dag_lane
+    main_lane = conversation.chat_lane
     assert main_lane.present?
     assert_equal DAG::Lane::MAIN, main_lane.role
+    assert_equal conversation, main_lane.attachable
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, LaneAwareAgentExecutor.new)
@@ -69,15 +68,34 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       task = graph.nodes.active.find_by!(turn_id: main_agent.turn_id, node_type: Messages::Task.node_type_key, idempotency_key: "tool")
       assert_equal main_lane.id, task.lane_id
+      branch_conversation =
+        Conversation.create!(
+          user: conversation.user,
+          title: "Branch",
+          metadata: conversation.metadata,
+          kind: "branch",
+          parent_conversation: conversation,
+          forked_from_node_id: main_agent.id,
+        )
 
-      branch_topic = conversation.fork_topic_from(from_node: main_agent, title: "Branch", user_content: "What if?")
-      branch_lane = branch_topic.dag_lane
+      branch_root = nil
+      graph.mutate! do |m|
+        branch_root = m.fork_from!(
+          from_node: main_agent,
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "What if?",
+          metadata: {},
+        )
+      end
+
+      branch_lane = branch_root.lane
       assert branch_lane.present?
       assert_equal DAG::Lane::BRANCH, branch_lane.role
       assert_equal main_lane.id, branch_lane.parent_lane_id
       assert_equal main_agent.id, branch_lane.forked_from_node_id
-
-      branch_root = graph.nodes.active.find(branch_lane.root_node_id)
+      branch_lane.update!(attachable: branch_conversation)
+      assert_equal branch_conversation, branch_lane.reload.attachable
       assert_equal branch_lane.id, branch_root.lane_id
 
       branch_agent =
@@ -147,7 +165,19 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       DAG::Runner.run_node!(branch_agent_2.id)
       assert_equal DAG::Node::FINISHED, branch_agent_2.reload.state
 
-      merge_node = conversation.merge_topic_into_main(source_topic: branch_topic, metadata: { "reason" => "test" })
+      main_head = graph.leaf_nodes.where(lane_id: main_lane.id).sole
+      source_head = graph.leaf_nodes.where(lane_id: branch_lane.id).sole
+
+      merge_node = nil
+      graph.mutate! do |m|
+        merge_node = m.merge_lanes!(
+          target_lane: main_lane,
+          target_from_node: main_head,
+          source_lanes_and_nodes: [{ lane: branch_lane, from_node: source_head }],
+          node_type: Messages::AgentMessage.node_type_key,
+          metadata: { "reason" => "test" }
+        )
+      end
       assert_equal main_lane.id, merge_node.lane_id
       assert_equal DAG::Node::PENDING, merge_node.state
 
@@ -236,7 +266,19 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
         end
       assert_match(/Lane is archived/, error.message)
 
-      merge_node_2 = conversation.merge_topic_into_main(source_topic: branch_topic, metadata: { "reason" => "merge_again" })
+      main_head = graph.leaf_nodes.where(lane_id: main_lane.id).sole
+      source_head = graph.leaf_nodes.where(lane_id: branch_lane.id).sole
+
+      merge_node_2 = nil
+      graph.mutate! do |m|
+        merge_node_2 = m.merge_lanes!(
+          target_lane: main_lane,
+          target_from_node: main_head,
+          source_lanes_and_nodes: [{ lane: branch_lane, from_node: source_head }],
+          node_type: Messages::AgentMessage.node_type_key,
+          metadata: { "reason" => "merge_again" }
+        )
+      end
       assert_equal main_lane.id, merge_node_2.lane_id
       assert_equal DAG::Node::PENDING, merge_node_2.state
 

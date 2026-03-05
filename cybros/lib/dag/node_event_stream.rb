@@ -8,6 +8,7 @@ module DAG
       @graph_id = node.graph_id
       @node_id = node.id
       @body_id = node.body_id
+      @turn_id = node.turn_id
 
       @flush_interval = Float(flush_interval)
       @flush_bytes = Integer(flush_bytes)
@@ -106,6 +107,8 @@ module DAG
         DAG::NodeEvent.create!(
           graph_id: @graph_id,
           node_id: @node_id,
+          turn_id: @turn_id,
+          body_id: @body_id,
           kind: kind.to_s,
           text: text,
           payload: payload
