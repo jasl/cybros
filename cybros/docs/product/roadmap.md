@@ -367,7 +367,7 @@ Add system + integration tests that cover:
   - [x] Server-push is the primary streaming mechanism (polling only low-frequency fallback)
   - [x] Stable event envelope exists and is surface-agnostic (usable by future Telegram bot)
   - [x] Reconnect/resume-from-cursor works without duplication
-  - [ ] Active run node tracking is explicit (no “latest leaf” inference) (verify explicit server-side source of truth)
+  - [x] Active run node tracking is explicit (no “latest leaf” inference) (verify explicit server-side source of truth)
 - [x] **Ordering invariants**:
   - [x] Rapid sends preserve user bubble order
   - [x] Each user message pairs to the correct assistant response bubble
