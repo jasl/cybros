@@ -58,6 +58,9 @@ The Codex reference includes a “Responses API WebSocket” transport for `/v1/
 - Implement Codex subscription as first milestone after provider refactor.
 - Implement OpenRouter as the second milestone after Codex subscription.
 - Support a **local inference provider** for development/testing (e.g., Ollama or a mock OpenAI-compatible endpoint) that is only enabled/available in `development` and `test` environments.
+- Usage statistics:
+  - Track each user’s token usage **by model** (where “model” means the fully-qualified `model_ref`).
+  - Track total token usage **by provider** across all users (Phase 0: single user, but keep the shape future-proof).
 
 ### Non-goals (for this iteration)
 - Full “model editor” UI for every capability field.
@@ -371,6 +374,44 @@ Reasoning effort:
 
 ---
 
+## Usage statistics (tokens)
+
+### What we already have
+This repo already has graph/lane-scoped aggregation utilities:
+- `DAG::Lane#llm_usage_stats(...)`
+- `DAG::Graph#llm_usage_stats(...)`
+
+They aggregate from terminal `dag_nodes.metadata["usage"]` and group by `dag_node_bodies.output["provider"]` and `["model"]`.
+
+### What we will add
+Add system-scoped usage stats for:
+- **Per-user, by model_ref** (and by provider_key).
+- **Global totals by provider_key** (all users).
+
+### Canonical dimensions (must be stable)
+To avoid collisions (same upstream model name across providers), we treat:
+- `provider_key` as the canonical provider dimension.
+- `model_ref = "#{provider_key}/#{model_key}"` as the canonical model dimension.
+
+Therefore, when producing the `agent_message` node output payload, we must write:
+- `body_output["provider"] = provider_key`
+- `body_output["model"] = model_ref`
+- (optional) also include `body_output["api_model"] = api_model` for debug/audit.
+
+### Proposed API surface
+- `User#llm_usage_stats(...)` (or a service `LLM::UsageStats.call(user: ...)`) returning the same shape as `DAG::UsageStats`:
+  - `totals`
+  - `by_model` (grouped by provider_key + model_ref)
+  - `by_day`
+- `LLM::UsageStats.global_by_provider(...)` for global provider totals.
+
+### Implementation notes
+- Prefer querying off `dag_nodes` + joins rather than introducing a second usage-events table:
+  - join `dag_nodes -> dag_graphs (attachable) -> conversations -> users`
+  - filter to terminal nodes with `metadata ? 'usage'`
+  - group by provider/model fields in `dag_node_bodies.output`
+- Add any missing indexes only if needed after measuring (Phase 0 is small).
+
 ## Milestones / Phasing
 
 ### Phase 1: Provider refactor + Codex subscription
@@ -414,6 +455,10 @@ Deliverables:
 - Conversation turn selection:
   - choosing a model in composer persists to turn metadata
   - runtime uses that model; if incompatible (tools/images/protocol), sending is rejected with a clear error
+
+- Usage stats:
+  - user usage stats aggregates across conversations and groups by `model_ref`
+  - global provider totals aggregate across users (even if only 1 user exists today)
 
 ### E2E (Playwright) — optional but recommended
 - “Select model in composer” smoke
@@ -506,6 +551,14 @@ OpenRouter capabilities are not reliable unless explicitly curated. Our default 
   - `ollama` (OpenAI-compatible HTTP) for local dev, or
   - a “mock provider” base_url for tests
 - [ ] Ensure this provider is not visible/usable in production env even if accidentally configured
+
+### Task group H: Usage statistics (per user + global)
+- [ ] Ensure agent message output payload includes canonical `provider_key` + `model_ref` for aggregation
+- [ ] Add a `LLM::UsageStats` service (or `User#llm_usage_stats`) that aggregates usage across graphs by joining to conversations/users
+- [ ] Add a global “by provider” aggregation across all users
+- [ ] Add tests:
+  - per-user by-model stats
+  - global by-provider stats
 
 ---
 
