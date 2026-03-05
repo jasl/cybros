@@ -166,12 +166,13 @@ export default class extends Controller {
       return
     }
 
-    const nextUrl = res?.url || ""
-    if (nextUrl && window.Turbo?.visit) {
-      window.Turbo.visit(nextUrl)
-    } else if (nextUrl) {
-      window.location.href = nextUrl
-    }
+    if (!res || !res.ok) return
+
+    const nextUrl = res.url || ""
+    if (!nextUrl) return
+
+    if (window.Turbo?.visit) window.Turbo.visit(nextUrl)
+    else window.location.href = nextUrl
   }
 
   #extractCopyText() {

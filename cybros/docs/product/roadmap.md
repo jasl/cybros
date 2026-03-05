@@ -298,7 +298,7 @@ This section is written as a **Conversation façade API checklist** so the App n
   - [x] Heartbeat timeout → show warning + allow stop/retry
   - [x] Best-effort convergence via `messages/refresh` if realtime delivery is missed
 - [ ] **TavernKit “production feel” parity (follow-up)**
-  - [x] Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent)
+  - [x] Message action layer: copy / regenerate / swipe / branch (`message_actions_controller` equivalent)
   - [x] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
   - [ ] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
 

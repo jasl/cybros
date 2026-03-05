@@ -1,10 +1,10 @@
 import { Controller } from "@hotwired/stimulus"
 
-function isActiveElementInAnyInput({ textareaTarget } = {}) {
+function isActiveElementInAnyInput() {
   const el = document.activeElement
   if (!el) return false
   if (el.tagName === "INPUT") return true
-  if (el.tagName === "TEXTAREA") return el !== textareaTarget
+  if (el.tagName === "TEXTAREA") return true
   return !!el.isContentEditable
 }
 
@@ -33,7 +33,7 @@ export default class extends Controller {
 
     // ?: open help (when not in any input)
     if (event.key === "?") {
-      if (isActiveElementInAnyInput({ textareaTarget: this.hasTextareaTarget ? this.textareaTarget : null })) return
+      if (isActiveElementInAnyInput()) return
       event.preventDefault()
       document.getElementById("hotkeys_help_modal")?.showModal?.()
       return
@@ -59,7 +59,7 @@ export default class extends Controller {
 
     // ArrowLeft/ArrowRight: swipe tail assistant (only when textarea is empty)
     if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
-      if (isActiveElementInAnyInput({ textareaTarget: this.hasTextareaTarget ? this.textareaTarget : null })) return
+      if (isActiveElementInAnyInput()) return
       if (this.hasTextareaTarget && this.textareaTarget.value.trim().length > 0) return
       if (event.ctrlKey || event.altKey || event.metaKey || event.shiftKey) return
 
@@ -126,12 +126,13 @@ export default class extends Controller {
       return
     }
 
-    const nextUrl = res?.url || ""
-    if (nextUrl && window.Turbo?.visit) {
-      window.Turbo.visit(nextUrl)
-    } else if (nextUrl) {
-      window.location.href = nextUrl
-    }
+    if (!res || !res.ok) return
+
+    const nextUrl = res.url || ""
+    if (!nextUrl) return
+
+    if (window.Turbo?.visit) window.Turbo.visit(nextUrl)
+    else window.location.href = nextUrl
   }
 }
 

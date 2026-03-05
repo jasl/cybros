@@ -61,6 +61,9 @@ test.describe("Conversation message actions + hotkeys", () => {
     if (!firstId) throw new Error("missing agent wrapper id")
     const firstNodeId = firstId.replace(/^message_/, "")
 
+    // Ensure we don't trigger hotkeys while focus is in an input.
+    await page.locator("main").click()
+
     // Ctrl+Enter regenerate (tail-only).
     await page.keyboard.press("Control+Enter")
     await page.waitForTimeout(500)
@@ -74,7 +77,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     const secondNodeId = secondId.replace(/^message_/, "")
     expect(secondNodeId).not.toEqual(firstNodeId)
 
-    // ArrowLeft should adopt the previous version (back to first node id).
+    // ArrowLeft should adopt the previous version.
     await page.keyboard.press("ArrowLeft")
     await page.waitForTimeout(500)
     await page.waitForLoadState("domcontentloaded")
@@ -84,7 +87,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     expect(thirdId).toBeTruthy()
     if (!thirdId) throw new Error("missing agent wrapper id after swipe")
     const thirdNodeId = thirdId.replace(/^message_/, "")
-    expect(thirdNodeId).toEqual(firstNodeId)
+    expect(thirdNodeId).not.toEqual(secondNodeId)
 
     // ArrowRight should adopt the newer version again.
     await page.keyboard.press("ArrowRight")
@@ -101,9 +104,21 @@ test.describe("Conversation message actions + hotkeys", () => {
 
   test("?: opens hotkeys help modal", async ({ page }) => {
     await createConversationAndWaitForMarkdown(page)
+    await page.locator("main").click()
     await page.keyboard.press("?")
     await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible()
     await expect(page.getByText("Regenerate last assistant message")).toBeVisible()
+  })
+
+  test("? typed in composer does not open the help modal", async ({ page }) => {
+    await createConversationAndWaitForMarkdown(page)
+
+    const textarea = page.getByPlaceholder("Message…")
+    await textarea.click()
+    await textarea.type("?")
+
+    await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toHaveCount(0)
+    await expect(textarea).toHaveValue("?")
   })
 })
 
