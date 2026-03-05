@@ -372,6 +372,19 @@ Reasoning effort:
 - There is **no separate “reasoning effort” control in the composer**.
 - If you want users to choose between efforts, define distinct model variants (distinct `model_key`s). Those variants appear as separate choices in the model picker.
 
+### Statistics page (token usage)
+Add a dedicated, user-facing page that shows the signed-in user’s token usage across all conversations.
+
+- **Route**: `GET /statistics`
+- **Access**: requires authentication
+- **Data** (Phase 0.5: token-only):
+  - per-user totals + by_model + by_day (grouped by `provider_key` + `model_ref`)
+  - optional “global by provider” totals (all users) for owners/admins; Phase 0 can show it unconditionally if desired
+- **UI (minimal)**:
+  - totals cards: calls, input_tokens, output_tokens, total_tokens, cache_hit_rate
+  - table: by provider + model_ref
+  - table: by day
+
 ---
 
 ## Usage statistics (tokens)
@@ -459,6 +472,10 @@ Deliverables:
 - Usage stats:
   - user usage stats aggregates across conversations and groups by `model_ref`
   - global provider totals aggregate across users (even if only 1 user exists today)
+
+- Statistics page:
+  - renders for a signed-in user
+  - shows non-empty totals/tables when usage exists
 
 ### E2E (Playwright) — optional but recommended
 - “Select model in composer” smoke
@@ -559,6 +576,14 @@ OpenRouter capabilities are not reliable unless explicitly curated. Our default 
 - [ ] Add tests:
   - per-user by-model stats
   - global by-provider stats
+
+### Task group I: Statistics page
+- [ ] Add `StatisticsController#show` (or `#index`) that fetches per-user stats and renders totals + tables
+- [ ] Add route: `GET /statistics`
+- [ ] Add a navigation entry (e.g. in `NavigationHelper` / layout) to reach the page
+- [ ] Add an integration test:
+  - requires authentication
+  - renders totals and by_model table when usage exists
 
 ---
 
