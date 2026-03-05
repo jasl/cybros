@@ -11,17 +11,20 @@ Phase 2 ── Demo Agents ────────── "Prove the architectur
 Phase 3 ── Observability ──────── "Understand and improve agents"
 ```
 
+## Status Legend (Tracking)
+
+- [x] Done (implemented + verified in code/tests)
+- [ ] Not done / not yet verified
+
+Last audit: **2026-03-05**
+
 ## Design Strategy
 
-**Cybros is the control plane**: Conduits API (territories, facilities, directives) lives in Cybros. Nexus polls Cybros directly. Mothership is a lightweight prototype/testbed — when protocol or data format changes are needed, prototype in Mothership first (smaller codebase, faster iteration), verify with Nexus, then port the proven design into Cybros.
-
-**Agent programs from day one**: Even Phase 0 uses the agent program file structure (read locally). This ensures the architecture doesn't need to be retrofitted later.
-
-**TavernKit streaming pattern**: Dual-channel architecture adopted wholesale — ActionCable for ephemeral events (typing, stream chunks), Turbo Streams for persistent DOM updates (message creation).
-
-**Gradual AgentCore externalization**: Phase 0 wraps existing AgentCore with data-driven `PromptConfig`. Phase 1 adds hooks that can override the config. No big-bang rewrite.
-
-**Breaking changes are welcome**: The codebase can be destructively modified to achieve the correct design. No backward compatibility burden.
+- [x] **Cybros is the control plane**: Conduits API (territories, facilities, directives) lives in Cybros. Nexus polls Cybros directly. Mothership is a lightweight prototype/testbed — when protocol or data format changes are needed, prototype in Mothership first (smaller codebase, faster iteration), verify with Nexus, then port the proven design into Cybros.
+- [x] **Agent programs from day one**: Even Phase 0 uses the agent program file structure (read locally). This ensures the architecture doesn't need to be retrofitted later.
+- [x] **TavernKit streaming pattern**: Dual-channel architecture adopted wholesale — ActionCable for ephemeral events (typing, stream chunks), Turbo Streams for persistent DOM updates (message creation).
+- [x] **Gradual AgentCore externalization**: Phase 0 wraps existing AgentCore with data-driven `PromptConfig`. Phase 1 adds hooks that can override the config. No big-bang rewrite.
+- [x] **Breaking changes are welcome**: The codebase can be destructively modified to achieve the correct design. No backward compatibility burden.
 
 ---
 
@@ -33,15 +36,15 @@ Phase 3 ── Observability ──────── "Understand and improve ag
 
 Based on Fizzy's patterns with Discourse-inspired settings:
 
-- **Account**: Phase 0 uses a **single default account** (no URL multi-tenancy). Holds global configuration as JSONB `settings` column (LLM defaults, feature flags). Future phases may add real tenancy.
-- **Identity**: Global user identity (**email + `password_digest`**). Single identity created via first-run setup wizard.
-- **User**: Phase 0 user record for the identity. Belongs to Identity. A `role` field may exist, but Phase 0 assumes a single "owner" user.
-- **Session**: Cookie-based (signed, HTTP-only, SameSite: lax). Modeled after Fizzy's session pattern.
-- **Current**: `ActiveSupport::CurrentAttributes` — `Current.user`, `Current.identity`, `Current.account`, `Current.session`.
-- **LlmProvider**: API endpoint configuration. Fields: `name`, `base_url`, `api_key` (encrypted), `api_format` (default: "openai"), `headers` (JSONB), `model_allowlist` (string array, required — provider only serves models explicitly listed), `priority` (integer, default: 0 — higher wins when multiple providers serve the same model). Modeled after vibe_tavern's LlmProvider, simplified (no LlmModel/LlmPreset tiers). UI includes a "Fetch Models" button that queries the provider's `/v1/models` endpoint to help populate the allowlist (not all providers support this).
-- **Conversation**: App-facing aggregate root for chat. Internally backed by the DAG engine, but controllers/channels/views must only use `Conversation` APIs (no direct `DAG::*` calls). Belongs to `AgentProgram`. Supports archive (soft-delete) and hard-delete.
-- **ConversationRun**: State machine (queued → running → succeeded/failed/canceled) tracking each agent execution. Modeled after TavernKit's pattern.
-- **AgentProgram**: Points to a local directory containing agent program files (Phase 0) or a Nexus facility (Phase 1). Fields: `name`, `description`, `profile_source`, `local_path`, `args` (JSONB), `active_persona`.
+- [x] **Account**: Phase 0 uses a **single default account** (no URL multi-tenancy). Holds global configuration as JSONB `settings` column (LLM defaults, feature flags). Future phases may add real tenancy.
+- [x] **Identity**: Global user identity (**email + `password_digest`**). Single identity created via first-run setup wizard.
+- [x] **User**: Phase 0 user record for the identity. Belongs to Identity. A `role` field may exist, but Phase 0 assumes a single "owner" user.
+- [x] **Session**: Cookie-based (signed, HTTP-only, SameSite: lax). Modeled after Fizzy's session pattern.
+- [x] **Current**: `ActiveSupport::CurrentAttributes` — `Current.user`, `Current.identity`, `Current.account`, `Current.session`.
+- [x] **LlmProvider**: API endpoint configuration. Fields: `name`, `base_url`, `api_key` (encrypted), `api_format` (default: "openai"), `headers` (JSONB), `model_allowlist` (string array, required — provider only serves models explicitly listed), `priority` (integer, default: 0 — higher wins when multiple providers serve the same model). Modeled after vibe_tavern's LlmProvider, simplified (no LlmModel/LlmPreset tiers). UI includes a "Fetch Models" button that queries the provider's `/v1/models` endpoint to help populate the allowlist (not all providers support this).
+- [x] **Conversation**: App-facing aggregate root for chat. Internally backed by the DAG engine, but controllers/channels/views must only use `Conversation` APIs (no direct `DAG::*` calls). Belongs to `AgentProgram`. Supports archive (soft-delete) and hard-delete.
+- [x] **ConversationRun**: State machine (queued → running → succeeded/failed/canceled) tracking each agent execution. Modeled after TavernKit's pattern.
+- [x] **AgentProgram**: Points to a local directory containing agent program files (Phase 0) or a Nexus facility (Phase 1). Fields: `name`, `description`, `profile_source`, `local_path`, `args` (JSONB), `active_persona`.
 
 Development: `db/seeds.rb` creates default Account, Identity, User, LlmProvider (from .env), and bundled AgentPrograms.
 
@@ -71,16 +74,16 @@ Seeds read these and create the corresponding LlmProvider record.
 
 Adopt TavernKit's proven streaming architecture:
 
-- **Conversation list**: Sidebar with conversation titles, ordered by last activity.
-- **Message stream**: Messages rendered from `Conversation`'s message/transcript projection (DAG-backed internally). Markdown rendering.
-- **Input**: Text input with send button. Keyboard shortcuts.
-- **Streaming**: ActionCable `ConversationChannel` for ephemeral events:
-  - `typing_start` / `typing_stop`: Show/hide typing indicator
-  - `stream_chunk`: Update typing indicator with accumulated content
-  - `stream_complete`: Signal that streaming is done
-- **Message creation**: Turbo Stream `append` when `Conversation#append_user_message!` creates the user message + the paired placeholder assistant bubble. Durable message updates converge via Turbo Stream `replace` when the assistant message becomes terminal (or swipes/regenerates).
-- **Error handling**: ConversationRun failure → show error in UI, allow retry.
-- **Stuck detection**: Heartbeat timeout → show warning, allow cancel.
+- [x] **Conversation list**: Sidebar with conversation titles, ordered by last activity.
+- [x] **Message stream**: Messages rendered from `Conversation`'s message/transcript projection (DAG-backed internally). Markdown rendering.
+- [x] **Input**: Text input with send button. Keyboard shortcuts.
+- [ ] **Streaming**: ActionCable `ConversationChannel` for ephemeral events (implemented via stable `node_event` / `node_state` envelope in Phase 0.5)
+  - [ ] `typing_start` / `typing_stop`: Show/hide typing indicator
+  - [ ] `stream_chunk`: Update typing indicator with accumulated content
+  - [ ] `stream_complete`: Signal that streaming is done
+- [x] **Message creation**: Turbo Stream `append` when `Conversation#append_user_message!` creates the user message + the paired placeholder assistant bubble. Durable message updates converge via Turbo Stream `replace` when the assistant message becomes terminal (or swipes/regenerates).
+- [x] **Error handling**: ConversationRun failure → show error in UI, allow retry.
+- [x] **Stuck detection**: Heartbeat timeout → show warning, allow cancel.
 
 ### Agent Execution Pipeline
 
@@ -108,19 +111,19 @@ ConversationRunJob:
 
 These tools run inside the Cybros process, no Nexus required:
 
-- `memory_search`, `memory_store`, `memory_forget` (pgvector, existing)
-- `skills_list`, `skills_load`, `skills_read_file` (existing)
-- `web_search`, `web_fetch` (HTTP calls from Cybros process)
+- [x] `memory_search`, `memory_store`, `memory_forget` (pgvector, existing)
+- [x] `skills_list`, `skills_load`, `skills_read_file` (existing)
+- [ ] `web_search`, `web_fetch` (HTTP calls from Cybros process)
 
 ### UI Skeleton
 
 Build the full UI shell in Phase 0, even if some sections are empty:
 
-- **Navigation**: Sidebar with sections: Conversations, Agents, Settings
-- **Conversations page**: List + chat view. Support delete and archive (soft-delete).
-- **Agents page**: List of available agent programs. Create new agent from bundled profile (UI-driven). Read-only detail view in Phase 0 (full editing in Phase 1).
-- **Settings page**: LLM providers CRUD (with "Fetch Models" button), Account settings, User profile
-- **Mock LLM**: Development-only controller (ported from vibe_tavern) at `/mock_llm/v1/`
+- [x] **Navigation**: Sidebar with sections: Conversations, Agents, Settings
+- [ ] **Conversations page**: List + chat view. Support delete and archive (soft-delete).
+- [x] **Agents page**: List of available agent programs. Create new agent from bundled profile (UI-driven). Read-only detail view in Phase 0 (full editing in Phase 1).
+- [x] **Settings page**: LLM providers CRUD (with "Fetch Models" button), Account settings, User profile
+- [x] **Mock LLM**: Development-only controller (ported from vibe_tavern) at `/mock_llm/v1/`
 
 > Note: Several ChatGPT-grade UI/UX details (three-pane responsive shell, strict message ordering under rapid interactions, typing indicator/retry/cancel UX, and improved streaming observability) are intentionally deferred to **Phase 0.5** to keep Phase 0 focused on end-to-end plumbing.
 
@@ -141,18 +144,18 @@ default-assistant/
 
 ### Acceptance Criteria
 
-- [ ] First-run setup: open browser → create Identity + User → land on conversations page
-- [ ] Create conversation: select agent → new conversation appears
-- [ ] Send message: type → send → see typing indicator → streaming response appears
-- [ ] Multi-turn: conversation history preserved, context passed to LLM correctly
-- [ ] Tool calling: agent uses memory_search/store, results visible in conversation
-- [ ] Agent behavior: changing AGENT.md or SOUL.md files changes agent behavior on next turn
-- [ ] ConversationRun lifecycle: can see run status (running/succeeded/failed), retry on failure
-- [ ] LLM Provider management: add/edit/delete providers from Settings UI
-- [ ] Mock LLM: tests can run against mock endpoint without real API keys
+- [x] First-run setup: open browser → create Identity + User → land on conversations page
+- [ ] Create conversation: select agent → new conversation appears (currently defaults to a profile; selection UI deferred)
+- [x] Send message: type → send → see typing indicator → streaming response appears
+- [x] Multi-turn: conversation history preserved, context passed to LLM correctly
+- [ ] Tool calling: agent uses memory_search/store, results visible in conversation (verify end-to-end UI)
+- [ ] Agent behavior: changing AGENT.md or SOUL.md files changes agent behavior on next turn (verify end-to-end)
+- [x] ConversationRun lifecycle: can see run status (running/succeeded/failed), retry on failure
+- [x] LLM Provider management: add/edit/delete providers from Settings UI
+- [x] Mock LLM: tests can run against mock endpoint without real API keys
 - [ ] Conversation lifecycle: can archive (soft-delete) and delete conversations
-- [ ] Agent creation from UI: create new agent from bundled profile
-- [ ] Development: `bin/setup` + `bin/dev` + seeds → working instance with default agent
+- [x] Agent creation from UI: create new agent from bundled profile
+- [ ] Development: `bin/setup` + `bin/dev` + seeds → working instance with default agent (verify on fresh machine)
 
 ---
 
@@ -162,9 +165,9 @@ default-assistant/
 
 ### Guiding principles
 
-- **One UI shell, many surfaces**: Web UI today; other surfaces (Telegram bot, etc.) later should reuse the same *conversation event stream* and *run state model*.
-- **Componentize the hard parts**: message list rendering, streaming bubble, indicator state machine, reconnect/resume logic, and event ordering must be isolated and testable.
-- **Server-push by default**: Phase 0.5 should remove “per-connection 0.25s polling” as the primary mechanism. Keep polling only as a low-frequency fallback.
+- [x] **One UI shell, many surfaces**: Web UI today; other surfaces (Telegram bot, etc.) later should reuse the same *conversation event stream* and *run state model*.
+- [x] **Componentize the hard parts**: message list rendering, streaming bubble, indicator state machine, reconnect/resume logic, and event ordering must be isolated and testable.
+- [x] **Server-push by default**: Phase 0.5 should remove “per-connection 0.25s polling” as the primary mechanism. Keep polling only as a low-frequency fallback.
 
 ### Milestones (deliverables)
 
@@ -172,49 +175,49 @@ default-assistant/
 
 Prepare **three Rails layouts** so each surface has a clean, consistent UI skeleton:
 
-- **`landing` layout** (unauthenticated):
-  - Update the current **Home page** to become the product landing page (visual polish + clear CTA).
-  - Keep it independent from the authenticated app shell (no 3-pane constraint).
-- **`agent` layout** (authenticated chat surface):
-  - Used by the chat UI (the “left / center / right” 3-column layout described below).
-  - Optimized for conversation flows and inspection/debug context.
-- **`settings` layout** (authenticated settings surface):
-  - Used by **`/settings`** and **`/system/settings`** pages.
-  - Optimized for forms, tables, CRUD workflows; can be simpler than the chat surface (no always-on inspector).
+- [x] **`landing` layout** (unauthenticated)
+  - [x] Home page is a product landing page with a clear CTA
+  - [x] Independent from authenticated app shell (no 3-pane constraint)
+- [x] **`agent` layout** (authenticated chat surface)
+  - [x] Used by the chat UI (the “left / center / right” 3-column layout described below)
+  - [x] Optimized for conversation flows and inspection/debug context
+- [x] **`settings` layout** (authenticated settings surface)
+  - [x] Used by **`/settings`** and **`/system/settings`** pages
+  - [x] Optimized for forms/tables/CRUD workflows (can be simpler than the chat surface)
 
 #### 0.5-A — Agent layout: App Shell (3-pane, responsive)
 
 Build a **three-pane layout** (ChatGPT-inspired) used by authenticated **agent surfaces** (not the landing page):
 
-- **Left sidebar (collapsible)**:
-  - Primary nav: Dashboard / Conversations / Agents / Settings
-  - Conversation list (recency grouping + search)
-  - Collapsed mode: icons only
-- **Main pane**:
-  - Route content (dashboard cards, chat, settings forms)
-- **Right pane (on-demand)**:
-  - Inspector/Context drawer (selected message, run status, provider/model, tool calls, debug)
-  - Opens per selection or route; dismissible
+- [x] **Left sidebar (collapsible)**
+  - [x] Primary nav: Dashboard / Conversations / Agents / Settings (Settings via account dropdown)
+  - [ ] Conversation list (recency grouping + search) (grouping TBD; search exists)
+  - [x] Collapsed mode: icons only
+- [x] **Main pane**
+  - [x] Route content (dashboard cards, chat, settings forms)
+- [x] **Right pane (on-demand)**
+  - [x] Inspector/Context drawer (selected message, run status, provider/model, tool calls, debug)
+  - [x] Opens per selection or route; dismissible
 
 **Responsive acceptance**:
-- **Mobile**: left sidebar as drawer; right pane as modal/drawer; composer always reachable.
-- **Tablet**: left collapsible; right overlays/docks depending on width.
-- **Desktop**: full three-pane; optional resize handles.
+- [ ] **Mobile**: left sidebar as drawer; right pane as modal/drawer; composer always reachable.
+- [ ] **Tablet**: left collapsible; right overlays/docks depending on width.
+- [ ] **Desktop**: full three-pane; optional resize handles.
 
 #### 0.5-B — Pages (Dashboard + `/settings` + `/system/settings`)
 
 Add top-level pages across the layouts (content can be minimal, but layout + routing must be real):
 
-- **Dashboard**:
-  - Recent conversations
-  - Status cards (provider connectivity, model allowlist health, last run summary)
-  - Quick actions
-- **`/settings` (Personal settings)**:
-  - Profile (email/password change)
-  - Sessions (sign out all)
-- **`/system/settings` (System settings, in `System` namespace)**:
-  - LLM providers (existing CRUD, improved inline validation UX)
-  - Agent programs management (existing, plus browsing/search)
+- [x] **Dashboard**
+  - [x] Recent conversations
+  - [ ] Status cards (provider connectivity, model allowlist health, last run summary) (connectivity/health TBD; last run summary exists)
+  - [x] Quick actions
+- [x] **`/settings` (Personal settings)**
+  - [x] Profile (email/password change)
+  - [x] Sessions (sign out all)
+- [x] **`/system/settings` (System settings, in `System` namespace)**
+  - [x] LLM providers (CRUD + inline validation for headers JSON)
+  - [x] Agent programs management (create + browse/show)
 
 #### 0.5-C — Chat transport: server-push + connectivity (reference: tavern_kit/playground)
 
@@ -222,167 +225,164 @@ Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes).
 
 This section is written as a **Conversation façade API checklist** so the App never depends on DAG internals.
 
-- **Durable HTTP truth (Turbo Streams)**:
-  - **`POST /conversations/:conversation_id/messages`** (`ConversationMessagesController#create`)
-    - Calls: `Conversation#append_user_message!(content:)` (or `append_user_message_and_project!` for immediate projection)
-    - Returns: `text/vnd.turbo-stream.html`
-      - `append` user bubble + paired agent placeholder bubble
-      - `remove` empty state
-  - **`GET /conversations/:conversation_id/messages`** (`ConversationMessagesController#index`)
-    - Calls: `Conversation#message_page(limit:, before_message_id:, after_message_id:, mode:)`
-    - Returns: `text/vnd.turbo-stream.html` with `prepend`/`append` + “load more” cursor update
-  - **`GET /conversations/:conversation_id/messages/refresh?node_id=...`** (`ConversationMessagesController#refresh`)
-    - Calls: `Conversation#message_for_node_id(node_id:, mode:)`
-    - Returns: `replace` for `message_<node_id>` (best-effort convergence when realtime delivery is missed)
+- [x] **Durable HTTP truth (Turbo Streams)**
+  - [x] **`POST /conversations/:conversation_id/messages`** (`ConversationMessagesController#create`)
+    - [x] Calls: `Conversation#append_user_message!(content:)` (or `append_user_message_and_project!` for immediate projection)
+    - [x] Returns: `text/vnd.turbo-stream.html`
+      - [x] `append` user bubble + paired agent placeholder bubble
+      - [x] `remove` empty state
+  - [x] **`GET /conversations/:conversation_id/messages`** (`ConversationMessagesController#index`)
+    - [x] Calls: `Conversation#message_page(limit:, before_message_id:, after_message_id:, mode:)`
+    - [x] Returns: `text/vnd.turbo-stream.html` with `prepend`/`append` + “load more” cursor update
+  - [x] **`GET /conversations/:conversation_id/messages/refresh?node_id=...`** (`ConversationMessagesController#refresh`)
+    - [x] Calls: `Conversation#message_for_node_id(node_id:, mode:)`
+    - [x] Returns: `replace` for `message_<node_id>` (best-effort convergence when realtime delivery is missed)
 
-- **Ephemeral realtime (ActionCable)**:
-  - Channel: **`ConversationChannel`**
-    - Subscribe params:
-      - required: `conversation_id`
-      - optional: `node_id` (defaults to `Conversation#chat_head_node_id`)
-      - optional: `cursor` (resume point)
-    - On subscribe:
-      - calls `Conversation#cursor_for_existing_output(node_id)` to avoid replay duplication when preview already exists
-      - transmits missed events as a batch (see `replay_batch` below)
+- [x] **Ephemeral realtime (ActionCable)**
+  - [x] Channel: **`ConversationChannel`**
+    - [x] Subscribe params:
+      - [x] required: `conversation_id`
+      - [x] optional: `node_id` (defaults to `Conversation#chat_head_node_id`)
+      - [x] optional: `cursor` (resume point)
+    - [x] On subscribe:
+      - [x] calls `Conversation#cursor_for_existing_output(node_id)` to avoid replay duplication when preview already exists
+      - [x] transmits missed events as a batch (see `replay_batch` below)
 
-  - Stable event envelope (usable by other surfaces, e.g. Telegram):
-    - `type` (string), `conversation_id`, `turn_id`, `node_id`, `event_id`, `kind`, `text`, `payload`, `occurred_at`
-    - **Event types**:
-      - `node_event`: streaming/progress/log events for a single node
-      - `node_state`: node state transitions (used for Stop/Retry UI convergence)
-      - `replay_batch`: `{ type: "replay_batch", events: [<node_event>...] }`
+  - [x] Stable event envelope (usable by other surfaces, e.g. Telegram)
+    - [x] `type` (string), `conversation_id`, `turn_id`, `node_id`, `event_id`, `kind`, `text`, `payload`, `occurred_at`
+    - [x] **Event types**:
+      - [x] `node_event`: streaming/progress/log events for a single node
+      - [x] `node_state`: node state transitions (used for Stop/Retry UI convergence)
+      - [x] `replay_batch`: `{ type: "replay_batch", events: [<node_event>...] }`
 
-  - `node_event.kind` (minimum set):
-    - `output_delta` (append-only streaming text)
-    - `output_compacted` (marker event; if `text` blank, use durable preview via `Conversation#output_preview_for_node_id`)
-    - `progress` (phase/progress line)
-    - `log` (structured log line)
+  - [x] `node_event.kind` (minimum set)
+    - [x] `output_delta` (append-only streaming text)
+    - [x] `output_compacted` (marker event; if `text` blank, use durable preview via `Conversation#output_preview_for_node_id`)
+    - [x] `progress` (phase/progress line)
+    - [x] `log` (structured log line)
 
-- **Connectivity**:
-  - Reconnect, resume-from-cursor, and dedupe without duplicating text (cursor is stored per conversation and advanced by event id).
-  - Explicit “active run node” tracking (do not infer from “latest leaf”).
-- **Ordering invariants** (non-negotiable):
-  - Rapid sends create distinct user bubbles **in order**.
-  - Each user message pairs to the correct assistant bubble.
-  - Out-of-order arrival must not reorder UI; reconcile by `(turn_id, node_id, event_id)`.
+- [ ] **Connectivity**
+  - [x] Reconnect, resume-from-cursor, and dedupe without duplicating text (cursor advanced by event id)
+  - [ ] Explicit “active run node” tracking (do not infer from “latest leaf”)
+- [x] **Ordering invariants** (non-negotiable)
+  - [x] Rapid sends create distinct user bubbles **in order**
+  - [x] Each user message pairs to the correct assistant bubble
+  - [x] Out-of-order arrival must not reorder UI; reconcile by `(turn_id, node_id, event_id)`
 
 #### 0.5-D — Chat UX: indicator + error/retry/cancel (state machine)
 
-- **Streaming indicator (UI state machine)**:
-  - Anchored to the currently streaming assistant bubble (`data-role="agent-bubble"` + `data-node-id`).
-  - Driven by `node_event` + `node_state`:
-    - `idle` → `streaming` (first `output_delta`)
-    - `streaming` → `completed` (terminal state + durable replace)
-    - `streaming` → `errored` / `stopped` / `rejected` / `skipped` (terminal state + durable replace)
+- [x] **Streaming indicator (UI state machine)**
+  - [x] Anchored to the currently streaming assistant bubble (`data-role="agent-bubble"` + `data-node-id`)
+  - [x] Driven by `node_event` + `node_state` (terminal state hides controls and converges via Turbo replace/refresh)
 
-- **User actions must map to Conversation façade APIs**:
-  - **Stop/cancel**:
-    - Endpoint: `POST /conversations/:id/stop` (or equivalent)
-    - Calls: `Conversation#stop_node!(node_id:, reason:)`
-    - UI: hide Stop once terminal; show reason on stopped nodes
-  - **Retry (same conversation/lane)**:
-    - Endpoint: `POST /conversations/:id/retry` (or equivalent)
-    - Calls: `Conversation#retry_agent_node!(failed_node_id:)`
-    - Output: returns new agent node id (queued) and relies on Turbo Streams + realtime for UI convergence
-    - Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_limit_reached`, `retry_already_queued`, `missing_parent`
-  - **Regenerate (swipe semantics)**:
-    - Calls: `Conversation#regenerate!(agent_node_id:)`
-      - tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
-      - non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
-  - **Swipe selection**:
-    - Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
-  - **Branch from a message**:
-    - Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
+- [ ] **User actions (end-to-end) map to Conversation façade APIs**
+  - [x] **Stop/cancel** (endpoint + UI)
+    - [x] Endpoint: `POST /conversations/:id/stop`
+    - [x] Calls: `Conversation#stop_node!(node_id:, reason:)`
+    - [x] UI: hide Stop once terminal; show reason on stopped nodes
+  - [x] **Retry (same conversation/lane)** (endpoint + UI)
+    - [x] Endpoint: `POST /conversations/:id/retry`
+    - [x] Calls: `Conversation#retry_agent_node!(failed_node_id:)`
+    - [x] Output: returns new agent node id (queued) and relies on Turbo Streams + realtime for UI convergence
+    - [x] Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_limit_reached`, `retry_already_queued`, `missing_parent`
+  - [ ] **Regenerate (swipe semantics)** (server API exists; UI actions TBD)
+    - [ ] Calls: `Conversation#regenerate!(agent_node_id:)`
+      - [ ] tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
+      - [ ] non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
+  - [ ] **Swipe selection** (server API exists; UI actions TBD)
+    - [ ] Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
+  - [ ] **Branch from a message** (server API exists; UI actions TBD)
+    - [ ] Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
 
-- **Stuck detection**:
-  - Heartbeat timeout → show warning + allow stop/retry.
-  - Implementation detail: controller may periodically reconcile from durable truth via `messages/refresh` if realtime delivery is missed.
-- **TavernKit “production feel” parity (follow-up)**:
-  - Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent).
-  - Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent).
-  - Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration).
+- [x] **Stuck detection**
+  - [x] Heartbeat timeout → show warning + allow stop/retry
+  - [x] Best-effort convergence via `messages/refresh` if realtime delivery is missed
+- [ ] **TavernKit “production feel” parity (follow-up)**
+  - [ ] Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent)
+  - [ ] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
+  - [ ] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
 
 #### 0.5-E — Observability & debuggability
 
-- **Rate-limited warnings** (no silent stalls).
-- Structured logs for: subscribe, reconnect, cursor advance, event counts by kind.
-- Dev-only debug overlay for stream state (cursor, node id, run state).
+- [x] **Rate-limited warnings** (no silent stalls)
+- [ ] Structured logs for: subscribe, reconnect, cursor advance, event counts by kind (partial; expand coverage)
+- [x] Dev-only debug overlay for stream state (cursor, node id, run state)
 
 #### 0.5-G — UI framework stabilization backlog (non-blocking)
 
-- **Turbo Stream buffering performance**:
-  - Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers).
-  - Keep eviction (TTL/max-size) to prevent unbounded retention.
-- **Roadmap/documentation consistency**:
-  - Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals.
+- [ ] **Turbo Stream buffering performance**
+  - [ ] Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers)
+  - [ ] Keep eviction (TTL/max-size) to prevent unbounded retention
+- [ ] **Roadmap/documentation consistency**
+  - [ ] Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals
 
 #### 0.5-F — Authorization + Pagination Hardening
 
-- **Owner-based authorization**:
-  - Conversations are owned by `User` (no multi-tenant `Account` scoping yet).
-  - Controllers and ActionCable must enforce ownership (no cross-user access).
-- **Optional E2E (Playwright)**:
-  - Add an optional Playwright test suite (`bin/e2e`) for end-to-end UI verification.
-  - Keep it out of `bin/ci` by default (dev-only / on-demand).
-- **Cursor pagination**:
-  - Conversations index + sidebar use cursor pagination (UUIDv7 keyset).
-  - Messages list supports: initial \"recent\" load + \"load older\" cursor paging.
-- **Replay batching**:
-  - Reconnect replay transmits missed events as a single batch payload (avoid 100–200 per reconnect).
-- **Broadcast error handling**:
-  - Broadcast failures must not be silently swallowed; add rate-limited warn logs.
-- **Request throttling**:
-  - Add lightweight per-user throttling for high-frequency endpoints (messages create, stop, retry) to prevent abuse/DoS.
+- [x] **Owner-based authorization**
+  - [x] Conversations are owned by `User` (no multi-tenant `Account` scoping yet)
+  - [x] Controllers and ActionCable enforce ownership (no cross-user access)
+- [x] **Optional E2E (Playwright)**
+  - [x] Optional Playwright test suite exists (`bin/e2e`)
+  - [x] Kept out of `bin/ci` by default (dev-only / on-demand)
+- [x] **Cursor pagination**
+  - [x] Conversations index + sidebar use cursor pagination (UUIDv7 keyset)
+  - [x] Messages list supports: initial "recent" load + "load older" cursor paging
+- [x] **Replay batching**
+  - [x] Reconnect replay transmits missed events as a single batch payload (avoid 100–200 per reconnect)
+- [x] **Broadcast error handling**
+  - [x] Broadcast failures are rate-limited and logged (not silently swallowed)
+- [x] **Request throttling**
+  - [x] Lightweight per-user throttling for high-frequency endpoints (messages create, stop, retry)
 
 ### Edge/extreme test matrix (required)
 
 Add system + integration tests that cover:
 
-- **Rapid sends**: 3–10 messages quickly; assert ordering + pairing.
-- **Reconnect**: disconnect/reconnect mid-stream; resume without duplication.
-- **Compaction**: deltas compacted mid-stream; UI remains correct.
-- **Out-of-order events**: simulate reordering; UI stable by reconciliation keys.
-- **Provider/model mismatch**: clear UX when no provider supports preferred models.
-- **Invalid provider config**: invalid headers JSON is 422 with inline errors (no 500).
-- **Long outputs**: large responses; UI remains responsive and bounded.
+- [x] **Rapid sends**: 3–10 messages quickly; assert ordering + pairing.
+- [x] **Reconnect**: disconnect/reconnect mid-stream; resume without duplication.
+- [ ] **Compaction**: deltas compacted mid-stream; UI remains correct.
+- [x] **Out-of-order events**: simulate reordering; UI stable by reconciliation keys.
+- [ ] **Provider/model mismatch**: clear UX when no provider supports preferred models.
+- [x] **Invalid provider config**: invalid headers JSON is 422 with inline errors (no 500).
+- [ ] **Long outputs**: large responses; UI remains responsive and bounded.
 
 ### Acceptance Criteria
 
 > Project is early-stage. Until the first external beta, **destructive changes are allowed** and plans may evolve; optimize for correctness and product shape over backward compatibility.
 
-- [ ] **Rails layouts**:
-  - [ ] `landing` / `agent` / `settings` layouts exist
-  - [ ] **Home** uses `landing`
-  - [ ] **Dashboard + Conversations + Agents** use `agent`
-  - [ ] **`/settings` + `/system/settings`** use `settings`
-- [ ] **App shell (agent layout)**: three-pane layout exists and is used by authenticated agent surfaces
+- [x] **Rails layouts**:
+  - [x] `landing` / `agent` / `settings` layouts exist
+  - [x] **Home** uses `landing`
+  - [x] **Dashboard + Conversations + Agents** use `agent`
+  - [x] **`/settings` + `/system/settings`** use `settings`
+- [x] **App shell (agent layout)**: three-pane layout exists and is used by authenticated agent surfaces
 - [ ] **Responsive**:
-  - [ ] Mobile: left sidebar is a drawer; right pane is a modal/drawer; composer always reachable
-  - [ ] Tablet: left collapsible; right overlays/docks appropriately
-  - [ ] Desktop: full three-pane; navigation + inspector usable
-- [ ] **Dashboard**: route exists and renders meaningful status cards (can be minimal content)
-- [ ] **`/settings`**: profile + session management routes exist (can be minimal content)
-- [ ] **`/system/settings`**: system settings live under `System` namespace and are usable (LLM providers + agent programs management; existing CRUD integrated)
-- [ ] **Chat transport (server-push)**:
-  - [ ] Server-push is the primary streaming mechanism (polling only low-frequency fallback)
-  - [ ] Stable event envelope exists and is surface-agnostic (usable by future Telegram bot)
-  - [ ] Reconnect/resume-from-cursor works without duplication
-  - [ ] Active run node tracking is explicit (no “latest leaf” inference)
-- [ ] **Ordering invariants**:
-  - [ ] Rapid sends preserve user bubble order
-  - [ ] Each user message pairs to the correct assistant response bubble
-  - [ ] Out-of-order event arrival does not reorder UI; reconciliation key(s) enforced
-- [ ] **Indicator + controls**:
-  - [ ] Typing/streaming indicator anchored to the streaming assistant bubble
-  - [ ] Inline error presentation, retry, cancel/stop generation, and stuck detection all work end-to-end
-- [ ] **Observability**:
-  - [ ] Rate-limited warnings/logs prevent silent stalls
-  - [ ] Dev-only debug overlay shows stream state (cursor/node/run state)
-- [ ] **Authorization & pagination**:
-  - [ ] Cross-user conversation access is denied (controllers + ActionCable)
-  - [ ] Conversations index is cursor-paginated
-  - [ ] Message history paging works (load older via Turbo Stream)
-  - [ ] Replay batching is used on reconnect
+  - [ ] Mobile: left sidebar is a drawer; right pane is a modal/drawer; composer always reachable (manual verify)
+  - [ ] Tablet: left collapsible; right overlays/docks appropriately (manual verify)
+  - [ ] Desktop: full three-pane; navigation + inspector usable (manual verify)
+- [x] **Dashboard**: route exists and renders meaningful status cards (can be minimal content)
+- [x] **`/settings`**: profile + session management routes exist (can be minimal content)
+- [x] **`/system/settings`**: system settings live under `System` namespace and are usable (LLM providers + agent programs management; existing CRUD integrated)
+- [x] **Chat transport (server-push)**:
+  - [x] Server-push is the primary streaming mechanism (polling only low-frequency fallback)
+  - [x] Stable event envelope exists and is surface-agnostic (usable by future Telegram bot)
+  - [x] Reconnect/resume-from-cursor works without duplication
+  - [ ] Active run node tracking is explicit (no “latest leaf” inference) (verify explicit server-side source of truth)
+- [x] **Ordering invariants**:
+  - [x] Rapid sends preserve user bubble order
+  - [x] Each user message pairs to the correct assistant response bubble
+  - [x] Out-of-order event arrival does not reorder UI; reconciliation key(s) enforced
+- [x] **Indicator + controls**:
+  - [x] Typing/streaming indicator anchored to the streaming assistant bubble
+  - [x] Inline error presentation, retry, cancel/stop generation, and stuck detection all work end-to-end
+- [x] **Observability**:
+  - [x] Rate-limited warnings/logs prevent silent stalls
+  - [x] Dev-only debug overlay shows stream state (cursor/node/run state)
+- [x] **Authorization & pagination**:
+  - [x] Cross-user conversation access is denied (controllers + ActionCable)
+  - [x] Conversations index is cursor-paginated
+  - [x] Message history paging works (load older via Turbo Stream)
+  - [x] Replay batching is used on reconnect
 - [ ] **Tests**: the edge/extreme matrix above is covered by system/integration tests and is stable in CI
 - [ ] **Handoff quality gate (required before acceptance)**:
   - [ ] **Smoke tests**: add a system test suite that visits each top-level page (Home, Dashboard, Conversations, Agents, `/settings`, `/system/settings`) and asserts it loads (no routing typos, no ERB syntax/render exceptions)
@@ -398,31 +398,31 @@ Add system + integration tests that cover:
 
 Port the Conduits control plane from Mothership into Cybros. Nexus polls Cybros directly.
 
-- **Conduits controllers in Cybros**: Port Mothership's Conduits namespace (territories, facilities, directives, policies) into Cybros. Reuse the existing models, services, and API design. Adapt for Cybros's Account model and auth.
-- **Conduits API endpoints** (served by Cybros):
-  - `POST /conduits/v1/polls` — Nexus claims directives
-  - `POST /conduits/v1/territories/enroll` — Register territory
-  - `POST /conduits/v1/territories/heartbeat` — Territory presence
-  - `POST /conduits/v1/directives/:id/started` — Report execution start
-  - `POST /conduits/v1/directives/:id/heartbeat` — Renew lease
-  - `POST /conduits/v1/directives/:id/log_chunks` — Upload stdout/stderr
-  - `POST /conduits/v1/directives/:id/finished` — Report completion
-- **Internal directive creation**: AgentCore tool calls create directives directly in the Cybros database (no HTTP round-trip to an external service).
-- **Directive execution flow**:
-  1. AgentCore tool call → Cybros creates directive record in DB
-  2. Nexus polls Cybros, claims directive
-  3. Nexus executes command in facility (host driver)
-  4. Nexus reports result to Cybros
-  5. ConversationRunJob polls the directive record for completion
-- **ActiveJob orchestration**: ConversationRunJob manages directive creation and polls the DB for completion. Uses Solid Queue. Known limitation: polling in the job holds a worker thread for the directive duration. Acceptable for single-user; callback-based approach deferred.
-- **Protocol changes**: If the Conduits API needs changes, prototype in Mothership first (verify with Nexus), then port the proven changes into Cybros.
+- [ ] **Conduits controllers in Cybros**: Port Mothership's Conduits namespace (territories, facilities, directives, policies) into Cybros. Reuse the existing models, services, and API design. Adapt for Cybros's Account model and auth.
+- [ ] **Conduits API endpoints** (served by Cybros):
+  - [ ] `POST /conduits/v1/polls` — Nexus claims directives
+  - [ ] `POST /conduits/v1/territories/enroll` — Register territory
+  - [ ] `POST /conduits/v1/territories/heartbeat` — Territory presence
+  - [ ] `POST /conduits/v1/directives/:id/started` — Report execution start
+  - [ ] `POST /conduits/v1/directives/:id/heartbeat` — Renew lease
+  - [ ] `POST /conduits/v1/directives/:id/log_chunks` — Upload stdout/stderr
+  - [ ] `POST /conduits/v1/directives/:id/finished` — Report completion
+- [ ] **Internal directive creation**: AgentCore tool calls create directives directly in the Cybros database (no HTTP round-trip to an external service).
+- [ ] **Directive execution flow**:
+  1. [ ] AgentCore tool call → Cybros creates directive record in DB
+  2. [ ] Nexus polls Cybros, claims directive
+  3. [ ] Nexus executes command in facility (host driver)
+  4. [ ] Nexus reports result to Cybros
+  5. [ ] ConversationRunJob polls the directive record for completion
+- [ ] **ActiveJob orchestration**: ConversationRunJob manages directive creation and polls the DB for completion. Uses Solid Queue. Known limitation: polling in the job holds a worker thread for the directive duration. Acceptable for single-user; callback-based approach deferred.
+- [ ] **Protocol changes**: If the Conduits API needs changes, prototype in Mothership first (verify with Nexus), then port the proven changes into Cybros.
 
 ### Hook Execution
 
-- `before_inference` hook: Runs via Nexus directive before each LLM call. Output merged into PromptConfig.
-- `on_conversation_start` hook: Runs when a new conversation is created with this agent.
-- `after_tool_call` hook: Runs after a tool returns a result (optional).
-- **Fallback**: If hook fails, times out (default: 30s), or is absent → proceed with static config only.
+- [ ] `before_inference` hook: Runs via Nexus directive before each LLM call. Output merged into PromptConfig.
+- [ ] `on_conversation_start` hook: Runs when a new conversation is created with this agent.
+- [ ] `after_tool_call` hook: Runs after a tool returns a result (optional).
+- [ ] **Fallback**: If hook fails, times out (default: 30s), or is absent → proceed with static config only.
 
 ### Coding Tools (via Nexus)
 
@@ -443,11 +443,11 @@ Tools for coding agent capabilities, executed as Nexus directives in a project f
 
 ### Workspace Management
 
-- Workspace path stored as a persistent fact (KV) on the agent or conversation
-- User tells agent "work on /path/to/project" → agent validates → stores as fact
-- All coding tools execute relative to this workspace path
-- Phase 1: workspace is a Nexus facility; directives execute with `cwd` set to facility mount
-- No path restrictions in host driver mode (single user trusts themselves)
+- [ ] Workspace path stored as a persistent fact (KV) on the agent or conversation
+- [ ] User tells agent "work on /path/to/project" → agent validates → stores as fact
+- [ ] All coding tools execute relative to this workspace path
+- [ ] Phase 1: workspace is a Nexus facility; directives execute with `cwd` set to facility mount
+- [ ] No path restrictions in host driver mode (single user trusts themselves)
 
 ### macOS Automation Tools (via Nexus)
 
@@ -463,38 +463,38 @@ Tools for macOS automation, executed as Nexus directives on a macOS territory:
 
 ### Self-Modification
 
-- Agent self-modification tools: `agent_read_self`, `agent_write_self`, `agent_edit_self`, `agent_commit`, `agent_diff`, `agent_revert`, `agent_log`.
-- Git operations via ruby-git gem (in-process for local repos) or Nexus directives (for remote repos).
-- Health check after modification: test message → verify response → auto-revert if broken.
-- Version history UI: commit log, diffs, one-click revert.
+- [ ] Agent self-modification tools: `agent_read_self`, `agent_write_self`, `agent_edit_self`, `agent_commit`, `agent_diff`, `agent_revert`, `agent_log`.
+- [ ] Git operations via ruby-git gem (in-process for local repos) or Nexus directives (for remote repos).
+- [ ] Health check after modification: test message → verify response → auto-revert if broken.
+- [ ] Version history UI: commit log, diffs, one-click revert.
 
 ### Custom Tools (Agent-Defined)
 
-- Agent declares custom tools in `tools/*.yml` + `tools/*.rb` (or any executable).
-- Tool name maps to files by convention: `fortune` → `tools/fortune.yml` + `tools/fortune.rb`.
-- Execution: Cybros creates Nexus directive to run tool script in agent's facility.
-- Result returned to AgentCore tool loop.
+- [ ] Agent declares custom tools in `tools/*.yml` + `tools/*.rb` (or any executable).
+- [ ] Tool name maps to files by convention: `fortune` → `tools/fortune.yml` + `tools/fortune.rb`.
+- [ ] Execution: Cybros creates Nexus directive to run tool script in agent's facility.
+- [ ] Result returned to AgentCore tool loop.
 
 ### Agent Management UI
 
-- Agent list: show available agent programs (bundled + user-created).
-- Create agent: from bundled profile, from GitHub URL, or blank.
-- Agent detail: config view, version history (git log), health status.
-- Create conversation: select which agent to use.
+- [ ] Agent list: show available agent programs (bundled + user-created).
+- [ ] Create agent: from bundled profile, from GitHub URL, or blank.
+- [ ] Agent detail: config view, version history (git log), health status.
+- [ ] Create conversation: select which agent to use.
 
 ### Codex OAuth (Optional)
 
-- Implement PKCE OAuth flow for OpenAI Codex subscription (reference: OpenClaw's implementation).
-- Store OAuth tokens in LlmProvider credentials.
-- Token refresh on expiry.
+- [ ] Implement PKCE OAuth flow for OpenAI Codex subscription (reference: OpenClaw's implementation).
+- [ ] Store OAuth tokens in LlmProvider credentials.
+- [ ] Token refresh on expiry.
 
 ### Bundled Agents (Upgraded)
 
 Upgrade `default-assistant` and add new agents:
 
-- `default-assistant`: Now with Nexus-backed tools (code_execution, web tools).
-- `coder`: Coding agent with read_file, write_file, edit_file, bash, glob, grep, git_*.
-- `mac-assistant`: macOS automation agent with run_applescript, open_url, take_screenshot.
+- [ ] `default-assistant`: Now with Nexus-backed tools (code_execution, web tools).
+- [ ] `coder`: Coding agent with read_file, write_file, edit_file, bash, glob, grep, git_*.
+- [ ] `mac-assistant`: macOS automation agent with run_applescript, open_url, take_screenshot.
 
 ### Acceptance Criteria
 
@@ -518,13 +518,13 @@ Upgrade `default-assistant` and add new agents:
 
 ### 2a: Multi-Persona Agent
 
-- **Persona router**: `before_inference` hook classifies user intent, selects persona.
-- **Each persona**: subdirectory with its own SOUL.md + system.md.liquid + tool allowlist.
-- **Switching**:
-  - Explicit: user says "switch to coder mode" → agent switches
-  - Automatic: hook detects intent shift (coding question → coder persona)
-  - Configurable: `router: auto | explicit | hook` in agent.yml
-- **Shared state**: Conversation history shared across personas. Persona switches are recorded as a **conversation node/event** (DAG-backed internally; App consumes via `Conversation` projections).
+- [ ] **Persona router**: `before_inference` hook classifies user intent, selects persona.
+- [ ] **Each persona**: subdirectory with its own SOUL.md + system.md.liquid + tool allowlist.
+- [ ] **Switching**:
+  - [ ] Explicit: user says "switch to coder mode" → agent switches
+  - [ ] Automatic: hook detects intent shift (coding question → coder persona)
+  - [ ] Configurable: `router: auto | explicit | hook` in agent.yml
+- [ ] **Shared state**: Conversation history shared across personas. Persona switches are recorded as a **conversation node/event** (DAG-backed internally; App consumes via `Conversation` projections).
 
 **Acceptance**:
 - [ ] Agent switches persona based on user message content
@@ -534,10 +534,10 @@ Upgrade `default-assistant` and add new agents:
 
 ### 2b: Multi-Agent / Swarm
 
-- **Coordinator pattern**: A coordinator agent program uses `subagent_spawn`/`subagent_poll` to orchestrate specialists.
-- **Each specialist**: Separate agent program on its own facility.
-- **Task routing**: Coordinator decides task breakdown, assigns to specialists, aggregates results.
-- **Example**: Research agent spawns `web_researcher` + `summarizer` + `fact_checker`.
+- [ ] **Coordinator pattern**: A coordinator agent program uses `subagent_spawn`/`subagent_poll` to orchestrate specialists.
+- [ ] **Each specialist**: Separate agent program on its own facility.
+- [ ] **Task routing**: Coordinator decides task breakdown, assigns to specialists, aggregates results.
+- [ ] **Example**: Research agent spawns `web_researcher` + `summarizer` + `fact_checker`.
 
 **Acceptance**:
 - [ ] Coordinator spawns specialist agents for subtasks
@@ -547,11 +547,11 @@ Upgrade `default-assistant` and add new agents:
 
 ### 2c: Roleplay Agent
 
-- **Character card**: SOUL.md defines character personality, background, speech patterns, appearance.
-- **Lorebook**: `data/lorebook.yml` contains world-building entries. Cybros scans user messages for keywords and injects matching entries into context.
-- **Memory**: Long-term relationship memory via memory tools (pgvector).
-- **Character message**: A `character_message` **conversation message type** (DAG-backed internally; surfaced via the normal `Conversation` transcript/message projection).
-- **Group chat** (stretch): Multiple character agents in same conversation via subagents.
+- [ ] **Character card**: SOUL.md defines character personality, background, speech patterns, appearance.
+- [ ] **Lorebook**: `data/lorebook.yml` contains world-building entries. Cybros scans user messages for keywords and injects matching entries into context.
+- [ ] **Memory**: Long-term relationship memory via memory tools (pgvector).
+- [ ] **Character message**: A `character_message` **conversation message type** (DAG-backed internally; surfaced via the normal `Conversation` transcript/message projection).
+- [ ] **Group chat** (stretch): Multiple character agents in same conversation via subagents.
 
 **Acceptance**:
 - [ ] Agent stays in character across multi-turn conversation
@@ -561,10 +561,10 @@ Upgrade `default-assistant` and add new agents:
 
 ### 2d: Game Agent — Astrology Fortune-Telling
 
-- **Knowledge base**: Astrology knowledge in skills/ directory.
-- **Custom tools**: `get_zodiac_info`, `calculate_compatibility`, `daily_fortune`.
-- **Structured output**: Fortune results as structured data.
-- **Rich display** (stretch): First candidate for predefined UI components (fortune cards).
+- [ ] **Knowledge base**: Astrology knowledge in skills/ directory.
+- [ ] **Custom tools**: `get_zodiac_info`, `calculate_compatibility`, `daily_fortune`.
+- [ ] **Structured output**: Fortune results as structured data.
+- [ ] **Rich display** (stretch): First candidate for predefined UI components (fortune cards).
 
 **Acceptance**:
 - [ ] Agent provides zodiac-based fortune readings
@@ -580,38 +580,38 @@ Upgrade `default-assistant` and add new agents:
 
 ### Usage Dashboard
 
-- Conversations: count, duration, messages per conversation
-- Token usage: per model, per agent, per conversation
-- Cost tracking: estimated cost per agent, per conversation
-- Tool usage: call frequency, success rate, average latency
+- [ ] Conversations: count, duration, messages per conversation
+- [ ] Token usage: per model, per agent, per conversation
+- [ ] Cost tracking: estimated cost per agent, per conversation
+- [ ] Tool usage: call frequency, success rate, average latency
 
 ### Agent Performance
 
-- Success rate: conversations completed vs abandoned/errored
-- Latency: time-to-first-token, total response time
-- Error frequency: tool failures, LLM errors, hook failures
-- Version comparison: side-by-side metrics for agent versions
+- [ ] Success rate: conversations completed vs abandoned/errored
+- [ ] Latency: time-to-first-token, total response time
+- [ ] Error frequency: tool failures, LLM errors, hook failures
+- [ ] Version comparison: side-by-side metrics for agent versions
 
 ### Context Management
 
-- Context budget visualization: show what fills the prompt window
-- Compression effectiveness: tokens saved by compression
-- Memory relevance: hit rate for memory_search results
+- [ ] Context budget visualization: show what fills the prompt window
+- [ ] Compression effectiveness: tokens saved by compression
+- [ ] Memory relevance: hit rate for memory_search results
 
 ### Prompt Cache Optimization
 
 A key cost driver for agent products (including OpenClaw) is poor prompt cache hit rate — system prompts that change slightly each turn invalidate the cache, causing massive token consumption.
 
 Metrics to track:
-- Prompt cache hit rate per provider (Anthropic and OpenAI report this in response headers/usage)
-- Cache-eligible tokens vs total prompt tokens
-- Cost savings from cache hits vs estimated cost without caching
+- [ ] Prompt cache hit rate per provider (Anthropic and OpenAI report this in response headers/usage)
+- [ ] Cache-eligible tokens vs total prompt tokens
+- [ ] Cost savings from cache hits vs estimated cost without caching
 
 Optimization techniques:
-- Stable prompt prefix: ensure the system prompt sections that don't change (AGENT.md, SOUL.md) are at the beginning and identical across turns
-- Separate stable vs dynamic sections: put volatile content (recent messages, hook output) at the end
-- Minimize unnecessary prompt variation: avoid injecting timestamps, random IDs, or other per-turn noise into the system prompt
-- Track which prompt sections change between turns and why
+- [ ] Stable prompt prefix: ensure the system prompt sections that don't change (AGENT.md, SOUL.md) are at the beginning and identical across turns
+- [ ] Separate stable vs dynamic sections: put volatile content (recent messages, hook output) at the end
+- [ ] Minimize unnecessary prompt variation: avoid injecting timestamps, random IDs, or other per-turn noise into the system prompt
+- [ ] Track which prompt sections change between turns and why
 
 This requires the prompt assembly pipeline (AgentProgramLoader → PromptConfig → SystemPromptSectionsBuilder) to be **cache-aware** from the start: stable sections first, dynamic sections last, minimize unnecessary variation. Implementation should consider this even in Phase 0, though metrics and active optimization are Phase 3 work.
 
@@ -629,16 +629,16 @@ This requires the prompt assembly pipeline (AgentProgramLoader → PromptConfig 
 
 These are tracked for planning purposes but not committed to a timeline:
 
-- **Plugin/Extension system**: Discourse-style plugins for customizing Cybros itself
-- **Channel integrations**: Telegram, Discord, Slack, webhook adapters
-- **A2UI**: Agent-driven UI rendering (rich components → arbitrary HTML)
-- **A2A / ACP**: Agent-to-agent protocol for cross-instance communication
-- **Multi-execution environment discovery**: Agent auto-detects machine capabilities
-- **Scheduling / Automation**: Cron-based triggers, event-driven agent runs
-- **Multi-user / multi-tenancy**: Full Account model, invitation, URL-based routing, role-based access
-- **OAuth login**: UserAssociatedAccount for Google, GitHub, etc.
-- **Sandbox isolation**: Bubblewrap, container, microVM drivers for Nexus
-- **Runtime Facts KV**: Mutable key-value store via internal MCP (no decay, write-back without git)
-- **Internal MCP server**: Expose Cybros services (memory, facts, knowledge base) to agent programs
-- **Codex OAuth**: PKCE OAuth flow for OpenAI Codex subscription (may move to Phase 1 if needed)
-- **Context compression tuning**: Advanced compression strategies
+- [ ] **Plugin/Extension system**: Discourse-style plugins for customizing Cybros itself
+- [ ] **Channel integrations**: Telegram, Discord, Slack, webhook adapters
+- [ ] **A2UI**: Agent-driven UI rendering (rich components → arbitrary HTML)
+- [ ] **A2A / ACP**: Agent-to-agent protocol for cross-instance communication
+- [ ] **Multi-execution environment discovery**: Agent auto-detects machine capabilities
+- [ ] **Scheduling / Automation**: Cron-based triggers, event-driven agent runs
+- [ ] **Multi-user / multi-tenancy**: Full Account model, invitation, URL-based routing, role-based access
+- [ ] **OAuth login**: UserAssociatedAccount for Google, GitHub, etc.
+- [ ] **Sandbox isolation**: Bubblewrap, container, microVM drivers for Nexus
+- [ ] **Runtime Facts KV**: Mutable key-value store via internal MCP (no decay, write-back without git)
+- [ ] **Internal MCP server**: Expose Cybros services (memory, facts, knowledge base) to agent programs
+- [ ] **Codex OAuth**: PKCE OAuth flow for OpenAI Codex subscription (may move to Phase 1 if needed)
+- [ ] **Context compression tuning**: Advanced compression strategies
