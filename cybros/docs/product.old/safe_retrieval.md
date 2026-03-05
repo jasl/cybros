@@ -212,4 +212,3 @@ Metadata / 特殊目标（建议最小集）：
 
 - [ ] 审计不落内容；记录 `requested_host/url_hash`、耗时、bytes、错误码、重定向次数
 - [ ] 错误码稳定且可聚合；details 安全
-

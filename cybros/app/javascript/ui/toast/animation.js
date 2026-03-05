@@ -34,4 +34,3 @@ export function dismiss(controller) {
   el.addEventListener("transitionend", remove, { once: true })
   setTimeout(remove, 250)
 }
-

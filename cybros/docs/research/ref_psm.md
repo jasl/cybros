@@ -38,4 +38,3 @@
 - persona 可以作为 `AgentProfile` 的变体（profile=persona），或作为 system prompt 的一个可替换 section。
 - 路由与 handoff 可以落在 `Workflow/Orchestrator`：Presenter/Router 负责选 persona，Specialist 负责执行。
 - 重要：persona 切换不应改变 permission gate 与执行侧 policy 的上限（尤其：secrets/host IO/private network）。
-

@@ -38,4 +38,3 @@ test.describe("Conversation with Mock LLM streaming + markdown", () => {
     await expect(page.getByText("Mock Markdown")).toBeVisible()
   })
 })
-

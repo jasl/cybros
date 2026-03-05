@@ -31,4 +31,3 @@ A2UI 提供一个 “agent → UI” 的声明式 JSON 格式与多端 renderer 
 - A2UI 作为 Phase 2+ 可插拔协议引入，并且：
   - 默认严格白名单 + 属性校验
   - 与权限模型强绑定（例如审批 UI 永远由 core 渲染，禁止由 A2UI 伪造）
-

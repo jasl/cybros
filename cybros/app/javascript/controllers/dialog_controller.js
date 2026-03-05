@@ -28,4 +28,3 @@ export default class extends Controller {
     return dialog instanceof HTMLDialogElement ? dialog : null
   }
 }
-

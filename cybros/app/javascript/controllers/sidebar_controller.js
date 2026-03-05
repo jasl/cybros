@@ -37,4 +37,3 @@ export default class extends Controller {
     return `cybros:sidebar:v2:${this.keyValue}`
   }
 }
-

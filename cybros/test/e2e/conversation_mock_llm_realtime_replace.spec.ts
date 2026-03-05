@@ -77,4 +77,3 @@ test.describe("Conversation dual-channel (ActionCable ephemeral + Turbo truth)",
     await expect(page).toHaveURL(/\/conversations\//)
   })
 })
-

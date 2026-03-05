@@ -109,4 +109,3 @@ class DAG::GraphPolicyInjectionTest < ActiveSupport::TestCase
     assert_equal DAG::Node::FINISHED, agent.reload.state
   end
 end
-

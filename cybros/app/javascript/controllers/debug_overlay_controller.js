@@ -34,4 +34,3 @@ export default class extends Controller {
     this.panelTarget.classList.toggle("hidden", !this.visible)
   }
 }
-

@@ -34,4 +34,3 @@ module DAG
     ALLOW_ALL = AllowAll.new.freeze
   end
 end
-

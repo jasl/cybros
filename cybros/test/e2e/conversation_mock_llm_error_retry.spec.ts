@@ -88,4 +88,3 @@ test.describe("Conversation mock LLM: error + retry flow", () => {
     await expect(finalWrapper.getByText("Mock Markdown", { exact: true })).toBeVisible()
   })
 })
-

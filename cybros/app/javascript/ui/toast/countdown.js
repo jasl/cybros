@@ -51,4 +51,3 @@ export function clearTimers(controller) {
     controller.animationFrameId = null
   }
 }
-

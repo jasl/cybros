@@ -37,4 +37,3 @@
 
 - 执行能力（Runner/工具/网络/文件）带来更大风险面，因此 Tier 1/2 的默认策略必须更保守（deny-by-default + permission gate）。
 - Conversation 强隐私：插件系统不能绕过隐私边界（尤其是 Tier 2 插件要把风险写清楚）。
-

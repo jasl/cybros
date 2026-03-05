@@ -69,4 +69,3 @@
 
 - outlet 的上下文对象是否需要一套“序列化约束”（只给 id/flags，不给全量对象）？
 - 是否需要 “Plugin API 兼容层” 来允许 core 演进而不立刻 break 插件？
-

@@ -30,4 +30,3 @@ This document summarizes the current parity status between TavernKit playgroundâ
 ## Notes
 
 - Search/index tools exclude `references/` (gitignored) content, so the TavernKit citations above are based on direct file reads of the referenced test/service files.
-

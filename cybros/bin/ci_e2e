@@ -75,4 +75,3 @@ fi
 echo "🎭 running Playwright"
 bunx playwright install chromium >/dev/null 2>&1 || true
 bunx playwright test "$@"
-

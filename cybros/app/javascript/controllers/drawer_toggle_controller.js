@@ -15,4 +15,3 @@ export default class extends Controller {
     input.click()
   }
 }
-

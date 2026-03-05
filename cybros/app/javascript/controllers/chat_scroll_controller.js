@@ -167,4 +167,3 @@ export default class extends Controller {
     return url
   }
 }
-

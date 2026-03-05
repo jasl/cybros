@@ -19,4 +19,3 @@ function sanitizeUrl(href, allowedProtocols) {
     return null
   }
 }
-

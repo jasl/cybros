@@ -98,4 +98,3 @@ test("ignores non-message targets", () => {
   expect(prevented).toBe(false)
   expect(rendered.length).toBe(0)
 })
-

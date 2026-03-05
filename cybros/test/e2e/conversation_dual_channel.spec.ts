@@ -28,4 +28,3 @@ test.describe("Conversation dual-channel skeleton", () => {
     await expect(page.locator('[data-role="agent-bubble"]').first()).toBeVisible()
   })
 })
-

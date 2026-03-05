@@ -84,4 +84,3 @@ module Messages
     end
   end
 end
-

@@ -54,4 +54,3 @@
 
 - request-level safe mode 是否需要支持“仅禁用 themes”“禁用所有 UI outlets”等细粒度选项？
 - safe mode 下是否仍允许执行 sandbox tools？（默认建议：允许，但仍走 permission gate）
-

@@ -39,4 +39,3 @@ describe("boundedPush", () => {
     expect(arr).toEqual([2, 3, 4])
   })
 })
-
