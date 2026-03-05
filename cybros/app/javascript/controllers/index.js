@@ -16,6 +16,9 @@ application.register("conversation-search", ConversationSearchController)
 import DebugOverlayController from "./debug_overlay_controller"
 application.register("debug-overlay", DebugOverlayController)
 
+import ChatHotkeysController from "./chat_hotkeys_controller"
+application.register("chat-hotkeys", ChatHotkeysController)
+
 import DialogController from "./dialog_controller"
 application.register("dialog", DialogController)
 
@@ -30,6 +33,12 @@ application.register("markdown", MarkdownController)
 
 import MessageFormController from "./message_form_controller"
 application.register("message-form", MessageFormController)
+
+import MessageActionsController from "./message_actions_controller"
+application.register("message-actions", MessageActionsController)
+
+import TouchSwipeController from "./touch_swipe_controller"
+application.register("touch-swipe", TouchSwipeController)
 
 import SectionToggleController from "./section_toggle_controller"
 application.register("section-toggle", SectionToggleController)

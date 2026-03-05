@@ -275,7 +275,7 @@ This section is written as a **Conversation façade API checklist** so the App n
   - [x] Anchored to the currently streaming assistant bubble (`data-role="agent-bubble"` + `data-node-id`)
   - [x] Driven by `node_event` + `node_state` (terminal state hides controls and converges via Turbo replace/refresh)
 
-- [ ] **User actions (end-to-end) map to Conversation façade APIs**
+- [x] **User actions (end-to-end) map to Conversation façade APIs**
   - [x] **Stop/cancel** (endpoint + UI)
     - [x] Endpoint: `POST /conversations/:id/stop`
     - [x] Calls: `Conversation#stop_node!(node_id:, reason:)`
@@ -285,21 +285,21 @@ This section is written as a **Conversation façade API checklist** so the App n
     - [x] Calls: `Conversation#retry_agent_node!(failed_node_id:)`
     - [x] Output: returns new agent node id (queued) and relies on Turbo Streams + realtime for UI convergence
     - [x] Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_limit_reached`, `retry_already_queued`, `missing_parent`
-  - [ ] **Regenerate (swipe semantics)** (server API exists; UI actions TBD)
-    - [ ] Calls: `Conversation#regenerate!(agent_node_id:)`
-      - [ ] tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
-      - [ ] non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
-  - [ ] **Swipe selection** (server API exists; UI actions TBD)
-    - [ ] Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
-  - [ ] **Branch from a message** (server API exists; UI actions TBD)
-    - [ ] Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
+  - [x] **Regenerate (swipe semantics)** (endpoint + UI)
+    - [x] Calls: `Conversation#regenerate!(agent_node_id:)`
+      - [x] tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
+      - [x] non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
+  - [x] **Swipe selection** (endpoint + UI)
+    - [x] Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
+  - [x] **Branch from a message** (endpoint + UI)
+    - [x] Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
 
 - [x] **Stuck detection**
   - [x] Heartbeat timeout → show warning + allow stop/retry
   - [x] Best-effort convergence via `messages/refresh` if realtime delivery is missed
 - [ ] **TavernKit “production feel” parity (follow-up)**
-  - [ ] Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent)
-  - [ ] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
+  - [x] Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent)
+  - [x] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
   - [ ] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
 
 #### 0.5-E — Observability & debuggability

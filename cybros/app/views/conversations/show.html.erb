@@ -58,7 +58,7 @@
 
 <div
   class="h-full flex flex-col"
-  data-controller="conversation-channel chat-scroll<%= Rails.env.development? ? " debug-overlay" : "" %>"
+  data-controller="conversation-channel chat-scroll chat-hotkeys<%= Rails.env.development? ? " debug-overlay" : "" %>"
   data-action="conversation-channel:debug->debug-overlay#update"
   data-conversation-channel-conversation-id-value="<%= @conversation.id %>"
   data-chat-scroll-load-more-url-value="<%= conversation_messages_path(@conversation) %>">
@@ -103,6 +103,7 @@
             placeholder="Message…"
             aria-label="Message"
             data-message-form-target="textarea"
+            data-chat-hotkeys-target="textarea"
             data-action="keydown->message-form#keydown input->message-form#autoResize"></textarea>
           <button type="submit" class="btn btn-neutral btn-circle btn-sm shrink-0 mb-0.5" aria-label="Send">
             <span class="icon-[lucide--arrow-up] size-4"></span>

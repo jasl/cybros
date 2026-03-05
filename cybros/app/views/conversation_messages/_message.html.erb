@@ -18,48 +18,127 @@
 
 <div id="message_<%= node_id %>" data-message-node-id="<%= node_id %>">
   <% if type == Messages::UserMessage.node_type_key %>
-    <div class="flex justify-end">
-      <div class="bg-base-200 rounded-3xl px-5 py-3 max-w-[70%]" data-node-id="<%= node_id %>">
-        <p class="whitespace-pre-wrap text-sm"><%= input %></p>
+    <div
+      class="flex justify-end group"
+      data-controller="message-actions"
+      data-message-actions-node-id-value="<%= node_id %>"
+      data-message-actions-role-value="user">
+      <div class="max-w-[70%]">
+        <div class="bg-base-200 rounded-3xl px-5 py-3" data-node-id="<%= node_id %>">
+          <p class="whitespace-pre-wrap text-sm" data-role="user-text"><%= input %></p>
+        </div>
+        <div class="mt-1 flex justify-end gap-1 opacity-60 group-hover:opacity-100">
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  data-message-actions-target="copyButton"
+                  data-action="message-actions#copy">
+            <span class="icon-[lucide--copy] size-3"></span>
+            Copy
+          </button>
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  data-message-actions-target="branchButton"
+                  data-action="message-actions#branch">
+            <span class="icon-[lucide--git-branch] size-3"></span>
+            Branch
+          </button>
+        </div>
       </div>
     </div>
   <% elsif type == Messages::AgentMessage.node_type_key %>
-    <div data-role="agent-bubble" data-node-id="<%= node_id %>" data-node-state="<%= state %>">
-      <% if llm_warning.present? %>
-        <div role="alert" class="alert alert-warning alert-soft text-sm mb-2">
-          <span class="icon-[lucide--triangle-alert] size-4 shrink-0"></span>
-          <span class="flex-1">
-            Preferred model unavailable.
-            Using <span class="font-mono"><%= llm_warning.fetch("chosen_model", "").to_s %></span>
-            <% provider_name = llm_warning.fetch("provider_name", "").to_s %>
-            <% if provider_name.present? %>
-              via <span class="font-semibold"><%= provider_name %></span>.
-            <% end %>
-            <% preferred = Array(llm_warning.fetch("preferred_models", [])).map(&:to_s).reject(&:blank?) %>
-            <% if preferred.any? %>
-              Preferred: <span class="font-mono"><%= preferred.join(", ") %></span>
-            <% end %>
-          </span>
+    <div
+      class="flex justify-start group"
+      data-controller="message-actions"
+      data-message-actions-node-id-value="<%= node_id %>"
+      data-message-actions-role-value="agent">
+      <div class="max-w-[85%]">
+        <div
+          data-role="agent-bubble"
+          data-controller="touch-swipe"
+          data-node-id="<%= node_id %>"
+          data-node-state="<%= state %>"
+          data-touch-swipe-node-id-value="<%= node_id %>"
+          class="bg-base-100 border border-base-300 rounded-3xl px-5 py-3">
+          <% if llm_warning.present? %>
+            <div role="alert" class="alert alert-warning alert-soft text-sm mb-2">
+              <span class="icon-[lucide--triangle-alert] size-4 shrink-0"></span>
+              <span class="flex-1">
+                Preferred model unavailable.
+                Using <span class="font-mono"><%= llm_warning.fetch("chosen_model", "").to_s %></span>
+                <% provider_name = llm_warning.fetch("provider_name", "").to_s %>
+                <% if provider_name.present? %>
+                  via <span class="font-semibold"><%= provider_name %></span>.
+                <% end %>
+                <% preferred = Array(llm_warning.fetch("preferred_models", [])).map(&:to_s).reject(&:blank?) %>
+                <% if preferred.any? %>
+                  Preferred: <span class="font-mono"><%= preferred.join(", ") %></span>
+                <% end %>
+              </span>
+            </div>
+          <% end %>
+          <% if terminal && state == "errored" && error_text.present? %>
+            <div class="text-sm text-error"><%= error_text %></div>
+          <% elsif terminal && state == "stopped" && reason_text.present? %>
+            <div class="text-sm opacity-70"><%= reason_text %></div>
+          <% elsif terminal && markdown_source.present? %>
+            <div data-controller="markdown">
+              <template data-markdown-target="content"><%= markdown_source %></template>
+              <div data-markdown-target="output" class="prose prose-sm max-w-none">
+                <%= simple_format(markdown_source) %>
+              </div>
+            </div>
+          <% else %>
+            <% spinner_hidden = !%w[pending running].include?(state) %>
+            <div data-role="progress" class="text-xs opacity-60 mb-1 hidden"></div>
+            <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
+            <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle <%= spinner_hidden ? "hidden" : "" %>"></span>
+          <% end %>
+          <div data-role="error" class="mt-2 text-sm text-error hidden"></div>
         </div>
-      <% end %>
-      <% if terminal && state == "errored" && error_text.present? %>
-        <div class="text-sm text-error"><%= error_text %></div>
-      <% elsif terminal && state == "stopped" && reason_text.present? %>
-        <div class="text-sm opacity-70"><%= reason_text %></div>
-      <% elsif terminal && markdown_source.present? %>
-        <div data-controller="markdown">
-          <template data-markdown-target="content"><%= markdown_source %></template>
-          <div data-markdown-target="output" class="prose prose-sm max-w-none">
-            <%= simple_format(markdown_source) %>
+
+        <div class="mt-1 flex items-center gap-1 opacity-60 group-hover:opacity-100">
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  data-message-actions-target="copyButton"
+                  data-action="message-actions#copy">
+            <span class="icon-[lucide--copy] size-3"></span>
+            Copy
+          </button>
+
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  data-message-actions-target="regenerateButton"
+                  data-action="message-actions#regenerate">
+            <span class="icon-[lucide--refresh-cw] size-3"></span>
+            Regenerate
+          </button>
+
+          <div class="join hidden" data-message-actions-target="swipeNav">
+            <button type="button"
+                    class="btn btn-ghost btn-xs join-item"
+                    title="Previous version"
+                    data-message-actions-target="swipeLeft"
+                    data-action="message-actions#swipeLeft">
+              <span class="icon-[lucide--chevron-left] size-3"></span>
+            </button>
+            <button type="button"
+                    class="btn btn-ghost btn-xs join-item"
+                    title="Next version"
+                    data-message-actions-target="swipeRight"
+                    data-action="message-actions#swipeRight">
+              <span class="icon-[lucide--chevron-right] size-3"></span>
+            </button>
           </div>
+
+          <button type="button"
+                  class="btn btn-ghost btn-xs"
+                  data-message-actions-target="branchButton"
+                  data-action="message-actions#branch">
+            <span class="icon-[lucide--git-branch] size-3"></span>
+            Branch
+          </button>
         </div>
-      <% else %>
-        <% spinner_hidden = !%w[pending running].include?(state) %>
-        <div data-role="progress" class="text-xs opacity-60 mb-1 hidden"></div>
-        <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
-        <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle <%= spinner_hidden ? "hidden" : "" %>"></span>
-      <% end %>
-      <div data-role="error" class="mt-2 text-sm text-error hidden"></div>
+      </div>
     </div>
   <% end %>
 </div>
