@@ -1,5 +1,5 @@
 import { test, expect } from "bun:test"
-import { createTurboStreamBuffer } from "../../app/javascript/lib/turbo_stream_buffer"
+import { createTurboStreamBuffer, mutationCouldRevealBufferedTarget } from "../../app/javascript/lib/turbo_stream_buffer"
 
 function makeStream({ action = "replace", target = "message_123", html = "<turbo-stream></turbo-stream>" } = {}) {
   return {
@@ -97,4 +97,30 @@ test("ignores non-message targets", () => {
 
   expect(prevented).toBe(false)
   expect(rendered.length).toBe(0)
+})
+
+test("mutationCouldRevealBufferedTarget returns true only when message_* wrappers may have been added", () => {
+  const makeMutation = (addedNodes) => ({ addedNodes })
+
+  expect(mutationCouldRevealBufferedTarget([])).toBe(false)
+
+  expect(mutationCouldRevealBufferedTarget([makeMutation([])])).toBe(false)
+
+  expect(
+    mutationCouldRevealBufferedTarget([
+      makeMutation([{ id: "toast_container", querySelectorAll: () => [] }]),
+    ]),
+  ).toBe(false)
+
+  expect(
+    mutationCouldRevealBufferedTarget([
+      makeMutation([{ id: "message_abc", querySelectorAll: () => [] }]),
+    ]),
+  ).toBe(true)
+
+  expect(
+    mutationCouldRevealBufferedTarget([
+      makeMutation([{ id: "wrapper", querySelectorAll: () => [{ id: "message_nested" }] }]),
+    ]),
+  ).toBe(true)
 })

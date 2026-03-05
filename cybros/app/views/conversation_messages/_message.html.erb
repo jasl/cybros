@@ -8,7 +8,9 @@
 <% preview = payload.dig("output_preview", "content").to_s %>
 <% output = payload.dig("output", "content").to_s %>
 <% input = payload.dig("input", "content").to_s %>
-<% terminal = DAG::Node::TERMINAL_STATES.include?(state) %>
+<% llm_warning = metadata.fetch("llm_warning", {}) %>
+<% llm_warning = {} unless llm_warning.is_a?(Hash) %>
+<% terminal = Conversation::TERMINAL_NODE_STATES.include?(state) %>
 <% markdown_source = output.presence || preview %>
 <% markdown_source = markdown_source.to_s.truncate(20_000, omission: "\n\n… (truncated)") %>
 <% error_text = metadata.fetch("error", "").to_s %>
@@ -23,9 +25,26 @@
     </div>
   <% elsif type == Messages::AgentMessage.node_type_key %>
     <div data-role="agent-bubble" data-node-id="<%= node_id %>" data-node-state="<%= state %>">
-      <% if terminal && state == DAG::Node::ERRORED && error_text.present? %>
+      <% if llm_warning.present? %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm mb-2">
+          <span class="icon-[lucide--triangle-alert] size-4 shrink-0"></span>
+          <span class="flex-1">
+            Preferred model unavailable.
+            Using <span class="font-mono"><%= llm_warning.fetch("chosen_model", "").to_s %></span>
+            <% provider_name = llm_warning.fetch("provider_name", "").to_s %>
+            <% if provider_name.present? %>
+              via <span class="font-semibold"><%= provider_name %></span>.
+            <% end %>
+            <% preferred = Array(llm_warning.fetch("preferred_models", [])).map(&:to_s).reject(&:blank?) %>
+            <% if preferred.any? %>
+              Preferred: <span class="font-mono"><%= preferred.join(", ") %></span>
+            <% end %>
+          </span>
+        </div>
+      <% end %>
+      <% if terminal && state == "errored" && error_text.present? %>
         <div class="text-sm text-error"><%= error_text %></div>
-      <% elsif terminal && state == DAG::Node::STOPPED && reason_text.present? %>
+      <% elsif terminal && state == "stopped" && reason_text.present? %>
         <div class="text-sm opacity-70"><%= reason_text %></div>
       <% elsif terminal && markdown_source.present? %>
         <div data-controller="markdown">
@@ -35,7 +54,7 @@
           </div>
         </div>
       <% else %>
-        <% spinner_hidden = ![DAG::Node::PENDING, DAG::Node::RUNNING].include?(state) %>
+        <% spinner_hidden = !%w[pending running].include?(state) %>
         <div data-role="progress" class="text-xs opacity-60 mb-1 hidden"></div>
         <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
         <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle <%= spinner_hidden ? "hidden" : "" %>"></span>

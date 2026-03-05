@@ -9,14 +9,18 @@ class Event < ApplicationRecord
   private
 
     def broadcast_node_state_change
-      return unless event_type.to_s == DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED
+      return unless event_type.to_s == "node_state_changed"
       return unless subject_type.to_s == "DAG::Node"
+
+      node = subject
 
       ConversationChannel.broadcast_to(
         conversation,
         {
           "type" => "node_state",
           "conversation_id" => conversation_id.to_s,
+          "event_id" => id.to_s,
+          "turn_id" => node&.turn_id.to_s,
           "node_id" => subject_id.to_s,
           "from" => particulars.is_a?(Hash) ? particulars["from"].to_s : "",
           "to" => particulars.is_a?(Hash) ? particulars["to"].to_s : "",
@@ -25,16 +29,10 @@ class Event < ApplicationRecord
       )
 
       to = particulars.is_a?(Hash) ? particulars["to"].to_s : ""
-      return unless DAG::Node::TERMINAL_STATES.include?(to)
+      return unless Conversation::TERMINAL_NODE_STATES.include?(to)
 
-      node = subject
-      return unless node.is_a?(DAG::Node)
       return unless node.node_type.to_s == Messages::AgentMessage.node_type_key
-
-      graph = conversation.dag_graph
-      projection = DAG::TranscriptProjection.new(graph: graph)
-      message = projection.project(node_records: [node], mode: :full).first
-      return unless message.is_a?(Hash)
+      message = conversation.message_for_node_id(node_id: node.id, mode: :full)
 
       Turbo::StreamsChannel.broadcast_replace_to(
         [conversation, :messages],

@@ -11,17 +11,9 @@ class BroadcastErrorLoggingTest < ActiveSupport::TestCase
 
   test "DAG::NodeEvent broadcast failure is logged (rate limited)" do
     conversation = create_conversation!
-    graph = conversation.dag_graph
-
-    node = nil
-    graph.mutate! do |m|
-      node =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::RUNNING,
-          metadata: {},
-        )
-    end
+    result = conversation.append_user_message!(content: "Hi")
+    node = result.fetch(:agent_node)
+    node.update!(state: "running")
 
     calls = []
     original_warn = Cybros::RateLimitedLog.method(:warn)
@@ -32,7 +24,15 @@ class BroadcastErrorLoggingTest < ActiveSupport::TestCase
     end
 
     with_singleton_override(ConversationChannel, :broadcast_node_event, ->(_conversation, _node_event) { raise "boom" }) do
-      DAG::NodeEvent.create!(graph: graph, node: node, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "x", payload: {})
+      DAG::NodeEvent.create!(
+        graph_id: node.graph_id,
+        node_id: node.id,
+        turn_id: node.turn_id,
+        body_id: node.body_id,
+        kind: "output_delta",
+        text: "x",
+        payload: {},
+      )
     end
 
     assert calls.any? { |c| c.fetch(:key).to_s == "dag.node_event.broadcast_to_conversation" }
@@ -43,15 +43,8 @@ class BroadcastErrorLoggingTest < ActiveSupport::TestCase
   test "Event broadcast failure is logged (rate limited)" do
     conversation = create_conversation!
 
-    node = nil
-    conversation.dag_graph.mutate! do |m|
-      node =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: {},
-        )
-    end
+    result = conversation.append_user_message!(content: "Hi")
+    node = result.fetch(:agent_node)
 
     calls = []
     original_warn = Cybros::RateLimitedLog.method(:warn)
@@ -64,7 +57,7 @@ class BroadcastErrorLoggingTest < ActiveSupport::TestCase
     with_singleton_override(ConversationChannel, :broadcast_to, ->(_conversation, _payload) { raise "boom" }) do
       Event.create!(
         conversation: conversation,
-        event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+        event_type: "node_state_changed",
         subject: node,
         particulars: { "from" => "pending", "to" => "running" },
       )
@@ -77,23 +70,17 @@ class BroadcastErrorLoggingTest < ActiveSupport::TestCase
 
   test "ConversationChannel broadcast_node_event failure is logged (rate limited)" do
     conversation = create_conversation!
-    graph = conversation.dag_graph
-
-    node = nil
-    graph.mutate! do |m|
-      node =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::RUNNING,
-          metadata: {},
-        )
-    end
+    result = conversation.append_user_message!(content: "Hi")
+    node = result.fetch(:agent_node)
+    node.update!(state: "running")
 
     node_event =
       DAG::NodeEvent.create!(
-        graph: graph,
-        node: node,
-        kind: DAG::NodeEvent::OUTPUT_DELTA,
+        graph_id: node.graph_id,
+        node_id: node.id,
+        turn_id: node.turn_id,
+        body_id: node.body_id,
+        kind: "output_delta",
         text: "x",
         payload: {},
       )

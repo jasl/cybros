@@ -8,7 +8,7 @@ export RAILS_ENV="${RAILS_ENV:-development}"
 PORT="${E2E_PORT:-3100}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
 
-echo "🎭 CI E2E: starting server + jobs"
+echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"
 
 bundle exec ruby -v >/dev/null
@@ -23,7 +23,7 @@ RUBY
 
 cleanup() {
   echo ""
-  echo "🧹 CI E2E: stopping server + jobs"
+  echo "CI E2E: stopping server + jobs"
   for pid in "${JOBS_PID:-}" "${SERVER_PID:-}"; do
     [[ -n "${pid}" ]] || continue
     kill "${pid}" 2>/dev/null || true
@@ -52,10 +52,10 @@ rm -f "${PIDFILE}"
 bin/rails server -b 127.0.0.1 -p "${PORT}" -P "${PIDFILE}" >tmp/ci_e2e_server.log 2>&1 &
 SERVER_PID="$!"
 
-echo "⏳ waiting for ${E2E_BASE_URL}/up"
+echo "waiting for ${E2E_BASE_URL}/up"
 for i in {1..60}; do
   if curl -fsS "${E2E_BASE_URL}/up" >/dev/null 2>&1; then
-    echo "✅ server is up"
+    echo "server is up"
     break
   fi
   sleep 0.5
@@ -72,6 +72,6 @@ if ! curl -fsS "${E2E_BASE_URL}/up" >/dev/null 2>&1; then
   exit 1
 fi
 
-echo "🎭 running Playwright"
+echo "running Playwright"
 bunx playwright install chromium >/dev/null 2>&1 || true
 bunx playwright test "$@"

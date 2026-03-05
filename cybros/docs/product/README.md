@@ -20,7 +20,7 @@ Key principles:
 │                                                              │
 │  ┌─────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
 │  │ Web UI  │  │ Conversations │  │ Agent Program Loader    │ │
-│  │ Hotwire │  │ DAG Engine   │  │ (reads agent repos)     │ │
+│  │ Hotwire │  │ facade + DAG │  │ (reads agent repos)     │ │
 │  └────┬────┘  └──────┬───────┘  └────────────┬────────────┘ │
 │       │              │                        │              │
 │  ┌────┴──────────────┴────────────────────────┴────────────┐ │
@@ -83,7 +83,7 @@ Communication is **pull-based**: Nexus polls the control plane (Cybros) via `POS
 | **Account** | The instance tenant. Holds global configuration (LLM providers, defaults, settings). Single account in Phase 0. |
 | **Identity** | Global user identity (email-based). Enables future OAuth via `UserAssociatedAccount`. |
 | **User** | Account-scoped membership. Belongs to Identity and Account. Has role (owner/admin/member). |
-| **Conversation** | DAG-backed conversation container. Belongs to an Agent Program. |
+| **Conversation** | App-facing chat entity (facade). Internally backed by the DAG engine; App uses `Conversation` APIs only. Belongs to an Agent Program. |
 | **ConversationRun** | Tracks a single agent execution lifecycle (queued → running → succeeded/failed/canceled). |
 | **Agent Program** | Git-managed repository defining agent behavior: config, prompts, hooks, custom tools. See [Agent Program Framework](agent_program_framework.md). |
 | **LLM Provider** | Configuration for an LLM API endpoint: base URL, API key, model allowlist, priority. |

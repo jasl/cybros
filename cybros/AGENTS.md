@@ -159,16 +159,17 @@ Doc: `docs/dag/public_api.md`
 
 ### DAG API safety tiers（very important）
 
-When building App features (controllers/views/services), treat the DAG engine as **Lane-first**:
+When building App features (controllers/views/services), treat the conversation engine as **Conversation-first**:
 
-- **App-safe (user sync requests)**: only use `DAG::Lane` / `DAG::Turn` primitives (keyset paging + bounded limits), plus bounded mutations (`fork/merge/archive`, node commands).
+- **App-safe (user sync requests)**: use the `Conversation` facade only (e.g. `append_user_message!`, `message_page`, `regenerate!`, `select_swipe!`, `create_child!`, `soft_delete_node!`, `restore_node!`, `exclude_node!`, `include_node!`). Avoid referencing `DAG::*` types/constants from controllers/channels/views.
+- **Engine-only (internal)**: `DAG::Lane` / `DAG::Turn` / `DAG::Graph` primitives and engine mutation APIs. If the App needs a capability, add it to `Conversation` (public API) + tests/docs, rather than reaching into DAG internals.
 - **Dangerous/internal (admin/job/diagnostics only)**: graph-wide closure/export/visualization/audit/repair. Do not call these from user-facing request paths:
   - `DAG::Graph#context_closure_for*`
   - `DAG::Graph#transcript_closure_for*`
   - `DAG::Graph#to_mermaid(...)`
   - `DAG::GraphAudit.scan(...)` on large graphs
 
-If you need a capability for the App, extend the **Public API** + add tests/docs, instead of reaching into internal tables/SQL.
+If you need a capability for the App, extend the `Conversation` public API + add tests/docs, instead of reaching into internal tables/SQL.
 
 #### Node Types
 - `system_message` — System prompt / global rules (not executable)

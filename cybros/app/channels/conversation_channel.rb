@@ -37,25 +37,11 @@ class ConversationChannel < ApplicationCable::Channel
     @cursor = nil unless @cursor.present? && AgentCore::Utils.uuid_like?(@cursor)
 
     if @node_id.blank?
-      leaf = @conversation.chat_head_leaf
-      @node_id = leaf&.id&.to_s
+      @node_id = @conversation.chat_head_node_id
     end
 
     if @cursor.blank? && @node_id.present?
-      lane = @conversation.chat_lane
-      node = @conversation.root_graph.nodes.find_by(id: @node_id)
-      preview = node&.body_output_preview
-      preview = preview.is_a?(Hash) ? preview : {}
-
-      if preview.fetch("content", "").to_s.present?
-        @cursor =
-          lane
-            .node_event_scope_for(@node_id)
-            .order(id: :desc)
-            .limit(1)
-            .pick(:id)
-            &.to_s
-      end
+      @cursor = @conversation.cursor_for_existing_output(@node_id)
     end
 
     Rails.logger.info(
@@ -103,14 +89,8 @@ class ConversationChannel < ApplicationCable::Channel
         kind = node_event.kind.to_s
         text = node_event.text.to_s
 
-        if kind == DAG::NodeEvent::OUTPUT_COMPACTED && text.blank?
-          body_id = node_event.respond_to?(:body_id) ? node_event.body_id : nil
-          if body_id.blank?
-            body_id = DAG::Node.where(graph_id: conversation.root_graph.id, id: node_id).pick(:body_id)
-          end
-
-          output_preview = body_id.present? ? DAG::NodeBody.where(id: body_id).pick(:output_preview) : {}
-          output_preview = output_preview.is_a?(Hash) ? output_preview : {}
+        if kind == "output_compacted" && text.blank?
+          output_preview = conversation.output_preview_for_node_id(node_id)
           text = output_preview.fetch("content", "").to_s
         end
 
@@ -155,21 +135,19 @@ class ConversationChannel < ApplicationCable::Channel
       return if @conversation.nil?
       return if @node_id.blank?
 
-      lane = @conversation.chat_lane
-      node = @conversation.root_graph.nodes.find_by(id: @node_id)
-      output_preview = DAG::NodeBody.where(id: node&.body_id).pick(:output_preview)
-      output_preview = output_preview.is_a?(Hash) ? output_preview : {}
+      output_preview = @conversation.output_preview_for_node_id(@node_id)
+      turn_id = @conversation.turn_id_for_node_id(@node_id).to_s
 
       events =
-        lane.node_event_page_for(
+        @conversation.node_event_page_for(
           @node_id,
           after_event_id: @cursor,
           limit: 200,
           kinds: [
-            DAG::NodeEvent::OUTPUT_DELTA,
-            DAG::NodeEvent::OUTPUT_COMPACTED,
-            DAG::NodeEvent::PROGRESS,
-            DAG::NodeEvent::LOG,
+            "output_delta",
+            "output_compacted",
+            "progress",
+            "log",
           ],
         )
 
@@ -181,14 +159,14 @@ class ConversationChannel < ApplicationCable::Channel
 
           kind = event_hash.fetch("kind").to_s
           text = event_hash.fetch("text").to_s
-          if kind == DAG::NodeEvent::OUTPUT_COMPACTED && text.blank?
+          if kind == "output_compacted" && text.blank?
             text = output_preview.fetch("content", "").to_s
           end
 
           {
             "type" => "node_event",
             "conversation_id" => @conversation.id.to_s,
-            "turn_id" => node&.turn_id.to_s,
+            "turn_id" => turn_id,
             "node_id" => @node_id.to_s,
             "event_id" => event_hash.fetch("event_id"),
             "kind" => kind,

@@ -5,9 +5,15 @@ class ConversationMessagesController < ApplicationController
   before_action :set_conversation
   before_action -> { throttle!(key: "messages", limit: 20, period: 60) }, only: :create
 
-  def index
-    lane = @conversation.chat_lane
+  rescue_from ArgumentError, Cybros::Error do |e|
+    respond_to do |format|
+      format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
+      format.html { render plain: e.message, status: :unprocessable_entity }
+      format.json { render json: { ok: false, error: e.class.name, message: e.message }, status: :unprocessable_entity }
+    end
+  end
 
+  def index
     before = params[:before].to_s.presence
     after = params[:after].to_s.presence
     if before.present? && !AgentCore::Utils.uuid_like?(before)
@@ -19,16 +25,11 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    page = lane.message_page(limit: 20, before_message_id: before, after_message_id: after, mode: :full)
+    page = @conversation.message_page(limit: 20, before_message_id: before, after_message_id: after, mode: :full)
     @messages = page.fetch("messages")
 
     before_cursor = page.fetch("before_message_id", nil).to_s.presence
-    @has_more =
-      if before_cursor.present?
-        lane.message_page(limit: 1, before_message_id: before_cursor, mode: :preview).fetch("messages").any?
-      else
-        false
-      end
+    @has_more = @conversation.has_more_messages_before?(before_message_id: before_cursor)
     @before_cursor = before_cursor
 
     respond_to do |format|
@@ -64,29 +65,18 @@ class ConversationMessagesController < ApplicationController
 
       format.html { redirect_to conversation_path(@conversation) }
     end
-  rescue DAG::PaginationError => e
-    respond_to do |format|
-      format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
-      format.html { render plain: e.message, status: :unprocessable_entity }
-    end
   end
 
   def refresh
     node_id = params.fetch(:node_id, "").to_s
     raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(node_id)
 
-    graph = @conversation.root_graph
-    node = graph.nodes.find_by(id: node_id)
-    raise ActiveRecord::RecordNotFound if node.nil?
-
-    projection = DAG::TranscriptProjection.new(graph: graph)
-    message = projection.project(node_records: [node], mode: :full).first
-    raise ActiveRecord::RecordNotFound unless message.is_a?(Hash)
+    message = @conversation.message_for_node_id(node_id: node_id, mode: :full)
 
     respond_to do |format|
       format.turbo_stream do
         render turbo_stream: turbo_stream.replace(
-          "message_#{node.id}",
+          "message_#{node_id}",
           partial: "conversation_messages/message",
           locals: { message: message },
         )
@@ -108,16 +98,11 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    graph = @conversation.root_graph
-    result = @conversation.append_user_message!(content: content)
-    user_node = result&.fetch(:user_node, nil)
-    agent_node = result&.fetch(:agent_node, nil)
+    result = @conversation.append_user_message_and_project!(content: content, mode: :preview)
+    created_messages = result.fetch(:messages)
 
     respond_to do |format|
       format.turbo_stream do
-        projection = DAG::TranscriptProjection.new(graph: graph)
-        created_messages = projection.project(node_records: [user_node, agent_node].compact, mode: :preview)
-
         list_id = helpers.dom_id(@conversation, :messages_list)
         empty_state_id = helpers.dom_id(@conversation, :messages_empty_state)
 

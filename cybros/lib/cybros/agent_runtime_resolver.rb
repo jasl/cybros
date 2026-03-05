@@ -4,6 +4,13 @@ module Cybros
 
     module_function
 
+    def model_resolution_for(conversation:)
+      agent_metadata = agent_metadata_for(conversation)
+      resolve_model_and_provider(agent_metadata, include_diagnostics: true)
+    rescue StandardError
+      { provider: nil, model: nil, preferred_models: [], matched_preference: false, provider_name: nil }
+    end
+
     def phase_0_tool_policy(base_tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new)
       AgentCore::Resources::Tools::Policy::Ruleset.new(
         allow: [
@@ -147,7 +154,7 @@ module Cybros
       registry
     end
 
-    def resolve_model_and_provider(agent_metadata)
+    def resolve_model_and_provider(agent_metadata, include_diagnostics: false)
       default_model = ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini").to_s.strip
       default_model = "gpt-4o-mini" if default_model.empty?
 
@@ -156,6 +163,7 @@ module Cybros
 
       provider = nil
       chosen_model = nil
+      matched_preference = false
 
       providers = fetch_llm_providers
 
@@ -165,6 +173,7 @@ module Cybros
 
         provider = matching.max_by { |p| p.priority.to_i }
         chosen_model = model
+        matched_preference = true
         break
       end
 
@@ -182,9 +191,22 @@ module Cybros
           end
       end
 
-      { provider: build_provider_from_record(provider) || build_default_provider, model: chosen_model }
+      out = { provider: build_provider_from_record(provider) || build_default_provider, model: chosen_model }
+      if include_diagnostics
+        out[:preferred_models] = prefer
+        out[:matched_preference] = matched_preference
+        out[:provider_name] = provider&.name.to_s.presence
+      end
+
+      out
     rescue StandardError
-      { provider: build_default_provider, model: default_model }
+      out = { provider: build_default_provider, model: default_model }
+      if include_diagnostics
+        out[:preferred_models] = prefer || []
+        out[:matched_preference] = false
+        out[:provider_name] = nil
+      end
+      out
     end
     private_class_method :resolve_model_and_provider
 

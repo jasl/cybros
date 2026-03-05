@@ -25,6 +25,7 @@ test.describe("Conversation mock LLM: error + retry flow", () => {
 
     const agentWrappers = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])')
     await expect(agentWrappers).toHaveCount(1)
+    await expect(agentWrappers.first().getByText("boom")).toBeVisible()
 
     await page.getByRole("button", { name: "Retry" }).click()
 

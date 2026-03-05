@@ -51,6 +51,43 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(data-role="agent-bubble")
   end
 
+  test "create includes a warning when preferred model is unavailable" do
+    LLMProvider.delete_all
+    LLMProvider.create!(
+      name: "p1",
+      base_url: "http://p1.test/v1",
+      api_key: "k1",
+      model_allowlist: ["m2"],
+      priority: 5,
+      api_format: "openai",
+    )
+
+    user = create_user!
+    sign_in!(user)
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+            "agent_program" => { "model_prefer" => ["m1"] },
+          },
+        },
+      )
+
+    post conversation_messages_path(conversation),
+         params: { content: "Hello" },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+    assert_includes response.body, %(data-role="agent-bubble")
+    assert_includes response.body, "Preferred model unavailable"
+    assert_includes response.body, "m1"
+    assert_includes response.body, "m2"
+  end
+
   test "create with blank content returns no-content for turbo and creates no messages" do
     user = create_user!
     sign_in!(user)
@@ -71,22 +108,20 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     sign_in!(user)
 
     conversation = create_conversation!(user: user, title: "Chat")
-    graph = conversation.dag_graph
+    graph = conversation.root_graph
 
     agent = nil
     graph.mutate! do |m|
       agent =
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::FINISHED,
+          state: "finished",
           metadata: {},
         )
     end
 
-    DAG::NodeBody.where(id: agent.body_id).update_all(
-      output_preview: { "content" => "# Done" },
-      updated_at: Time.current,
-    )
+    agent.body.apply_finished_content!("# Done")
+    agent.body.save!
 
     get refresh_conversation_messages_path(conversation),
         params: { node_id: agent.id },

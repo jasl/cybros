@@ -1,7 +1,7 @@
 class ConversationsController < AgentController
   include RateLimitable
 
-  rescue_from ArgumentError, DAG::ValidationError, DAG::OperationNotAllowedError, Cybros::Error do |e|
+  rescue_from ArgumentError, Cybros::Error do |e|
     respond_to do |format|
       format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
       format.html { render plain: e.message, status: :unprocessable_entity }
@@ -53,19 +53,11 @@ class ConversationsController < AgentController
   end
 
   def show
-    graph = @conversation.root_graph
-    lane = @conversation.chat_lane
-
-    page = lane.message_page(limit: 30, mode: :full)
+    page = @conversation.message_page(limit: 30, mode: :full)
     @messages = page.fetch("messages")
     @before_cursor = page.fetch("before_message_id", nil).to_s.presence
 
-    @has_more =
-      if @before_cursor.present?
-        lane.message_page(limit: 1, before_message_id: @before_cursor, mode: :preview).fetch("messages").any?
-      else
-        false
-      end
+    @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
   end
 
   def branch
@@ -113,84 +105,24 @@ class ConversationsController < AgentController
 
   def stop
     node_id = params[:node_id].to_s
-    node = @conversation.root_graph.nodes.find_by(id: node_id)
-    render json: { ok: false, error: "node_not_found" }, status: :not_found and return if node.nil?
-
-    render json: { ok: false, error: "node_not_running" }, status: :unprocessable_entity and return unless node.running?
-
-    node.stop!(reason: "user_cancelled")
-
+    @conversation.stop_node!(node_id: node_id, reason: "user_cancelled")
     render json: { ok: true }
+  rescue ActiveRecord::RecordNotFound
+    render json: { ok: false, error: "node_not_found" }, status: :not_found
+  rescue Cybros::Error
+    render json: { ok: false, error: "node_not_running" }, status: :unprocessable_entity
   end
 
   def retry
-    graph = @conversation.root_graph
-
     failed_node_id = params[:node_id].to_s
-    failed_node = graph.nodes.find_by(id: failed_node_id)
-    render json: { ok: false, error: "node_not_found" }, status: :not_found and return if failed_node.nil?
-
-    unless failed_node.node_type == Messages::AgentMessage.node_type_key
-      render json: { ok: false, error: "not_an_agent_node" }, status: :unprocessable_entity and return
-    end
-
-    unless failed_node.errored? || failed_node.stopped?
-      render json: { ok: false, error: "not_retryable" }, status: :unprocessable_entity and return
-    end
-
-    retry_depth = 0
-    trace_id = failed_node_id
-    while (source_id = graph.nodes.find_by(id: trace_id)&.metadata&.dig("retry_of_node_id"))
-      retry_depth += 1
-      trace_id = source_id
-    end
-    if retry_depth >= 5
-      render json: { ok: false, error: "retry_limit_reached" }, status: :unprocessable_entity and return
-    end
-
-    existing_retry =
-      graph.nodes.where(node_type: Messages::AgentMessage.node_type_key, compressed_at: nil).where(
-        "metadata ->> 'retry_of_node_id' = ?",
-        failed_node_id,
-      ).order(:id).last
-    if existing_retry && !(existing_retry.finished? || existing_retry.errored? || existing_retry.stopped? || existing_retry.skipped?)
-      render json: { ok: false, error: "retry_already_queued" }, status: :conflict and return
-    end
-
-    from_node_id =
-      graph
-        .edges
-        .active
-        .where(edge_type: DAG::Edge::SEQUENCE, to_node_id: failed_node.id)
-        .order(:id)
-        .pick(:from_node_id)
-    render json: { ok: false, error: "missing_parent" }, status: :unprocessable_entity and return if from_node_id.nil?
-
-    from_node = graph.nodes.find(from_node_id)
-
-    new_agent = nil
-    graph.mutate!(turn_id: from_node.turn_id) do |m|
-      new_agent =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: { "retry_of_node_id" => failed_node_id },
-        )
-      m.create_edge(from_node: from_node, to_node: new_agent, edge_type: DAG::Edge::SEQUENCE)
-    end
-
-    ConversationRun.create!(
-      conversation: @conversation,
-      dag_node_id: new_agent.id,
-      state: "queued",
-      queued_at: Time.current,
-      debug: {},
-      error: {},
-    )
-
-    graph.kick!
-
-    render json: { ok: true, node_id: new_agent.id }
+    new_id = @conversation.retry_agent_node!(failed_node_id: failed_node_id)
+    render json: { ok: true, node_id: new_id }
+  rescue ActiveRecord::RecordNotFound
+    render json: { ok: false, error: "node_not_found" }, status: :not_found
+  rescue Cybros::Error => e
+    code = e.message.to_s
+    status = code == "retry_already_queued" ? :conflict : :unprocessable_entity
+    render json: { ok: false, error: code }, status: status
   end
 
   private

@@ -62,8 +62,25 @@ export function createTurboStreamBuffer({
   return { onBeforeStreamRender, flush }
 }
 
+export function mutationCouldRevealBufferedTarget(mutations) {
+  const list = Array.isArray(mutations) ? mutations : []
+
+  for (const m of list) {
+    const added = Array.from(m?.addedNodes || [])
+    for (const node of added) {
+      const id = String(node?.id || "")
+      if (id.startsWith("message_")) return true
+
+      const descendants = node?.querySelectorAll?.("[id^='message_']")
+      if (descendants && descendants.length > 0) return true
+    }
+  }
+
+  return false
+}
+
 export function installTurboStreamBuffer({
-  scopeRoot = document.documentElement,
+  scopeRoot = document.body || document.documentElement,
   turbo = window.Turbo,
 } = {}) {
   if (!turbo || typeof turbo.renderStreamMessage !== "function") return null
@@ -76,7 +93,9 @@ export function installTurboStreamBuffer({
   const onBeforeStreamRender = (event) => buffer.onBeforeStreamRender(event)
   document.addEventListener("turbo:before-stream-render", onBeforeStreamRender)
 
-  const observer = new MutationObserver(() => buffer.flush())
+  const observer = new MutationObserver((mutations) => {
+    if (mutationCouldRevealBufferedTarget(mutations)) buffer.flush()
+  })
   if (scopeRoot) observer.observe(scopeRoot, { childList: true, subtree: true })
 
   return {

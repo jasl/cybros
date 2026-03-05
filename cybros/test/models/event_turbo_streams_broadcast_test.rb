@@ -63,4 +63,36 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
     assert_includes html, %(data-controller="markdown")
     assert_includes html, "**Done**"
   end
+
+  test "node_state broadcast includes stable envelope fields (event_id + turn_id)" do
+    user = create_user!
+    conversation = create_conversation!(user: user, title: "Chat")
+    result = conversation.append_user_message!(content: "Hi")
+    agent = result.fetch(:agent_node)
+    agent.update!(state: "running")
+    agent.update!(state: "finished")
+
+    broadcasting = ConversationChannel.broadcasting_for(conversation)
+
+    event = nil
+    assert_broadcasts(broadcasting, 1) do
+      event =
+        Event.create!(
+          conversation: conversation,
+          subject: agent,
+          event_type: "node_state_changed",
+          particulars: { "from" => "running", "to" => "finished" },
+        )
+    end
+
+    payload = JSON.parse(broadcasts(broadcasting).last)
+    assert_equal "node_state", payload.fetch("type")
+    assert_equal conversation.id.to_s, payload.fetch("conversation_id")
+    assert_equal agent.id.to_s, payload.fetch("node_id")
+    assert_equal "running", payload.fetch("from")
+    assert_equal "finished", payload.fetch("to")
+
+    assert_equal event.id.to_s, payload.fetch("event_id").to_s
+    assert_equal agent.turn_id.to_s, payload.fetch("turn_id").to_s
+  end
 end

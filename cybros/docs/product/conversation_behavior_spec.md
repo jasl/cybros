@@ -18,7 +18,7 @@
 ### 1.2 Source of truth 与 projection
 
 - **聊天记录（Message）不是新真相表**：UI 的线性对话历史是对 DAG 的 **projection**。
-- 线性 projection 的主要入口是 `DAG::Lane#message_page`（以及 transcript/context 相关 API），`Conversation` 负责选择正确的 lane + head。
+- 线性 projection 的主要入口是 `Conversation` 的 bounded read APIs（例如 `Conversation#message_page` / `#transcript_page` / `#context_for`），`Conversation` 在内部选择正确的 lane + head 并完成投影；App **不得**直接依赖 `DAG::Lane` 或其他引擎类型。
 
 ---
 
@@ -28,12 +28,12 @@
 
 `Conversation.kind` 取值：
 
-- `root`：拥有 `dag_graph` 的根容器
+- `root`：拥有 root graph 的根容器（引擎实现细节；App 不直接触达）
 - `branch` / `thread` / `checkpoint`：对话树中的子会话（共享 root graph，但绑定到不同 lane）
 
 ### 2.2 Root graph 与 lane 绑定
 
-- `root` conversation 拥有 `dag_graph`，并通过 `chat_lane` 绑定到 graph 的 main lane。
+- `root` conversation 拥有 root graph，并通过 `chat_lane` 绑定到 root 的 chat lane（通常是默认 lane）。
 - child conversation **不拥有** graph；通过 `root_graph` 委托到 root；通过 `chat_lane` 绑定到 fork 出来的 branch lane。
 
 ### 2.3 Fork point（分支点）保护
@@ -130,5 +130,5 @@ restore 反向操作，恢复可见性（timeline + context）。
 
 ## 6) 性能与安全带（产品层约束）
 
-- UI/Controller 路径必须优先走 `Conversation#chat_lane` + `DAG::Lane` 的 bounded APIs（如 `message_page`），避免无意间触发全图闭包/全图扫描。
+- UI/Controller 路径必须优先走 `Conversation` 的 bounded read APIs（如 `message_page` / `transcript_page`），避免无意间触发全图闭包/全图扫描；App 不应直接拿到 `DAG::Lane` 并调用其方法。
 - 200+ turns + 多分支情况下，产品层在任何用户请求路径上不得调用“危险 API”（例如全量 mermaid/closure）作为默认行为。

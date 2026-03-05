@@ -3,7 +3,7 @@ class ConversationNodesController < ApplicationController
   before_action :set_conversation
   before_action :set_node_id
 
-  rescue_from ArgumentError, DAG::ValidationError, DAG::OperationNotAllowedError, Cybros::Error do |e|
+  rescue_from ArgumentError, Cybros::Error do |e|
     respond_to do |format|
       format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
       format.html { render plain: e.message, status: :unprocessable_entity }

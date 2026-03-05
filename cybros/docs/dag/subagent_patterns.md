@@ -1,6 +1,6 @@
 # DAG Subagent Patterns（v1）
 
-本文件描述 **在不改变 DAG 拓扑/调度语义** 的前提下，App 域如何用 “多 Conversation/Graph” 组合出 subagent（子代理/子会话）能力。
+本文件描述 **在不改变 DAG 拓扑/调度语义** 的前提下，App 域如何用 “多 Conversation（每个 Conversation 内部由 DAG 引擎承载）” 组合出 subagent（子代理/子会话）能力。
 
 > v1 约束：DAG 只对 **单图内** 的调度与审计负责；跨图依赖/等待/桥接由 App 的 executor 自行实现（轮询、回调、事件桥接等）。
 
@@ -13,15 +13,15 @@
 
 完成后，父图的下游 `agent_message`/`character_message` 节点在执行时：
 
-1) 从 context 读取 child 引用  
-2) 通过 child graph 的 **bounded read API** 读取子会话的最近记录  
+1) 从 context 读取 child 引用
+2) 通过 child graph 的 **bounded read API** 读取子会话的最近记录
 3) 把读取到的内容拼接/总结为父图的最终输出
 
 典型读 API 选择：
 
-- `child_conversation.dag_graph.main_lane.transcript_recent_turns(limit_turns: N)`（最常用）
-- `child_conversation.dag_graph.main_lane.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
-- 若要“锚定某个节点做审计”：`child_conversation.dag_graph.transcript_for(target_node_id, limit_turns: N)`
+- `child_conversation.transcript_recent_turns(limit_turns: N)`（最常用）
+- `child_conversation.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
+- 若要“锚定某个节点做审计”：`child_conversation.transcript_for(target_node_id, limit_turns: N)`
 
 ## 1.1) Native tools（P1 已落地）
 

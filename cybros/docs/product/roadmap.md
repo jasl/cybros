@@ -39,7 +39,7 @@ Based on Fizzy's patterns with Discourse-inspired settings:
 - **Session**: Cookie-based (signed, HTTP-only, SameSite: lax). Modeled after Fizzy's session pattern.
 - **Current**: `ActiveSupport::CurrentAttributes` — `Current.user`, `Current.identity`, `Current.account`, `Current.session`.
 - **LlmProvider**: API endpoint configuration. Fields: `name`, `base_url`, `api_key` (encrypted), `api_format` (default: "openai"), `headers` (JSONB), `model_allowlist` (string array, required — provider only serves models explicitly listed), `priority` (integer, default: 0 — higher wins when multiple providers serve the same model). Modeled after vibe_tavern's LlmProvider, simplified (no LlmModel/LlmPreset tiers). UI includes a "Fetch Models" button that queries the provider's `/v1/models` endpoint to help populate the allowlist (not all providers support this).
-- **Conversation**: Existing model, wired to `DAG::Graph`. Add `belongs_to :agent_program`. Add controller CRUD. Supports soft-delete (archive) and hard-delete.
+- **Conversation**: App-facing aggregate root for chat. Internally backed by the DAG engine, but controllers/channels/views must only use `Conversation` APIs (no direct `DAG::*` calls). Belongs to `AgentProgram`. Supports archive (soft-delete) and hard-delete.
 - **ConversationRun**: State machine (queued → running → succeeded/failed/canceled) tracking each agent execution. Modeled after TavernKit's pattern.
 - **AgentProgram**: Points to a local directory containing agent program files (Phase 0) or a Nexus facility (Phase 1). Fields: `name`, `description`, `profile_source`, `local_path`, `args` (JSONB), `active_persona`.
 
@@ -72,13 +72,13 @@ Seeds read these and create the corresponding LlmProvider record.
 Adopt TavernKit's proven streaming architecture:
 
 - **Conversation list**: Sidebar with conversation titles, ordered by last activity.
-- **Message stream**: Messages rendered from DAG transcript projection. Markdown rendering.
+- **Message stream**: Messages rendered from `Conversation`'s message/transcript projection (DAG-backed internally). Markdown rendering.
 - **Input**: Text input with send button. Keyboard shortcuts.
 - **Streaming**: ActionCable `ConversationChannel` for ephemeral events:
   - `typing_start` / `typing_stop`: Show/hide typing indicator
   - `stream_chunk`: Update typing indicator with accumulated content
   - `stream_complete`: Signal that streaming is done
-- **Message creation**: Turbo Stream `append` when agent_message node is created atomically (no placeholder messages).
+- **Message creation**: Turbo Stream `append` when `Conversation#append_user_message!` creates the user message + the paired placeholder assistant bubble. Durable message updates converge via Turbo Stream `replace` when the assistant message becomes terminal (or swipes/regenerates).
 - **Error handling**: ConversationRun failure → show error in UI, allow retry.
 - **Stuck detection**: Heartbeat timeout → show warning, allow cancel.
 
@@ -86,22 +86,21 @@ Adopt TavernKit's proven streaming architecture:
 
 ```
 User submits message
-  → ConversationsController#create_message
-  → Create user_message DAG node
-  → Enqueue ConversationRunJob (Solid Queue)
+  → ConversationMessagesController#create (or equivalent)
+  → `Conversation#append_user_message!` (creates user message + paired placeholder assistant bubble; enqueues a run)
   → Return immediately (optimistic UI via Turbo Stream)
 
 ConversationRunJob:
   → Load agent program (AgentProgramLoader reads files from local directory)
   → Build PromptConfig (AGENT.md + SOUL.md + system.md.liquid + tools + skills)
   → Feed PromptConfig into SystemPromptSectionsBuilder (existing AgentCore, adapted)
-  → Assemble context (DAG context_for)
+  → Assemble prompt context via `Conversation` (engine detail is hidden from the App)
   → broadcast_typing_start
   → Call LLM (streaming via AgentCore executor)
     → Each chunk: broadcast_stream_chunk
   → Tool calls? → Execute in-process → broadcast tool status → Continue loop
-  → Create agent_message DAG node
-  → broadcast_create (Turbo Stream append)
+  → Persist assistant output (update placeholder assistant bubble, or create a new terminal version)
+  → broadcast_create/update (Turbo Stream replace/append as needed)
   → broadcast_typing_stop + stream_complete
 ```
 
@@ -179,8 +178,8 @@ Prepare **three Rails layouts** so each surface has a clean, consistent UI skele
 - **`agent` layout** (authenticated chat surface):
   - Used by the chat UI (the “left / center / right” 3-column layout described below).
   - Optimized for conversation flows and inspection/debug context.
-- **`settings` layout** (authenticated dashboard surface):
-  - Used by **Dashboard**, **`/settings`**, and **`/system/settings`** pages.
+- **`settings` layout** (authenticated settings surface):
+  - Used by **`/settings`** and **`/system/settings`** pages.
   - Optimized for forms, tables, CRUD workflows; can be simpler than the chat surface (no always-on inspector).
 
 #### 0.5-A — Agent layout: App Shell (3-pane, responsive)
@@ -219,14 +218,48 @@ Add top-level pages across the layouts (content can be minimal, but layout + rou
 
 #### 0.5-C — Chat transport: server-push + connectivity (reference: tavern_kit/playground)
 
-Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes):
+Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes).
 
-- **Server-push events**:
-  - Prefer broadcasting on `DAG::NodeEvent` creation (and/or stream flush) rather than per-connection polling.
-  - Define a stable event envelope usable by other surfaces (e.g. Telegram):
-    - `conversation_id`, `turn_id` (or run id), `node_id`, `event_id`, `kind`, `text`, `payload`, timestamps.
+This section is written as a **Conversation façade API checklist** so the App never depends on DAG internals.
+
+- **Durable HTTP truth (Turbo Streams)**:
+  - **`POST /conversations/:conversation_id/messages`** (`ConversationMessagesController#create`)
+    - Calls: `Conversation#append_user_message!(content:)` (or `append_user_message_and_project!` for immediate projection)
+    - Returns: `text/vnd.turbo-stream.html`
+      - `append` user bubble + paired agent placeholder bubble
+      - `remove` empty state
+  - **`GET /conversations/:conversation_id/messages`** (`ConversationMessagesController#index`)
+    - Calls: `Conversation#message_page(limit:, before_message_id:, after_message_id:, mode:)`
+    - Returns: `text/vnd.turbo-stream.html` with `prepend`/`append` + “load more” cursor update
+  - **`GET /conversations/:conversation_id/messages/refresh?node_id=...`** (`ConversationMessagesController#refresh`)
+    - Calls: `Conversation#message_for_node_id(node_id:, mode:)`
+    - Returns: `replace` for `message_<node_id>` (best-effort convergence when realtime delivery is missed)
+
+- **Ephemeral realtime (ActionCable)**:
+  - Channel: **`ConversationChannel`**
+    - Subscribe params:
+      - required: `conversation_id`
+      - optional: `node_id` (defaults to `Conversation#chat_head_node_id`)
+      - optional: `cursor` (resume point)
+    - On subscribe:
+      - calls `Conversation#cursor_for_existing_output(node_id)` to avoid replay duplication when preview already exists
+      - transmits missed events as a batch (see `replay_batch` below)
+
+  - Stable event envelope (usable by other surfaces, e.g. Telegram):
+    - `type` (string), `conversation_id`, `turn_id`, `node_id`, `event_id`, `kind`, `text`, `payload`, `occurred_at`
+    - **Event types**:
+      - `node_event`: streaming/progress/log events for a single node
+      - `node_state`: node state transitions (used for Stop/Retry UI convergence)
+      - `replay_batch`: `{ type: "replay_batch", events: [<node_event>...] }`
+
+  - `node_event.kind` (minimum set):
+    - `output_delta` (append-only streaming text)
+    - `output_compacted` (marker event; if `text` blank, use durable preview via `Conversation#output_preview_for_node_id`)
+    - `progress` (phase/progress line)
+    - `log` (structured log line)
+
 - **Connectivity**:
-  - Reconnect, resume-from-cursor, and dedupe without duplicating text.
+  - Reconnect, resume-from-cursor, and dedupe without duplicating text (cursor is stored per conversation and advanced by event id).
   - Explicit “active run node” tracking (do not infer from “latest leaf”).
 - **Ordering invariants** (non-negotiable):
   - Rapid sends create distinct user bubbles **in order**.
@@ -235,15 +268,35 @@ Solve *all* chat-page communication problems in Phase 0.5 (no partial fixes):
 
 #### 0.5-D — Chat UX: indicator + error/retry/cancel (state machine)
 
-- **Streaming indicator**:
-  - Anchored to the currently streaming assistant bubble.
-  - State transitions: idle → streaming → completed / errored / canceled.
-- **Error / retry / cancel**:
-  - Inline errors on the relevant assistant bubble.
-  - Retry generation (new node or rerun semantics, consistent with DAG).
-  - Stop/cancel while streaming.
+- **Streaming indicator (UI state machine)**:
+  - Anchored to the currently streaming assistant bubble (`data-role="agent-bubble"` + `data-node-id`).
+  - Driven by `node_event` + `node_state`:
+    - `idle` → `streaming` (first `output_delta`)
+    - `streaming` → `completed` (terminal state + durable replace)
+    - `streaming` → `errored` / `stopped` / `rejected` / `skipped` (terminal state + durable replace)
+
+- **User actions must map to Conversation façade APIs**:
+  - **Stop/cancel**:
+    - Endpoint: `POST /conversations/:id/stop` (or equivalent)
+    - Calls: `Conversation#stop_node!(node_id:, reason:)`
+    - UI: hide Stop once terminal; show reason on stopped nodes
+  - **Retry (same conversation/lane)**:
+    - Endpoint: `POST /conversations/:id/retry` (or equivalent)
+    - Calls: `Conversation#retry_agent_node!(failed_node_id:)`
+    - Output: returns new agent node id (queued) and relies on Turbo Streams + realtime for UI convergence
+    - Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_limit_reached`, `retry_already_queued`, `missing_parent`
+  - **Regenerate (swipe semantics)**:
+    - Calls: `Conversation#regenerate!(agent_node_id:)`
+      - tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
+      - non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
+  - **Swipe selection**:
+    - Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
+  - **Branch from a message**:
+    - Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
+
 - **Stuck detection**:
-  - Heartbeat timeout → show warning + allow cancel/retry.
+  - Heartbeat timeout → show warning + allow stop/retry.
+  - Implementation detail: controller may periodically reconcile from durable truth via `messages/refresh` if realtime delivery is missed.
 - **TavernKit “production feel” parity (follow-up)**:
   - Message action layer: copy / regenerate / edit / branch (`message_actions_controller` equivalent).
   - Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent).
@@ -300,8 +353,8 @@ Add system + integration tests that cover:
 - [ ] **Rails layouts**:
   - [ ] `landing` / `agent` / `settings` layouts exist
   - [ ] **Home** uses `landing`
-  - [ ] **Conversations + Agents** use `agent`
-  - [ ] **Dashboard + `/settings` + `/system/settings`** use `settings`
+  - [ ] **Dashboard + Conversations + Agents** use `agent`
+  - [ ] **`/settings` + `/system/settings`** use `settings`
 - [ ] **App shell (agent layout)**: three-pane layout exists and is used by authenticated agent surfaces
 - [ ] **Responsive**:
   - [ ] Mobile: left sidebar is a drawer; right pane is a modal/drawer; composer always reachable
@@ -471,7 +524,7 @@ Upgrade `default-assistant` and add new agents:
   - Explicit: user says "switch to coder mode" → agent switches
   - Automatic: hook detects intent shift (coding question → coder persona)
   - Configurable: `router: auto | explicit | hook` in agent.yml
-- **Shared state**: Conversation history shared across personas. Persona switch recorded as DAG event.
+- **Shared state**: Conversation history shared across personas. Persona switches are recorded as a **conversation node/event** (DAG-backed internally; App consumes via `Conversation` projections).
 
 **Acceptance**:
 - [ ] Agent switches persona based on user message content
@@ -497,7 +550,7 @@ Upgrade `default-assistant` and add new agents:
 - **Character card**: SOUL.md defines character personality, background, speech patterns, appearance.
 - **Lorebook**: `data/lorebook.yml` contains world-building entries. Cybros scans user messages for keywords and injects matching entries into context.
 - **Memory**: Long-term relationship memory via memory tools (pgvector).
-- **Character message**: Uses `character_message` DAG node type (already exists).
+- **Character message**: A `character_message` **conversation message type** (DAG-backed internally; surfaced via the normal `Conversation` transcript/message projection).
 - **Group chat** (stretch): Multiple character agents in same conversation via subagents.
 
 **Acceptance**:

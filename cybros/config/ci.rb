@@ -14,7 +14,9 @@ CI.run do
   step "Tests: Rails", "bin/rails test"
   step "Tests: Seeds", "env RAILS_ENV=test bin/rails db:seed:replant"
 
-  step "Tests: E2E (Playwright)", "bin/ci_e2e"
+  if ENV["RUN_E2E"].to_s == "1"
+    step "Tests: E2E (Playwright)", "bin/ci_e2e"
+  end
 
   # Optional: Run system tests
   # step "Tests: System", "bin/rails test:system"

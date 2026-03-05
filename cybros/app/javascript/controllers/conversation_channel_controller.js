@@ -1,6 +1,8 @@
 import { Controller } from "@hotwired/stimulus"
 import consumer from "../channels/consumer"
-import { boundedPush, compareEventIds, sortEventsByEventId } from "../lib/event_id"
+import { boundedPush, compareEventIds } from "../lib/event_id"
+import { shouldShowStuckWarning } from "../lib/stuck_detection"
+import { orderNodeEventsForFlush } from "../lib/node_event_ordering"
 
 export default class extends Controller {
   static values = {
@@ -192,7 +194,7 @@ export default class extends Controller {
     this.pendingEventsByNodeId.delete(nodeId)
 
     // Ensure deterministic order in case buffered out-of-order.
-    const ordered = sortEventsByEventId(events)
+    const ordered = orderNodeEventsForFlush(events)
 
     for (const ev of ordered) {
       this.#applyNodeEvent(bubble, ev)
@@ -434,8 +436,7 @@ export default class extends Controller {
     if (!this.activeNodeId) return
     if (!this.lastEventAt) return
 
-    const seconds = (Date.now() - this.lastEventAt) / 1000
-    if (seconds < 30) return
+    if (!shouldShowStuckWarning({ lastEventAtMs: this.lastEventAt, nowMs: Date.now(), thresholdSeconds: 30 })) return
     this.#showStuck()
     this.#showRetry()
   }
