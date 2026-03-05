@@ -47,6 +47,10 @@ function tailAgentNodeId(listEl) {
   return last?.getAttribute?.("data-node-id") || null
 }
 
+function terminalState(state) {
+  return ["finished", "errored", "stopped", "rejected", "skipped"].includes(String(state || ""))
+}
+
 export default class extends Controller {
   static values = {
     nodeId: String,
@@ -81,12 +85,25 @@ export default class extends Controller {
     const tailId = tailAgentNodeId(listEl)
     const isTailAgent = role === "agent" && nodeId && tailId && nodeId === tailId
 
+    const bubbleState = this.element.querySelector("[data-role='agent-bubble']")?.getAttribute?.("data-node-state") || ""
+    const isTerminal = terminalState(bubbleState)
+    const canRegenerate = role === "agent" && bubbleState === "finished"
+    const canSwipe = role === "agent" && isTailAgent && bubbleState === "finished"
+    const canBranch = role === "user" ? true : (role === "agent" && isTerminal)
+
     if (this.hasSwipeNavTarget) {
-      this.swipeNavTarget.classList.toggle("hidden", !isTailAgent)
+      this.swipeNavTarget.classList.toggle("hidden", !canSwipe)
     }
 
     if (this.hasRegenerateButtonTarget) {
       this.regenerateButtonTarget.title = isTailAgent ? "Regenerate" : "Regenerate (creates branch)"
+      this.regenerateButtonTarget.toggleAttribute("disabled", !canRegenerate)
+      this.regenerateButtonTarget.classList.toggle("btn-disabled", !canRegenerate)
+    }
+
+    if (this.hasBranchButtonTarget) {
+      this.branchButtonTarget.toggleAttribute("disabled", !canBranch)
+      this.branchButtonTarget.classList.toggle("btn-disabled", !canBranch)
     }
   }
 

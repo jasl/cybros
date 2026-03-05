@@ -50,6 +50,9 @@ export default class extends Controller {
 
   #handleTouchStart(event) {
     if (!this.#isTailAgent()) return
+    if (String(this.element.getAttribute("data-node-state") || "") !== "finished") return
+    if (event.target?.closest?.("button,a,input,textarea,select,[role='button']")) return
+
     const touch = event.touches?.[0]
     if (!touch) return
     this.touchStartX = touch.clientX
@@ -63,6 +66,9 @@ export default class extends Controller {
 
   #handleTouchEnd(event) {
     if (!this.#isTailAgent()) return
+    if (String(this.element.getAttribute("data-node-state") || "") !== "finished") return
+    if (event.target?.closest?.("button,a,input,textarea,select,[role='button']")) return
+
     const touch = event.changedTouches?.[0]
     if (!touch) return
 
