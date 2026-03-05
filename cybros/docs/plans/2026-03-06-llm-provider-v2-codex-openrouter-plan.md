@@ -156,8 +156,20 @@ providers:
 
 #### File locations and Docker injection
 - **Default catalog (shipped in image)**: `config/llm/providers.yml`
-- **Optional override catalog (runtime-injected)**: file path specified by `CYBROS_LLM_CONFIG_PATH`
-  - Docker example: mount `./providers.override.yml:/config/providers.override.yml` and set `CYBROS_LLM_CONFIG_PATH=/config/providers.override.yml`
+- **Config root for runtime mounts (recommended)**: mount a single directory (e.g. `/config/cybros`) that can hold multiple future overrides (LLM config today, other config later).
+  - Env: `CYBROS_CONFIG_ROOT=/config/cybros`
+  - When set, the app should look for:
+    - `#{CYBROS_CONFIG_ROOT}/llm/providers.yml` as the override catalog (if present)
+    - (optional) `#{CYBROS_CONFIG_ROOT}/llm/providers.local.yml` for developer-local overrides (if we want a second layer)
+- **Optional override catalog (legacy/explicit)**: file path specified by `CYBROS_LLM_CONFIG_PATH`
+  - This remains supported for one-off mounts, but prefer `CYBROS_CONFIG_ROOT` for long-term deploy ergonomics.
+  - Docker example (root mount): mount `./cybros-config:/config/cybros` and set `CYBROS_CONFIG_ROOT=/config/cybros`
+  - Docker example (single file): mount `./providers.override.yml:/config/providers.override.yml` and set `CYBROS_LLM_CONFIG_PATH=/config/providers.override.yml`
+
+Override precedence (highest wins):
+1) `CYBROS_LLM_CONFIG_PATH` (explicit file)
+2) `CYBROS_CONFIG_ROOT/llm/providers.yml` (root-mounted convention)
+3) `config/llm/providers.yml` (default shipped with image)
 
 #### Merge semantics (default + override)
 We treat the override file as a deep-merge patch keyed by provider/model keys:
@@ -494,6 +506,14 @@ Deliverables:
 
 ## Potential blockers / discussion points (identify early)
 
+## Destructive refactor policy (explicit)
+This phase optimizes for **architecture correctness and clean code**, not backwards compatibility.
+
+- It is acceptable to do **breaking, destructive refactors** to remove the old LLM provider approach entirely.
+- Do not build compatibility layers or dual-write paths unless they materially reduce risk for *this* implementation.
+- Prefer deleting dead code, unused routes, and old DB fields once the new approach is in place.
+- For DB changes in this experimental repo, it is acceptable to **edit/rewrite recent migrations** and/or reset DB in development as needed (keep schema + tests aligned).
+
 ### WebSocket client implementation in Ruby
 Responses-over-WebSocket requires an outbound WS client that:
 - supports custom headers (Authorization, ChatGPT-Account-Id, beta headers)
@@ -524,7 +544,7 @@ OpenRouter capabilities are not reliable unless explicitly curated. Our default 
 - [ ] Add default YAML catalog file (e.g. `config/llm/providers.yml`) with:
   - providers (`provider_key`) + base_url/headers/enabled/default_model/requires_credential/wire_api/transport
   - models (`model_key`) with capabilities/tokenizer_hint/context window and reasoning-effort variants
-- [ ] Add YAML loader + deep-merge layering (default + optional override via `CYBROS_LLM_CONFIG_PATH`)
+- [ ] Add YAML loader + deep-merge layering (default + optional override via `CYBROS_CONFIG_ROOT` and/or `CYBROS_LLM_CONFIG_PATH`)
 - [ ] Add schema validation + helpful error reporting on boot (fail-fast with actionable message)
 - [ ] Update DB `llm_providers` to include `provider_key` (unique) and credential_type fields; keep API key encrypted
 - [ ] Add encrypted OAuth credential fields for Codex subscription (`access_token`, `refresh_token`, `expires_at`, `account_id`)
