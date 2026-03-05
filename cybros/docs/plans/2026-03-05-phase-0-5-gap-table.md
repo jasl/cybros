@@ -20,12 +20,12 @@ Counts by section:
 - **Auth/pagination/broadcast hardening**: ✅ 7 · 🟡 0 · ❌ 0
 - **Edge/extreme test matrix**: ✅ 7 · 🟡 0 · ❌ 0
 
-Top 5 next steps (highest risk/user impact):
-1. **Narrow Turbo stream buffer observer scope** (0.5-G perf backlog).
-2. **Add a UI-level rapid-sends ordering assertion** (optional, aligns with acceptance language).
-3. **Decide whether to include `RUN_E2E=1` in CI** (keep default fast; opt-in on demand).
-4. **Archive/clean up this gap table post-acceptance** (as agreed: temporary doc).
-5. **Consider a lightweight DOM-order check for rapid sends** (only if it’s stable).
+Optional follow-ups (post-acceptance / non-blocking):
+1. **Decide whether to include `RUN_E2E=1` in CI** (keep default fast; opt-in on demand).
+2. **Archive/clean up this gap table** (as agreed: temporary doc).
+3. **Add a dedicated typing-indicator assertion** (spinner appears on first delta; not strictly required if other E2E cover streaming).
+4. **Add provider/model “health” copy/empty states** on `/system/settings` (nice-to-have).
+5. **Stabilize log key contract** for subscribe/replay structured logs (nice-to-have).
 
 ---
 
@@ -67,7 +67,7 @@ Top 5 next steps (highest risk/user impact):
 | Replay batching (`replay_batch`) | ✅ | `ConversationChannel#replay_missed_events!` transmits `{type:"replay_batch", events:[...]}` | — | — | `test/channels/conversation_channel_test.rb` |
 | Cursor semantics: resume strictly after cursor + dedupe via preview | ✅ | Cursor persisted + replay resumes strictly after cursor; dedupe via compareEventIds | — | — | `test/e2e/conversation_reconnect_resume.spec.ts` |
 | Low-frequency polling fallback (not primary) | ✅ | `ConversationChannel` periodic `poll_fallback` every 10s (vs prior 0.25s polling) | Might still be too chatty for scale (Phase 0.5 ok) | Consider lowering frequency or gating when connected/idle | `test/channels/conversation_channel_test.rb` (poll_fallback replay) |
-| Ordering invariant: rapid sends preserve user order + pairing | ✅ | Server-side transcript alternates user/agent placeholders by turn | No UI-level assertion (DOM ordering) | Optional: add Playwright rapid-sends ordering test | `test/integration/conversation_rapid_sends_test.rb` |
+| Ordering invariant: rapid sends preserve user order + pairing | ✅ | Server-side transcript alternates user/agent placeholders by turn | — | — | `test/e2e/conversation_rapid_sends_ordering.spec.ts`, `test/integration/conversation_rapid_sends_test.rb` |
 | Out-of-order event arrival does not reorder UI | ✅ | Client buffers then orders by `event_id` before applying | — | — | `test/js/node_event_ordering.test.js` |
 | “Active run node” tracking is explicit | ✅ | `conversation_channel_controller.js` maintains `activeNodeId` driven by `node_state` + `output_delta` | Node selection semantics beyond “last bubble” not specified | Confirm any multi-run UI uses explicit node id | `test/e2e/conversation_mock_llm_stop.spec.ts` (stop targets node id) |
 | Stable envelope contract for `node_state` is surface-agnostic | ✅ | `app/models/event.rb` broadcasts `{type:"node_state", conversation_id, event_id, turn_id, node_id, from, to, occurred_at}` | — | — | `test/models/event_turbo_streams_broadcast_test.rb` |
@@ -78,7 +78,7 @@ Top 5 next steps (highest risk/user impact):
 
 | Item | Status (✅/🟡/❌) | Evidence | Gap | Next step | Test coverage |
 |---|---|---|---|---|---|
-| Typing/streaming indicator anchored to active assistant bubble | ✅ | `conversation_channel_controller.js` shows `[data-role="spinner"]` within `[data-role="agent-bubble"][data-node-id]` | No dedicated test for “spinner appears on first delta” | Add small Playwright assertion (optional) | 🟡 (indirect via other E2E) |
+| Typing/streaming indicator anchored to active assistant bubble | ✅ | `conversation_channel_controller.js` shows `[data-role="spinner"]` within `[data-role="agent-bubble"][data-node-id]` | No dedicated “spinner appears on first delta” assertion | Optional: add one small E2E assertion | `test/e2e/conversation_mock_llm_streaming.spec.ts`, `test/e2e/conversation_mock_llm_stop.spec.ts` (streaming coverage) |
 | Stop/cancel works end-to-end | ✅ | `POST /conversations/:id/stop` → `ConversationsController#stop` → `Conversation#stop_node!`; UI button wired via Stimulus | UI button timing can be flaky; E2E uses direct request (still exercises endpoint) | Add UI-click stop test only if stable | `test/e2e/conversation_mock_llm_stop.spec.ts` |
 | Retry works end-to-end (errored → retry) | ✅ | `POST /conversations/:id/retry` → `ConversationsController#retry`; client shows Retry on `node_state: errored` | Retry triggers full reload (`Turbo.visit`) instead of in-place reconciliation | Consider in-place path later (non-blocking) | `test/e2e/conversation_mock_llm_error_retry.spec.ts` |
 | Terminal convergence (replace missed) | ✅ | `Event#broadcast_node_state_change` broadcasts Turbo replace on terminal; client also falls back to `messages/refresh` | None | — | `test/models/event_turbo_streams_broadcast_test.rb`, `test/e2e/conversation_mock_llm_realtime_replace.spec.ts` |
