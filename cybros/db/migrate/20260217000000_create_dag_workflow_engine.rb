@@ -158,6 +158,8 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
       t.uuid :lane_id, null: false
+      t.index %i[graph_id lane_id], where: "anchor_node_id_including_deleted IS NOT NULL",
+              name: "index_dag_turns_graph_lane_visible_including_deleted"
 
       t.bigint :anchored_seq
       t.check_constraint(
@@ -217,6 +219,8 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
 
       t.uuid :node_id, null: false
+      t.uuid :turn_id
+      t.uuid :body_id
 
       t.string :kind, null: false
       t.text :text

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_05_000003) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_05_000000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -99,7 +99,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_05_000003) do
     t.text "summary"
     t.string "title"
     t.datetime "updated_at", null: false
-    t.uuid "user_id", null: false
+    t.uuid "user_id"
     t.index ["forked_from_node_id"], name: "index_conversations_on_forked_from_node_id"
     t.index ["kind"], name: "index_conversations_on_kind"
     t.index ["parent_conversation_id"], name: "index_conversations_on_parent_conversation_id"
@@ -258,8 +258,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_05_000003) do
     t.index ["graph_id", "lane_id", "anchored_seq"], name: "index_dag_turns_graph_lane_anchored_seq_unique", unique: true, where: "(anchored_seq IS NOT NULL)"
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_id_unique", unique: true
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible", where: "(anchor_node_id IS NOT NULL)"
-    t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible_including_deleted", where: "(anchor_node_id_including_deleted IS NOT NULL)"
     t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane"
+    t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane_visible_including_deleted", where: "(anchor_node_id_including_deleted IS NOT NULL)"
     t.index ["graph_id"], name: "index_dag_turns_on_graph_id"
     t.check_constraint "(anchor_node_id IS NULL) = (anchor_created_at IS NULL)", name: "check_dag_turns_anchor_fields_consistent"
     t.check_constraint "(anchor_node_id_including_deleted IS NULL) = (anchor_created_at_including_deleted IS NULL)", name: "check_dag_turns_anchor_including_deleted_fields_consistent"
@@ -325,6 +325,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_05_000003) do
   add_foreign_key "conversation_runs", "conversations"
   add_foreign_key "conversations", "conversations", column: "parent_conversation_id", on_delete: :nullify
   add_foreign_key "conversations", "conversations", column: "root_conversation_id", on_delete: :nullify
+  add_foreign_key "conversations", "dag_nodes", column: "forked_from_node_id", on_delete: :nullify
   add_foreign_key "conversations", "users"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
