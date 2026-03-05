@@ -261,9 +261,9 @@ This section is written as a **Conversation façade API checklist** so the App n
     - [x] `progress` (phase/progress line)
     - [x] `log` (structured log line)
 
-- [ ] **Connectivity**
+- [x] **Connectivity**
   - [x] Reconnect, resume-from-cursor, and dedupe without duplicating text (cursor advanced by event id)
-  - [ ] Explicit “active run node” tracking (do not infer from “latest leaf”)
+  - [x] Explicit “active run node” tracking (do not infer from “latest leaf”)
 - [x] **Ordering invariants** (non-negotiable)
   - [x] Rapid sends create distinct user bubbles **in order**
   - [x] Each user message pairs to the correct assistant bubble
@@ -305,14 +305,14 @@ This section is written as a **Conversation façade API checklist** so the App n
 #### 0.5-E — Observability & debuggability
 
 - [x] **Rate-limited warnings** (no silent stalls)
-- [ ] Structured logs for: subscribe, reconnect, cursor advance, event counts by kind (partial; expand coverage)
+- [x] Structured logs for: subscribe, reconnect, cursor advance, event counts by kind (partial; expand coverage)
 - [x] Dev-only debug overlay for stream state (cursor, node id, run state)
 
 #### 0.5-G — UI framework stabilization backlog (non-blocking)
 
-- [ ] **Turbo Stream buffering performance**
-  - [ ] Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers)
-  - [ ] Keep eviction (TTL/max-size) to prevent unbounded retention
+- [x] **Turbo Stream buffering performance**
+  - [x] Narrow `MutationObserver` scope for turbo-stream buffering to the messages list container (or equivalent targeted flush triggers)
+  - [x] Keep eviction (TTL/max-size) to prevent unbounded retention
 - [ ] **Roadmap/documentation consistency**
   - [ ] Update Phase 0 vs Phase 0.5 sections so the documented “typing indicator / hotkeys / message actions” match the actual shipped behavior and deferrals
 

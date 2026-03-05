@@ -79,28 +79,60 @@ export function mutationCouldRevealBufferedTarget(mutations) {
   return false
 }
 
+export function resolveTurboStreamBufferScopeRoot({
+  documentLike = document,
+  selector = "[data-turbo-stream-buffer-scope]",
+} = {}) {
+  const explicit = documentLike?.querySelector?.(selector)
+  return explicit || documentLike?.body || documentLike?.documentElement || null
+}
+
 export function installTurboStreamBuffer({
-  scopeRoot = document.body || document.documentElement,
+  scopeRoot = null,
   turbo = window.Turbo,
+  documentLike = document,
+  MutationObserverClass = MutationObserver,
 } = {}) {
   if (!turbo || typeof turbo.renderStreamMessage !== "function") return null
 
+  const resolveRoot = () => {
+    if (typeof scopeRoot === "function") {
+      return scopeRoot({ documentLike }) || resolveTurboStreamBufferScopeRoot({ documentLike })
+    }
+    return scopeRoot || resolveTurboStreamBufferScopeRoot({ documentLike })
+  }
+
   const buffer = createTurboStreamBuffer({
-    getElementById: (id) => document.getElementById(id),
+    getElementById: (id) => documentLike.getElementById(id),
     renderStreamMessage: (html) => turbo.renderStreamMessage(html),
   })
 
   const onBeforeStreamRender = (event) => buffer.onBeforeStreamRender(event)
-  document.addEventListener("turbo:before-stream-render", onBeforeStreamRender)
+  documentLike.addEventListener("turbo:before-stream-render", onBeforeStreamRender)
 
-  const observer = new MutationObserver((mutations) => {
+  const observer = new MutationObserverClass((mutations) => {
     if (mutationCouldRevealBufferedTarget(mutations)) buffer.flush()
   })
-  if (scopeRoot) observer.observe(scopeRoot, { childList: true, subtree: true })
+
+  let observedRoot = null
+  const observeCurrentRoot = () => {
+    const nextRoot = resolveRoot()
+    if (!nextRoot) return
+    if (nextRoot === observedRoot) return
+    observer.disconnect()
+    observer.observe(nextRoot, { childList: true, subtree: true })
+    observedRoot = nextRoot
+  }
+
+  observeCurrentRoot()
+
+  const onTurboLoad = () => observeCurrentRoot()
+  documentLike.addEventListener("turbo:load", onTurboLoad)
 
   return {
     uninstall() {
-      document.removeEventListener("turbo:before-stream-render", onBeforeStreamRender)
+      documentLike.removeEventListener("turbo:before-stream-render", onBeforeStreamRender)
+      documentLike.removeEventListener("turbo:load", onTurboLoad)
       observer.disconnect()
     },
   }

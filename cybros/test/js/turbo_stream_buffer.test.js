@@ -1,5 +1,10 @@
 import { test, expect } from "bun:test"
-import { createTurboStreamBuffer, mutationCouldRevealBufferedTarget } from "../../app/javascript/lib/turbo_stream_buffer"
+import {
+  createTurboStreamBuffer,
+  installTurboStreamBuffer,
+  mutationCouldRevealBufferedTarget,
+  resolveTurboStreamBufferScopeRoot,
+} from "../../app/javascript/lib/turbo_stream_buffer"
 
 function makeStream({ action = "replace", target = "message_123", html = "<turbo-stream></turbo-stream>" } = {}) {
   return {
@@ -123,4 +128,82 @@ test("mutationCouldRevealBufferedTarget returns true only when message_* wrapper
       makeMutation([{ id: "wrapper", querySelectorAll: () => [{ id: "message_nested" }] }]),
     ]),
   ).toBe(true)
+})
+
+test("resolveTurboStreamBufferScopeRoot prefers an explicit scope element when present", () => {
+  const scopeEl = { id: "scope_el" }
+  const bodyEl = { id: "body_el" }
+  const htmlEl = { id: "html_el" }
+
+  const doc = {
+    querySelector: (sel) => (sel === "[data-turbo-stream-buffer-scope]" ? scopeEl : null),
+    body: bodyEl,
+    documentElement: htmlEl,
+  }
+
+  expect(resolveTurboStreamBufferScopeRoot({ documentLike: doc })).toBe(scopeEl)
+})
+
+test("resolveTurboStreamBufferScopeRoot falls back to body/documentElement when no explicit scope exists", () => {
+  const bodyEl = { id: "body_el" }
+  const htmlEl = { id: "html_el" }
+
+  const doc = {
+    querySelector: () => null,
+    body: bodyEl,
+    documentElement: htmlEl,
+  }
+
+  expect(resolveTurboStreamBufferScopeRoot({ documentLike: doc })).toBe(bodyEl)
+})
+
+test("installTurboStreamBuffer rebinds observer to explicit scope on turbo:load", () => {
+  let scopeEl = null
+
+  const bodyEl = { id: "body_el" }
+  const explicitEl = { id: "explicit_el" }
+
+  const listeners = new Map()
+  const doc = {
+    querySelector: (sel) => (sel === "[data-turbo-stream-buffer-scope]" ? scopeEl : null),
+    body: bodyEl,
+    documentElement: { id: "html_el" },
+    getElementById: () => null,
+    addEventListener: (name, fn) => listeners.set(name, fn),
+    removeEventListener: (name, fn) => {
+      if (listeners.get(name) === fn) listeners.delete(name)
+    },
+  }
+
+  const observed = []
+  class FakeMutationObserver {
+    constructor(_cb) {}
+    observe(root) {
+      observed.push(root)
+    }
+    disconnect() {
+      observed.push("disconnect")
+    }
+  }
+
+  const turbo = { renderStreamMessage: () => {} }
+
+  // Initially, explicit scope doesn't exist: should observe body.
+  scopeEl = null
+  const handle = installTurboStreamBuffer({
+    turbo,
+    documentLike: doc,
+    MutationObserverClass: FakeMutationObserver,
+    scopeRoot: resolveTurboStreamBufferScopeRoot,
+  })
+
+  expect(observed).toContain(bodyEl)
+
+  // Later (Turbo navigation complete), explicit container exists: should re-observe explicit.
+  scopeEl = explicitEl
+  listeners.get("turbo:load")?.()
+
+  expect(observed).toContain(explicitEl)
+
+  handle?.uninstall?.()
 })

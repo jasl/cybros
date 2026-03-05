@@ -34,6 +34,83 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
     assert subscription.rejected?
   end
 
+  test "structured logs include subscribe and replay details" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user_node = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user_node, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first = DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "A", payload: {})
+    DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "B", payload: {})
+
+    fake_logger =
+      Class.new do
+        attr_reader :infos
+
+        def initialize
+          @infos = []
+        end
+
+        def info(message)
+          @infos << message
+        end
+
+        def warn(_message)
+          nil
+        end
+      end.new
+
+    old_logger = Rails.logger
+    Rails.singleton_class.send(:define_method, :logger) { fake_logger }
+
+    begin
+      transmissions.clear
+      subscribe conversation_id: conversation.id, node_id: agent.id, cursor: first.id
+      assert subscription.confirmed?
+    ensure
+      Rails.singleton_class.send(:define_method, :logger) { old_logger }
+    end
+
+    parsed =
+      fake_logger.infos.filter_map do |line|
+        JSON.parse(line)
+      rescue JSON::ParserError
+        nil
+      end
+
+    subscribed = parsed.find { |h| h["event"] == "subscribed" }
+    assert subscribed, "expected a structured subscribed log event"
+    assert_equal conversation.id.to_s, subscribed["conversation_id"]
+    assert_equal agent.id.to_s, subscribed["node_id"]
+
+    replay = parsed.find { |h| h["event"] == "replay" }
+    assert replay, "expected a structured replay log event"
+    assert_equal 1, replay["replay_count"]
+    assert_equal({ "output_delta" => 1 }, replay["replay_kinds_counts"])
+  end
+
   test "broadcasts node events on create" do
     user = sign_in_owner!
 

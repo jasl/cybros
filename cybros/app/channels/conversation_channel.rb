@@ -44,20 +44,27 @@ class ConversationChannel < ApplicationCable::Channel
       @cursor = @conversation.cursor_for_existing_output(@node_id)
     end
 
+    provided_node_id = params[:node_id].to_s.presence
+    provided_cursor = params[:cursor].to_s.presence
+
     Rails.logger.info(
       {
         msg: "conversation_channel_subscribed",
+        event: "subscribed",
+        source: "subscribe",
         conversation_id: @conversation.id.to_s,
         node_id: @node_id.to_s,
         cursor: @cursor.to_s,
+        provided_node_id: provided_node_id.to_s,
+        provided_cursor: provided_cursor.to_s,
       }.to_json
     )
 
-    replay_missed_events!
+    replay_missed_events!(source: "subscribe")
   end
 
   def poll_fallback
-    replay_missed_events!
+    replay_missed_events!(source: "poll_fallback")
   rescue StandardError => e
     rate_limited_warn(e)
     nil
@@ -131,10 +138,11 @@ class ConversationChannel < ApplicationCable::Channel
       nil
     end
 
-    def replay_missed_events!
+    def replay_missed_events!(source:)
       return if @conversation.nil?
       return if @node_id.blank?
 
+      after_cursor = @cursor.to_s
       output_preview = @conversation.output_preview_for_node_id(@node_id)
       turn_id = @conversation.turn_id_for_node_id(@node_id).to_s
 
@@ -153,6 +161,7 @@ class ConversationChannel < ApplicationCable::Channel
 
       return if events.empty?
 
+      replay_kinds_counts = Hash.new(0)
       batch =
         events.filter_map do |event_hash|
           next unless event_hash.is_a?(Hash)
@@ -162,6 +171,7 @@ class ConversationChannel < ApplicationCable::Channel
           if kind == "output_compacted" && text.blank?
             text = output_preview.fetch("content", "").to_s
           end
+          replay_kinds_counts[kind] += 1
 
           {
             "type" => "node_event",
@@ -185,9 +195,13 @@ class ConversationChannel < ApplicationCable::Channel
       Rails.logger.info(
         {
           msg: "conversation_channel_replay",
+          event: "replay",
+          source: source.to_s,
           conversation_id: @conversation.id.to_s,
           node_id: @node_id.to_s,
-          replay_count: events.length,
+          replay_count: batch.length,
+          replay_kinds_counts: replay_kinds_counts,
+          after_cursor: after_cursor,
           cursor: @cursor.to_s,
         }.to_json
       )

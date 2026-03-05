@@ -2,7 +2,7 @@
 import "@hotwired/turbo-rails"
 import "./controllers"
 import "./channels"
-import { installTurboStreamBuffer } from "./lib/turbo_stream_buffer"
+import { installTurboStreamBuffer, resolveTurboStreamBufferScopeRoot } from "./lib/turbo_stream_buffer"
 
 // Global toast handler
 // Listens for `toast:show` custom events and displays toast notifications.
@@ -55,4 +55,4 @@ window.addEventListener("toast:show", (event) => {
 // Turbo Stream replace can arrive before the placeholder message wrapper exists (race between
 // ActionCable/Turbo streams and the request-response turbo_stream append). Buffer and flush these
 // streams so the UI converges without requiring a reload.
-installTurboStreamBuffer()
+installTurboStreamBuffer({ scopeRoot: resolveTurboStreamBufferScopeRoot })

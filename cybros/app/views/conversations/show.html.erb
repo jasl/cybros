@@ -78,7 +78,11 @@
         No messages yet. Start a conversation below.
       </p>
 
-      <div id="<%= dom_id(@conversation, :messages_list) %>" data-chat-scroll-target="list" class="space-y-5">
+      <div
+        id="<%= dom_id(@conversation, :messages_list) %>"
+        data-chat-scroll-target="list"
+        data-turbo-stream-buffer-scope
+        class="space-y-5">
         <%= render partial: "conversation_messages/message", collection: @messages, as: :message %>
       </div>
     </div>
