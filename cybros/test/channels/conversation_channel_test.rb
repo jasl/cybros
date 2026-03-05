@@ -83,14 +83,14 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
       end.new
 
     old_logger = Rails.logger
-    Rails.singleton_class.send(:define_method, :logger) { fake_logger }
+    Rails.define_singleton_method(:logger) { fake_logger }
 
     begin
       transmissions.clear
       subscribe conversation_id: conversation.id, node_id: agent.id, cursor: first.id
       assert subscription.confirmed?
     ensure
-      Rails.singleton_class.send(:define_method, :logger) { old_logger }
+      Rails.define_singleton_method(:logger) { old_logger }
     end
 
     parsed =
@@ -109,6 +109,69 @@ class ConversationChannelTest < ActionCable::Channel::TestCase
     assert replay, "expected a structured replay log event"
     assert_equal 1, replay["replay_count"]
     assert_equal({ "output_delta" => 1 }, replay["replay_kinds_counts"])
+  end
+
+  test "structured logs include replay event even when no events are missed on subscribe" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    agent = nil
+    graph.mutate! do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+    end
+
+    first = DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "A", payload: {})
+    second = DAG::NodeEvent.create!(graph: graph, node: agent, kind: DAG::NodeEvent::OUTPUT_DELTA, text: "B", payload: {})
+
+    fake_logger =
+      Class.new do
+        attr_reader :infos
+
+        def initialize
+          @infos = []
+        end
+
+        def info(message)
+          @infos << message
+        end
+
+        def warn(_message)
+          nil
+        end
+      end.new
+
+    old_logger = Rails.logger
+    Rails.define_singleton_method(:logger) { fake_logger }
+
+    begin
+      transmissions.clear
+      subscribe conversation_id: conversation.id, node_id: agent.id, cursor: second.id
+      assert subscription.confirmed?
+    ensure
+      Rails.define_singleton_method(:logger) { old_logger }
+    end
+
+    parsed =
+      fake_logger.infos.filter_map do |line|
+        JSON.parse(line)
+      rescue JSON::ParserError
+        nil
+      end
+
+    replay = parsed.find { |h| h["event"] == "replay" }
+    assert replay, "expected a structured replay log event"
+    assert_equal 0, replay["replay_count"]
+    assert_equal({}, replay["replay_kinds_counts"])
+    assert_equal second.id.to_s, replay["after_cursor"]
+    assert_equal second.id.to_s, replay["cursor"]
+    refute_equal first.id.to_s, replay["cursor"]
   end
 
   test "broadcasts node events on create" do

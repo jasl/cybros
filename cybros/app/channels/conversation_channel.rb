@@ -159,7 +159,27 @@ class ConversationChannel < ApplicationCable::Channel
           ],
         )
 
-      return if events.empty?
+      if events.empty?
+        # On subscribe/reconnect, emit a structured replay log even when no events were missed.
+        # (On poll fallback, stay quiet to avoid log spam.)
+        if source.to_s == "subscribe"
+          Rails.logger.info(
+            {
+              msg: "conversation_channel_replay",
+              event: "replay",
+              source: source.to_s,
+              conversation_id: @conversation.id.to_s,
+              node_id: @node_id.to_s,
+              replay_count: 0,
+              replay_kinds_counts: {},
+              after_cursor: after_cursor,
+              cursor: @cursor.to_s,
+            }.to_json
+          )
+        end
+
+        return
+      end
 
       replay_kinds_counts = Hash.new(0)
       batch =
