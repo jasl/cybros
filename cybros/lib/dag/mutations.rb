@@ -221,6 +221,12 @@ module DAG
 
       def fork_from!(from_node:, node_type:, state:, content: nil, body_input: {}, body_output: {}, metadata: {})
         assert_node_belongs_to_graph!(from_node)
+        @graph.policy.assert_allowed!(
+          operation: :fork_from,
+          graph: @graph,
+          subject: from_node,
+          details: { node_type: node_type.to_s, state: state.to_s }
+        )
         OperationNotAllowedError.raise!(
           "cannot fork from compressed nodes",
           code: "dag.mutations.cannot_fork_from_compressed_nodes",
@@ -519,6 +525,13 @@ module DAG
       old = locked_active_node!(node)
       now = Time.current
 
+        @graph.policy.assert_allowed!(
+          operation: :rerun_replace,
+          graph: @graph,
+          subject: old,
+          details: { node_type: old.node_type.to_s }
+        )
+
         unless old.body.rerunnable?
           OperationNotAllowedError.raise!(
             "can only rerun rerunnable nodes",
@@ -586,6 +599,13 @@ module DAG
       def adopt_version!(node:)
       target = locked_node!(node)
       now = Time.current
+
+        @graph.policy.assert_allowed!(
+          operation: :adopt_version,
+          graph: @graph,
+          subject: target,
+          details: { node_type: target.node_type.to_s, version_set_id: target.version_set_id.to_s }
+        )
 
         if @graph.nodes.active.where(state: DAG::Node::RUNNING).exists?
           OperationNotAllowedError.raise!(
@@ -672,6 +692,13 @@ module DAG
       def edit_replace!(node:, new_input:)
       old = locked_active_node!(node)
       now = Time.current
+
+        @graph.policy.assert_allowed!(
+          operation: :edit_replace,
+          graph: @graph,
+          subject: old,
+          details: { node_type: old.node_type.to_s }
+        )
 
         unless old.body.editable?
           OperationNotAllowedError.raise!(

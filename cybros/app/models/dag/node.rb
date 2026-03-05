@@ -90,6 +90,12 @@ module DAG
 
     def exclude_from_context!(at: Time.current)
       graph.with_graph_lock! do
+        graph.policy.assert_allowed!(
+          operation: :visibility_strict,
+          graph: graph,
+          subject: self,
+          details: { action: "exclude_from_context" }
+        )
         assert_visibility_mutation_allowed!
         from = visibility_snapshot
         update_visibility_columns!(context_excluded_at: at)
@@ -104,6 +110,12 @@ module DAG
 
     def include_in_context!
       graph.with_graph_lock! do
+        graph.policy.assert_allowed!(
+          operation: :visibility_strict,
+          graph: graph,
+          subject: self,
+          details: { action: "include_in_context" }
+        )
         assert_visibility_mutation_allowed!
         from = visibility_snapshot
         update_visibility_columns!(context_excluded_at: nil)
@@ -118,6 +130,12 @@ module DAG
 
     def soft_delete!(at: Time.current)
       graph.with_graph_lock! do
+        graph.policy.assert_allowed!(
+          operation: :visibility_strict,
+          graph: graph,
+          subject: self,
+          details: { action: "soft_delete" }
+        )
         assert_visibility_mutation_allowed!
         from = visibility_snapshot
         update_visibility_columns!(deleted_at: at)
@@ -140,6 +158,12 @@ module DAG
 
     def restore!
       graph.with_graph_lock! do
+        graph.policy.assert_allowed!(
+          operation: :visibility_strict,
+          graph: graph,
+          subject: self,
+          details: { action: "restore" }
+        )
         assert_visibility_mutation_allowed!
         from = visibility_snapshot
         update_visibility_columns!(deleted_at: nil)
@@ -161,6 +185,12 @@ module DAG
     end
 
     def request_exclude_from_context!(at: Time.current)
+      graph.policy.assert_allowed!(
+        operation: :visibility_deferred,
+        graph: graph,
+        subject: self,
+        details: { action: "exclude_from_context" }
+      )
       request_visibility_patch!(
         context_excluded_at: at,
         deleted_at: KEEP,
@@ -169,6 +199,12 @@ module DAG
     end
 
     def request_include_in_context!
+      graph.policy.assert_allowed!(
+        operation: :visibility_deferred,
+        graph: graph,
+        subject: self,
+        details: { action: "include_in_context" }
+      )
       request_visibility_patch!(
         context_excluded_at: nil,
         deleted_at: KEEP,
@@ -177,6 +213,12 @@ module DAG
     end
 
     def request_soft_delete!(at: Time.current)
+      graph.policy.assert_allowed!(
+        operation: :visibility_deferred,
+        graph: graph,
+        subject: self,
+        details: { action: "soft_delete" }
+      )
       request_visibility_patch!(
         context_excluded_at: KEEP,
         deleted_at: at,
@@ -185,6 +227,12 @@ module DAG
     end
 
     def request_restore!
+      graph.policy.assert_allowed!(
+        operation: :visibility_deferred,
+        graph: graph,
+        subject: self,
+        details: { action: "restore" }
+      )
       request_visibility_patch!(
         context_excluded_at: KEEP,
         deleted_at: nil,

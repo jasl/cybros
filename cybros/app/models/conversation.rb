@@ -40,6 +40,15 @@ class Conversation < ApplicationRecord
     @dag_graph_hooks ||= Messages::GraphHooks.new(conversation: root_conversation || self)
   end
 
+  def dag_graph_policy
+    if Rails.env.test?
+      key = metadata.is_a?(Hash) ? metadata["dag_graph_policy"].to_s : ""
+      return DAG::GraphPolicy::ALLOW_ALL unless key == "product"
+    end
+
+    @dag_graph_policy ||= Messages::GraphPolicy.new(conversation: root_conversation || self)
+  end
+
   def root_graph
     root? ? dag_graph : root_conversation!.dag_graph
   end

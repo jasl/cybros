@@ -13,6 +13,7 @@
 - App 的第一实体是 `Conversation`（路由 `/conversations/...`）。
 - `Conversation` 对外暴露的“聊天 API”是 **facade**（`Conversation#append_user_message!`、`#regenerate!`、`#select_swipe!`、`#create_child!`、`#soft_delete_node!` 等）。
 - Controller/Channel/View **不得**直接依赖 DAG 的内部结构细节（例如手写 edge 遍历、假设 main lane 等）。
+- 引擎层可注入 `DAG::GraphPolicy` 作为 defense-in-depth：即使绕过 facade 直接调用 DAG 的高阶写原语，也能被 policy 兜底拦截（不阻塞 runner/leaf repair 等引擎自动化路径；详见 `docs/dag/public_api.md`）。
 
 ### 1.2 Source of truth 与 projection
 

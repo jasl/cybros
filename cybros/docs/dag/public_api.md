@@ -101,6 +101,13 @@ end
 - **一切创建/连边/改状态/改可见性**，都通过 block 内的 `m`（`DAG::Mutations`）或 node 的 command 方法完成。
 - `mutate!` 返回后，引擎会在必要时自动 `kick!` 推进调度。
 
+### 3.1.1 Injectable GraphPolicy（defense-in-depth）
+
+引擎支持为每个 graph 注入一个可选的 policy，用于在引擎层对 **用户语义操作** 做兜底限制（防止绕过产品 facade 直接调用高阶写原语）。
+
+- 注入方式：`graph.attachable` 若实现 `dag_graph_policy`，则 `DAG::Graph#policy` 会使用其返回值；否则默认 `DAG::GraphPolicy::ALLOW_ALL`。
+- 本轮 gate 的范围（正交且不阻塞引擎）：只 gate fork/rerun/adopt/edit/visibility changes 等“用户语义操作”入口；不 gate `create_node/create_edge` 与 runner/leaf repair/turn anchor/patch apply 等引擎自动化维护路径。
+
 ### 3.2 Mutations（结构性改图）
 
 > 以下方法被视为 Public API（v1）。

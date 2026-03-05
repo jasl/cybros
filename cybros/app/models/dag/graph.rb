@@ -537,6 +537,22 @@ module DAG
         end
     end
 
+    def policy
+      key = attachable_policy_cache_key
+      if defined?(@policy_cache_key) && @policy_cache_key == key
+        return @policy
+      end
+
+      @policy_cache_key = key
+
+      @policy =
+        if attachable&.respond_to?(:dag_graph_policy)
+          attachable.dag_graph_policy || DAG::GraphPolicy::ALLOW_ALL
+        else
+          DAG::GraphPolicy::ALLOW_ALL
+        end
+    end
+
     def body_class_for_node_type(node_type)
       node_type = node_type.to_s
 
@@ -860,6 +876,14 @@ module DAG
 
       def attachable_cache_key
         [attachable_type, attachable_id]
+      end
+
+      def attachable_policy_cache_key
+        if attachable&.respond_to?(:cache_key_with_version)
+          attachable.cache_key_with_version
+        else
+          attachable_cache_key
+        end
       end
 
       def validate_event_type!(event_type)
