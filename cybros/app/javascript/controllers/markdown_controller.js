@@ -5,57 +5,79 @@ import { sanitizeImageUrl, sanitizeLinkUrl } from "../lib/safe_url"
 
 let markedConfigured = false
 
+function tokensToPlainText(tokens) {
+  if (!Array.isArray(tokens)) return ""
+
+  let out = ""
+  for (const t of tokens) {
+    if (!t || typeof t !== "object") continue
+    if (typeof t.text === "string") out += t.text
+    if (Array.isArray(t.tokens)) out += tokensToPlainText(t.tokens)
+  }
+  return out
+}
+
 function configureMarkedOnce() {
   if (markedConfigured) return
-
-  const renderer = new marked.Renderer()
-
-  // Disallow raw HTML from user content (XSS mitigation).
-  renderer.html = (html) => escapeHtml(html)
-
-  // Sanitize links to block javascript:/data: etc.
-  renderer.link = (href, title, text) => {
-    const url = sanitizeLinkUrl(href)
-    const safeText = escapeHtml(text)
-    if (!url) return safeText
-
-    const isExternal = url.origin !== window.location.origin
-    const safeHref = escapeHtml(url.toString())
-    const safeTitle = title ? ` title="${escapeHtml(title)}"` : ""
-    const externalAttrs = isExternal ? ` target="_blank" rel="nofollow noreferrer noopener"` : ""
-
-    return `<a href="${safeHref}"${safeTitle}${externalAttrs}>${safeText}</a>`
-  }
-
-  // Allow only http(s) images (blocks data: and other schemes).
-  renderer.image = (href, title, text) => {
-    const url = sanitizeImageUrl(href)
-    if (!url) return ""
-
-    const safeSrc = escapeHtml(url.toString())
-    const safeAlt = escapeHtml(text)
-    const safeTitle = title ? ` title="${escapeHtml(title)}"` : ""
-
-    return `<img src="${safeSrc}" alt="${safeAlt}" loading="lazy" referrerpolicy="no-referrer"${safeTitle} />`
-  }
-
-  // Do not trust/propagate user-controlled "language" strings into class attributes.
-  // Keep code blocks plain and escaped.
-  renderer.code = (code) => {
-    return `<pre><code>${escapeHtml(code)}</code></pre>`
-  }
-
-  renderer.codespan = (code) => {
-    return `<code>${escapeHtml(code)}</code>`
-  }
 
   marked.setOptions({
     gfm: true,
     breaks: true,
     pedantic: false,
-    headerIds: false,
-    mangle: false,
-    renderer,
+  })
+
+  marked.use({
+    renderer: {
+      // Disallow raw HTML from user content (XSS mitigation).
+      html({ text }) {
+        return escapeHtml(text)
+      },
+
+      // Keep headings deterministic and avoid id generation.
+      heading({ depth, tokens }) {
+        const d = Number(depth)
+        const safeDepth = Number.isFinite(d) ? Math.min(Math.max(d, 1), 6) : 1
+        const label = escapeHtml(tokensToPlainText(tokens))
+        return `<h${safeDepth}>${label}</h${safeDepth}>`
+      },
+
+      // Sanitize links to block javascript:/data: etc.
+      link({ href, title, tokens, text }) {
+        const url = sanitizeLinkUrl(href)
+        const label = text ?? tokensToPlainText(tokens)
+        const safeText = escapeHtml(label)
+        if (!url) return safeText
+
+        const isExternal = url.origin !== window.location.origin
+        const safeHref = escapeHtml(url.toString())
+        const safeTitle = title ? ` title="${escapeHtml(title)}"` : ""
+        const externalAttrs = isExternal ? ` target="_blank" rel="nofollow noreferrer noopener"` : ""
+
+        return `<a href="${safeHref}"${safeTitle}${externalAttrs}>${safeText}</a>`
+      },
+
+      // Allow only http(s) images (blocks data: and other schemes).
+      image({ href, title, text }) {
+        const url = sanitizeImageUrl(href)
+        if (!url) return ""
+
+        const safeSrc = escapeHtml(url.toString())
+        const safeAlt = escapeHtml(text)
+        const safeTitle = title ? ` title="${escapeHtml(title)}"` : ""
+
+        return `<img src="${safeSrc}" alt="${safeAlt}" loading="lazy" referrerpolicy="no-referrer"${safeTitle} />`
+      },
+
+      // Do not trust/propagate user-controlled "language" strings into class attributes.
+      // Keep code blocks plain and escaped.
+      code({ text }) {
+        return `<pre><code>${escapeHtml(text)}</code></pre>`
+      },
+
+      codespan({ text }) {
+        return `<code>${escapeHtml(text)}</code>`
+      },
+    },
   })
 
   markedConfigured = true
@@ -98,4 +120,3 @@ export default class extends Controller {
     return el.textContent || ""
   }
 }
-

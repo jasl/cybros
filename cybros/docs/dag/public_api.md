@@ -2,7 +2,7 @@
 
 本文件定义 **DAG 引擎对 App 域暴露的稳定 Public API**（鼓励开发者/Agent 只通过这些 API 操作图），以减少对内部实现细节（表结构、具体 SQL、内部类）的耦合。
 
-> 重要约定（Lane-first）：**App 侧默认只操作 Lane / Turn / Message（Node）视图**。  
+> 重要约定（Lane-first）：**App 侧默认只操作 Lane / Turn / Message（Node）视图**。
 > `DAG::Graph` 仍存在，但其“全图语义”读 API（closure / mermaid / audit-like）必须被视为 **危险操作**，只用于后台/诊断/离线任务，不应出现在用户同步请求路径。
 
 ---

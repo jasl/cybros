@@ -61,7 +61,7 @@
   - `root_node_id`：fork 创建的第一条新 node（子图头）
   - `merged_into_lane_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source lane 时，用于记录“归档并合并进哪个 lane”）
   - `next_anchored_seq`：单调计数器（为 turn 的 `anchored_seq` 分配序号）
-  - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Topic`）
+  - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Conversation`）
   - `metadata`：JSONB 扩展点
 
 ### Turn：`DAG::Turn`（一等公民）
@@ -213,11 +213,11 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - 原子更新为 `running` 并设置 `claimed_at/claimed_by/lease_expires_at`（`started_at` 由 Runner 实际开始执行时写入）
 
 > claim lease 时长由 `graph.claim_lease_seconds_for(...)` 决定；里程碑 1 默认值为 `30.minutes`。
-
+>
 > 依赖失败传播：对 `dependency` 的父节点若进入失败终态（`errored/rejected/skipped/stopped`），下游 `pending` 节点会被自动标记为 `skipped`（见 `DAG::FailurePropagation`），避免图推进卡死（由于不变量，下游 pending 节点均为可执行节点）。
 >
 > 例外（与实现一致）：若父节点为 `rejected` 且 `metadata["reason"] == "approval_denied"` 且 `metadata["approval"]["required"] == true`，FailurePropagation **不会**自动把下游 pending 标记为 skipped（此时图会保持“被拒绝的必需审批阻塞”，需要 App/管理员显式处理该分支）。
-
+>
 > 可观测（hooks）：Scheduler claim 会尝试 emit `node_state_changed`（`pending → running`）。
 
 ### Runner：执行与落库
@@ -241,9 +241,9 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   4. 执行后触发下一轮 tick
 
 > execution lease 时长由 `graph.execution_lease_seconds_for(node)` 决定；里程碑 1 默认值为 `2.hours`。
-
+>
 > 语义约束：`skipped` 是 `pending` 终态，因此 Runner（处理 running 节点）收到 `ExecutionResult.skipped` 视为不合法并转为 `errored`。
-
+>
 > 可观测（hooks）：FailurePropagation 会尝试 emit `node_state_changed`（`pending → skipped`）。
 
 ### Jobs：推进图执行（Solid Queue / ActiveJob）
@@ -258,6 +258,7 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
   - 不负责再 enqueue tick：推进后继由 Runner 在 `ensure` 中统一 `DAG::TickGraphJob.perform_later(node.graph_id)`（避免 job 层遗漏/重复）
 
 相关代码：
+
 - `app/jobs/dag/tick_graph_job.rb`
 - `app/jobs/dag/execute_node_job.rb`
 
