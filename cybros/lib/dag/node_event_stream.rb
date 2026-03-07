@@ -40,6 +40,84 @@ module DAG
       )
     end
 
+    def activity_planned!(activity_id:, activity_kind:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_PLANNED,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: "planned",
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
+    def activity_started!(activity_id:, activity_kind:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_STARTED,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: "running",
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
+    def activity_updated!(activity_id:, activity_kind:, status:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_UPDATED,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: status,
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
+    def activity_waiting!(activity_id:, activity_kind:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_WAITING,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: "awaiting_approval",
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
+    def activity_finished!(activity_id:, activity_kind:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_FINISHED,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: "completed",
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
+    def activity_failed!(activity_id:, activity_kind:, phase:, source_node_id: @node_id, diagnostic_level: "standard", data: {})
+      activity_event!(
+        event_kind: DAG::NodeEvent::ACTIVITY_FAILED,
+        activity_id: activity_id,
+        activity_kind: activity_kind,
+        status: "failed",
+        phase: phase,
+        source_node_id: source_node_id,
+        diagnostic_level: diagnostic_level,
+        data: data,
+      )
+    end
+
     def log(line, level: "info")
       emit(
         kind: DAG::NodeEvent::LOG,
@@ -99,6 +177,27 @@ module DAG
           output_preview: @output_preview,
           updated_at: Time.current
         )
+      end
+
+      def activity_event!(event_kind:, activity_id:, activity_kind:, status:, phase:, source_node_id:, diagnostic_level:, data:)
+        emit(
+          kind: event_kind,
+          payload: {
+            "turn_id" => @turn_id,
+            "sequence" => next_activity_sequence,
+            "activity_id" => activity_id.to_s,
+            "kind" => activity_kind.to_s,
+            "status" => status.to_s,
+            "phase" => phase.to_s,
+            "source_node_id" => source_node_id.to_s,
+            "diagnostic_level" => diagnostic_level.to_s,
+            "data" => normalize_payload_hash(data),
+          }.compact
+        )
+      end
+
+      def next_activity_sequence
+        DAG::NodeEvent.where(graph_id: @graph_id, turn_id: @turn_id, kind: DAG::NodeEvent::ACTIVITY_EVENT_KINDS).count + 1
       end
 
       def emit(kind:, text: nil, payload: {})

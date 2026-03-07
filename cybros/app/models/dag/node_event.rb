@@ -6,6 +6,21 @@ module DAG
     OUTPUT_COMPACTED = "output_compacted"
     PROGRESS = "progress"
     LOG = "log"
+    ACTIVITY_PLANNED = "activity_planned"
+    ACTIVITY_STARTED = "activity_started"
+    ACTIVITY_UPDATED = "activity_updated"
+    ACTIVITY_WAITING = "activity_waiting"
+    ACTIVITY_FINISHED = "activity_finished"
+    ACTIVITY_FAILED = "activity_failed"
+
+    ACTIVITY_EVENT_KINDS = [
+      ACTIVITY_PLANNED,
+      ACTIVITY_STARTED,
+      ACTIVITY_UPDATED,
+      ACTIVITY_WAITING,
+      ACTIVITY_FINISHED,
+      ACTIVITY_FAILED,
+    ].freeze
 
     belongs_to :graph, class_name: "DAG::Graph", inverse_of: :node_events
     belongs_to :node, class_name: "DAG::Node", inverse_of: :node_events

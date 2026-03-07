@@ -8,12 +8,21 @@ module AgentCore
 
         def execute(node:, context:, stream:)
           _ = context
-          _ = stream
 
           runtime = AgentCore::DAG.runtime_for(node: node)
           execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
 
           tool_name, arguments = tool_call_from_input(node)
+          activity_id = "task:#{node.id}"
+          activity_kind = activity_kind_for(node, tool_name: tool_name)
+          activity_phase = activity_phase_for(activity_kind: activity_kind)
+
+          stream&.activity_started!(
+            activity_id: activity_id,
+            activity_kind: activity_kind,
+            phase: activity_phase,
+            source_node_id: node.id,
+          )
 
           result =
             execution_context.instrumenter.instrument(
@@ -32,6 +41,23 @@ module AgentCore
 
           result = truncate_result(result)
 
+          if result.error?
+            stream&.activity_failed!(
+              activity_id: activity_id,
+              activity_kind: activity_kind,
+              phase: activity_phase,
+              source_node_id: node.id,
+              data: { "error" => result.text.to_s },
+            )
+          else
+            stream&.activity_finished!(
+              activity_id: activity_id,
+              activity_kind: activity_kind,
+              phase: activity_phase,
+              source_node_id: node.id,
+            )
+          end
+
           ::DAG::ExecutionResult.finished(
             content: result.to_h,
             metadata: {
@@ -40,12 +66,43 @@ module AgentCore
             },
           )
         rescue AgentCore::ToolNotFoundError => e
+          stream&.activity_failed!(
+            activity_id: "task:#{node.id}",
+            activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node)),
+            phase: activity_phase_for(activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node))),
+            source_node_id: node.id,
+            data: { "error" => "ToolNotFoundError: #{e.message}" },
+          )
           ::DAG::ExecutionResult.errored(error: "ToolNotFoundError: #{e.message}")
         rescue StandardError => e
+          stream&.activity_failed!(
+            activity_id: "task:#{node.id}",
+            activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node)),
+            phase: activity_phase_for(activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node))),
+            source_node_id: node.id,
+            data: { "error" => "#{e.class}: #{e.message}" },
+          )
           ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}")
         end
 
         private
+
+          def activity_kind_for(node, tool_name:)
+            if %w[compress_input compact_context].include?(tool_name.to_s)
+              "preflight_task"
+            else
+              "tool_call"
+            end
+          end
+
+          def activity_phase_for(activity_kind:)
+            activity_kind == "preflight_task" ? "preflight" : "execution"
+          end
+
+          def tool_call_name_from_input(node)
+            input = node.body_input.is_a?(Hash) ? node.body_input : {}
+            input.fetch("name", input.fetch("requested_name", "")).to_s
+          end
 
           def tool_call_from_input(node)
             input = node.body_input.is_a?(Hash) ? node.body_input : {}
