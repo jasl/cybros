@@ -63,7 +63,7 @@ SimpleInference exposes a small, OpenAI-shaped chat contract that upper layers
   - `body["choices"][0]["message"]` (Hash)
   - `body["choices"][0]["finish_reason"]` (String/nil)
   - `body["usage"]` (Hash/nil)
-- On non-2xx responses, it raises `SimpleInference::Errors::HTTPError` by
+- On non-2xx responses, it raises `SimpleInference::HTTPError` by
   default (`raise_on_error: true`), and the error exposes `#status`, `#body`,
   and `#raw_body`.
 
@@ -329,7 +329,7 @@ By default, non-2xx responses raise exceptions:
 ```ruby
 begin
   client.chat_completions(model: "invalid", messages: [])
-rescue SimpleInference::Errors::HTTPError => e
+rescue SimpleInference::HTTPError => e
   puts "HTTP #{e.status}: #{e.message}"
   p e.body      # parsed body (Hash/Array/String)
   puts e.raw_body # raw response body string (if available)
@@ -338,10 +338,10 @@ end
 
 Other exception types:
 
-- `SimpleInference::Errors::TimeoutError` – Request timed out
-- `SimpleInference::Errors::ConnectionError` – Network error
-- `SimpleInference::Errors::DecodeError` – JSON parsing failed
-- `SimpleInference::Errors::ConfigurationError` – Invalid configuration
+- `SimpleInference::TimeoutError` – Request timed out
+- `SimpleInference::ConnectionError` – Network error
+- `SimpleInference::DecodeError` – JSON parsing failed
+- `SimpleInference::ConfigurationError` – Invalid configuration
 
 To handle errors manually:
 

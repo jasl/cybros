@@ -46,18 +46,16 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     node
   end
 
-  test "runtime_for selects highest priority matching LLMProvider and model from agent.yml model.prefer" do
+  test "runtime_for selects model_ref preference when available in YAML catalog" do
     LLMProvider.delete_all
-
-    LLMProvider.create!(name: "p1", base_url: "http://p1.test/v1", api_key: "k1", model_allowlist: ["m1"], priority: 1, api_format: "openai")
-    LLMProvider.create!(name: "p2", base_url: "http://p2.test/v1", api_key: "k2", model_allowlist: ["m1"], priority: 5, api_format: "openai")
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     conversation =
       create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "coding",
-            "agent_program" => { "model_prefer" => ["m1"] },
+              "agent_program" => { "model_prefer" => ["openai/gpt-5.4"] },
           },
         },
       )
@@ -66,40 +64,85 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
 
     provider = runtime.provider
-    assert_equal "simple_inference", provider.name
-    assert_equal "m1", runtime.model
+    assert_equal "openai", provider.name
+    assert_equal "gpt-5.4", runtime.model
 
     # Implementation detail, but needed to prove DB-driven selection without making a network call.
-    client_options = provider.instance_variable_get(:@client_options)
-    assert_equal "http://p2.test/v1", client_options.fetch(:base_url)
+    client_options = provider.instance_variable_get(:@delegate).instance_variable_get(:@client_options)
+    assert_equal "https://api.openai.com/v1", client_options.fetch(:base_url)
   end
 
-  test "runtime_for falls back to a model allowed by the chosen provider when no provider matches preferred/default" do
+  test "runtime_for ignores preferences for providers requiring missing credentials" do
     LLMProvider.delete_all
-
-    LLMProvider.create!(
-      name: "p1",
-      base_url: "http://p1.test/v1",
-      api_key: "k1",
-      model_allowlist: ["m2"],
-      priority: 5,
-      api_format: "openai",
-    )
 
     conversation =
       create_conversation!(
         metadata: {
           "agent" => {
             "agent_profile" => "coding",
-            "agent_program" => { "model_prefer" => ["m1"] },
+            "agent_program" => { "model_prefer" => ["codex_subscription/gpt-5.3-codex"] },
           },
         },
       )
     node = build_pending_agent_node(conversation: conversation)
 
-    with_env("AGENT_CORE_MODEL" => "m1") do
-      runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
-      assert_equal "m2", runtime.model
-    end
+    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.runtime_for(node: node) }
+    assert_equal "cybros.llm.model_preference_unavailable", error.code
+  end
+
+  test "runtime_for uses site default when agent prefer is absent" do
+    LLMProvider.delete_all
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-or-test")
+    Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4")
+
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+          },
+        },
+      )
+    node = build_pending_agent_node(conversation: conversation)
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+    assert_equal "openai/gpt-5.4", runtime.model
+  end
+
+  test "runtime_for falls back to catalog default when site default no longer exists" do
+    LLMProvider.delete_all
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
+    Account.instance.update_llm_default_model_ref!("openai/does-not-exist")
+
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+          },
+        },
+      )
+    node = build_pending_agent_node(conversation: conversation)
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+    assert_equal "gpt-5.4", runtime.model
+  end
+
+  test "runtime_for hard-errors when site default exists but is not currently usable" do
+    LLMProvider.delete_all
+    Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
+
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+          },
+        },
+      )
+    node = build_pending_agent_node(conversation: conversation)
+
+    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.runtime_for(node: node) }
+    assert_equal "cybros.llm.credential_missing", error.code
   end
 end

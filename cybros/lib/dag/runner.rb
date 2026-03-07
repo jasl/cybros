@@ -99,6 +99,7 @@ module DAG
         node.reload
 
         record_execution_start_metadata!(node, now: now)
+        ConversationRunTracker.mark_running_for_node!(node, at: started_at)
         true
       end
 
@@ -167,6 +168,10 @@ module DAG
           )
 
           record_execution_finished_metadata!(node)
+        end
+
+        if node.terminal?
+          ConversationRunTracker.mark_terminal_for_node!(node, at: node.finished_at || Time.current)
         end
       end
 

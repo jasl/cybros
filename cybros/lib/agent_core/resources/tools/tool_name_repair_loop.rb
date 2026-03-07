@@ -12,7 +12,6 @@ module AgentCore
         def self.call(
           provider:,
           requested_model:,
-          fallback_models:,
           tool_calls:,
           visible_tools:,
           tools_registry:,
@@ -29,7 +28,6 @@ module AgentCore
           new(
             provider: provider,
             requested_model: requested_model,
-            fallback_models: fallback_models,
             tool_calls: tool_calls,
             visible_tools: visible_tools,
             tools_registry: tools_registry,
@@ -45,10 +43,9 @@ module AgentCore
           ).call
         end
 
-        def initialize(provider:, requested_model:, fallback_models:, tool_calls:, visible_tools:, tools_registry:, max_attempts:, max_output_tokens:, max_candidates:, max_visible_tool_names:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
+        def initialize(provider:, requested_model:, tool_calls:, visible_tools:, tools_registry:, max_attempts:, max_output_tokens:, max_candidates:, max_visible_tool_names:, tool_name_aliases:, tool_name_normalize_fallback:, options:, instrumenter:, run_id:)
           @provider = provider
           @requested_model = requested_model.to_s
-          @fallback_models = Array(fallback_models)
           @tool_calls = Array(tool_calls)
           @visible_tools = Array(visible_tools)
           @tools_registry = tools_registry
@@ -187,10 +184,7 @@ module AgentCore
             return { tool_name_repairs: {}, metadata: metadata }
           end
 
-          models = normalize_models(@requested_model, @fallback_models)
-
           attempts = 0
-          used_model = nil
           payload = nil
 
           prompt_messages = [
@@ -199,7 +193,6 @@ module AgentCore
           ]
 
           @max_attempts.times do |attempt_idx|
-            used_model = models.fetch(attempt_idx, models.last)
             attempts += 1
 
             attempt_messages =
@@ -214,7 +207,7 @@ module AgentCore
                 resp =
                   @provider.chat(
                     messages: attempt_messages,
-                    model: used_model,
+                    model: @requested_model,
                     tools: nil,
                     stream: false,
                     **repair_options
@@ -251,7 +244,7 @@ module AgentCore
             candidates: candidates_total,
             repaired: repaired_count,
             failed: candidates_total - repaired_count,
-            model: used_model,
+            model: @requested_model,
             elapsed_ms: elapsed_ms,
           )
 
@@ -263,7 +256,7 @@ module AgentCore
               repaired: repaired_count,
               failed: candidates_total - repaired_count,
               skipped: skipped,
-              model: used_model,
+              model: @requested_model,
               visible_tools_total: visible_tools_total,
               visible_tools_sent: visible_tools_sent,
               visible_tools_truncated: visible_tools_truncated,
@@ -479,19 +472,6 @@ module AgentCore
           id.empty? ? "unknown" : id
         rescue StandardError
           "unknown"
-        end
-
-        def normalize_models(requested_model, fallback_models)
-          list = [requested_model.to_s, *Array(fallback_models).map(&:to_s)]
-          list = list.map { |m| m.to_s.strip }.reject(&:empty?)
-
-          seen = {}
-          list.each_with_object([]) do |m, out|
-            next if seen[m]
-
-            seen[m] = true
-            out << m
-          end
         end
 
         def publish_event(candidates:, repaired:, failed:, model:, elapsed_ms:)

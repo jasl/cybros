@@ -1,6 +1,10 @@
 require "test_helper"
 
 class UiSmokeTest < ActionDispatch::IntegrationTest
+  setup do
+    LLMProvider.delete_all
+  end
+
   def sign_in!(user: nil, password: "Passw0rd")
     user ||= create_user!(role: :owner, password: password)
     post session_path, params: { email: user.identity.email, password: password }
@@ -21,6 +25,7 @@ class UiSmokeTest < ActionDispatch::IntegrationTest
 
   test "authenticated top-level pages load" do
     sign_in!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
 
     get dashboard_path
     assert_response :success

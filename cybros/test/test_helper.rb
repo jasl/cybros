@@ -47,6 +47,10 @@ module ActiveSupport
     # Setup all fixtures in test/fixtures/*.yml for all tests in alphabetical order.
     fixtures :all
 
+    setup do
+      Account.instance.update_llm_default_model_ref!("dev/mock-model")
+    end
+
     # Add more helper methods to be used by all tests here...
 
     def create_identity!(email: nil, password: "Passw0rd")
@@ -67,6 +71,19 @@ module ActiveSupport
       user ||= create_user!
       metadata ||= { "agent" => { "agent_profile" => "coding" } }
       Conversation.create!(user: user, title: title, metadata: metadata)
+    end
+
+    def ensure_llm_provider!(provider_key:, credential_type:, **attributes)
+      attrs = { credential_type: credential_type }.merge(attributes)
+
+      provider = LLMProvider.find_or_initialize_by(provider_key: provider_key)
+      provider.assign_attributes(attrs)
+      provider.save!
+      provider
+    rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
+      provider = LLMProvider.find_by!(provider_key: provider_key)
+      provider.update!(attrs)
+      provider
     end
   end
 end

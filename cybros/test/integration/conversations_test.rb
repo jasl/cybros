@@ -1,6 +1,10 @@
 require "test_helper"
 
 class ConversationsTest < ActionDispatch::IntegrationTest
+  setup do
+    LLMProvider.delete_all
+  end
+
   def sign_in_owner!
     identity =
       Identity.create!(
@@ -37,6 +41,8 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
   test "create redirects to show" do
     sign_in_owner!
+    Account.instance.update_llm_default_model_ref!("")
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
 
     assert_difference -> { Conversation.count }, +1 do
       post conversations_path, params: { conversation: { title: "New convo" } }
@@ -44,6 +50,22 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation_path(conversation)
+    assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
+  end
+
+  test "create redirects to llm settings when no usable default model exists" do
+    sign_in_owner!
+    Account.instance.update_llm_default_model_ref!("")
+    LLMProvider.delete_all
+
+    assert_no_difference -> { Conversation.count } do
+      post conversations_path, params: { conversation: { title: "New convo" } }
+    end
+
+    assert_redirected_to system_settings_llm_providers_path
+    follow_redirect!
+    assert_response :success
+    assert_includes response.body, "No usable default model is configured."
   end
 
   test "show renders transcript and message form" do
@@ -57,8 +79,164 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Message…"
   end
 
+  test "stop accepts pending agent nodes" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+    result = conversation.append_user_message!(content: "Hello")
+    agent = result.fetch(:agent_node)
+    run = ConversationRun.find_by!(conversation_id: conversation.id, dag_node_id: agent.id)
+
+    post stop_conversation_path(conversation), params: { node_id: agent.id }, as: :json
+
+    assert_response :success
+    assert_equal DAG::Node::STOPPED, agent.reload.state
+    assert_equal "canceled", run.reload.state
+  end
+
+  test "stop returns not found for nodes outside the conversation lane" do
+    user = sign_in_owner!
+    root = create_conversation!(user: user, title: "Root")
+
+    first_turn = root.append_user_message!(content: "Hello")
+    first_agent = first_turn.fetch(:agent_node)
+    first_agent.mark_running!
+    first_agent.mark_finished!(content: "Done")
+
+    branch = root.create_child!(from_node_id: first_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+    second_turn = root.append_user_message!(content: "Root followup")
+    root_agent = second_turn.fetch(:agent_node)
+    root_agent.mark_running!
+
+    post stop_conversation_path(branch), params: { node_id: root_agent.id }, as: :json
+
+    assert_response :not_found
+    assert_equal DAG::Node::RUNNING, root_agent.reload.state
+  end
+
+  test "show renders composer model picker below input without visible model label or provider prefix" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", refresh_token: "rt")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "codex_subscription/gpt-5.3-codex" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_match(/data-testid="conversation-composer-input".*data-testid="conversation-composer-footer"/m, response.body)
+    refute_match(/>\s*Model\s*</, response.body)
+    refute_includes response.body, "Codex (ChatGPT Pro/Plus) · GPT‑5.3 Codex"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][aria-label="Model"]'
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.3 Codex"
+  end
+
+  test "show keeps stale model selection in reselect state instead of auto-falling back" do
+    user = sign_in_owner!
+    LLMProvider.delete_all
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_includes response.body, "Selected model is no longer available. Please reselect a model."
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "Please reselect a model"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][required]'
+  end
+
+  test "show uses resolved default model instead of first picker option when conversation has no stored model_ref" do
+    user = sign_in_owner!
+    Account.instance.update_llm_default_model_ref!("")
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.4"
+  end
+
+  test "show requires reselection when default model is unusable and conversation has no stored model_ref" do
+    user = sign_in_owner!
+    Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
+    LLMProvider.delete_all
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+    assert_includes response.body, "Default model is not currently usable. Please reselect a model or fix credentials."
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "Please reselect a model"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][required]'
+  end
+
+  test "show disambiguates duplicate model names by provider when needed" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-openrouter")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+    assert_includes response.body, "GPT‑5.4 (OpenAI)"
+    assert_includes response.body, "GPT‑5.4 (OpenRouter)"
+  end
+
+  test "create uses site default model when configured" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
+    Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-pro")
+
+    assert_difference -> { Conversation.count }, +1 do
+      post conversations_path, params: { conversation: { title: "Chat" } }
+    end
+
+    conversation = Conversation.order(:created_at).last
+    assert_equal user.id, conversation.user_id
+    assert_equal "openrouter/openai-gpt-5.4-pro", conversation.metadata.dig("llm", "model_ref")
+  end
+
   test "create_message appends a finished user_message and leaves a pending agent_message leaf" do
     user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
 
     conversation = create_conversation!(user: user, title: "Chat")
 

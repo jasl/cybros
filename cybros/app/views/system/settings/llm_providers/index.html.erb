@@ -1,7 +1,68 @@
 <div class="space-y-6">
   <div class="flex items-center justify-between">
     <h2 class="text-lg font-semibold">LLM Providers</h2>
-    <%= link_to "New provider", new_system_settings_llm_provider_path, class: "btn btn-primary btn-sm" %>
+  </div>
+
+  <div class="card bg-base-100 border border-base-300 shadow-sm">
+    <div class="card-body gap-4">
+      <div class="flex items-start justify-between gap-4">
+        <div>
+          <h3 class="card-title text-base">Default model</h3>
+          <p class="text-sm opacity-70">Used for new conversations and for agent runs without `prefer`.</p>
+        </div>
+        <div class="badge badge-outline"><%= @default_model_source_text %></div>
+      </div>
+
+      <% if @site_default_missing_from_catalog %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm">
+          <span>Stored site default no longer exists; falling back to catalog default.</span>
+        </div>
+      <% end %>
+
+      <% if @site_default_unusable %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm">
+          <span>Stored site default is not currently usable.</span>
+        </div>
+      <% end %>
+
+      <% if @catalog_default_unusable %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm">
+          <span>Catalog default is not currently usable.</span>
+        </div>
+      <% end %>
+
+      <% if @default_model_error.present? %>
+        <div role="alert" class="alert alert-error alert-soft text-sm">
+          <span><%= @default_model_error %></span>
+        </div>
+      <% end %>
+
+      <%= form_with url: default_model_system_settings_llm_providers_path, method: :patch, class: "flex flex-col gap-3 md:flex-row md:items-end" do %>
+        <fieldset class="fieldset w-full max-w-xl">
+          <legend class="fieldset-legend">Model</legend>
+          <% if @default_model_options.present? %>
+            <select name="default_model_ref" class="select select-bordered w-full">
+              <option value=""><%= "Use catalog default: #{@catalog_default_model_ref}" %></option>
+              <% if @site_default_unusable %>
+                <option value="<%= @stored_default_model_ref %>" selected>Stored but unusable: <%= @stored_default_model_ref %></option>
+              <% end %>
+              <% @default_model_options.each do |option| %>
+                <% model_ref = option.fetch(:model_ref) %>
+                <option value="<%= model_ref %>" <%= model_ref == @stored_default_model_ref ? "selected" : "" %>><%= option.fetch(:label) %></option>
+              <% end %>
+            </select>
+          <% else %>
+            <select class="select select-bordered w-full" disabled>
+              <option>No usable models</option>
+            </select>
+          <% end %>
+        </fieldset>
+
+        <div class="flex items-center gap-2">
+          <button type="submit" class="btn btn-primary btn-sm">Save default</button>
+        </div>
+      <% end %>
+    </div>
   </div>
 
   <div class="card bg-base-200/30 border border-base-300 shadow-sm">
@@ -9,22 +70,41 @@
       <table class="table">
         <thead>
           <tr>
-            <th>Name</th>
-            <th>Base URL</th>
-            <th class="text-right">Priority</th>
+            <th>Provider</th>
+            <th>Key</th>
+            <th>Protocol</th>
             <th class="text-right">Models</th>
+            <th class="text-right">Credential</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <% @llm_providers.each do |provider| %>
+          <% @providers.each do |row| %>
+            <% provider_key = row.fetch(:provider_key).to_s %>
+            <% spec = row.fetch(:spec) %>
+            <% requires_credential = spec.fetch("requires_credential") == true %>
+            <% has_credential = row.fetch(:has_credential) %>
+
             <tr class="hover:bg-base-200/50 transition-colors">
-              <td class="font-medium"><%= provider.name %></td>
-              <td class="opacity-70"><%= provider.base_url %></td>
-              <td class="text-right"><%= provider.priority %></td>
-              <td class="text-right"><%= provider.model_allowlist.length %></td>
+              <td class="font-medium"><%= spec.fetch("display_name").to_s %></td>
+              <td class="font-mono text-sm opacity-80"><%= provider_key %></td>
+              <td class="font-mono text-sm opacity-70">
+                <%= spec.fetch("wire_api").to_s %>/<%= spec.fetch("transport").to_s %>
+              </td>
+              <td class="text-right"><%= spec.fetch("models").is_a?(Hash) ? spec.fetch("models").length : 0 %></td>
               <td class="text-right">
-                <%= link_to "Edit", edit_system_settings_llm_provider_path(provider), class: "btn btn-ghost btn-sm" %>
+                <% if requires_credential %>
+                  <% if has_credential %>
+                    <span class="badge badge-success badge-sm">Configured</span>
+                  <% else %>
+                    <span class="badge badge-warning badge-sm">Missing</span>
+                  <% end %>
+                <% else %>
+                  <span class="badge badge-ghost badge-sm">Not required</span>
+                <% end %>
+              </td>
+              <td class="text-right">
+                <%= link_to "Configure", edit_system_settings_llm_provider_path(provider_key), class: "btn btn-ghost btn-sm" %>
               </td>
             </tr>
           <% end %>

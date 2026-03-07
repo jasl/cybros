@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_05_000000) do
+ActiveRecord::Schema[8.2].define(version: 2026_02_26_000007) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -288,16 +288,16 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_05_000000) do
   end
 
   create_table "llm_providers", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.string "api_format", default: "openai", null: false
+    t.string "access_token"
+    t.string "account_id"
     t.string "api_key"
-    t.string "base_url", null: false
     t.datetime "created_at", null: false
-    t.jsonb "headers", default: {}, null: false
-    t.string "model_allowlist", default: [], null: false, array: true
-    t.string "name", null: false
-    t.integer "priority", default: 0, null: false
+    t.string "credential_type", null: false
+    t.datetime "expires_at"
+    t.string "provider_key", null: false
+    t.string "refresh_token"
     t.datetime "updated_at", null: false
-    t.index ["priority"], name: "index_llm_providers_on_priority"
+    t.index ["provider_key"], name: "index_llm_providers_on_provider_key", unique: true
   end
 
   create_table "sessions", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|

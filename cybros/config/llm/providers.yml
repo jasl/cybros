@@ -1,0 +1,191 @@
+version: 1
+default_model_ref: "openai/gpt-5.4"
+providers:
+  openai:
+    display_name: OpenAI
+    enabled: true
+    adapter_key: openai
+    base_url: "https://api.openai.com/v1"
+    headers: {}
+    requires_credential: true
+    credential_type: api_key
+    wire_api: chat_completions
+    transport: http
+    models:
+      gpt-5.3-instant:
+        display_name: "GPT‑5.3 Instant"
+        api_model: "gpt-5.3-chat-latest"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        context_window_tokens: 128000
+        tokenizer_hint: "gpt-5.2-chat"
+      gpt-5.4:
+        display_name: "GPT‑5.4"
+        api_model: "gpt-5.4"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        context_window_tokens: 1050000
+        tokenizer_hint: "gpt-5.4"
+  codex_subscription:
+    display_name: Codex (ChatGPT Pro/Plus)
+    enabled: true
+    adapter_key: codex_subscription
+    base_url: "https://chatgpt.com/backend-api/codex"
+    headers:
+      originator: "cybros"
+      User-Agent: "cybros/1.0"
+    requires_credential: true
+    credential_type: oauth_codex
+    wire_api: responses
+    transport: http_sse
+    responses_path: "/responses"
+    models:
+      gpt-5.3-codex:
+        display_name: "GPT‑5.3 Codex"
+        api_model: "gpt-5.3-codex"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: responses
+        tokenizer_hint: "gpt-5.2"
+        context_window_tokens: 400000
+        request_defaults:
+          reasoning_effort: medium
+      gpt-5.4:
+        display_name: "GPT‑5.4 Codex"
+        api_model: "gpt-5.4"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: responses
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 1050000
+        request_defaults:
+          reasoning_effort: high
+      gpt-5.4-extra-high:
+        display_name: "GPT‑5.4 Codex Extra high"
+        api_model: "gpt-5.4"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: responses
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 1050000
+        request_defaults:
+          reasoning_effort: xhigh
+  openrouter:
+    display_name: OpenRouter
+    enabled: true
+    adapter_key: openrouter
+    base_url: "https://openrouter.ai/api/v1"
+    headers: {}
+    requires_credential: true
+    credential_type: api_key
+    wire_api: chat_completions
+    transport: http
+    models:
+      openai-gpt-5.4-pro:
+        display_name: "GPT‑5.4 Pro"
+        api_model: "openai/gpt-5.4-pro"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 1050000
+      openai-gpt-5.4:
+        display_name: "GPT‑5.4"
+        api_model: "openai/gpt-5.4"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 1050000
+      openai-gpt-5.3-chat:
+        display_name: "GPT‑5.3 Chat"
+        api_model: "openai/gpt-5.3-chat"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.3-chat-latest"
+        context_window_tokens: 128000
+      openai-gpt-5.3-codex:
+        display_name: "GPT‑5.3 Codex"
+        api_model: "openai/gpt-5.3-codex"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.2"
+        context_window_tokens: 400000
+      anthropic-claude-opus-4.6-nitro:
+        display_name: "Claude Opus 4.6"
+        api_model: "anthropic/claude-opus-4.6:nitro"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "anthropic/claude-opus-4.6"
+        context_window_tokens: 200000
+      z-ai-glm-5-nitro:
+        display_name: "GLM‑5"
+        api_model: "z-ai/glm-5:nitro"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "glm-5"
+        context_window_tokens: 128000
+      minimax-minimax-m2.5-nitro:
+        display_name: "MiniMax M2.5 Nitro"
+        api_model: "minimax/minimax-m2.5:nitro"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "minimax-m2.5"
+        context_window_tokens: 1000000
+      moonshotai-kimi-k2.5-nitro:
+        display_name: "Kimi K2.5"
+        api_model: "moonshotai/kimi-k2.5:nitro"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "kimi-k2.5"
+        context_window_tokens: 256000
+      qwen-qwen3.5-plus-02-15:
+        display_name: "Qwen 3.5 Plus 02-15"
+        api_model: "qwen/qwen3.5-plus-02-15"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "qwen3"
+        context_window_tokens: 262144
+  dev:
+    display_name: Dev mock (dev/test)
+    enabled: true
+    adapter_key: dev
+    environments: ["development", "test"]
+    base_url: "http://localhost:3000/mock_llm/v1"
+    headers: {}
+    requires_credential: false
+    wire_api: chat_completions
+    transport: http
+    models:
+      mock-model:
+        display_name: "Mock model"
+        api_model: "mock-model"
+        capabilities:
+          input: { text: true, image: false }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 32000

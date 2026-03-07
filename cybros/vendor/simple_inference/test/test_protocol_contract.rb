@@ -86,6 +86,8 @@ class TestProtocolContract < Minitest::Test
   end
 
   def assert_protocol_contract(instance)
+    assert_equal StandardError, SimpleInference::Error.superclass
+
     assert_respond_to instance, :chat_completions
     assert_respond_to instance, :chat
 
@@ -111,7 +113,7 @@ class TestProtocolContract < Minitest::Test
     assert result.response.raw_body.is_a?(String)
     assert_includes result.response.raw_body, "hi"
 
-    error = assert_raises(SimpleInference::Errors::HTTPError) { instance.chat_completions(model: "foo", messages: []) }
+    error = assert_raises(SimpleInference::HTTPError) { instance.chat_completions(model: "foo", messages: []) }
     assert_equal 401, error.status
     assert error.body.is_a?(Hash)
     assert_includes error.message, "nope"

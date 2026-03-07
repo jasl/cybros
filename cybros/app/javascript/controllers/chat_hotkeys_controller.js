@@ -9,11 +9,35 @@ function isActiveElementInAnyInput() {
   return !!el.isContentEditable
 }
 
-function tailAgentNodeId(listEl) {
+function tailAgentBubble(listEl) {
   if (!listEl) return ""
   const bubbles = listEl.querySelectorAll?.('[data-role="agent-bubble"][data-node-id]') || []
-  const last = bubbles.length ? bubbles[bubbles.length - 1] : null
-  return String(last?.getAttribute?.("data-node-id") || "")
+  return bubbles.length ? bubbles[bubbles.length - 1] : null
+}
+
+function tailAgentNodeId(listEl) {
+  const bubble = tailAgentBubble(listEl)
+  return String(bubble?.getAttribute?.("data-node-id") || "")
+}
+
+function parseActionPolicy(bubble) {
+  if (!bubble) return {}
+
+  try {
+    const raw = String(bubble.getAttribute("data-action-policy") || "")
+    if (!raw) return {}
+
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" ? parsed : {}
+  } catch (_e) {
+    return {}
+  }
+}
+
+function actionAvailable(policy, key) {
+  const actions = policy?.actions
+  const entry = actions && typeof actions === "object" ? actions[key] : null
+  return entry?.available === true
 }
 
 export default class extends Controller {
@@ -50,11 +74,12 @@ export default class extends Controller {
       return
     }
 
-    // Ctrl+Enter: regenerate tail assistant
+    // Ctrl+Enter: replay the tail assistant using its projected action policy.
     if (event.key === "Enter" && event.ctrlKey && !event.shiftKey && !event.altKey && !event.metaKey) {
-      if (!this.#tailAgentNodeId()) return
+      const policy = this.#tailAgentActionPolicy()
+      if (!actionAvailable(policy, "retry") && !actionAvailable(policy, "regenerate")) return
       event.preventDefault()
-      this.#regenerateTail()
+      this.#replayTail(policy)
       return
     }
 
@@ -66,6 +91,7 @@ export default class extends Controller {
 
       const nodeId = this.#tailAgentNodeId()
       if (!nodeId) return
+      if (!actionAvailable(this.#tailAgentActionPolicy(), "swipe")) return
 
       event.preventDefault()
       const direction = event.key === "ArrowLeft" ? "left" : "right"
@@ -85,6 +111,21 @@ export default class extends Controller {
     return tailAgentNodeId(this.#messagesListElement())
   }
 
+  #tailAgentActionPolicy() {
+    return parseActionPolicy(tailAgentBubble(this.#messagesListElement()))
+  }
+
+  async #replayTail(policy) {
+    if (actionAvailable(policy, "retry")) {
+      await this.#retryTail()
+      return
+    }
+
+    if (actionAvailable(policy, "regenerate")) {
+      await this.#regenerateTail()
+    }
+  }
+
   async #regenerateTail() {
     const conversationId = this.#conversationId()
     const nodeId = this.#tailAgentNodeId()
@@ -92,6 +133,13 @@ export default class extends Controller {
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/regenerate`
     await postAndTurboVisit(url, { agent_node_id: nodeId })
+  }
+
+  async #retryTail() {
+    const retryButton = this.element.querySelector("[data-conversation-channel-target='retryButton']")
+    if (!retryButton || retryButton.classList.contains("hidden")) return
+
+    retryButton.click()
   }
 
   async #swipeTail(direction) {

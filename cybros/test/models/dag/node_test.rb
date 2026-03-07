@@ -159,6 +159,21 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_not pending.can_fork?
   end
 
+  test "can_fork? respects node body forkable policy" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    task =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        metadata: {},
+      )
+
+    assert_not task.body.forkable?
+    assert_not task.can_fork?
+  end
+
   test "retry! rejects attempts when downstream nodes are not pending" do
     conversation = create_conversation!
     graph = conversation.dag_graph

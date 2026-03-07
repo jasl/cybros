@@ -1,76 +1,28 @@
 import { Controller } from "@hotwired/stimulus"
 import { postAndTurboVisit } from "../lib/post_and_turbo_visit"
 
-const registryByList = new WeakMap()
-
-function listEntryFor(listEl) {
-  if (!listEl) return null
-  let entry = registryByList.get(listEl)
-  if (entry) return entry
-
-  entry = {
-    controllers: new Set(),
-    observer: null,
-  }
-
-  entry.observer = new MutationObserver(() => {
-    for (const controller of entry.controllers) controller.updateVisibility()
-  })
-  entry.observer.observe(listEl, { childList: true })
-
-  registryByList.set(listEl, entry)
-  return entry
+function actionEntry(policy, key) {
+  const actions = policy?.actions
+  if (!actions || typeof actions !== "object") return {}
+  const entry = actions[key]
+  return entry && typeof entry === "object" ? entry : {}
 }
 
-function registerController(controller) {
-  const listEl = controller.messagesListElement()
-  const entry = listEntryFor(listEl)
-  if (!entry) return
-  entry.controllers.add(controller)
-}
-
-function unregisterController(controller) {
-  const listEl = controller.messagesListElement()
-  const entry = listEl ? registryByList.get(listEl) : null
-  if (!entry) return
-
-  entry.controllers.delete(controller)
-  if (entry.controllers.size === 0) {
-    entry.observer?.disconnect?.()
-    registryByList.delete(listEl)
-  }
-}
-
-function tailAgentNodeId(listEl) {
-  if (!listEl) return null
-  const bubbles = listEl.querySelectorAll?.('[data-role="agent-bubble"][data-node-id]') || []
-  const last = bubbles.length ? bubbles[bubbles.length - 1] : null
-  return last?.getAttribute?.("data-node-id") || null
-}
-
-function terminalState(state) {
-  return ["finished", "errored", "stopped", "rejected", "skipped"].includes(String(state || ""))
+function actionAvailable(policy, key) {
+  return actionEntry(policy, key).available === true
 }
 
 export default class extends Controller {
   static values = {
     nodeId: String,
     role: String,
+    actionPolicy: Object,
   }
 
-  static targets = ["copyButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeRight", "branchButton"]
+  static targets = ["copyButton", "retryButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeRight", "branchButton"]
 
   connect() {
-    registerController(this)
     this.updateVisibility()
-  }
-
-  disconnect() {
-    unregisterController(this)
-  }
-
-  messagesListElement() {
-    return this.element.closest?.("[data-chat-scroll-target='list']") || null
   }
 
   conversationId() {
@@ -79,30 +31,27 @@ export default class extends Controller {
   }
 
   updateVisibility() {
-    const role = String(this.roleValue || "")
-    const nodeId = String(this.nodeIdValue || "")
-
-    const listEl = this.messagesListElement()
-    const tailId = tailAgentNodeId(listEl)
-    const isTailAgent = role === "agent" && nodeId && tailId && nodeId === tailId
-
-    const bubbleState = this.element.querySelector("[data-role='agent-bubble']")?.getAttribute?.("data-node-state") || ""
-    const isTerminal = terminalState(bubbleState)
-    const canRegenerate = role === "agent" && bubbleState === "finished"
-    const canSwipe = role === "agent" && isTailAgent && bubbleState === "finished"
-    const canBranch = role === "user" ? true : (role === "agent" && isTerminal)
+    const policy = this.actionPolicyValue || {}
+    const regenerate = actionEntry(policy, "regenerate")
 
     if (this.hasSwipeNavTarget) {
-      this.swipeNavTarget.classList.toggle("hidden", !canSwipe)
+      this.swipeNavTarget.classList.toggle("hidden", !actionAvailable(policy, "swipe"))
     }
 
     if (this.hasRegenerateButtonTarget) {
-      this.regenerateButtonTarget.title = isTailAgent ? "Regenerate" : "Regenerate (creates branch)"
-      this.regenerateButtonTarget.toggleAttribute("disabled", !canRegenerate)
-      this.regenerateButtonTarget.classList.toggle("btn-disabled", !canRegenerate)
+      const branchMode = regenerate.mode === "branch"
+      this.regenerateButtonTarget.title = branchMode ? "Regenerate (creates branch)" : "Regenerate"
+      this.regenerateButtonTarget.toggleAttribute("disabled", !actionAvailable(policy, "regenerate"))
+      this.regenerateButtonTarget.classList.toggle("btn-disabled", !actionAvailable(policy, "regenerate"))
+    }
+
+    if (this.hasRetryButtonTarget) {
+      this.retryButtonTarget.toggleAttribute("disabled", !actionAvailable(policy, "retry"))
+      this.retryButtonTarget.classList.toggle("btn-disabled", !actionAvailable(policy, "retry"))
     }
 
     if (this.hasBranchButtonTarget) {
+      const canBranch = actionAvailable(policy, "branch")
       this.branchButtonTarget.toggleAttribute("disabled", !canBranch)
       this.branchButtonTarget.classList.toggle("btn-disabled", !canBranch)
     }
@@ -131,6 +80,22 @@ export default class extends Controller {
     await postAndTurboVisit(url, { agent_node_id: nodeId })
   }
 
+  async retry(event) {
+    event.preventDefault()
+    const conversationId = this.conversationId()
+    const nodeId = String(this.nodeIdValue || "")
+    if (!conversationId || !nodeId) return
+    if (!actionAvailable(this.actionPolicyValue || {}, "retry")) return
+
+    const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/retry`, { node_id: nodeId })
+    if (!response?.ok) {
+      await this.#toastRetryFailure(response)
+      return
+    }
+
+    window.Turbo?.visit?.(window.location.href)
+  }
+
   async swipeLeft(event) {
     event.preventDefault()
     await this.#swipe("left")
@@ -155,9 +120,47 @@ export default class extends Controller {
     const conversationId = this.conversationId()
     const nodeId = String(this.nodeIdValue || "")
     if (!conversationId || !nodeId) return
+    if (!actionAvailable(this.actionPolicyValue || {}, "swipe")) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/swipe`
     await postAndTurboVisit(url, { agent_node_id: nodeId, direction })
+  }
+
+  async #postJson(url, body) {
+    const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
+    if (!token) return null
+
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "X-CSRF-Token": token,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      credentials: "same-origin",
+    })
+  }
+
+  async #toastRetryFailure(response) {
+    let message = "Retry failed."
+
+    try {
+      const payload = await response.json()
+      const code = String(payload?.error || "")
+      if (code === "retry_already_queued") message = "Retry is already queued."
+      else if (code === "not_retryable") message = "This message cannot be retried."
+    } catch (_e) {
+      // best-effort
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("toast:show", {
+        detail: { message, type: "error" },
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
   }
 
   #extractCopyText() {

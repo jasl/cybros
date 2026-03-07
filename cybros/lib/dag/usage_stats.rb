@@ -102,25 +102,29 @@ module DAG
       end
 
       def by_model_rows
-        provider_sql = "COALESCE(NULLIF(dag_node_bodies.output->>'provider', ''), 'unknown')"
-        model_sql = "COALESCE(NULLIF(dag_node_bodies.output->>'model', ''), 'unknown')"
+        provider_key_sql =
+          "COALESCE(NULLIF(dag_node_bodies.output->>'provider_key', ''), 'unknown')"
+        model_ref_sql =
+          "COALESCE(NULLIF(dag_node_bodies.output->>'model_ref', ''), 'unknown')"
 
         base_scope
           .joins(:body)
-          .group(Arel.sql(provider_sql), Arel.sql(model_sql))
+          .group(Arel.sql(provider_key_sql), Arel.sql(model_ref_sql))
           .pluck(
-            Arel.sql(provider_sql),
-            Arel.sql(model_sql),
+            Arel.sql(provider_key_sql),
+            Arel.sql(model_ref_sql),
             Arel.sql("COUNT(*)"),
             Arel.sql(sum_usage_sql("input_tokens")),
             Arel.sql(sum_usage_sql("output_tokens")),
             Arel.sql(sum_usage_sql("cache_creation_tokens")),
             Arel.sql(sum_usage_sql("cache_read_tokens")),
           )
-          .map do |provider, model, calls, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens|
+          .map do |provider_key, model_ref, calls, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens|
             usage_hash(
-              provider: provider,
-              model: model,
+              provider_key: provider_key,
+              model_ref: model_ref,
+              provider: provider_key,
+              model: model_ref,
               calls: calls,
               input_tokens: input_tokens,
               output_tokens: output_tokens,
@@ -165,6 +169,8 @@ module DAG
         cache_read_tokens:,
         provider: nil,
         model: nil,
+        provider_key: nil,
+        model_ref: nil,
         date: nil
       )
         calls = calls.to_i
@@ -194,6 +200,8 @@ module DAG
         out["date"] = date if date
         out["provider"] = provider if provider
         out["model"] = model if model
+        out["provider_key"] = provider_key if provider_key
+        out["model_ref"] = model_ref if model_ref
 
         out
       end

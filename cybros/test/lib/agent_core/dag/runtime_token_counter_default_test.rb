@@ -5,7 +5,7 @@ class AgentCoreDAGRuntimeTokenCounterDefaultTest < ActiveSupport::TestCase
     runtime =
       AgentCore::DAG::Runtime.new(
         provider: AgentCore::Resources::Provider::SimpleInferenceProvider.new(base_url: nil, api_key: nil),
-        model: "gpt-4o-mini",
+        model: "gpt-5.4",
         tools_registry: AgentCore::Resources::Tools::Registry.new,
       )
 

@@ -62,6 +62,8 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
     assert_includes html, %(<turbo-stream action="replace" target="message_#{agent.id}")
     assert_includes html, %(data-controller="markdown")
     assert_includes html, "**Done**"
+    assert_includes html, %(data-message-actions-action-policy-value=)
+    assert_includes html, %(&quot;regenerate&quot;:{&quot;supported&quot;:true,&quot;available&quot;:true,&quot;mode&quot;:&quot;in_place&quot;})
   end
 
   test "node_state broadcast includes stable envelope fields (event_id + turn_id)" do

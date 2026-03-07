@@ -56,10 +56,37 @@ module Cybros
       {
         hint: "gpt-5.2",
         tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
       },
       {
         hint: "gpt-5.2-chat",
         tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
+      },
+      {
+        hint: "gpt-5.3-chat-latest",
+        tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
+      },
+      {
+        hint: "gpt-5.3-chat",
+        tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
+      },
+      {
+        hint: "gpt-5.4",
+        tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
+      },
+      {
+        hint: "gpt-5.4-pro",
+        tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
+      },
+      {
+        hint: "gpt-5-chat",
+        tokenizer_family: :tiktoken,
+        encoding_name: "o200k_base",
       },
       {
         hint: "x-ai/grok-4.1-fast",
@@ -148,9 +175,15 @@ module Cybros
           entry = {
             hint: hint,
             tokenizer_family: family,
+            encoding_name: source.fetch(:encoding_name, nil),
             source_hint: hint,
             source_repo: source.fetch(:hf_repo, nil),
           }
+
+          if family == :tiktoken
+            encoding_name = entry[:encoding_name].to_s.strip
+            validate_tiktoken_encoding_name!(encoding_name, hint: hint) unless encoding_name.empty?
+          end
 
           if AgentCore::Tokenization::Registry.hf_tokenizer_family?(family)
             path = root_dir.join(tokenizer_relative_path(hint)).to_s
@@ -190,6 +223,19 @@ module Cybros
     def tokenizer_relative_path(hint)
       File.join(hint.to_s, "tokenizer.json")
     end
+
+    def validate_tiktoken_encoding_name!(encoding_name, hint:)
+      require "tiktoken_ruby"
+      encoding = ::Tiktoken.get_encoding(encoding_name)
+      raise ArgumentError, "unknown encoding" if encoding.nil?
+    rescue StandardError => e
+      AgentCore::ValidationError.raise!(
+        "Unsupported tiktoken encoding #{encoding_name.inspect} for #{hint}",
+        code: "cybros.token_estimation.encoding_name_is_invalid",
+        details: { encoding_name: encoding_name, hint: hint, error_class: e.class.name, error_message: e.message },
+      )
+    end
+    private_class_method :validate_tiktoken_encoding_name!
 
     def tokenizer_root
       root = app_root

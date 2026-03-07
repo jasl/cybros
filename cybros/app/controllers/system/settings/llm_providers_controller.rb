@@ -1,37 +1,42 @@
 module System
   module Settings
     class LLMProvidersController < BaseController
-      before_action :set_llm_provider, only: %i[edit update destroy fetch_models]
+      before_action :set_provider_spec, only: %i[edit update device_flow_start device_flow_poll]
+      before_action :set_llm_provider, only: %i[edit update]
 
       def index
-        @llm_providers = LLMProvider.order(priority: :desc, created_at: :asc)
+        load_index_context
       end
 
-      def new
-        @llm_provider = LLMProvider.new(api_format: "openai", priority: 0, model_allowlist: [], headers: {})
-      end
+      def default_model
+        load_index_context
+        model_ref = params.fetch(:default_model_ref, "").to_s.strip
 
-      def create
-        attrs, errors = llm_provider_attributes_and_errors_from_params(existing_headers: {})
-        @llm_provider = LLMProvider.new(attrs)
-        errors.each { |(field, message)| @llm_provider.errors.add(field, message) }
-        @headers_json = params.dig(:llm_provider, :headers_json).to_s
-
-        if errors.empty? && @llm_provider.save
-          flash[:notice] = "Provider created"
-          redirect_to edit_system_settings_llm_provider_path(@llm_provider)
-        else
-          render :new, status: :unprocessable_entity
+        if model_ref.blank? && @catalog_default_unusable
+          @default_model_error = "Catalog default is not currently usable."
+          render :index, status: :unprocessable_entity
+          return
         end
+
+        if model_ref.present? && @default_model_options.none? { |option| option.fetch(:model_ref) == model_ref }
+          @default_model_error = "Default model must be currently usable"
+          render :index, status: :unprocessable_entity
+          return
+        end
+
+        Account.instance.update_llm_default_model_ref!(model_ref)
+        flash[:notice] = model_ref.present? ? "Default model updated" : "Default model cleared"
+        redirect_to system_settings_llm_providers_path
       end
 
       def edit
+        @device_flow = active_device_flow_for(@provider_key)
       end
 
       def update
-        attrs, errors = llm_provider_attributes_and_errors_from_params(existing_headers: @llm_provider.headers || {})
+        attrs, errors = credential_attributes_and_errors_from_params
+
         attrs.delete(:api_key) if attrs.key?(:api_key) && attrs[:api_key].to_s.strip == ""
-        @headers_json = params.dig(:llm_provider, :headers_json).to_s
 
         if errors.any?
           @llm_provider.assign_attributes(attrs)
@@ -41,81 +46,223 @@ module System
         end
 
         if @llm_provider.update(attrs)
-          flash[:notice] = "Provider updated"
-          redirect_to edit_system_settings_llm_provider_path(@llm_provider)
+          flash[:notice] = "Credentials updated"
+          redirect_to edit_system_settings_llm_provider_path(@provider_key)
         else
           render :edit, status: :unprocessable_entity
         end
       end
 
-      def destroy
-        @llm_provider.destroy!
-        flash[:notice] = "Provider deleted"
-        redirect_to system_settings_llm_providers_path
+      def device_flow_start
+        return unless ensure_oauth_device_flow_supported!
+
+        flow = Cybros::LLM::CodexOAuth.start_device_flow!
+        session[:llm_device_flow] ||= {}
+        session[:llm_device_flow][@provider_key] = flow.merge("session_id" => Current.session&.id.to_s)
+
+        flash[:notice] = "Device flow started"
+        redirect_to edit_system_settings_llm_provider_path(@provider_key)
+      rescue Cybros::LLM::CodexOAuthError => e
+        flash[:alert] = e.message
+        redirect_to edit_system_settings_llm_provider_path(@provider_key)
       end
 
-      def fetch_models
-        ids = LLMProviders::ModelFetcher.model_ids_for(@llm_provider)
-        @llm_provider.update!(model_allowlist: ids)
-        flash[:notice] = "Fetched #{ids.length} models"
-        redirect_to edit_system_settings_llm_provider_path(@llm_provider)
-      rescue StandardError
-        flash[:alert] = "Failed to fetch models"
-        redirect_to edit_system_settings_llm_provider_path(@llm_provider)
+      def device_flow_poll
+        return unless ensure_oauth_device_flow_supported!
+
+        flow = active_device_flow_for(@provider_key)
+        unless flow.is_a?(Hash) && flow["device_auth_id"].to_s.present? && flow["user_code"].to_s.present?
+          flash[:alert] = "No active device flow. Start it first."
+          redirect_to edit_system_settings_llm_provider_path(@provider_key)
+          return
+        end
+
+        result =
+          Cybros::LLM::CodexOAuth.poll_device_flow!(
+            device_auth_id: flow.fetch("device_auth_id"),
+            user_code: flow.fetch("user_code"),
+          )
+        status = result.fetch(:status)
+        if status == :authorized
+          tokens = result.fetch(:tokens)
+
+          cred = LLMProvider.find_by(provider_key: @provider_key) || LLMProvider.new(provider_key: @provider_key, credential_type: "oauth_codex")
+          cred.credential_type = "oauth_codex"
+          cred.access_token = tokens.fetch("access_token")
+          cred.refresh_token = tokens.fetch("refresh_token", cred.refresh_token)
+          cred.expires_at = tokens.fetch("expires_at", nil)
+          cred.account_id = tokens.fetch("account_id", cred.account_id)
+          cred.save!
+
+          (session[:llm_device_flow] || {}).delete(@provider_key)
+          flash[:notice] = "Connected"
+        elsif status == :pending
+          flash[:notice] = "Waiting for authorization…"
+        else
+          flash[:alert] = "Device flow failed: #{result[:error] || status}"
+        end
+
+        redirect_to edit_system_settings_llm_provider_path(@provider_key)
+      rescue Cybros::LLM::CodexOAuthError => e
+        clear_device_flow_session!(@provider_key) if terminal_device_flow_error?(e)
+        flash[:alert] = e.message
+        redirect_to edit_system_settings_llm_provider_path(@provider_key)
       end
 
       private
 
-        def set_llm_provider
-          @llm_provider = LLMProvider.find(params[:id])
+        def set_provider_spec
+          @catalog = Cybros::LLM::Catalog.effective
+          @provider_key = params[:provider_key].to_s
+          raise ActiveRecord::RecordNotFound if @provider_key.blank?
+          raise ActiveRecord::RecordNotFound unless @catalog.enabled_provider_keys_for_env(Rails.env).include?(@provider_key)
+
+          @provider_spec = @catalog.provider(@provider_key)
+        rescue KeyError
+          raise ActiveRecord::RecordNotFound
         end
 
-        def llm_provider_attributes_and_errors_from_params(existing_headers:)
-          raw = params.require(:llm_provider).permit(
-            :name,
-            :base_url,
-            :api_key,
-            :api_format,
-            :priority,
-            :headers_json,
-            :model_allowlist_text,
-            model_allowlist: [],
-          )
+        def set_llm_provider
+          @llm_provider =
+            LLMProvider.find_by(provider_key: @provider_key) ||
+              LLMProvider.new(provider_key: @provider_key, credential_type: credential_type_from_spec)
+        end
 
-          attrs = raw.to_h
+        def credential_type_from_spec
+          ct = @provider_spec.fetch("credential_type", nil).to_s.strip
+          ct = "api_key" if ct.empty?
+          ct
+        end
+
+        def ensure_oauth_device_flow_supported!
+          unless @provider_spec.fetch("credential_type", nil).to_s == "oauth_codex"
+            head :unprocessable_entity
+            return false
+          end
+          true
+        end
+
+        def credential_attributes_and_errors_from_params
+          ct = credential_type_from_spec
+          attrs = {}
           errors = []
 
-          if attrs.key?("priority")
-            attrs["priority"] = Integer(attrs["priority"], exception: false)
+          if ct == "api_key"
+            raw = params.require(:llm_provider).permit(:api_key)
+            attrs = raw.to_h
           end
 
-          if attrs.key?("model_allowlist_text")
-            text = attrs.delete("model_allowlist_text").to_s
-            models =
-              text
-                .lines
-                .map { |l| l.strip }
-                .reject(&:blank?)
-                .uniq
-            attrs["model_allowlist"] = models
-          end
+          attrs["provider_key"] = @provider_key
+          attrs["credential_type"] = ct
 
-          if attrs.key?("headers_json")
-            json = attrs.delete("headers_json").to_s.strip
-            if json.blank?
-              attrs["headers"] = {}
-            else
-              begin
-                parsed = JSON.parse(json)
-                attrs["headers"] = parsed.is_a?(Hash) ? parsed : {}
-              rescue JSON::ParserError
-                attrs["headers"] = existing_headers
-                errors << [:headers, "must be valid JSON"]
-              end
+          [attrs.symbolize_keys, errors]
+        end
+
+        def load_index_context
+          @catalog = Cybros::LLM::Catalog.effective
+          provider_keys = @catalog.enabled_provider_keys_for_env(Rails.env)
+          @providers =
+            provider_keys.map do |provider_key|
+              spec = @catalog.provider(provider_key)
+              cred = LLMProvider.find_by(provider_key: provider_key)
+              {
+                provider_key: provider_key,
+                spec: spec,
+                credential: cred,
+                has_credential: Cybros::AgentRuntimeResolver.send(:credential_present_for_provider?, provider_key: provider_key, provider_spec: spec),
+              }
+            end
+
+          @stored_default_model_ref = Account.instance.llm_default_model_ref
+          @site_default_missing_from_catalog =
+            @stored_default_model_ref.present? && !model_ref_in_catalog?(@stored_default_model_ref)
+          @site_default_unusable = false
+          if @stored_default_model_ref.present? && !@site_default_missing_from_catalog
+            begin
+              Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: @stored_default_model_ref)
+            rescue AgentCore::ValidationError
+              @site_default_unusable = true
             end
           end
 
-          [attrs.symbolize_keys, errors]
+          @catalog_default_model_ref = @catalog.default_model_ref
+          @catalog_default_unusable = false
+          begin
+            Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: @catalog_default_model_ref)
+          rescue AgentCore::ValidationError
+            @catalog_default_unusable = true
+          end
+          @effective_default_model_ref = @site_default_missing_from_catalog ? @catalog_default_model_ref : (@stored_default_model_ref || @catalog_default_model_ref)
+          @default_model_source_text =
+            if @site_default_missing_from_catalog || @stored_default_model_ref.blank?
+              "Catalog default: #{@catalog_default_model_ref}"
+            else
+              "Site override: #{@stored_default_model_ref}"
+            end
+
+          @default_model_options = Cybros::AgentRuntimeResolver.usable_model_options(catalog: @catalog)
+        end
+
+        def model_ref_in_catalog?(model_ref)
+          provider_key, model_key = model_ref.to_s.split("/", 2).map(&:to_s)
+          return false if provider_key.blank? || model_key.blank?
+
+          @catalog.model(provider_key, model_key)
+          true
+        rescue KeyError
+          false
+        end
+
+        def active_device_flow_for(provider_key)
+          flows = session[:llm_device_flow]
+          return nil unless flows.is_a?(Hash)
+
+          flow = flows[provider_key.to_s]
+          return nil unless flow.is_a?(Hash)
+          return nil if flow["device_auth_id"].to_s.blank? || flow["user_code"].to_s.blank?
+
+          stored_session_id = flow["session_id"].to_s
+          current_session_id = Current.session&.id.to_s
+          if stored_session_id.blank? || current_session_id.blank? || stored_session_id != current_session_id
+            clear_device_flow_session!(provider_key)
+            return nil
+          end
+
+          expires_at = parse_optional_time(flow["expires_at"])
+          if expires_at.nil? || expires_at <= Time.current
+            clear_device_flow_session!(provider_key)
+            return nil
+          end
+
+          flow
+        rescue StandardError
+          nil
+        end
+
+        def parse_optional_time(value)
+          string = value.to_s.strip
+          return nil if string.empty?
+
+          Time.iso8601(string)
+        rescue ArgumentError
+          nil
+        end
+
+        def clear_device_flow_session!(provider_key)
+          flows = session[:llm_device_flow]
+          return unless flows.is_a?(Hash)
+
+          flows.delete(provider_key.to_s)
+          session[:llm_device_flow] = flows
+        end
+
+        def terminal_device_flow_error?(error)
+          return true if error.error_code.to_s.present?
+
+          status = error.details.is_a?(Hash) ? error.details[:status] || error.details["status"] : nil
+          [400, 401, 410].include?(status.to_i)
+        rescue StandardError
+          false
         end
     end
   end

@@ -109,7 +109,7 @@ class TestSimpleInferenceClient < Minitest::Test
 
     client = SimpleInference::Client.new(base_url: "http://example.com", adapter: adapter)
 
-    error = assert_raises(SimpleInference::Errors::HTTPError) do
+    error = assert_raises(SimpleInference::HTTPError) do
       client.embeddings(model: "foo", input: "bar")
     end
     assert_equal 500, error.status
@@ -129,11 +129,101 @@ class TestSimpleInferenceClient < Minitest::Test
 
     client = SimpleInference::Client.new(base_url: "http://example.com", adapter: adapter)
 
-    error = assert_raises(SimpleInference::Errors::HTTPError) do
+    error = assert_raises(SimpleInference::HTTPError) do
       client.embeddings(model: "foo", input: "bar")
     end
     assert_equal 401, error.status
     assert_includes error.message, "nope"
+  end
+
+  def test_chat_raises_validation_error_when_model_missing
+    client = SimpleInference::Client.new(base_url: "http://example.com")
+
+    error =
+      assert_raises(SimpleInference::ValidationError) do
+        client.chat(model: nil, messages: [])
+      end
+
+    assert_includes error.message, "model is required"
+  end
+
+  def test_chat_raises_validation_error_when_messages_are_not_an_array
+    client = SimpleInference::Client.new(base_url: "http://example.com")
+
+    error =
+      assert_raises(SimpleInference::ValidationError) do
+        client.chat(model: "foo", messages: "oops")
+      end
+
+    assert_includes error.message, "messages must be an Array"
+  end
+
+  def test_client_raises_configuration_error_for_malformed_base_url_before_calling_adapter
+    adapter = Class.new(SimpleInference::HTTPAdapter) do
+      attr_reader :called
+
+      def call(_env)
+        @called = true
+        raise "adapter should not be reached"
+      end
+    end.new
+
+    client = SimpleInference::Client.new(base_url: "http://exa mple.com", adapter: adapter)
+
+    error =
+      assert_raises(SimpleInference::ConfigurationError) do
+        client.embeddings(model: "foo", input: "bar")
+      end
+
+    assert_includes error.message, "base_url"
+    refute_equal true, adapter.called
+  end
+
+  def test_client_raises_validation_error_for_non_serializable_request_body
+    bad_input = Object.new
+    bad_input.define_singleton_method(:to_json) do |_generator_state = nil|
+      raise JSON::GeneratorError, "boom"
+    end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", adapter: Class.new(SimpleInference::HTTPAdapter) do
+      def call(_env)
+        raise "adapter should not be reached"
+      end
+    end.new)
+
+    error =
+      assert_raises(SimpleInference::ValidationError) do
+        client.embeddings(model: "foo", input: bad_input)
+      end
+
+    assert_includes error.message, "JSON"
+  end
+
+  def test_client_raises_configuration_error_for_invalid_headers_shape
+    error =
+      assert_raises(SimpleInference::ConfigurationError) do
+        SimpleInference::Client.new(base_url: "http://example.com", headers: [])
+      end
+
+    assert_includes error.message, "headers"
+  end
+
+  def test_client_raises_configuration_error_for_invalid_options_shape
+    error =
+      assert_raises(SimpleInference::ConfigurationError) do
+        SimpleInference::Client.new([])
+      end
+
+    assert_includes error.message, "options"
+  end
+
+  def test_client_raises_configuration_error_for_invalid_timeout_value
+    error =
+      assert_raises(SimpleInference::ConfigurationError) do
+        SimpleInference::Client.new(base_url: "http://example.com", timeout: "oops")
+      end
+
+    assert_includes error.message, "timeout"
   end
 
   def test_audio_transcriptions_uses_streaming_multipart_body

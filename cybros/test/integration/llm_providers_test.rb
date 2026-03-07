@@ -1,27 +1,16 @@
 require "test_helper"
 
 class LlmProvidersTest < ActionDispatch::IntegrationTest
-  def with_stubbed_class_method(klass, method_name, value: nil, implementation: nil)
-    original = klass.method(method_name)
-    klass.define_singleton_method(method_name) do |*args, **kwargs|
-      if implementation.respond_to?(:call)
-        implementation.call(*args, **kwargs)
-      else
-        value
-      end
-    end
-    yield
-  ensure
-    klass.define_singleton_method(method_name) do |*args, **kwargs, &block|
-      original.call(*args, **kwargs, &block)
-    end
+  setup do
+    LLMProvider.delete_all
   end
 
-  def provider_models_error
-    SimpleInference::Errors::HTTPError.new(
-      "boom",
-      response: SimpleInference::Response.new(status: 500, headers: {}, body: {}, raw_body: ""),
-    )
+  def with_stubbed_singleton_method(obj, method_name, value:)
+    original = obj.method(method_name)
+    obj.define_singleton_method(method_name) { |*_args, **_kwargs| value }
+    yield
+  ensure
+    obj.define_singleton_method(method_name) { |*args, **kwargs, &block| original.call(*args, **kwargs, &block) }
   end
 
   def sign_in_owner!
@@ -71,115 +60,127 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
 
   test "index lists providers" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "OpenRouter", base_url: "https://openrouter.ai/api/v1", api_key: "sk-test")
+    Account.instance.update_llm_default_model_ref!("")
 
     get system_settings_llm_providers_path
     assert_response :success
-    assert_includes response.body, provider.name
+    assert_includes response.body, "OpenAI"
+    assert_includes response.body, "codex_subscription"
+    assert_includes response.body, "Catalog default: openai/gpt-5.4"
+    assert_includes response.body, "Use catalog default: openai/gpt-5.4"
   end
 
-  test "create redirects to edit and stores encrypted api_key" do
+  test "update stores encrypted api_key credential (provider_key keyed)" do
     sign_in_owner!
+    LLMProvider.delete_all
 
     assert_difference -> { LLMProvider.count }, +1 do
-      post system_settings_llm_providers_path, params: {
+      patch system_settings_llm_provider_path("openai"), params: {
         llm_provider: {
-          name: "OpenRouter",
-          base_url: "https://openrouter.ai/api/v1",
           api_key: "sk-test",
-          api_format: "openai",
-          priority: 10,
-          model_allowlist: %w[gpt-4o-mini gpt-4.1-mini],
         },
       }
     end
 
-    provider = LLMProvider.order(:created_at).last
-    assert_redirected_to edit_system_settings_llm_provider_path(provider)
+    provider = LLMProvider.find_by!(provider_key: "openai")
+    assert_redirected_to edit_system_settings_llm_provider_path("openai")
     assert_equal "sk-test", provider.api_key
+    assert_equal "api_key", provider.credential_type
 
     raw =
       LLMProvider.lease_connection.select_value(
         LLMProvider.send(
           :sanitize_sql_array,
-          ["SELECT api_key FROM llm_providers WHERE id = ?", provider.id],
+          ["SELECT api_key FROM llm_providers WHERE provider_key = ?", "openai"],
         ),
       ).to_s
     refute_equal "sk-test", raw
     refute_includes raw, "sk-test"
   end
 
-  test "update changes provider fields" do
+  test "update_default_model stores and clears a site-wide default model" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, api_format: "openai", priority: 0, model_allowlist: [])
+    Account.instance.update_llm_default_model_ref!("")
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
 
-    patch system_settings_llm_provider_path(provider), params: {
-      llm_provider: {
-        name: "P2",
-        priority: 5,
-        model_allowlist_text: "m1\nm2\nm2\n\n",
-      },
-    }
+    patch default_model_system_settings_llm_providers_path, params: { default_model_ref: "openai/gpt-5.4" }
+    assert_redirected_to system_settings_llm_providers_path
+    assert_equal "openai/gpt-5.4", Account.instance.settings.dig("llm", "default_model_ref")
 
-    assert_redirected_to edit_system_settings_llm_provider_path(provider)
-    provider.reload
-    assert_equal "P2", provider.name
-    assert_equal 5, provider.priority
-    assert_equal %w[m1 m2], provider.model_allowlist
+    get system_settings_llm_providers_path
+    assert_response :success
+    assert_includes response.body, "Site override: openai/gpt-5.4"
+
+    patch default_model_system_settings_llm_providers_path, params: { default_model_ref: "" }
+    assert_redirected_to system_settings_llm_providers_path
+    assert_nil Account.instance.settings.dig("llm", "default_model_ref")
   end
 
-  test "update returns unprocessable_entity on invalid headers_json" do
+  test "update_default_model rejects model refs that are not currently usable" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, api_format: "openai", priority: 0, model_allowlist: [], headers: {})
+    Account.instance.update_llm_default_model_ref!("")
 
-    patch system_settings_llm_provider_path(provider), params: {
-      llm_provider: {
-        headers_json: "{",
-      },
-    }
+    patch default_model_system_settings_llm_providers_path, params: { default_model_ref: "openai/gpt-5.4" }
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Default model must be currently usable"
+    assert_nil Account.instance.settings.dig("llm", "default_model_ref")
+  end
+
+  test "update_default_model rejects clearing to an unusable catalog default" do
+    sign_in_owner!
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
+    Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-pro")
+
+    patch default_model_system_settings_llm_providers_path, params: { default_model_ref: "" }
 
     assert_response :unprocessable_entity
-    assert_includes response.body, "must be valid JSON"
+    assert_includes response.body, "Catalog default is not currently usable."
+    assert_equal "openrouter/openai-gpt-5.4-pro", Account.instance.settings.dig("llm", "default_model_ref")
   end
 
-  test "destroy removes provider" do
+  test "index flags a stored site default that is not currently usable" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil)
+    Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
+    LLMProvider.delete_all
 
-    assert_difference -> { LLMProvider.count }, -1 do
-      delete system_settings_llm_provider_path(provider)
-    end
-
-    assert_redirected_to system_settings_llm_providers_path
+    get system_settings_llm_providers_path
+    assert_response :success
+    assert_includes response.body, "Stored site default is not currently usable."
+    assert_includes response.body, "Site override: openai/gpt-5.4"
   end
 
-  test "fetch_models updates allowlist" do
+  test "index excludes codex models from the default selector when oauth credentials are not runtime-usable" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, model_allowlist: [])
+    ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", access_token: "at-only")
 
-    with_stubbed_class_method(LLMProviders::ModelFetcher, :model_ids_for, value: ["m1", "m2"]) do
-      post fetch_models_system_settings_llm_provider_path(provider)
-    end
-
-    assert_redirected_to edit_system_settings_llm_provider_path(provider)
-    provider.reload
-    assert_equal %w[m1 m2], provider.model_allowlist
+    get system_settings_llm_providers_path
+    assert_response :success
+    refute_includes response.body, 'value="codex_subscription/gpt-5.4"'
   end
 
-  test "fetch_models failure does not change allowlist" do
+  test "index includes codex models when oauth access token has a future expiry" do
     sign_in_owner!
-    provider = LLMProvider.create!(name: "P1", base_url: "http://localhost:1234/v1", api_key: nil, model_allowlist: ["existing"])
+    ensure_llm_provider!(
+      provider_key: "codex_subscription",
+      credential_type: "oauth_codex",
+      access_token: "at-valid",
+      expires_at: 2.hours.from_now,
+    )
 
-    with_stubbed_class_method(
-      LLMProviders::ModelFetcher,
-      :model_ids_for,
-      implementation: ->(*) { raise provider_models_error },
-    ) do
-      post fetch_models_system_settings_llm_provider_path(provider)
+    get system_settings_llm_providers_path
+
+    assert_response :success
+    assert_includes response.body, 'value="codex_subscription/gpt-5.4"'
+  end
+
+  test "dev provider routes are unavailable outside development and test" do
+    sign_in_owner!
+    production_env = ActiveSupport::StringInquirer.new("production")
+
+    with_stubbed_singleton_method(Rails, :env, value: production_env) do
+      get edit_system_settings_llm_provider_path("dev")
     end
 
-    assert_redirected_to edit_system_settings_llm_provider_path(provider)
-    provider.reload
-    assert_equal ["existing"], provider.model_allowlist
+    assert_response :not_found
   end
 end

@@ -50,39 +50,39 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 
 ```json
 {
-	  "context_cost": {
-	    "context_window_tokens": 8192,
-	    "reserved_output_tokens": 0,
-	    "limit": 8192,
-	    "memory_dropped": false,
-	    "limit_turns": 12,
-	    "auto_compact": true,
-	    "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
-	    "estimated_tokens_coarse": {
-	      "tools_schema": 334,
-	      "tool_results": 120,
-	      "history": 700,
-	      "injections": 50,
-	      "memory_knowledge": 30
-	    },
-	    "prompt_sections": {
-	      "system_prompt": {
-	        "prefix": { "bytes": 123, "estimated_tokens": 45, "sha256": "..." },
-	        "tail": { "bytes": 67, "estimated_tokens": 12, "sha256": "..." },
-	        "sections": [
-	          { "id": "base_system_prompt", "stability": "prefix", "order": 0, "bytes": 123, "estimated_tokens": 45, "metadata": {} }
-	        ]
-	      },
-	      "tools_schema": { "tool_count": 3, "bytes": 2000, "estimated_tokens": 334 },
-	      "preamble_messages": [
-	        { "id": "preamble_injection:1", "role": "user", "order": 10, "bytes": 80, "estimated_tokens": 20, "metadata": {} }
-	      ]
-	    },
-	    "decisions": [
-	      { "type": "drop_memory_results" },
-	      {
-	        "type": "prune_tool_outputs",
-	        "attempt": 1,
+  "context_cost": {
+    "context_window_tokens": 8192,
+    "reserved_output_tokens": 0,
+    "limit": 8192,
+    "memory_dropped": false,
+    "limit_turns": 12,
+    "auto_compact": true,
+    "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
+    "estimated_tokens_coarse": {
+      "tools_schema": 334,
+      "tool_results": 120,
+      "history": 700,
+      "injections": 50,
+      "memory_knowledge": 30
+    },
+    "prompt_sections": {
+      "system_prompt": {
+        "prefix": { "bytes": 123, "estimated_tokens": 45, "sha256": "..." },
+        "tail": { "bytes": 67, "estimated_tokens": 12, "sha256": "..." },
+        "sections": [
+          { "id": "base_system_prompt", "stability": "prefix", "order": 0, "bytes": 123, "estimated_tokens": 45, "metadata": {} }
+        ]
+      },
+      "tools_schema": { "tool_count": 3, "bytes": 2000, "estimated_tokens": 334 },
+      "preamble_messages": [
+        { "id": "preamble_injection:1", "role": "user", "order": 10, "bytes": 80, "estimated_tokens": 20, "metadata": {} }
+      ]
+    },
+    "decisions": [
+      { "type": "drop_memory_results" },
+      {
+        "type": "prune_tool_outputs",
+        "attempt": 1,
         "recent_turns": 2,
         "keep_last_assistant_messages": 3,
         "tools_allow_count": 0,
@@ -110,22 +110,31 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 - `decisions` 记录本轮为满足预算做过的降级决策（按发生顺序）。
   - `prune_tool_outputs.attempt`：同一轮内若多次 pruning（例如 shrink-loop 中反复尝试），attempt 递增。
 
-当 LLM 调用触发 model failover（同 provider 多模型重试）时，会写入：
+当主 LLM 调用触发 executor 级自动恢复时，会写入：
 
 ```json
 {
-  "llm": {
-    "failover": {
-      "requested_model": "primary-model",
-      "used_model": "fallback-model",
-      "attempts": [
-        { "model": "primary-model", "ok": false, "status": 400, "error_class": "AgentCore::ProviderError", "error_message": "...", "elapsed_ms": 12.3 },
-        { "model": "fallback-model", "ok": true, "elapsed_ms": 45.6 }
+  "llm_call": {
+    "recovery": {
+      "attempts": 1,
+      "recovered": 1,
+      "failed": 0,
+      "exhausted": false,
+      "failures_sample": [
+        { "error_class": "AgentCore::ProviderError", "message": "rate limited", "status": 429 }
       ]
     }
   }
 }
 ```
+
+说明：
+
+- `attempts`：实际执行的自动恢复重试次数（不含首次主调用）
+- `recovered`：是否通过自动恢复完成当前节点（`0|1`）
+- `failed`：是否在进入恢复流程后仍未成功（`0|1`）
+- `exhausted`：是否因为可重试失败耗尽恢复次数而落入 hard error
+- `failures_sample`：自动恢复阶段观察到的失败样本（最多 10 条）
 
 当 tool loop 触发工具参数修复（ToolCallRepairLoop）时，会写入：
 

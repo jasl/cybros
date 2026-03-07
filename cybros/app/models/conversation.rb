@@ -60,45 +60,55 @@ class Conversation < ApplicationRecord
     raise ArgumentError, "limit must be an integer" if raw.nil?
     raise ArgumentError, "limit must be >= 1" if raw < 1
 
-    chat_lane.message_page(
-      limit: raw,
-      before_message_id: before_message_id.to_s.presence,
-      after_message_id: after_message_id.to_s.presence,
-      mode: mode,
-    )
+    page =
+      chat_lane.message_page(
+        limit: raw,
+        before_message_id: before_message_id.to_s.presence,
+        after_message_id: after_message_id.to_s.presence,
+        mode: mode,
+      )
+
+    decorate_message_page(page)
   rescue DAG::PaginationError => e
     raise Cybros::Error, e.message
   end
 
   def transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview, include_deleted: false)
-    chat_lane.transcript_page(
-      limit_turns: limit_turns,
-      before_turn_id: before_turn_id,
-      after_turn_id: after_turn_id,
-      mode: mode,
-      include_deleted: include_deleted,
-    )
+    page =
+      chat_lane.transcript_page(
+        limit_turns: limit_turns,
+        before_turn_id: before_turn_id,
+        after_turn_id: after_turn_id,
+        mode: mode,
+        include_deleted: include_deleted,
+      )
+
+    decorate_transcript_page(page)
   rescue DAG::PaginationError => e
     raise Cybros::Error, e.message
   end
 
   def transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)
-    chat_lane.transcript_recent_turns(
-      limit_turns: limit_turns,
-      mode: mode,
-      include_deleted: include_deleted,
+    decorate_messages(
+      chat_lane.transcript_recent_turns(
+        limit_turns: limit_turns,
+        mode: mode,
+        include_deleted: include_deleted,
+      )
     )
   rescue DAG::PaginationError => e
     raise Cybros::Error, e.message
   end
 
   def transcript_for(target_node_id, limit_turns: nil, limit: nil, mode: :preview, include_deleted: false)
-    root_graph.transcript_for(
-      target_node_id,
-      limit_turns: limit_turns || DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
-      limit: limit,
-      mode: mode,
-      include_deleted: include_deleted,
+    decorate_messages(
+      root_graph.transcript_for(
+        target_node_id,
+        limit_turns: limit_turns || DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS,
+        limit: limit,
+        mode: mode,
+        include_deleted: include_deleted,
+      )
     )
   rescue DAG::ValidationError, DAG::OperationNotAllowedError, DAG::PaginationError, DAG::SafetyLimits::Exceeded => e
     raise Cybros::Error, e.message
@@ -130,24 +140,30 @@ class Conversation < ApplicationRecord
     nodes_by_id = root_graph.nodes.where(id: ids).to_a.index_by { |n| n.id.to_s }
     nodes = ids.filter_map { |id| nodes_by_id[id] }
 
-    projection = DAG::TranscriptProjection.new(graph: root_graph)
+    projection = transcript_projection
     projection.project(node_records: nodes, mode: mode)
   end
 
   def message_for_node_id(node_id:, mode: :full)
-    id = node_id.to_s
-    node = root_graph.nodes.find_by(id: id)
-    raise ActiveRecord::RecordNotFound if node.nil?
+    node = find_chat_lane_node!(node_id)
 
-    projection = DAG::TranscriptProjection.new(graph: root_graph)
+    projection = transcript_projection
     message = projection.project(node_records: [node], mode: mode).first
     raise ActiveRecord::RecordNotFound unless message.is_a?(Hash)
 
     message
   end
 
-  def append_user_message_and_project!(content:, mode: :preview)
-    result = append_user_message!(content: content)
+  def action_policy_for(node)
+    Conversation::NodeActionPolicy.new(conversation: self, node: node).to_h
+  end
+
+  def action_policy_for_node_id(node_id)
+    action_policy_for(find_chat_lane_node!(node_id))
+  end
+
+  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil)
+    result = append_user_message!(content: content, model_ref: model_ref)
     raise Cybros::Error, "failed to append message" if result.nil?
 
     node_ids = [result[:user_node]&.id, result[:agent_node]&.id].compact
@@ -156,11 +172,13 @@ class Conversation < ApplicationRecord
 
   def stop_node!(node_id:, reason: "user_cancelled")
     with_dag_errors_wrapped do
-      node = root_graph.nodes.find_by(id: node_id.to_s)
-      raise ActiveRecord::RecordNotFound if node.nil?
-      raise Cybros::Error, "node_not_running" unless node.running?
+      node = find_chat_lane_node!(node_id)
+      raise Cybros::Error, "node_not_running" unless node_stoppable?(node)
 
-      node.stop!(reason: reason.to_s)
+      stopped = node.stop!(reason: reason.to_s)
+      raise Cybros::Error, "node_not_running" unless stopped
+
+      cancel_runs_for_node!(node)
       node
     end
   end
@@ -171,48 +189,26 @@ class Conversation < ApplicationRecord
 
       failed_node = graph.nodes.find_by(id: failed_node_id.to_s)
       raise ActiveRecord::RecordNotFound if failed_node.nil?
+      raise ActiveRecord::RecordNotFound unless failed_node.lane_id.to_s == chat_lane.id.to_s
 
       raise Cybros::Error, "not_an_agent_node" unless failed_node.node_type == Messages::AgentMessage.node_type_key
-      raise Cybros::Error, "not_retryable" unless failed_node.errored? || failed_node.stopped?
-
-      retry_depth = 0
-      trace_id = failed_node.id.to_s
-      while (source_id = graph.nodes.find_by(id: trace_id)&.metadata&.dig("retry_of_node_id"))
-        retry_depth += 1
-        trace_id = source_id.to_s
-      end
-      raise Cybros::Error, "retry_limit_reached" if retry_depth >= 5
-
-      existing_retry =
-        graph.nodes
-          .where(node_type: Messages::AgentMessage.node_type_key, compressed_at: nil)
-          .where("metadata ->> 'retry_of_node_id' = ?", failed_node.id.to_s)
-          .order(:id)
-          .last
-      if existing_retry && !existing_retry.terminal?
-        raise Cybros::Error, "retry_already_queued"
+      retry_action = action_entry_for(failed_node, "retry")
+      unless retry_action.fetch("available", false)
+        code =
+          case retry_action["reason"].to_s
+          when "retry_limit_reached"
+            "retry_limit_reached"
+          when "retry_already_queued"
+            "retry_already_queued"
+          when "missing_parent"
+            "missing_parent"
+          else
+            "not_retryable"
+          end
+        raise Cybros::Error, code
       end
 
-      from_node_id =
-        graph.edges.active
-          .where(edge_type: DAG::Edge::SEQUENCE, to_node_id: failed_node.id)
-          .order(:id)
-          .pick(:from_node_id)
-      raise Cybros::Error, "missing_parent" if from_node_id.nil?
-
-      from_node = graph.nodes.find(from_node_id)
-
-      new_agent = nil
-      graph.mutate!(turn_id: from_node.turn_id) do |m|
-        new_agent =
-          m.create_node(
-            node_type: Messages::AgentMessage.node_type_key,
-            state: DAG::Node::PENDING,
-            lane_id: failed_node.lane_id,
-            metadata: { "retry_of_node_id" => failed_node.id.to_s },
-          )
-        m.create_edge(from_node: from_node, to_node: new_agent, edge_type: DAG::Edge::SEQUENCE)
-      end
+      new_agent = failed_node.retry!
 
       ConversationRun.create!(
         conversation: self,
@@ -262,7 +258,7 @@ class Conversation < ApplicationRecord
     )
   end
 
-  def append_user_message!(content:)
+  def append_user_message!(content:, model_ref: nil)
     content = content.to_s.strip
     return nil if content.blank?
 
@@ -270,11 +266,22 @@ class Conversation < ApplicationRecord
       graph = root_graph
       lane = chat_lane
 
-      resolution = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: self)
-      preferred_models = Array(resolution[:preferred_models]).map(&:to_s).reject(&:blank?)
-      matched_preference = !!resolution[:matched_preference]
-      chosen_model = resolution[:model].to_s
-      provider_name = resolution[:provider_name].to_s
+      model_ref = model_ref.to_s.strip.presence
+      if model_ref
+        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: model_ref)
+        self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => model_ref } })
+        save! if changed?
+      elsif metadata.dig("llm", "model_ref").to_s.strip.present?
+        model_ref = metadata.dig("llm", "model_ref").to_s.strip
+        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: model_ref)
+      else
+        model_ref =
+          Cybros::AgentRuntimeResolver.default_model_ref_for(
+            agent_metadata: (metadata || {}).fetch("agent", {}),
+          )
+        self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => model_ref } })
+        save! if changed?
+      end
 
       prev_leaf = head_leaf_for_lane(graph: graph, lane: lane)
       prev_agent_leaf = head_leaf_for_lane(graph: graph, lane: lane, node_type: Messages::AgentMessage.node_type_key)
@@ -301,18 +308,13 @@ class Conversation < ApplicationRecord
             lane_id: lane.id,
             metadata:
               begin
-                if preferred_models.any? && !matched_preference
-                  {
-                    "llm_warning" => {
-                      "code" => "model_preference_unavailable",
-                      "preferred_models" => preferred_models,
-                      "chosen_model" => chosen_model,
-                      "provider_name" => provider_name,
-                    },
-                  }
-                else
-                  {}
+                out = {}
+
+                if model_ref
+                  out["llm"] = { "model_ref" => model_ref }
                 end
+
+                out
               end,
           )
 
@@ -404,17 +406,15 @@ class Conversation < ApplicationRecord
       target = graph.nodes.active.find(agent_node_id)
       raise ArgumentError, "not an agent node" unless target.node_type == Messages::AgentMessage.node_type_key
       raise ArgumentError, "wrong lane" unless target.lane_id.to_s == lane.id.to_s
-      raise Cybros::Error, "cannot regenerate deleted node" if target.deleted?
+      regenerate_action = action_entry_for(target, "regenerate")
+      raise Cybros::Error, "cannot regenerate deleted node" if regenerate_action["reason"].to_s == "deleted"
+      raise Cybros::Error, "cannot regenerate non-terminal agent" if regenerate_action["reason"].to_s == "not_terminal"
+      raise Cybros::Error, "agent is not rerunnable" unless regenerate_action.fetch("available", false)
 
-      tail = head_leaf_for_lane(graph: graph, lane: lane, node_type: Messages::AgentMessage.node_type_key)
-      if tail.nil? || tail.id.to_s != target.id.to_s
-        # Non-tail regenerate: branch first, then regenerate there.
+      if regenerate_action["mode"].to_s == "branch"
         child = create_child!(from_node_id: target.id, kind: "branch", title: "Branch", user_content: "")
         return { mode: :branched, conversation: child }
       end
-
-      raise Cybros::Error, "cannot regenerate non-terminal agent" unless target.terminal?
-      raise Cybros::Error, "agent is not rerunnable" unless target.can_rerun?
 
       new_agent = target.rerun!(metadata_patch: { "generated_by" => "regenerate" })
 
@@ -702,6 +702,66 @@ class Conversation < ApplicationRecord
   end
 
   private
+
+    def transcript_projection
+      DAG::TranscriptProjection.new(
+        graph: root_graph,
+        context_node_decorator:
+          lambda do |message|
+            decorate_message(message)
+          end,
+      )
+    end
+
+    def decorate_message_page(page)
+      out = page.deep_dup
+      out["messages"] = decorate_messages(out.fetch("messages", []))
+      out
+    end
+
+    def decorate_transcript_page(page)
+      out = page.deep_dup
+      out["transcript"] = decorate_messages(out.fetch("transcript", []))
+      out
+    end
+
+    def decorate_messages(messages)
+      messages = Array(messages)
+      node_ids = messages.filter_map { |message| message.is_a?(Hash) ? message["node_id"].to_s.presence : nil }
+      nodes_by_id = root_graph.nodes.where(id: node_ids).includes(:body).to_a.index_by { |node| node.id.to_s }
+
+      messages.map { |message| decorate_message(message, nodes_by_id: nodes_by_id) }
+    end
+
+    def decorate_message(message, nodes_by_id: nil)
+      return message unless message.is_a?(Hash)
+
+      out = message.deep_dup
+      node_id = out["node_id"].to_s
+      return out if node_id.blank?
+
+      node = nodes_by_id ? nodes_by_id[node_id] : root_graph.nodes.find_by(id: node_id)
+      return out if node.nil?
+
+      out["action_policy"] = action_policy_for(node)
+      out
+    end
+
+    def action_entry_for(node, action_key)
+      action_policy_for(node).fetch("actions").fetch(action_key.to_s)
+    end
+
+    def find_chat_lane_node!(node_id)
+      node = root_graph.nodes.find_by(id: node_id.to_s)
+      raise ActiveRecord::RecordNotFound if node.nil?
+      raise ActiveRecord::RecordNotFound unless node.lane_id.to_s == chat_lane.id.to_s
+
+      node
+    end
+
+    def node_stoppable?(node)
+      [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+    end
 
     def with_dag_errors_wrapped
       yield

@@ -71,7 +71,7 @@ Playground 常见的“破限”需求，很多其实是想突破**产品默认�
 1. `StrictJsonSchema`（tools/MCP）：规整 schema，提高 tool args 命中率  
 2. `ToolOutputPruner`：只影响本次 prompt 的 tool outputs 裁剪（保护最近 N turns）  
 3. `ToolCallRepairLoop`：工具参数校验失败→结构化错误→有限次重试  
-4. `ProviderFailover`：把 tool 协议错误纳入可 failover 的错误域，并记录可观测事件  
+4. Provider/tool hard-error policy：工具协议错误与 provider 错误直接失败并暴露给调用方，不做 model/provider failover
 5. `ProtocolSanitizer`：机器协议块与 UI 文本分离（必要时）
 6. `ToolNameRepairLoop`：工具名不可见（tool_not_found / tool_not_in_profile）→ visible_tools 范围内重写（默认关闭）
 

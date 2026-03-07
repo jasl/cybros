@@ -34,9 +34,15 @@ module AgentCore
             end
 
             embedding.map(&:to_f)
-          rescue ::SimpleInference::Errors::HTTPError => e
+          rescue ::SimpleInference::HTTPError => e
             raise AgentCore::ProviderError.new(e.message, status: e.status, body: e.body)
-          rescue ::SimpleInference::Errors::Error => e
+          rescue ::SimpleInference::ValidationError => e
+            raise AgentCore::ConfigurationError.new(
+              e.message,
+              code: "agent_core.memory.embedder.simple_inference.validation_error",
+              details: { simple_inference_error_class: e.class.name },
+            )
+          rescue ::SimpleInference::Error => e
             raise AgentCore::ProviderError, e.message
           end
 

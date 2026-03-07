@@ -50,15 +50,17 @@ Development: `db/seeds.rb` creates default Account, Identity, User, LlmProvider 
 
 ### LLM Provider Configuration
 
-Phase 0 supports three provider types:
+Current code supports these catalog-backed provider types:
 
 | Provider | Configuration | Notes |
 |----------|--------------|-------|
-| OpenRouter | API key in .env (`OPENROUTER_API_KEY`) | Access to many models via single key |
-| Local (LM Studio / vLLM) | Base URL (e.g., `http://localhost:1234/v1`) | No API key needed |
-| Mock LLM | Built-in dev endpoint (`/mock_llm/v1/`) | Ported from vibe_tavern, for testing |
+| OpenAI | API key credential | Native OpenAI API models |
+| Codex subscription | OAuth device flow | ChatGPT Pro/Plus-backed Codex access |
+| OpenRouter | API key in .env (`OPENROUTER_API_KEY`) | Access to the approved OpenRouter model list |
+| Dev mock | Built-in dev endpoint (`/mock_llm/v1/`) | Development/test-only mock provider |
+| Local | Reserved name | Intended for future Ollama / vLLM / LM Studio integration |
 
-Codex OAuth: Deferred to Phase 1 (requires PKCE OAuth flow implementation).
+Model defaults are resolved from the catalog's top-level `default_model_ref`, optionally overridden by the site-wide setting in `Account.settings["llm"]["default_model_ref"]`.
 
 The .env file provides a backdoor for initial secrets (API keys) to simplify setup and enable integration testing:
 
@@ -124,7 +126,7 @@ Build the full UI shell in Phase 0, even if some sections are empty:
 - [x] **Navigation**: Sidebar with sections: Conversations, Agents, Settings
 - [ ] **Conversations page**: List + chat view. Support delete and archive (soft-delete).
 - [x] **Agents page**: List of available agent programs. Create new agent from bundled profile (UI-driven). Read-only detail view in Phase 0 (full editing in Phase 1).
-- [x] **Settings page**: LLM providers CRUD (with "Fetch Models" button), Account settings, User profile
+- [x] **Settings page**: LLM provider credential management plus site-wide default model selection
 - [x] **Mock LLM**: Development-only controller (ported from vibe_tavern) at `/mock_llm/v1/`
 
 > Note: Several ChatGPT-grade UI/UX details (three-pane responsive shell, strict message ordering under rapid interactions, typing indicator/retry/cancel UX, and improved streaming observability) are intentionally deferred to **Phase 0.5** to keep Phase 0 focused on end-to-end plumbing.

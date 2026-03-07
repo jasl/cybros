@@ -13,10 +13,12 @@
 # These inflection rules are supported but not enabled by default:
 ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "API"
+  inflect.acronym "CLI"
   inflect.acronym "DAG"
   inflect.acronym "LLM"
   inflect.acronym "LRU"
   inflect.acronym "MCP"
+  inflect.acronym "OAuth"
   inflect.acronym "OpenAI"
   inflect.acronym "AI"
 end

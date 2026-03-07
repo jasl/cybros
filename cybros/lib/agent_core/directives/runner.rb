@@ -248,9 +248,9 @@ module AgentCore
       end
 
       def simple_inference_http_error?(error)
-        return false unless defined?(::SimpleInference::Errors::HTTPError)
+        return false unless defined?(::SimpleInference::HTTPError)
 
-        error.is_a?(::SimpleInference::Errors::HTTPError)
+        error.is_a?(::SimpleInference::HTTPError)
       end
 
       def assert_prompt_within_context_window!(built_prompt, token_counter:, context_window:, reserved_output_tokens:)

@@ -113,5 +113,17 @@ module AgentCore
   end
 
   # Raised when streaming encounters an error.
-  class StreamError < Error; end
+  class StreamError < Error
+    attr_reader :output_committed, :status, :error_class, :validation_error, :recoverable, :body
+
+    def initialize(message = nil, output_committed: false, status: nil, error_class: nil, validation_error: false, recoverable: false, body: nil)
+      @output_committed = output_committed == true
+      @status = status
+      @error_class = error_class&.to_s
+      @validation_error = validation_error == true
+      @recoverable = recoverable == true
+      @body = body
+      super(message)
+    end
+  end
 end

@@ -20,6 +20,22 @@
 - **聊天记录（Message）不是新真相表**：UI 的线性对话历史是对 DAG 的 **projection**。
 - 线性 projection 的主要入口是 `Conversation` 的 bounded read APIs（例如 `Conversation#message_page` / `#transcript_page` / `#context_for`），`Conversation` 在内部选择正确的 lane + head 并完成投影；App **不得**直接依赖 `DAG::Lane` 或其他引擎类型。
 
+### 1.3 Action policy（产品层动作字典）
+
+- Message projection 还会附带一个 **app-facing action policy dictionary**（当前键名：`action_policy`），作为 Web UI / future API client / native app 的统一动作契约。
+- 该字典的第一层分为：
+  - `actions`：面向产品动作（例如 `retry` / `regenerate` / `swipe` / `branch` / `delete`）
+  - `capabilities`：保留给更低层的运行能力（例如 `execute`）
+- 每个 action entry 至少包含：
+  - `supported`：该 node type 是否支持该动作类别
+  - `available`：在当前 conversation/lane/state/topology 下是否可立即发起
+  - 可选 `mode` / `reason`
+- 重要分层：
+  - `NodeBody#retriable?` / `#rerunnable?` / `#forkable?` / `#swipable?` / `#deletable?` / `#editable?` 只表达 **type-level support**
+  - `DAG::Node#can_*?` 表达 **low-level mutation guard**
+  - `Conversation::NodeActionPolicy` 组合两者并加入产品语义（例如 tail/non-tail regenerate、deferred delete），形成 App/UI 应消费的最终字典
+- UI 不应再根据 `state == finished` / `state == errored` / “当前是不是 tail” 自行猜测按钮可见性；应消费 projection 里的 `action_policy`。
+
 ---
 
 ## 2) Conversation tree（对话树）
@@ -75,6 +91,9 @@ Swipe 由同一 `version_set_id` 下的多个版本表示（DAG 多版本语义�
 
 - **Tail agent regenerate**：在同一 conversation/lane 内创建新变体并默认选中。
 - **Non-tail regenerate**：自动创建 child conversation（branch），并在 child 上执行 regenerate（避免改写历史）。
+- `retry` 与 `regenerate` 是两个不同的产品动作：
+  - `retry`：面向 `errored` / `stopped` 的失败恢复
+  - `regenerate`：面向已完成 assistant version 的重新生成（可能是 in-place，也可能是 branch）
 
 ---
 

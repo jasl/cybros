@@ -44,6 +44,16 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     end
   end
 
+  class ErrorResultExecutor
+    def execute(node:, context:, stream:)
+      _ = node
+      _ = context
+      _ = stream
+
+      DAG::ExecutionResult.errored(error: "boom")
+    end
+  end
+
   class StopMidStreamExecutor
     def execute(node:, context:, stream:)
       _ = context
@@ -180,10 +190,80 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     DAG.executor_registry = original_registry
   end
 
+  test "runner marks matching queued conversation run as succeeded" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+
+    run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: node.id,
+        state: "queued",
+        queued_at: Time.current,
+        debug: {},
+        error: {},
+      )
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(Messages::AgentMessage.node_type_key, UsageExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    DAG::Runner.run_node!(node.id)
+
+    assert_equal "succeeded", run.reload.state
+    assert run.started_at.present?
+    assert run.finished_at.present?
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
+  test "runner marks matching queued conversation run as failed with error payload" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+
+    run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: node.id,
+        state: "queued",
+        queued_at: Time.current,
+        debug: {},
+        error: {},
+      )
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(Messages::AgentMessage.node_type_key, ErrorResultExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    DAG::Runner.run_node!(node.id)
+
+    assert_equal "failed", run.reload.state
+    assert run.started_at.present?
+    assert run.finished_at.present?
+    assert_equal "boom", run.error["message"]
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
   test "runner does not override a node that was stopped mid-stream, and stop materializes partial output" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+    run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: node.id,
+        state: "queued",
+        queued_at: Time.current,
+        debug: {},
+        error: {},
+      )
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, StopMidStreamExecutor.new)
@@ -206,6 +286,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     assert_equal 1, compacted.first.dig("payload", "chunks")
     assert_equal "hel".bytesize, compacted.first.dig("payload", "bytes")
     assert_equal Digest::SHA256.hexdigest("hel"), compacted.first.dig("payload", "sha256")
+    assert_equal "canceled", run.reload.state
 
     assert_enqueued_with(job: DAG::TickGraphJob, args: [graph.id])
   ensure

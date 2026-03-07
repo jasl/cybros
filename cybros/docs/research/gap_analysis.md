@@ -174,18 +174,18 @@
   - `StrictJsonSchema`：在 prompt build 阶段对 tools schema 做规整（尤其 MCP schemas）
   - `ToolCallRepairLoop`：工具参数无效（`invalid_json/too_large` 或 schema invalid）→ 发起一次“仅修参数”的修复调用（限定次数，避免死循环）
 - **Provider adapter**：
-  - `ProviderFailover`：可配置 fallback model 列表；把工具协议错误也计入可切换条件（并记录可观测事件）
+  - Provider/tool hard-error policy：工具协议错误与 provider 错误直接失败并暴露给调用方，不做 model/provider failover
 
 当前状态（2026-02-22）：
 
 - ✅ 已落地：`StrictJsonSchema`（在 prompt build 阶段对 tools schema 做保守 strict 化）
 - ✅ 已落地：`ToolCallRepairLoop`（覆盖 `arguments_parse_error`：`invalid_json/too_large` 与 schema invalid；批量一次修复；允许部分修复；repair prompt 支持候选数上限与 schema excerpt/truncate；若仍不满足 schema 则不执行工具、直接产出 `invalid_args` task；仅写 metadata、不写回 DAG 历史）
 - ✅ 已落地：tool name 修复（可选）：当 tool_not_found / tool_not_in_profile 时，允许一次“仅修 tool name”的修复调用（限定在 visible_tools 范围内；默认关闭）
-- ✅ 已落地：`ProviderFailover`（同 provider 多模型重试；触发：404 + 400/422 工具/协议关键词；streaming 仅覆盖 `provider.chat(...)` 直接 raise 的场景）
+- ✅ 当前方向：provider/tooling 错误直接 hard error；LLM Provider v2 不启用同 provider 多模型重试
 
 下一步（建议，P1+）：
 
-- ⏳ failover 错误域扩展（谨慎）：按需覆盖 timeout/5xx/429；mid-stream failover 复杂度高，建议后置
+- ⏳ 继续完善 provider 错误分类与可观测性（例如 timeout/5xx/429 的 UI 与日志表现），但不引入 failover
 - ⏳ Validator/Repair 增强（可选，逐项开关）：
   - `JsonSchemaLiteValidator`：按需补 `enum` 校验、数值范围（`minimum/maximum`）、string `pattern` 等
     - 风险：schema 质量参差时更易误报 → 触发不必要的 repair 调用与成本上升

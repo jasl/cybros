@@ -4,6 +4,7 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
   self.use_transactional_tests = false
 
   teardown do
+    LLMProvider.delete_all
     ConversationRun.delete_all
     Event.delete_all
     Conversation.delete_all
@@ -27,6 +28,7 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
   test "create returns turbo streams appending user + agent placeholder bubbles" do
     user = create_user!
     sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
 
     conversation = create_conversation!(user: user, title: "Chat")
 
@@ -51,16 +53,8 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(data-role="agent-bubble")
   end
 
-  test "create includes a warning when preferred model is unavailable" do
+  test "create returns 422 when preferred model is unavailable" do
     LLMProvider.delete_all
-    LLMProvider.create!(
-      name: "p1",
-      base_url: "http://p1.test/v1",
-      api_key: "k1",
-      model_allowlist: ["m2"],
-      priority: 5,
-      api_format: "openai",
-    )
 
     user = create_user!
     sign_in!(user)
@@ -81,11 +75,22 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
          params: { content: "Hello" },
          headers: { "Accept" => "text/vnd.turbo-stream.html" }
 
-    assert_response :success
-    assert_includes response.body, %(data-role="agent-bubble")
-    assert_includes response.body, "Preferred model unavailable"
-    assert_includes response.body, "m1"
-    assert_includes response.body, "m2"
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Preferred model is unavailable"
+  end
+
+  test "create returns 422 when selected model_ref is invalid" do
+    user = create_user!
+    sign_in!(user)
+
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    post conversation_messages_path(conversation),
+         params: { content: "Hello", model_ref: "openai/does-not-exist" },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Selected model is no longer available"
   end
 
   test "create with blank content returns no-content for turbo and creates no messages" do
@@ -132,5 +137,26 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(turbo-stream action="replace" target="message_#{agent.id}")
     assert_includes response.body, %(data-controller="markdown")
     assert_includes response.body, "# Done"
+  end
+
+  test "refresh returns not found for a node outside the conversation lane" do
+    user = create_user!
+    sign_in!(user)
+
+    root = create_conversation!(user: user, title: "Root")
+    first_turn = root.append_user_message!(content: "Hello")
+    first_agent = first_turn.fetch(:agent_node)
+    first_agent.mark_running!
+    first_agent.mark_finished!(content: "Done")
+
+    branch = root.create_child!(from_node_id: first_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+    root_turn = root.append_user_message!(content: "Root followup")
+    root_agent = root_turn.fetch(:agent_node)
+
+    get refresh_conversation_messages_path(branch),
+        params: { node_id: root_agent.id },
+        headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :not_found
   end
 end

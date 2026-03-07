@@ -1,9 +1,15 @@
 # LLM Provider v2 (Capabilities + Codex Subscription + OpenRouter) Plan
 > **For Cursor Agent:** This doc is a combined **design + implementation plan**. Use it task-by-task; keep diffs small; add tests per task.
 
+> **Implementation status update (2026-03-06):** The current code no longer follows every historical detail in this document. The authoritative current-state docs for model defaults and lineup are:
+> - `docs/plans/2026-03-06-llm-catalog-default-model-refresh-design.md`
+> - `docs/plans/2026-03-06-llm-catalog-default-model-refresh.md`
+>
+> In particular, current code uses a top-level `default_model_ref`, not provider-local `default_model`; the finalized provider key is `openrouter`; the dev/test mock provider is `dev`, not `local`; and compatibility aliases / auto-fallback behavior have been removed on purpose.
+
 **Goal:** Refactor Cybros LLM provider layer into a capability-aware, protocol-aware system that can reliably support **Codex subscription (ChatGPT Pro/Plus)** and **OpenRouter**, while enabling **model selection in the chat composer** and correct **token estimation** per model.
 
-**Architecture (1 paragraph):** Introduce a `ProviderAdapter` abstraction whose job is to (a) authenticate, (b) speak the wire protocol (OpenAI Chat Completions vs OpenAI Responses), (c) stream output into AgentCore’s existing stream event model, and (d) expose model capabilities. Move **provider + model catalog** (capabilities/tools/images/protocol/tokenizer hint/context window/default model/enabled/“requires credential”) into a **layered YAML config** (default shipped with the image + user override injected via Docker mount/ENV at boot). Keep **credentials** (API key / Codex OAuth tokens) in DB, encrypted, and associate them to config entries via stable `provider_key`. Extend `simple_inference` with `SimpleInference::Protocols::OpenAIResponses` (SSE + WebSocket) for reuse across projects. Ship in two phases: (1) provider refactor + Codex subscription, (2) OpenRouter.
+**Architecture (1 paragraph):** Introduce a `ProviderAdapter` abstraction whose job is to (a) authenticate, (b) speak the wire protocol (OpenAI Chat Completions vs OpenAI Responses), (c) stream output into AgentCore’s existing stream event model, and (d) expose model capabilities. Move **provider + model catalog** (capabilities/tools/images/protocol/tokenizer hint/context window/default model/enabled/“requires credential”) into a **layered YAML config** (default shipped with the image + user override injected via Docker mount/ENV at boot). Keep DB-backed provider credentials keyed by stable `provider_key`; encrypt secrets (`api_key`, `access_token`, `refresh_token`) while leaving non-secret OAuth metadata (`expires_at`, `account_id`) unencrypted. Extend `simple_inference` with `SimpleInference::Protocols::OpenAIResponses` (SSE + WebSocket) for reuse across projects. Ship in two phases: (1) provider refactor + Codex subscription, (2) OpenRouter.
 
 **Tech stack:** Rails 8.2, Ruby 4.0, ActiveRecord encryption, AgentCore DAG Runtime, `vendor/simple_inference` protocol clients.
 
@@ -51,7 +57,7 @@ The Codex reference includes a “Responses API WebSocket” transport for `/v1/
 - Support **chat composer model selection** (user chooses a model for the next turn).
 - Support **reasoning effort variants** as distinct selectable models when the upstream supports it (e.g., treat “gpt-5.2 (high)” as a separate catalog entry from “gpt-5.2 (default)”, even if they share the same API `model` name).
 - Avoid model ID collisions across providers by using a fully-qualified model reference: `provider_key/model_key`.
-- Store **credentials** in DB (encrypted) and associate to config provider by `provider_key` (supports usage stats).
+- Store DB-backed provider credentials keyed by `provider_key`; encrypt secrets while leaving non-secret OAuth metadata (`expires_at`, `account_id`) unencrypted.
 - **Hard-error policy for misconfiguration and provider failures**:
   - If a provider requires auth/API key and none is configured, it must not be usable in chat (hide from picker + reject if selected via stale metadata).
   - Provider failures are surfaced as hard errors requiring user correction (no silent fallback): invalid API key, OAuth expired/refresh failed, model not found, network failures/timeouts.
@@ -262,12 +268,14 @@ On app boot (or first use if lazy-loaded), validate and raise an error with:
 - We still keep internal retries where safe (idempotent reconnects for streaming), but we do not “fail over to another model/provider” implicitly.
 
 ### DB: `llm_providers` (repurposed to “credential + usage anchor”, associated by key)
-Keep a DB record per `provider_key` for encrypted secrets + usage attribution:
+Keep a DB record per `provider_key` for secrets + metadata + usage attribution:
 - `provider_key` (string, unique) — matches YAML provider key
 - `credential_type` (string) — `api_key|oauth_codex`
 - encrypted fields:
   - `api_key` (existing)
-  - `access_token`, `refresh_token`, `expires_at`, `account_id` (new, for Codex subscription)
+  - `access_token`, `refresh_token` (new, for Codex subscription)
+- unencrypted metadata fields:
+  - `expires_at`, `account_id`
 No operational overrides for base_url/models in DB; YAML remains the source of truth (DB is orthogonal: secrets + usage attribution only).
 
 ### Turn-level selection persistence
@@ -526,7 +534,7 @@ Plan: pick one WS client library early and build the protocol around it, but **s
 
 ### Codex subscription OAuth UX in a web app
 OpenCode’s CLI uses a local callback server and/or device flow. In Rails we should prefer a web-friendly flow:
-- **Device flow (recommended)**: show a code + link to authorize; poll token endpoint; store refresh/access/expires/account_id.
+- **Device flow (recommended)**: show a code + link to authorize; poll token endpoint; store refresh/access tokens plus `expires_at` / `account_id` metadata.
 - Ensure we can refresh tokens server-side and handle region/account headers (`ChatGPT-Account-Id`).
 
 ### “Model catalog drift” vs existing conversation turns
@@ -536,7 +544,8 @@ With YAML as source-of-truth, stored `model_ref` can become invalid after config
 
 ### Capability truthfulness (especially OpenRouter)
 OpenRouter capabilities are not reliable unless explicitly curated. Our default stance should be conservative:
-- default `tool_calling: false`, `image: false` unless explicitly enabled in YAML.
+- default `image: false` unless explicitly enabled in YAML.
+- for the approved/curated OpenRouter lineup, set `tool_calling: true` and rely on integration/runtime tests to catch incompatibilities.
 
 ## Implementation checklist (task breakdown)
 
@@ -547,7 +556,7 @@ OpenRouter capabilities are not reliable unless explicitly curated. Our default 
 - [ ] Add YAML loader + deep-merge layering (default + optional override via `CYBROS_CONFIG_ROOT` and/or `CYBROS_LLM_CONFIG_PATH`)
 - [ ] Add schema validation + helpful error reporting on boot (fail-fast with actionable message)
 - [ ] Update DB `llm_providers` to include `provider_key` (unique) and credential_type fields; keep API key encrypted
-- [ ] Add encrypted OAuth credential fields for Codex subscription (`access_token`, `refresh_token`, `expires_at`, `account_id`)
+- [ ] Add encrypted Codex OAuth secrets (`access_token`, `refresh_token`) plus `expires_at` / `account_id` metadata fields
 - [ ] Data migration: map existing `llm_providers` rows to `provider_key` (one-time; choose a stable default key like `openai_compatible_1` if needed)
 
 ### Task group B: `simple_inference` protocol layer
@@ -617,4 +626,3 @@ OpenRouter capabilities are not reliable unless explicitly curated. Our default 
 
 ### Remaining open questions
 - Whether to allow a per-conversation or per-profile “auto fallback” policy later (out of scope for Phase 1/2).
-

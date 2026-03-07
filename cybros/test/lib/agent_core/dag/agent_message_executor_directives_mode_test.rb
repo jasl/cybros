@@ -38,7 +38,7 @@ class AgentCoreDAGAgentMessageExecutorDirectivesModeTest < ActiveSupport::TestCa
     runtime =
       AgentCore::DAG::Runtime.new(
         provider: FakeDirectivesProvider.new(response_text: envelope),
-        model: "gpt-4o-mini",
+        model: "gpt-5.4",
         tools_registry: AgentCore::Resources::Tools::Registry.new,
         directives_config: {},
         token_counter: AgentCore::Resources::TokenCounter::Heuristic.new,

@@ -83,7 +83,28 @@ module AgentCore
           def selection_for(model_hint)
             return Selection.new(encoding: @default, source: :default) if model_hint.nil?
 
-            key = model_hint.to_s
+            explicit_encoding = nil
+            key = nil
+
+            if model_hint.is_a?(Hash)
+              explicit_encoding = model_hint[:encoding_name] || model_hint["encoding_name"]
+              explicit_encoding = explicit_encoding.to_s.strip
+              key = model_hint[:model_hint] || model_hint["model_hint"]
+            else
+              key = model_hint
+            end
+
+            if !explicit_encoding.empty?
+              cache_key = "encoding:#{explicit_encoding}"
+              return @encodings[cache_key] ||= begin
+                resolved = ::Tiktoken.get_encoding(explicit_encoding)
+                Selection.new(encoding: resolved, source: :registry_encoding)
+              rescue StandardError
+                Selection.new(encoding: @default, source: :default)
+              end
+            end
+
+            key = key.to_s
             return Selection.new(encoding: @default, source: :default) if key.empty?
 
             # Cache the encoding per model hint. This is a CPU-bound hot path when
@@ -189,11 +210,11 @@ module AgentCore
       def estimate(text, model_hint: nil)
         entry = resolve_registry_entry(model_hint)
         resolved = resolve_adapter(model_hint, entry: entry)
-        resolved.estimate(text, model_hint: model_hint)
+        resolved.estimate(text, model_hint: adapter_model_hint(entry, model_hint))
       rescue StandardError, LoadError
         begin
           if resolved && resolved != @adapter
-            return @adapter.estimate(text, model_hint: model_hint)
+            return @adapter.estimate(text, model_hint: adapter_model_hint(entry, model_hint))
           end
         rescue StandardError, LoadError
           # ignore and fall through
@@ -209,14 +230,15 @@ module AgentCore
       def tokenize(text, model_hint: nil)
         entry = resolve_registry_entry(model_hint)
         resolved = resolve_adapter(model_hint, entry: entry)
+        adapter_hint = adapter_model_hint(entry, model_hint)
 
         tokenization =
           if resolved.respond_to?(:tokenize)
-            resolved.tokenize(text, model_hint: model_hint)
+            resolved.tokenize(text, model_hint: adapter_hint)
           else
             Tokenization.new(
               backend: resolved.class.name,
-              token_count: resolved.estimate(text, model_hint: model_hint),
+              token_count: resolved.estimate(text, model_hint: adapter_hint),
               details: describe(model_hint: model_hint),
             )
           end
@@ -272,8 +294,9 @@ module AgentCore
       def describe(model_hint: nil)
         entry = resolve_registry_entry(model_hint)
         adapter = resolve_adapter(model_hint, entry: entry)
+        adapter_hint = adapter_model_hint(entry, model_hint)
 
-        raw = adapter.respond_to?(:describe) ? adapter.describe(model_hint: model_hint) : { backend: adapter.class.name }
+        raw = adapter.respond_to?(:describe) ? adapter.describe(model_hint: adapter_hint) : { backend: adapter.class.name }
         info = raw.is_a?(Hash) ? raw : { backend: adapter.class.name }
 
         attach_registry_metadata(info, entry: entry, model_hint: model_hint)
@@ -332,6 +355,9 @@ module AgentCore
         path = entry[:tokenizer_path].to_s.strip
         out[:registry_tokenizer_path] = path unless path.empty?
 
+        encoding_name = entry[:encoding_name].to_s.strip
+        out[:registry_encoding_name] = encoding_name unless encoding_name.empty?
+
         source_hint = entry[:source_hint].to_s.strip
         out[:registry_source_hint] = source_hint unless source_hint.empty?
 
@@ -378,6 +404,24 @@ module AgentCore
           .uniq
       rescue StandardError
         []
+      end
+
+      def adapter_model_hint(entry, model_hint)
+        return model_hint unless entry.is_a?(Hash)
+
+        family = entry[:tokenizer_family].to_s.strip.downcase.tr("-", "_").to_sym
+        return model_hint unless family == :tiktoken
+
+        encoding_name = entry[:encoding_name].to_s.strip
+        source_hint = entry[:source_hint].to_s.strip
+        return model_hint if encoding_name.empty? && (source_hint.empty? || source_hint == model_hint.to_s.strip)
+
+        {
+          model_hint: (source_hint.empty? ? model_hint.to_s : source_hint),
+          encoding_name: (encoding_name.empty? ? nil : encoding_name),
+        }
+      rescue StandardError
+        model_hint
       end
 
       def resolve_registry_entry(model_hint)

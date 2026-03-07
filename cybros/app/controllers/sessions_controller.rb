@@ -16,6 +16,8 @@ class SessionsController < ApplicationController
       return
     end
 
+    session.delete(:llm_device_flow)
+    reset_session
     session = Session.start!(identity: identity, ip_address: request.remote_ip, user_agent: request.user_agent)
     Current.session = session
     cookies.signed.permanent[:session_token] = { value: session.id, httponly: true, same_site: :lax }
@@ -26,6 +28,8 @@ class SessionsController < ApplicationController
 
   def destroy
     Current.session&.destroy
+    session.delete(:llm_device_flow)
+    reset_session
     cookies.delete(:session_token)
     flash[:notice] = "Signed out"
     redirect_to new_session_path

@@ -8,6 +8,20 @@ class TopLevelPagesSmokeTest < ActionDispatch::IntegrationTest
   end
 
   test "root redirects to setup wizard when no identities exist" do
+    # Some integration tests intentionally disable transactions; ensure a clean slate.
+    ConversationRun.delete_all
+    Event.delete_all
+    Conversation.delete_all
+    Session.delete_all
+    User.delete_all
+    Identity.delete_all
+
+    DAG::NodeEvent.delete_all
+    DAG::Edge.delete_all
+    DAG::Node.delete_all
+    DAG::NodeBody.delete_all
+    DAG::Graph.delete_all
+
     get root_path
     assert_redirected_to new_setup_path
   end

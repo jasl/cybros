@@ -49,7 +49,6 @@
 
 可选（强烈建议 app 显式注入）：
 
-- `fallback_models`：Provider failover 模型列表（同 provider；默认 `[]`，空数组表示不启用 failover）
 - `tool_policy`：`AgentCore::Resources::Tools::Policy::*`（默认 `DenyAll`）
   - 内建 policy（可组合）：
     - `Policy::DenyAll` / `Policy::AllowAll`
@@ -74,6 +73,15 @@
 - `execution_context_attributes`：执行上下文属性（Hash，Symbol keys；executor 会基于它构建 `ExecutionContext.attributes`，并自动注入 `dag.graph_id/node_id/lane_id/turn_id`；可用于注入 `cwd/workspace_dir/channel/agent/...` 等 app 侧信息）
 - `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `AgentCore::Resources::TokenCounter::Estimator`，失败时回退到 `Heuristic`）
 - `directives_config`：Hash or nil（nil 表示禁用；Hash 表示启用并使用 `AgentCore::Directives::Runner` 进行 envelope 输出；当前不支持 tool calling）
+- `agent_call_recovery_attempts`：主 `agent_message/character_message` LLM 调用的自动恢复次数（默认 `1`；表示“首次失败后最多再试几次”）
+  - 仅覆盖窄范围可重试失败：
+    - `ProviderError.status` ∈ `408/409/429/5xx`
+    - stream bootstrap / protocol failure 且尚未写出可见 output delta
+      - 若 stream failure 包裹的是 `ProviderError`，仍按 `408/409/429/5xx` 白名单判定
+  - 不覆盖：
+    - `ContextWindowExceededError`
+    - capability / config validation error
+    - 已经写出可见 output delta 的 mid-stream failure
 - `include_skill_locations`：是否在 `<available_skills>` 注入中包含技能 location（默认 `false`）
 - `prompt_mode`：提示词模式（默认 `:full`；`prompt_injections` 可按 mode 过滤）
 - `system_prompt_section_overrides`：system prompt sections 的 overrides（Hash；由 app 侧 profile 或 `agent_profile.system_prompt_sections` 注入；`time/channel/memory` 强制归入 tail）
@@ -93,16 +101,6 @@
 LLM options：
 
 - `llm_options`：透传给 provider（示例：`{ stream: false, temperature: 0.2 }`）
-
-Failover 配置示例（逗号分隔）：
-
-```ruby
-fallback_models =
-  ENV.fetch("AGENT_CORE_FALLBACK_MODELS", "")
-    .split(",")
-    .map(&:strip)
-    .reject(&:empty?)
-```
 
 Tool policy 组合示例：
 
@@ -127,14 +125,14 @@ tool_policy =
           { tools: ["read"], arguments: [{ key: "path", glob: "config/**", normalize: "path" }], decision: { outcome: "deny", reason: "no_config_reads" } },
         ],
         delegate:
-	          AgentCore::Resources::Tools::Policy::PrefixRules.new(
-	            tool_groups: groups,
-	            rules: [
-	              # Allow safe, repeatable exec prefixes
-	              { tools: ["exec"], argument_key: "command", prefixes: ["git status"], decision: { outcome: "allow", reason: "approved_prefix" } },
-	            ],
-	            delegate: AgentCore::Resources::Tools::Policy::ConfirmAll.new,
-	          ),
+            AgentCore::Resources::Tools::Policy::PrefixRules.new(
+              tool_groups: groups,
+              rules: [
+                # Allow safe, repeatable exec prefixes
+                { tools: ["exec"], argument_key: "command", prefixes: ["git status"], decision: { outcome: "allow", reason: "approved_prefix" } },
+              ],
+              delegate: AgentCore::Resources::Tools::Policy::ConfirmAll.new,
+            ),
       ),
   )
 ```
@@ -142,17 +140,22 @@ tool_policy =
 Tool calling 稳定性（Runner 级自愈）：
 
 - `tool_call_repair_attempts`：工具参数 parse_error 修复次数（默认 `1`；设为 `0` 可禁用 repair）
-- `tool_call_repair_fallback_models`：repair 失败时可升级的模型列表（同 provider；默认 `[]`）
 - `tool_call_repair_max_output_tokens`：repair 调用输出上限（默认 `300`；prompt-only JSON）
 - `tool_call_repair_validate_schema`：是否启用 schema 语义校验（默认 `true`；当 args 能 parse 但不满足 schema 时也会触发 repair；若仍失败则不执行工具、直接产出 `invalid_args` task）
 - `tool_call_repair_schema_max_depth`：schema 校验/repair prompt schema excerpt 的最大深度（默认 `2`）
 - `tool_call_repair_max_schema_bytes`：repair prompt 中单个候选 schema 的最大 JSON bytes（默认 `8000`；超限会降级/截断）
 - `tool_call_repair_max_candidates`：单次 repair 最多发送的候选数（默认 `10`；超过部分会记录失败原因并保留原 tool_call）
 - `tool_name_repair_attempts`：工具名修复次数（默认 `0`；设为 `1` 可在 tool_not_found / tool_not_in_profile 时触发一次“仅修工具名”的修复调用；只允许修到本轮可见工具名列表）
-- `tool_name_repair_fallback_models`：tool name repair 失败时可升级的模型列表（同 provider；默认 `[]`）
 - `tool_name_repair_max_output_tokens`：tool name repair 调用输出上限（默认 `200`；prompt-only JSON）
 - `tool_name_repair_max_candidates`：单次 tool name repair 最多发送的候选数（默认 `10`）
 - `tool_name_repair_max_visible_tool_names`：tool name repair prompt 中 visible 工具名列表上限（默认 `200`；超限会截断并在 metadata 标记）
+
+主 LLM 调用稳定性（executor 级自愈）：
+
+- `agent_call_recovery_attempts`：主 LLM 调用的自动恢复次数（默认 `1`）
+- 恢复是 **同节点 / 同 turn 的执行视图重试**，不会创建新的 DAG version/retry node
+- 成功恢复后，本轮 tool loop / 最终回答流程保持不变
+- 恢复耗尽或命中非可重试错误时，节点仍进入 `errored`；App/UI 可继续走 `Conversation#retry_agent_node!` / `DAG::Node#retry!`
 
 工具错误模式：
 

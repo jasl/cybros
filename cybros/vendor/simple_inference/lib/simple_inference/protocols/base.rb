@@ -3,6 +3,7 @@
 require "json"
 require "timeout"
 require "socket"
+require "uri"
 
 module SimpleInference
   module Protocols
@@ -21,7 +22,7 @@ module SimpleInference
         @adapter = @config.adapter || HTTPAdapters::Default.new
 
         unless @adapter.is_a?(HTTPAdapter)
-          raise Errors::ConfigurationError,
+          raise SimpleInference::ConfigurationError,
                 "adapter must be an instance of SimpleInference::HTTPAdapter (got #{@adapter.class})"
         end
       end
@@ -30,7 +31,7 @@ module SimpleInference
 
       def request_json(method:, url:, headers:, body:, expect_json:, raise_on_http_error:)
         headers = (headers || {}).merge("Content-Type" => "application/json")
-        payload = body.nil? ? nil : JSON.generate(body)
+        payload = serialize_json_body(body)
 
         request_env = {
           method: method,
@@ -51,10 +52,14 @@ module SimpleInference
 
       def validate_url!(url)
         raw = url.to_s.strip
-        raise Errors::ConfigurationError, "base_url is required" if raw.empty?
-        return if raw.include?("://")
+        raise SimpleInference::ConfigurationError, "base_url is required" if raw.empty?
 
-        raise Errors::ConfigurationError, "base_url must include a scheme (http:// or https://)"
+        uri = URI.parse(raw)
+        unless uri.is_a?(URI::HTTP) && uri.host.to_s != ""
+          raise SimpleInference::ConfigurationError, "base_url must be a valid http:// or https:// URL"
+        end
+      rescue URI::InvalidURIError
+        raise SimpleInference::ConfigurationError, "base_url must be a valid http:// or https:// URL"
       end
 
       def handle_response(request_env, expect_json:, raise_on_http_error:)
@@ -79,7 +84,7 @@ module SimpleInference
           if should_parse_json
             begin
               parse_json(body_str)
-            rescue Errors::DecodeError
+            rescue SimpleInference::DecodeError
               # Prefer HTTPError over DecodeError for non-2xx responses.
               status >= 200 && status < 300 ? raise : body_str
             end
@@ -91,9 +96,9 @@ module SimpleInference
         maybe_raise_http_error(response: response, raise_on_http_error: raise_on_http_error)
         response
       rescue Timeout::Error => e
-        raise Errors::TimeoutError, e.message
+        raise SimpleInference::TimeoutError, e.message
       rescue SocketError, SystemCallError => e
-        raise Errors::ConnectionError, e.message
+        raise SimpleInference::ConnectionError, e.message
       end
 
       def parse_json(body)
@@ -101,7 +106,15 @@ module SimpleInference
 
         JSON.parse(body)
       rescue JSON::ParserError => e
-        raise Errors::DecodeError, "Failed to parse JSON response: #{e.message}"
+        raise SimpleInference::DecodeError, "Failed to parse JSON response: #{e.message}"
+      end
+
+      def serialize_json_body(body)
+        return nil if body.nil?
+
+        JSON.generate(body)
+      rescue JSON::GeneratorError, TypeError => e
+        raise SimpleInference::ValidationError, "Request body must be JSON serializable: #{e.message}"
       end
 
       def raise_on_http_error?(raise_on_http_error)
@@ -143,7 +156,7 @@ module SimpleInference
           return
         end
 
-        raise Errors::HTTPError.new(
+        raise SimpleInference::HTTPError.new(
           http_error_message(response.status, response.raw_body.to_s, parsed_body: response.body),
           response: response,
         )

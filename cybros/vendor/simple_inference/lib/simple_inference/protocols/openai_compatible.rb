@@ -45,8 +45,8 @@ module SimpleInference
       # @yield [String] delta content chunks (streaming only)
       # @return [SimpleInference::OpenAI::ChatResult]
       def chat(model:, messages:, stream: nil, include_usage: nil, request_logprobs: false, top_logprobs: 5, **params, &block)
-        raise ArgumentError, "model is required" if model.nil? || model.to_s.strip.empty?
-        raise ArgumentError, "messages must be an Array" unless messages.is_a?(Array)
+        raise SimpleInference::ValidationError, "model is required" if model.nil? || model.to_s.strip.empty?
+        raise SimpleInference::ValidationError, "messages must be an Array" unless messages.is_a?(Array)
 
         use_stream = stream.nil? ? block_given? : stream
 
@@ -215,7 +215,7 @@ module SimpleInference
         status_ok = response.status == 200
         body_status_ok = response.body.is_a?(Hash) && response.body["status"] == "ok"
         status_ok && body_status_ok
-      rescue Errors::Error
+      rescue SimpleInference::Error
         false
       end
 
@@ -265,7 +265,7 @@ module SimpleInference
 
       def post_json_stream(path, body, raise_on_http_error: nil, &on_event)
         if base_url.nil? || base_url.empty?
-          raise Errors::ConfigurationError, "base_url is required"
+          raise SimpleInference::ConfigurationError, "base_url is required"
         end
 
         url = "#{base_url}#{path}"
@@ -275,7 +275,7 @@ module SimpleInference
           "Content-Type" => "application/json",
           "Accept" => "text/event-stream, application/json"
         )
-        payload = body.nil? ? nil : JSON.generate(body)
+        payload = serialize_json_body(body)
 
         request_env = {
           method: :post,
@@ -328,7 +328,7 @@ module SimpleInference
           if should_parse_json
             begin
               parse_json(body_str)
-            rescue Errors::DecodeError
+            rescue SimpleInference::DecodeError
               # Prefer HTTPError over DecodeError for non-2xx responses.
               status >= 200 && status < 300 ? raise : body_str
             end
@@ -340,9 +340,9 @@ module SimpleInference
         maybe_raise_http_error(response: response, raise_on_http_error: raise_on_http_error, ignore_streaming_unsupported: true)
         response
       rescue Timeout::Error => e
-        raise Errors::TimeoutError, e.message
+        raise SimpleInference::TimeoutError, e.message
       rescue SocketError, SystemCallError => e
-        raise Errors::ConnectionError, e.message
+        raise SimpleInference::ConnectionError, e.message
       end
 
       def extract_sse_blocks!(buffer)
@@ -404,7 +404,7 @@ module SimpleInference
       def parse_json_event(payload)
         JSON.parse(payload)
       rescue JSON::ParserError => e
-        raise Errors::DecodeError, "Failed to parse SSE JSON event: #{e.message}"
+        raise SimpleInference::DecodeError, "Failed to parse SSE JSON event: #{e.message}"
       end
 
       def streaming_unsupported_error?(status, body)
@@ -463,8 +463,8 @@ module SimpleInference
         file_value = params[:file] || params["file"]
         model = params[:model] || params["model"]
 
-        raise Errors::ConfigurationError, "file is required" if file_value.nil?
-        raise Errors::ConfigurationError, "model is required" if model.nil? || model.to_s.empty?
+        raise SimpleInference::ConfigurationError, "file is required" if file_value.nil?
+        raise SimpleInference::ConfigurationError, "model is required" if model.nil? || model.to_s.empty?
 
         io, filename = normalize_upload(file_value)
 
@@ -529,11 +529,11 @@ module SimpleInference
               "audio.wav"
             end
         else
-          raise Errors::ConfigurationError,
+          raise SimpleInference::ConfigurationError,
                 "file must be an IO object or a hash with :io and :filename keys"
         end
 
-        raise Errors::ConfigurationError, "file IO is required" if io.nil?
+        raise SimpleInference::ConfigurationError, "file IO is required" if io.nil?
 
         [io, filename]
       end

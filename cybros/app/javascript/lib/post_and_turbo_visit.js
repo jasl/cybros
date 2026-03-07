@@ -48,4 +48,3 @@ export async function postAndTurboVisit(url, params, { documentLike = document, 
     window.location.href = nextUrl
   }
 }
-

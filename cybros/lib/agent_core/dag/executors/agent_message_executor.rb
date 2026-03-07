@@ -9,6 +9,7 @@ module AgentCore
         def execute(node:, context:, stream:)
           runtime = nil
           execution_context = nil
+          llm_recovery_metadata = {}
 
           runtime = AgentCore::DAG.runtime_for(node: node)
           execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
@@ -23,14 +24,21 @@ module AgentCore
           ) do
             budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context)
 
-            llm = call_llm(runtime, budget.built_prompt, stream: stream, execution_context: execution_context)
+            llm =
+              call_llm_with_recovery(
+                runtime,
+                budget.built_prompt,
+                stream: stream,
+                execution_context: execution_context,
+                recovery_metadata_out: llm_recovery_metadata,
+              )
 
             message = llm.fetch(:message)
             stop_reason = llm.fetch(:stop_reason)
             usage = llm.fetch(:usage)
             streamed_output = llm.fetch(:streamed_output)
             used_model = llm.fetch(:used_model)
-            llm_metadata = llm.fetch(:metadata, {})
+            llm_metadata = deep_merge_metadata(llm.fetch(:metadata, {}), llm_recovery_metadata)
             directives = llm.fetch(:directives, nil)
 
             message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
@@ -95,35 +103,51 @@ module AgentCore
           end
         rescue AgentCore::ContextWindowExceededError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          ::DAG::ExecutionResult.errored(
-            error: "ContextWindowExceededError: #{e.message}",
-            metadata: {
-              "context_cost" => {
-                "context_window_tokens" => e.context_window,
-                "reserved_output_tokens" => e.reserved_output,
-                "limit" => e.limit,
-                "estimated_tokens" => {
-                  "total" => e.estimated_tokens,
-                  "messages" => e.message_tokens,
-                  "tools" => e.tool_tokens,
-                }.compact,
+          metadata = {
+            "context_cost" => {
+              "context_window_tokens" => e.context_window,
+              "reserved_output_tokens" => e.reserved_output,
+              "limit" => e.limit,
+              "estimated_tokens" => {
+                "total" => e.estimated_tokens,
+                "messages" => e.message_tokens,
+                "tools" => e.tool_tokens,
               }.compact,
-              "agent" => agent,
-            }
-          )
+            }.compact,
+            "agent" => agent,
+          }
+          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+          ::DAG::ExecutionResult.errored(error: "ContextWindowExceededError: #{e.message}", metadata: metadata)
         rescue AgentCore::ProviderError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+          metadata = {
+            provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
+            status: e.status,
+            agent: agent,
+          }.compact
+          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
           ::DAG::ExecutionResult.errored(
             error: "ProviderError: #{e.message}",
-            metadata: {
-              provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
-              status: e.status,
-              agent: agent,
-            }.compact,
+            metadata: metadata,
           )
+        rescue AgentCore::StreamError => e
+          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+          metadata = {
+            provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
+            stream: { "output_committed" => e.output_committed == true },
+            agent: agent,
+          }.compact
+          if e.respond_to?(:body) && e.body.present?
+            body_safe = e.body.is_a?(Hash) ? e.body : (e.body.to_s[0..2000] rescue nil)
+            metadata["provider_error_body"] = body_safe
+          end
+          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: metadata)
         rescue StandardError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: { agent: agent }.compact)
+          metadata = { agent: agent }.compact
+          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: metadata)
         end
 
         private
@@ -142,6 +166,52 @@ module AgentCore
               runtime: runtime,
               execution_context: execution_context,
             ).build_prompt(context_nodes: context_nodes)
+          end
+
+          def call_llm_with_recovery(runtime, built_prompt, stream:, execution_context:, recovery_metadata_out:)
+            max_attempts = runtime.agent_call_recovery_attempts.to_i
+            attempts = 0
+            failures_sample = []
+
+            loop do
+              begin
+                llm = call_llm(runtime, built_prompt, stream: stream, execution_context: execution_context)
+                if attempts.positive?
+                  recovery_metadata_out.replace(
+                    agent_call_recovery_metadata(
+                      attempts: attempts,
+                      recovered: 1,
+                      failed: 0,
+                      exhausted: false,
+                      failures_sample: failures_sample,
+                    )
+                  )
+                end
+                return llm
+              rescue AgentCore::ProviderError, AgentCore::StreamError => e
+                retryable = retryable_agent_call_error?(e)
+                failures_sample << agent_call_recovery_failure_sample(e) if failures_sample.length < 10
+
+                if retryable && attempts < max_attempts
+                  attempts += 1
+                  next
+                end
+
+                if retryable || attempts.positive?
+                  recovery_metadata_out.replace(
+                    agent_call_recovery_metadata(
+                      attempts: attempts,
+                      recovered: 0,
+                      failed: 1,
+                      exhausted: retryable,
+                      failures_sample: failures_sample,
+                    )
+                  )
+                end
+
+                raise
+              end
+            end
           end
 
           def call_llm(runtime, built_prompt, stream:, execution_context:)
@@ -189,33 +259,75 @@ module AgentCore
             }
 
             instrumenter.instrument("agent_core.llm.call", payload) do
-              failover =
-                AgentCore::Resources::Provider::ProviderFailover.call(
-                  provider: runtime.provider,
-                  requested_model: runtime.model,
-                  fallback_models: runtime.fallback_models,
+              response =
+                runtime.provider.chat(
                   messages: messages,
+                  model: runtime.model,
                   tools: built_prompt.tools,
                   stream: use_stream,
-                  options: options,
-                  instrumenter: instrumenter,
-                  run_id: execution_context.run_id,
+                  **options
                 )
 
-              used_model = failover.fetch(:used_model)
-              attempts = failover.fetch(:attempts)
-
-              payload[:used_model] = used_model if used_model && used_model != runtime.model
-              payload[:failover_attempts] = attempts.length if attempts.is_a?(Array) && attempts.length > 1
-
-              llm_metadata = build_failover_metadata(requested_model: runtime.model, used_model: used_model, attempts: attempts)
-
               if use_stream
-                stream_chat(enum: failover.fetch(:response), stream: stream).merge(used_model: used_model, metadata: llm_metadata)
+                provider_metadata = runtime.provider.respond_to?(:last_call_metadata) ? runtime.provider.last_call_metadata : {}
+                stream_chat(enum: response, stream: stream).merge(used_model: runtime.model, metadata: provider_metadata)
               else
-                sync_chat(failover.fetch(:response)).merge(used_model: used_model, metadata: llm_metadata)
+                provider_metadata = runtime.provider.respond_to?(:last_call_metadata) ? runtime.provider.last_call_metadata : {}
+                sync_chat(response).merge(used_model: runtime.model, metadata: provider_metadata)
               end
             end
+          end
+
+          def retryable_agent_call_error?(error)
+            case error
+            when AgentCore::ProviderError
+              retryable_provider_status?(error.status)
+            when AgentCore::StreamError
+              return false if error.output_committed == true
+              return retryable_provider_status?(error.status) if error.error_class == AgentCore::ProviderError.name || !error.status.nil?
+              return false if error.validation_error == true
+
+              error.recoverable == true
+            else
+              false
+            end
+          rescue StandardError
+            false
+          end
+
+          def retryable_provider_status?(status)
+            code = Integer(status, exception: false)
+            return false unless code
+
+            code == 408 || code == 409 || code == 429 || code >= 500
+          rescue StandardError
+            false
+          end
+
+          def agent_call_recovery_metadata(attempts:, recovered:, failed:, exhausted:, failures_sample:)
+            {
+              "llm_call" => {
+                "recovery" => {
+                  "attempts" => attempts,
+                  "recovered" => recovered,
+                  "failed" => failed,
+                  "exhausted" => exhausted == true,
+                  "failures_sample" => Array(failures_sample).first(10),
+                },
+              },
+            }
+          end
+
+          def agent_call_recovery_failure_sample(error)
+            sample = { "error_class" => error.class.name.to_s, "message" => error.message.to_s }
+            sample["status"] = error.status if error.respond_to?(:status) && !error.status.nil?
+            if error.respond_to?(:error_class) && error.error_class.to_s != ""
+              sample["source_error_class"] = error.error_class.to_s
+            end
+            sample["output_committed"] = true if error.respond_to?(:output_committed) && error.output_committed == true
+            sample
+          rescue StandardError
+            { "error_class" => error.class.name.to_s }
           end
 
           def call_llm_with_directives(runtime, built_prompt, directives_config:, execution_context:)
@@ -348,12 +460,31 @@ module AgentCore
                 stop_reason = event.stop_reason
                 usage = event.usage&.to_h
               when StreamEvent::ErrorEvent
-                raise AgentCore::StreamError, event.error.to_s
+                error = event.error
+                raise AgentCore::StreamError.new(
+                  error.to_s,
+                  output_committed: wrote_output_deltas,
+                  status: (error.respond_to?(:status) ? error.status : nil),
+                  error_class: error.class.name,
+                  validation_error: error.is_a?(AgentCore::ValidationError),
+                  recoverable: event.recoverable? == true,
+                  body: (error.respond_to?(:body) ? error.body : nil),
+                )
               else
                 # ignore tool call deltas (already captured in MessageComplete)
               end
             end
-
+          rescue AgentCore::ProviderError => e
+            raise AgentCore::StreamError.new(
+              e.message,
+              output_committed: wrote_output_deltas,
+              status: e.status,
+              error_class: e.class.name,
+              validation_error: e.is_a?(AgentCore::ValidationError),
+              recoverable: false,
+              body: e.body,
+            )
+          else
             final_message ||= Message.new(role: :assistant, content: content)
             stop_reason ||= :end_turn
 
@@ -377,14 +508,21 @@ module AgentCore
           def build_agent_output_payload(message, runtime:, stop_reason:, model:, directives: nil)
             tool_calls = message.has_tool_calls? ? message.tool_calls.map(&:to_h) : []
 
+            provider_key = runtime.provider.respond_to?(:provider_key) ? runtime.provider.provider_key.to_s : runtime_name(runtime)
+            model_ref = runtime.provider.respond_to?(:model_ref) ? runtime.provider.model_ref.to_s : ""
+            api_model = runtime.provider.respond_to?(:api_model) ? runtime.provider.api_model.to_s : model.to_s
+
             out = {
               "content" => message.text.to_s,
               "message" => message.to_h,
               "tool_calls" => tool_calls,
               "stop_reason" => stop_reason.to_s,
-              "model" => model.to_s,
-              "provider" => runtime_name(runtime),
+              "model" => (model_ref.to_s.strip != "" ? model_ref : model.to_s),
+              "provider" => (provider_key.to_s.strip != "" ? provider_key : runtime_name(runtime)),
+              "provider_key" => provider_key,
+              "api_model" => api_model,
             }
+            out["model_ref"] = model_ref if model_ref.to_s.strip != ""
             out["directives"] = AgentCore::Utils.deep_stringify_keys(directives) unless directives.nil?
             out
           end
@@ -426,7 +564,6 @@ module AgentCore
                 AgentCore::Resources::Tools::ToolNameRepairLoop.call(
                   provider: runtime.provider,
                   requested_model: runtime.model,
-                  fallback_models: runtime.tool_name_repair_fallback_models,
                   tool_calls: tool_calls,
                   visible_tools: visible_tools,
                   tools_registry: runtime.tools_registry,
@@ -450,7 +587,6 @@ module AgentCore
                 AgentCore::Resources::Tools::ToolCallRepairLoop.call(
                   provider: runtime.provider,
                   requested_model: runtime.model,
-                  fallback_models: runtime.tool_call_repair_fallback_models,
                   tool_calls: tool_calls,
                   visible_tools: visible_tools,
                   max_output_tokens: runtime.tool_call_repair_max_output_tokens,
@@ -1019,25 +1155,6 @@ module AgentCore
             runtime_name(runtime)
           rescue StandardError
             nil
-          end
-
-          def build_failover_metadata(requested_model:, used_model:, attempts:)
-            requested = requested_model.to_s
-            used = used_model.to_s
-
-            return {} if used.empty? || used == requested || !attempts.is_a?(Array) || attempts.length <= 1
-
-            {
-              "llm" => {
-                "failover" => {
-                  "requested_model" => requested,
-                  "used_model" => used,
-                  "attempts" => attempts,
-                },
-              },
-            }
-          rescue StandardError
-            {}
           end
 
           def should_repair_tool_calls?(tool_calls, runtime:)

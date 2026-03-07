@@ -16,16 +16,34 @@ module AgentCore
       #     api_key: ENV["OPENAI_API_KEY"],
       #   )
       class SimpleInferenceProvider < Base
-        def initialize(client: nil, stream_include_usage: true, request_defaults: {}, **client_options)
+        def initialize(
+          client: nil,
+          wire_api: :chat_completions,
+          responses_path: nil,
+          transport: nil,
+          stream_include_usage: true,
+          request_defaults: {},
+          **client_options
+        )
           @client = client
           @client_options = client_options
+          @wire_api = wire_api&.to_sym
+          @responses_path = responses_path
+          @transport = transport
           @stream_include_usage = stream_include_usage == true
           @request_defaults = normalize_request_defaults(request_defaults)
+          @last_call_metadata = {}
         end
 
         def name = "simple_inference"
 
+        def last_call_metadata
+          @last_call_metadata || {}
+        end
+
         def chat(messages:, model:, tools: nil, stream: false, **options)
+          @last_call_metadata = {}
+
           model_name = model.to_s.strip
           ValidationError.raise!(
             "model is required",
@@ -34,22 +52,72 @@ module AgentCore
 
           client = ensure_client!
 
-          request_messages = build_openai_messages(messages)
-          request_tools = tools.nil? || tools.empty? ? nil : build_openai_tools(tools)
+          case @wire_api
+          when :chat_completions
+            request_messages = build_openai_messages(messages)
+            request_tools = tools.nil? || tools.empty? ? nil : build_openai_tools(tools)
 
-          request = { model: model_name, messages: request_messages }
-          request[:tools] = request_tools if request_tools
+            request = { model: model_name, messages: request_messages }
+            request[:tools] = request_tools if request_tools
 
-          request_options = @request_defaults.merge(sanitize_options(options))
+            request_options = @request_defaults.merge(sanitize_options(options))
 
-          if request_tools && !request_options.key?(:parallel_tool_calls)
-            request_options[:parallel_tool_calls] = false
-          end
+            if request_tools && !request_options.key?(:parallel_tool_calls)
+              request_options[:parallel_tool_calls] = false
+            end
 
-          if stream
-            stream_chat(client: client, request: request, options: request_options)
+            if stream
+              stream_chat(client: client, request: request, options: request_options)
+            else
+              sync_chat(client: client, request: request, options: request_options)
+            end
+          when :responses
+            request_tools = tools.nil? || tools.empty? ? nil : build_responses_tools(tools)
+
+            transport = normalize_transport(@transport)
+            if transport == :websocket
+              ValidationError.raise!(
+                "websocket transport is not supported yet for wire_api=responses",
+                code: "agent_core.resources.provider.simple_inference_provider.responses_websocket_transport_not_supported_yet",
+              )
+            end
+            if transport == :auto
+              @last_call_metadata = {
+                "llm_transport" => {
+                  "configured" => "auto",
+                  "effective" => "http_sse",
+                  "fallback" => "websocket_not_supported",
+                },
+              }
+            end
+
+            request_options = @request_defaults.merge(sanitize_options(options))
+            request_options = normalize_responses_request_options(request_options)
+            instructions, response_messages = extract_responses_instructions(messages)
+            explicit_instructions = request_options.delete(:instructions).to_s
+            combined_instructions = [instructions, explicit_instructions].filter_map { |value| value.presence }.join("\n\n")
+            request_options[:store] = false unless request_options.key?(:store)
+
+            request_messages = build_responses_input(response_messages)
+            request = { model: model_name, input: request_messages }
+            request[:instructions] = combined_instructions if combined_instructions.present?
+            request[:tools] = request_tools if request_tools
+
+            if request_tools && !request_options.key?(:parallel_tool_calls)
+              request_options[:parallel_tool_calls] = false
+            end
+
+            if stream
+              stream_responses(client: client, request: request, options: request_options)
+            else
+              sync_responses(client: client, request: request, options: request_options)
+            end
           else
-            sync_chat(client: client, request: request, options: request_options)
+            ValidationError.raise!(
+              "wire_api must be :chat_completions or :responses",
+              code: "agent_core.resources.provider.simple_inference_provider.wire_api_must_be_chat_completions_or_responses",
+              details: { wire_api: @wire_api.to_s },
+            )
           end
         end
 
@@ -59,7 +127,15 @@ module AgentCore
           return @client if @client
 
           require_simple_inference!
-          @client = ::SimpleInference::Client.new(**@client_options)
+          if @wire_api == :responses
+            @client =
+              ::SimpleInference::Protocols::OpenAIResponses.new(
+                **@client_options,
+                responses_path: @responses_path,
+              )
+          else
+            @client = ::SimpleInference::Client.new(**@client_options)
+          end
         end
 
         def require_simple_inference!
@@ -77,6 +153,22 @@ module AgentCore
           out = Utils.symbolize_keys(options)
           out.delete(:stream)
           out
+        end
+
+        def normalize_transport(value)
+          s = value.to_s.strip.downcase
+          return nil if s.empty?
+
+          case s
+          when "http", "http_sse", "sse"
+            :http_sse
+          when "websocket", "ws"
+            :websocket
+          when "auto"
+            :auto
+          else
+            nil
+          end
         end
 
         def normalize_request_defaults(value)
@@ -105,9 +197,36 @@ module AgentCore
             raw: body,
             stop_reason: stop_reason
           )
-        rescue ::SimpleInference::Errors::HTTPError => e
+        rescue ::SimpleInference::HTTPError => e
           raise ProviderError.new(e.message, status: e.status, body: e.body)
-        rescue ::SimpleInference::Errors::Error => e
+        rescue ::SimpleInference::ValidationError => e
+          raise simple_inference_validation_error(e)
+        rescue ::SimpleInference::Error => e
+          raise ProviderError, e.message
+        end
+
+        def sync_responses(client:, request:, options:)
+          require_simple_inference!
+          validate_responses_client_method!(client, :responses)
+
+          result = client.responses(**request.merge(options))
+          text = result.output_text.to_s
+          usage_obj = usage_from_responses_usage(result.usage)
+          tool_calls = tool_calls_from_responses_output_items(result.respond_to?(:output_items) ? result.output_items : nil)
+          response_body = result.response.respond_to?(:body) ? result.response.body : nil
+          stop_reason = stop_reason_from_responses_payload(response_body, tool_calls: tool_calls)
+
+          Resources::Provider::Response.new(
+            message: Message.new(role: :assistant, content: text, tool_calls: tool_calls.empty? ? nil : tool_calls),
+            usage: usage_obj,
+            raw: response_body || {},
+            stop_reason: stop_reason
+          )
+        rescue ::SimpleInference::HTTPError => e
+          raise ProviderError.new(e.message, status: e.status, body: e.body)
+        rescue ::SimpleInference::ValidationError => e
+          raise simple_inference_validation_error(e)
+        rescue ::SimpleInference::Error => e
           raise ProviderError, e.message
         end
 
@@ -184,11 +303,272 @@ module AgentCore
 
             y << StreamEvent::MessageComplete.new(message: message)
             y << StreamEvent::Done.new(stop_reason: stop_reason, usage: usage_obj)
-          rescue ::SimpleInference::Errors::Error => e
-            y << StreamEvent::ErrorEvent.new(error: e.message, recoverable: false)
+          rescue ::SimpleInference::Error => e
+            y << StreamEvent::ErrorEvent.new(error: normalize_stream_error(e), recoverable: stream_error_recoverable?(e))
           rescue StandardError => e
-            y << StreamEvent::ErrorEvent.new(error: "#{e.class}: #{e.message}", recoverable: false)
+            y << StreamEvent::ErrorEvent.new(error: normalize_stream_error(e), recoverable: stream_error_recoverable?(e))
           end
+        end
+
+        def stream_responses(client:, request:, options:)
+          require_simple_inference!
+          validate_responses_client_method!(client, :responses_stream)
+
+          Enumerator.new do |y|
+            content = +""
+            last_usage = nil
+            tool_states = {}
+            tool_started = {}
+            raw_stream_response = nil
+            completed_response = nil
+
+            raw_stream_response =
+              client.responses_stream(**request.merge(options)) do |event|
+              delta =
+                if event.is_a?(Hash) && event["type"].to_s == "response.output_text.delta"
+                  event["delta"].to_s
+                end
+              if delta && !delta.empty?
+                content << delta
+                y << StreamEvent::TextDelta.new(text: delta)
+              end
+
+              if event.is_a?(Hash)
+                case event["type"].to_s
+                when "response.output_item.added"
+                  item = event.fetch("item", nil)
+                  if item.is_a?(Hash) && item["type"].to_s == "function_call"
+                    item_id = item["id"].to_s.strip
+                    call_id = item["call_id"].to_s.strip
+                    stable_id = call_id.present? ? call_id : item_id
+                    name = item["name"].to_s.strip
+                    next if item_id.empty? || stable_id.empty?
+
+                    state = tool_states[item_id] ||= { id: nil, name: nil, arguments: +"", output_index: nil, sequence_number: nil, pending_deltas: [], id_stable: false }
+                    if state[:id].to_s == item_id && call_id.present?
+                      state[:id] = call_id
+                    else
+                      state[:id] ||= stable_id
+                    end
+                    state[:id_stable] = true
+                    state[:name] ||= name if name.present?
+                    state[:output_index] ||= Integer(event["output_index"], exception: false)
+                    state[:sequence_number] ||= Integer(event["sequence_number"], exception: false)
+
+                    emit_tool_call_start_if_ready!(y, state, tool_started)
+                    flush_pending_tool_call_deltas!(y, state, tool_started)
+                  end
+                when "response.function_call_arguments.delta"
+                  item_id = event["item_id"].to_s.strip
+                  delta_args = event["delta"].to_s
+                  next if item_id.empty? || delta_args.empty?
+
+                  state = tool_states[item_id] ||= { id: nil, name: nil, arguments: +"", output_index: nil, sequence_number: nil, pending_deltas: [], id_stable: false }
+                  state[:id] ||= item_id
+                  state[:output_index] ||= Integer(event["output_index"], exception: false)
+                  state[:sequence_number] ||= Integer(event["sequence_number"], exception: false)
+                  state[:arguments] << delta_args
+                  if tool_call_live_events_ready?(state) && tool_started[state[:id]]
+                    y << StreamEvent::ToolCallDelta.new(id: state[:id], arguments_delta: delta_args)
+                  else
+                    state[:pending_deltas] << delta_args
+                  end
+                when "response.function_call_arguments.done"
+                  item_id = event["item_id"].to_s.strip
+                  next if item_id.empty?
+
+                  state = tool_states[item_id] ||= { id: nil, name: nil, arguments: +"", output_index: nil, sequence_number: nil, pending_deltas: [], id_stable: false }
+                  state[:id] ||= item_id
+                  state[:output_index] ||= Integer(event["output_index"], exception: false)
+                  state[:sequence_number] ||= Integer(event["sequence_number"], exception: false)
+                  name = event["name"].to_s.strip
+                  state[:name] ||= name if name.present?
+
+                  args = event["arguments"].to_s
+                  state[:arguments] = args if !args.empty?
+                  emit_tool_call_start_if_ready!(y, state, tool_started)
+                  flush_pending_tool_call_deltas!(y, state, tool_started)
+                when "response.completed"
+                  response = event["response"]
+                  completed_response = response if response.is_a?(Hash)
+                end
+              end
+
+              if event.is_a?(Hash) && event["type"].to_s == "response.completed"
+                usage = event.dig("response", "usage") || event["usage"]
+                last_usage = usage if usage.is_a?(Hash)
+              end
+            end
+
+            response_body = raw_stream_response.respond_to?(:body) && raw_stream_response.body.is_a?(Hash) ? raw_stream_response.body : nil
+            raw_output_items = response_body ? responses_output_items_from_body(response_body) : []
+            content = responses_output_text_from_body(response_body) if content.empty? && response_body
+            last_usage ||= response_body["usage"] if response_body&.fetch("usage", nil).is_a?(Hash)
+
+            tool_calls = build_tool_calls_from_item_states(tool_states)
+            tool_calls = merge_streamed_tool_calls_with_response_body(tool_calls, raw_output_items) if raw_output_items.any?
+            if tool_calls.empty? && raw_output_items.any?
+              tool_calls = tool_calls_from_responses_output_items(raw_output_items)
+            end
+            tool_calls.each do |tc|
+              y << StreamEvent::ToolCallEnd.new(id: tc.id, name: tc.name, arguments: tc.arguments)
+            end
+
+            message = Message.new(role: :assistant, content: content, tool_calls: tool_calls.empty? ? nil : tool_calls)
+            usage_obj = usage_from_responses_usage(last_usage)
+            stop_reason = stop_reason_from_responses_payload(response_body || completed_response, tool_calls: tool_calls)
+
+            y << StreamEvent::MessageComplete.new(message: message)
+            y << StreamEvent::Done.new(stop_reason: stop_reason, usage: usage_obj)
+          rescue ::SimpleInference::Error => e
+            y << StreamEvent::ErrorEvent.new(error: normalize_stream_error(e), recoverable: stream_error_recoverable?(e))
+          rescue StandardError => e
+            y << StreamEvent::ErrorEvent.new(error: normalize_stream_error(e), recoverable: stream_error_recoverable?(e))
+          end
+        end
+
+        def usage_from_responses_usage(usage_hash)
+          return nil unless usage_hash.is_a?(Hash)
+
+          input_tokens = Integer(usage_hash.fetch("input_tokens", 0), exception: false) || 0
+          output_tokens = Integer(usage_hash.fetch("output_tokens", 0), exception: false) || 0
+
+          Resources::Provider::Usage.new(
+            input_tokens: input_tokens,
+            output_tokens: output_tokens,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 0,
+          )
+        end
+
+        def tool_call_live_events_ready?(state)
+          state[:id].to_s.present? && state[:name].to_s.present? && state[:id_stable] == true
+        end
+
+        def emit_tool_call_start_if_ready!(stream, state, tool_started)
+          return unless tool_call_live_events_ready?(state)
+          return if tool_started[state[:id]]
+
+          tool_started[state[:id]] = true
+          stream << StreamEvent::ToolCallStart.new(id: state[:id], name: state[:name])
+        end
+
+        def flush_pending_tool_call_deltas!(stream, state, tool_started)
+          return unless tool_call_live_events_ready?(state)
+          return unless tool_started[state[:id]]
+
+          Array(state[:pending_deltas]).each do |delta|
+            stream << StreamEvent::ToolCallDelta.new(id: state[:id], arguments_delta: delta)
+          end
+          state[:pending_deltas] = []
+        end
+
+        def responses_output_text_from_body(body)
+          return "" unless body.is_a?(Hash)
+
+          output = body["output"]
+          return "" unless output.is_a?(Array)
+
+          output.flat_map do |item|
+            next [] unless item.is_a?(Hash)
+
+            content = item["content"]
+            next [] unless content.is_a?(Array)
+
+            content.filter_map do |part|
+              next nil unless part.is_a?(Hash)
+              next nil unless part["type"].to_s == "output_text"
+
+              part["text"].to_s
+            end
+          end.join
+        end
+
+        def responses_output_items_from_body(body)
+          return [] unless body.is_a?(Hash)
+
+          output = body["output"]
+          return [] unless output.is_a?(Array)
+
+          output.filter_map { |item| item.is_a?(Hash) ? item : nil }
+        end
+
+        def merge_streamed_tool_calls_with_response_body(tool_calls, raw_output_items)
+          function_items =
+            Array(raw_output_items).filter_map do |item|
+              item.is_a?(Hash) && item["type"].to_s == "function_call" ? item : nil
+            end
+
+          return tool_calls if function_items.empty?
+
+          tool_calls.map do |tool_call|
+            raw_item =
+              function_items.find do |item|
+                item_id = item["id"].to_s.strip
+                call_id = item["call_id"].to_s.strip
+                args = item["arguments"].to_s
+                matches_id = call_id == tool_call.id.to_s || item_id == tool_call.id.to_s
+                matches_shape = item["name"].to_s == tool_call.name.to_s && args == JSON.generate(tool_call.arguments || {})
+                matches_id || matches_shape
+              end
+
+            next tool_call unless raw_item
+
+            merged_id = raw_item["call_id"].to_s.strip.presence || raw_item["id"].to_s.strip.presence || tool_call.id
+            merged_name = raw_item["name"].to_s.strip.presence || tool_call.name
+            raw_args = raw_item["arguments"]
+            parsed_args, parse_error = Utils.parse_tool_arguments(raw_args)
+
+            if parse_error
+              AgentCore::ToolCall.new(
+                id: merged_id,
+                name: merged_name,
+                arguments: tool_call.arguments,
+                arguments_parse_error: tool_call.arguments_parse_error,
+                arguments_raw: tool_call.arguments_raw,
+              )
+            else
+              AgentCore::ToolCall.new(
+                id: merged_id,
+                name: merged_name,
+                arguments: parsed_args,
+              )
+            end
+          end
+        end
+
+        def normalize_stream_error(error)
+          case error
+          when ::SimpleInference::HTTPError
+            ProviderError.new(error.message, status: error.status, body: error.body)
+          when ::SimpleInference::ValidationError
+            simple_inference_validation_error(error)
+          else
+            error
+          end
+        rescue StandardError
+          error
+        end
+
+        def stream_error_recoverable?(error)
+          case error
+          when ::SimpleInference::TimeoutError,
+               ::SimpleInference::ConnectionError,
+               ::SimpleInference::DecodeError
+            true
+          else
+            false
+          end
+        rescue StandardError
+          false
+        end
+
+        def simple_inference_validation_error(error)
+          ConfigurationError.new(
+            error.message,
+            code: "agent_core.resources.provider.simple_inference_provider.validation_error",
+            details: { simple_inference_error_class: error.class.name },
+          )
         end
 
         def message_from_openai_body(body)
@@ -347,7 +727,13 @@ module AgentCore
             out = { "role" => role }
 
             if role == "tool"
-              out["tool_call_id"] = msg.tool_call_id.to_s if msg.tool_call_id
+              call_id = msg.tool_call_id.to_s.strip
+              ValidationError.raise!(
+                "tool_result messages must include tool_call_id",
+                code: "agent_core.resources.provider.simple_inference_provider.tool_result_requires_tool_call_id",
+              ) if call_id.empty?
+
+              out["tool_call_id"] = call_id
               out["content"] = msg.text.to_s
               next out
             end
@@ -362,6 +748,166 @@ module AgentCore
             end
 
             out
+          end
+        end
+
+        def build_responses_input(messages)
+          Array(messages).flat_map do |msg|
+            unless msg.is_a?(Message)
+              ValidationError.raise!(
+                "messages must contain AgentCore::Message instances",
+                code: "agent_core.resources.provider.simple_inference_provider.messages_must_contain_agentcore_message_instances",
+                details: { message_class: msg.class.name },
+              )
+            end
+
+            if msg.role == :tool_result
+              call_id = msg.tool_call_id.to_s.strip
+              ValidationError.raise!(
+                "tool_result messages must include tool_call_id",
+                code: "agent_core.resources.provider.simple_inference_provider.tool_result_requires_tool_call_id",
+              ) if call_id.empty?
+
+              [
+                {
+                  "type" => "function_call_output",
+                  "call_id" => call_id,
+                  "output" => msg.text.to_s,
+                },
+              ]
+            else
+              role = openai_role(msg.role)
+              items = []
+              items << { "role" => role, "content" => responses_content(msg) }
+
+              if role == "assistant" && msg.has_tool_calls?
+                msg.tool_calls.each do |tc|
+                  args = tc.respond_to?(:arguments) ? (tc.arguments || {}) : {}
+                  items << {
+                    "type" => "function_call",
+                    "call_id" => tc.id.to_s,
+                    "name" => tc.name.to_s,
+                    "arguments" => JSON.generate(args),
+                  }
+                end
+              end
+
+              items
+            end
+          end
+        end
+
+        def extract_responses_instructions(messages)
+          instructions = []
+          response_messages = []
+
+          Array(messages).each do |msg|
+            unless msg.is_a?(Message)
+              ValidationError.raise!(
+                "messages must contain AgentCore::Message instances",
+                code: "agent_core.resources.provider.simple_inference_provider.messages_must_contain_agentcore_message_instances",
+                details: { message_class: msg.class.name },
+              )
+            end
+
+            if msg.role == :system
+              text = responses_instruction_text(msg)
+              instructions << text if text.present?
+            else
+              response_messages << msg
+            end
+          end
+
+          [instructions.join("\n\n"), response_messages]
+        end
+
+        def normalize_responses_request_options(options)
+          out = options.is_a?(Hash) ? options.dup : {}
+          reasoning = out[:reasoning].is_a?(Hash) ? Utils.deep_symbolize_keys(out[:reasoning]) : {}
+
+          if out.key?(:max_tokens)
+            out[:max_output_tokens] = out[:max_tokens] unless out.key?(:max_output_tokens)
+            out.delete(:max_tokens)
+          end
+
+          effort = out.delete(:reasoning_effort)
+          summary = out.delete(:reasoning_summary)
+          reasoning[:effort] = effort if effort.present?
+          reasoning[:summary] = summary if summary.present?
+
+          out[:reasoning] = reasoning if reasoning.any?
+          out
+        end
+
+        def responses_instruction_text(msg)
+          case msg.content
+          when String
+            msg.content.to_s.strip
+          when Array
+            msg.content.filter_map do |block|
+              case block
+              when TextContent
+                block.text.to_s
+              else
+                block.respond_to?(:text) ? block.text.to_s : block.to_s
+              end
+            end.join.strip
+          when nil
+            ""
+          else
+            msg.content.to_s.strip
+          end
+        end
+
+        def responses_content(msg)
+          case msg.content
+          when String
+            [{ "type" => "input_text", "text" => msg.content }]
+          when Array
+            msg.content.filter_map { |block| responses_part(block) }
+          when nil
+            []
+          else
+            [{ "type" => "input_text", "text" => msg.content.to_s }]
+          end
+        end
+
+        def responses_part(block)
+          case block
+          when TextContent
+            { "type" => "input_text", "text" => block.text.to_s }
+          when ImageContent
+            { "type" => "input_image", "image_url" => openai_image_url(block) }
+          when DocumentContent
+            { "type" => "input_text", "text" => document_placeholder(block) }
+          when AudioContent
+            { "type" => "input_text", "text" => audio_placeholder(block) }
+          when ToolUseContent, ToolResultContent
+            { "type" => "input_text", "text" => block.to_h.to_s }
+          else
+            { "type" => "input_text", "text" => block.to_s }
+          end
+        end
+
+        def validate_responses_client_method!(client, method_name)
+          return if client.respond_to?(method_name)
+
+          raise ConfigurationError.new(
+                  "wire_api=responses client must implement the responses interface (missing ##{method_name})"
+                )
+        end
+
+        def stop_reason_from_responses_payload(payload, tool_calls:)
+          return :tool_use unless Array(tool_calls).empty?
+          return :end_turn unless payload.is_a?(Hash)
+
+          if payload["status"].to_s == "incomplete"
+            case payload.dig("incomplete_details", "reason").to_s
+            when "max_output_tokens" then :max_tokens
+            else :end_turn
+            end
+          else
+            :end_turn
           end
         end
 
@@ -500,6 +1046,7 @@ module AgentCore
 
             parameters = {} unless parameters.is_a?(Hash)
             parameters = Utils.normalize_json_schema(parameters)
+            parameters = JSON.parse(JSON.generate(parameters))
 
             {
               "type" => "function",
@@ -508,6 +1055,50 @@ module AgentCore
                 "description" => description,
                 "parameters" => parameters,
               },
+            }
+          end.compact
+        end
+
+        def build_responses_tools(tools)
+          Array(tools).map do |tool|
+            ValidationError.raise!(
+              "tools must contain Hash definitions",
+              code: "agent_core.resources.provider.simple_inference_provider.tools_must_contain_hash_definitions",
+              details: { tool_class: tool.class.name },
+            ) unless tool.is_a?(Hash)
+
+            h = Utils.symbolize_keys(tool)
+
+            name = ""
+            description = ""
+            parameters = {}
+
+            if h[:type].to_s == "function" && h[:function].is_a?(Hash)
+              fn = Utils.symbolize_keys(h.fetch(:function))
+              name = fn.fetch(:name, "").to_s
+              description = fn.fetch(:description, "").to_s
+              parameters = fn.fetch(:parameters, {})
+            else
+              name = h.fetch(:name, "").to_s
+              description = h.fetch(:description, "").to_s
+              parameters = h.fetch(:parameters, {})
+            end
+
+            ValidationError.raise!(
+              "tool name is required",
+              code: "agent_core.resources.provider.simple_inference_provider.tool_name_is_required",
+            ) if name.strip.empty?
+
+            parameters = {} unless parameters.is_a?(Hash)
+            parameters = Utils.normalize_json_schema(parameters)
+            parameters = JSON.parse(JSON.generate(parameters))
+
+            {
+              "type" => "function",
+              "name" => name,
+              "description" => description,
+              "strict" => false,
+              "parameters" => parameters,
             }
           end.compact
         end
@@ -544,6 +1135,67 @@ module AgentCore
 
               args_hash, parse_error = Utils.parse_tool_arguments(args)
               raw = parse_error ? args : nil
+              ToolCall.new(id: id, name: name, arguments: args_hash, arguments_parse_error: parse_error, arguments_raw: raw)
+            end
+        end
+
+        def tool_calls_from_responses_output_items(items)
+          Array(items).filter_map do |item|
+            next nil unless item.is_a?(Hash)
+            next nil unless item["type"].to_s == "function_call"
+
+            call_id = item["call_id"].to_s.strip
+            item_id = item["id"].to_s.strip
+            name = item["name"].to_s.strip
+            args = item["arguments"]
+
+            next nil if name.empty?
+
+            id = call_id.present? ? call_id : item_id
+            next nil if id.empty?
+
+            args_hash, parse_error = Utils.parse_tool_arguments(args)
+            raw = parse_error ? args.to_s : nil
+
+            ToolCall.new(
+              id: id,
+              name: name,
+              arguments: args_hash,
+              arguments_parse_error: parse_error,
+              arguments_raw: raw,
+            )
+          end
+        end
+
+        def build_tool_calls_from_item_states(tool_states)
+          used = {}
+
+          tool_states
+            .to_a
+            .sort_by do |item_id, state|
+              [
+                state.fetch(:output_index, nil) || Float::INFINITY,
+                state.fetch(:sequence_number, nil) || Float::INFINITY,
+                item_id.to_s,
+              ]
+            end
+            .filter_map.with_index do |(_item_id, state), idx|
+              id = state.fetch(:id, nil).to_s.strip
+              name = state.fetch(:name, nil).to_s.strip
+              args = state.fetch(:arguments, "").to_s
+
+              next nil if name.empty?
+
+              id =
+                Utils.normalize_tool_call_id(
+                  id,
+                  used: used,
+                  fallback: "tc_#{idx + 1}",
+                )
+
+              args_hash, parse_error = Utils.parse_tool_arguments(args)
+              raw = parse_error ? args : nil
+
               ToolCall.new(id: id, name: name, arguments: args_hash, arguments_parse_error: parse_error, arguments_raw: raw)
             end
         end

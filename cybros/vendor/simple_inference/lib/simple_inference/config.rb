@@ -12,6 +12,10 @@ module SimpleInference
                 :raise_on_error
 
     def initialize(options = {})
+      unless options.nil? || options.is_a?(Hash)
+        raise SimpleInference::ConfigurationError, "options must be a Hash"
+      end
+
       opts = symbolize_keys(options || {})
 
       @base_url = normalize_base_url(
@@ -28,9 +32,9 @@ module SimpleInference
       # and also use the default api_prefix of "/v1".
       @base_url = strip_api_prefix_from_base_url(@base_url, @api_prefix)
 
-      @timeout = to_float_or_nil(opts[:timeout] || ENV["SIMPLE_INFERENCE_TIMEOUT"])
-      @open_timeout = to_float_or_nil(opts[:open_timeout] || ENV["SIMPLE_INFERENCE_OPEN_TIMEOUT"])
-      @read_timeout = to_float_or_nil(opts[:read_timeout] || ENV["SIMPLE_INFERENCE_READ_TIMEOUT"])
+      @timeout = to_float_or_nil(opts[:timeout] || ENV["SIMPLE_INFERENCE_TIMEOUT"], field_name: "timeout")
+      @open_timeout = to_float_or_nil(opts[:open_timeout] || ENV["SIMPLE_INFERENCE_OPEN_TIMEOUT"], field_name: "open_timeout")
+      @read_timeout = to_float_or_nil(opts[:read_timeout] || ENV["SIMPLE_INFERENCE_READ_TIMEOUT"], field_name: "read_timeout")
 
       @adapter = opts[:adapter]
 
@@ -73,12 +77,12 @@ module SimpleInference
       base_url[0...-api_prefix.length].chomp("/")
     end
 
-    def to_float_or_nil(value)
+    def to_float_or_nil(value, field_name:)
       return nil if value.nil? || value == ""
 
       Float(value)
     rescue ArgumentError, TypeError
-      nil
+      raise SimpleInference::ConfigurationError, "#{field_name} must be a number"
     end
 
     def boolean_option(explicit:, env_name:, default:)
@@ -91,6 +95,10 @@ module SimpleInference
     end
 
     def build_default_headers(extra_headers)
+      unless extra_headers.is_a?(Hash)
+        raise SimpleInference::ConfigurationError, "headers must be a Hash"
+      end
+
       headers = {
         "Accept" => "application/json",
       }

@@ -25,7 +25,7 @@ module SimpleInference
         @timeout = timeout
 
         unless client == ::HTTPX || client.is_a?(::HTTPX::Session)
-          raise ArgumentError,
+          raise SimpleInference::ConfigurationError,
                 "client must be ::HTTPX or an instance of ::HTTPX::Session (got #{client.class})"
         end
 
@@ -64,11 +64,11 @@ module SimpleInference
         # NOTE: Some error response objects do not expose the normal response API
         # (e.g. no `#headers`), so we must handle them explicitly.
         if response.is_a?(::HTTPX::ErrorResponse)
-          raise Errors::ConnectionError, (response.error&.message || "HTTPX request failed")
+          raise SimpleInference::ConnectionError, (response.error&.message || "HTTPX request failed")
         end
 
         if response.status.to_i == 0
-          raise Errors::ConnectionError, "HTTPX request failed"
+          raise SimpleInference::ConnectionError, "HTTPX request failed"
         end
 
         response_headers = normalize_headers(response)
@@ -79,9 +79,9 @@ module SimpleInference
           body: response.body.to_s,
         }
       rescue ::HTTPX::TimeoutError => e
-        raise Errors::TimeoutError, e.message
+        raise SimpleInference::TimeoutError, e.message
       rescue ::HTTPX::Error, IOError, SystemCallError => e
-        raise Errors::ConnectionError, e.message
+        raise SimpleInference::ConnectionError, e.message
       end
 
       def call_stream(request)
@@ -124,11 +124,11 @@ module SimpleInference
         stream_response = client.request(method, url, headers: headers, body: body, stream: true)
 
         if stream_response.is_a?(::HTTPX::ErrorResponse)
-          raise Errors::ConnectionError, (stream_response.error&.message || "HTTPX request failed")
+          raise SimpleInference::ConnectionError, (stream_response.error&.message || "HTTPX request failed")
         end
 
         if stream_response.status.to_i == 0
-          raise Errors::ConnectionError, "HTTPX request failed"
+          raise SimpleInference::ConnectionError, "HTTPX request failed"
         end
 
         begin
@@ -145,7 +145,7 @@ module SimpleInference
           end
         rescue ::HTTPX::HTTPError => e
           # HTTPX's stream plugin raises for non-2xx. Swallow it and let the SDK
-          # raise `Errors::HTTPError` based on status.
+          # raise `SimpleInference::HTTPError` based on status.
           status ||= e.response.status.to_i
           response_headers = normalize_headers(e.response) if response_headers.empty?
         end
@@ -159,9 +159,9 @@ module SimpleInference
           { status: status, headers: response_headers, body: full_body.to_s }
         end
       rescue ::HTTPX::TimeoutError => e
-        raise Errors::TimeoutError, e.message
+        raise SimpleInference::TimeoutError, e.message
       rescue ::HTTPX::Error, IOError, SystemCallError => e
-        raise Errors::ConnectionError, e.message
+        raise SimpleInference::ConnectionError, e.message
       end
 
       private

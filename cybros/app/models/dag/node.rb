@@ -524,7 +524,11 @@ module DAG
     end
 
     def can_fork?
-      compressed_at.nil? && terminal?
+      return false if compressed_at.present?
+      return false if deleted?
+      return false unless body&.forkable?
+
+      terminal?
     end
 
     def body_input

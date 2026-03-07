@@ -99,11 +99,20 @@
       </div>
 
       <div role="alert" class="alert alert-warning text-sm hidden" data-conversation-channel-target="stuckAlert">
-        <span>Streaming seems stuck. You can stop generation and retry.</span>
+        <span>Streaming seems stuck. You can stop generation if it does not recover.</span>
       </div>
 
       <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit" } do %>
-        <div class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
+        <% needs_model_reselection = @model_picker_alert_message.present? && @selected_model_ref.blank? %>
+        <% if @model_picker_alert_message.present? %>
+          <div role="alert" class="alert alert-warning alert-soft text-sm">
+            <span><%= @model_picker_alert_message %></span>
+          </div>
+        <% end %>
+
+        <div
+          data-testid="conversation-composer-input"
+          class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
           <textarea
             name="content"
             rows="1"
@@ -118,24 +127,59 @@
           </button>
         </div>
 
-        <div class="flex items-center gap-1 mt-1.5 pl-2">
-          <button
-            type="button"
-            class="btn btn-ghost btn-xs hidden"
-            data-conversation-channel-target="stopButton"
-            data-action="click->conversation-channel#stop">
-            <span class="icon-[lucide--square] size-3"></span>
-            Stop
-          </button>
+        <div
+          data-testid="conversation-composer-footer"
+          class="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-2 pt-1">
+          <div class="flex items-center gap-2">
+            <% if @llm_model_options.present? %>
+              <select
+                name="model_ref"
+                data-testid="conversation-composer-model-picker"
+                aria-label="Model"
+                <%= needs_model_reselection ? "required" : nil %>
+                class="select select-bordered select-xs max-w-full">
+                <% if needs_model_reselection %>
+                  <option value="" selected>Please reselect a model</option>
+                <% end %>
+                <% @llm_model_options.each do |opt| %>
+                  <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
+                    <%= opt.fetch(:label) %>
+                  </option>
+                <% end %>
+              </select>
+            <% else %>
+              <select
+                data-testid="conversation-composer-model-picker"
+                aria-label="Model"
+                class="select select-bordered select-xs max-w-full"
+                disabled>
+                <option>No models configured</option>
+              </select>
+              <% if Current.user&.owner? || Current.user&.admin? %>
+                <%= link_to "Configure", system_settings_llm_providers_path, class: "link link-primary text-xs" %>
+              <% end %>
+            <% end %>
+          </div>
 
-          <button
-            type="button"
-            class="btn btn-ghost btn-xs hidden"
-            data-conversation-channel-target="retryButton"
-            data-action="click->conversation-channel#retry">
-            <span class="icon-[lucide--refresh-cw] size-3"></span>
-            Retry
-          </button>
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs hidden"
+              data-conversation-channel-target="stopButton"
+              data-action="click->conversation-channel#stop">
+              <span class="icon-[lucide--square] size-3"></span>
+              Stop
+            </button>
+
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs hidden"
+              data-conversation-channel-target="retryButton"
+              data-action="click->conversation-channel#retry">
+              <span class="icon-[lucide--refresh-cw] size-3"></span>
+              Retry
+            </button>
+          </div>
         </div>
       <% end %>
     </div>

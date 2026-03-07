@@ -1,7 +1,7 @@
 class ConversationsController < AgentController
   include RateLimitable
 
-  rescue_from ArgumentError, Cybros::Error do |e|
+  rescue_from ArgumentError, AgentCore::ValidationError, Cybros::Error do |e|
     respond_to do |format|
       format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
       format.html { render plain: e.message, status: :unprocessable_entity }
@@ -42,14 +42,22 @@ class ConversationsController < AgentController
   def create
     title = params.dig(:conversation, :title).to_s.strip
     title = "Conversation" if title.blank?
+    agent_metadata = { "agent_profile" => "coding" }
+    default_model_ref = Cybros::AgentRuntimeResolver.default_model_ref_for(agent_metadata: agent_metadata)
 
     conversation =
       Current.user.conversations.create!(
         title: title,
-        metadata: { "agent" => { "agent_profile" => "coding" } },
+        metadata: { "agent" => agent_metadata, "llm" => { "model_ref" => default_model_ref } },
       )
 
     redirect_to conversation_path(conversation)
+  rescue AgentCore::ValidationError
+    if Current.user&.owner? || Current.user&.admin?
+      redirect_to system_settings_llm_providers_path, alert: "No usable default model is configured."
+    else
+      raise
+    end
   end
 
   def show
@@ -58,6 +66,46 @@ class ConversationsController < AgentController
     @before_cursor = page.fetch("before_message_id", nil).to_s.presence
 
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
+
+    begin
+      @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
+
+      requested_model_ref = @conversation.metadata.dig("llm", "model_ref").to_s.presence
+      resolved_default_model_ref = nil
+      @model_picker_alert_message = nil
+      if requested_model_ref.blank?
+        begin
+          resolved_default_model_ref =
+            Cybros::AgentRuntimeResolver.default_model_ref_for(
+              agent_metadata: @conversation.metadata.fetch("agent", {}),
+            )
+        rescue AgentCore::ValidationError
+          resolved_default_model_ref = nil
+          @model_picker_alert_message = "Default model is not currently usable. Please reselect a model or fix credentials."
+        end
+      end
+      @stale_model_ref = nil
+
+      if requested_model_ref && @llm_model_options.any? { |o| o.fetch(:model_ref) == requested_model_ref }
+        @selected_model_ref = requested_model_ref
+      elsif requested_model_ref
+        @selected_model_ref = nil
+        @stale_model_ref = requested_model_ref
+        @model_picker_alert_message = "Selected model is no longer available. Please reselect a model."
+      else
+        @selected_model_ref =
+          if resolved_default_model_ref && @llm_model_options.any? { |o| o.fetch(:model_ref) == resolved_default_model_ref }
+            resolved_default_model_ref
+          end
+      end
+    rescue StandardError => e
+      Rails.logger.error(
+        "Conversation model options failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
+      )
+      @llm_model_options = []
+      @selected_model_ref = nil
+      @stale_model_ref = nil
+    end
   end
 
   def branch

@@ -61,7 +61,6 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopSchemaTruncationTest < Mini
       AgentCore::Resources::Tools::ToolCallRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         max_output_tokens: 300,

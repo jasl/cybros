@@ -8,6 +8,7 @@ require_relative "simple_inference/response"
 require_relative "simple_inference/openai"
 require_relative "simple_inference/protocols/base"
 require_relative "simple_inference/protocols/openai_compatible"
+require_relative "simple_inference/protocols/openai_responses"
 require_relative "simple_inference/client"
 
 module SimpleInference

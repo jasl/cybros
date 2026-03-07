@@ -219,6 +219,27 @@ class AgentCore::Resources::Provider::SimpleInferenceProviderTest < Minitest::Te
     assert_nil response.tool_calls.first.arguments_parse_error
   end
 
+  def test_chat_non_streaming_preserves_configuration_error_as_agentcore_configuration_error
+    adapter =
+      StubAdapter.new do |_req|
+        raise SimpleInference::ConfigurationError, "bad config"
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    error =
+      assert_raises(AgentCore::ConfigurationError) do
+        provider.chat(
+          messages: [AgentCore::Message.new(role: :user, content: "hi")],
+          model: "test-model",
+          stream: false,
+        )
+      end
+
+    assert_includes error.message, "bad config"
+  end
+
   def test_chat_non_streaming_normalizes_duplicate_tool_call_ids
     adapter =
       StubAdapter.new do |_req|
@@ -391,6 +412,27 @@ class AgentCore::Resources::Provider::SimpleInferenceProviderTest < Minitest::Te
     )
   end
 
+  def test_chat_rejects_tool_result_without_tool_call_id
+    adapter =
+      StubAdapter.new do |_req|
+        raise "should not send request"
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        provider.chat(
+          messages: [AgentCore::Message.new(role: :tool_result, content: "tool output")],
+          model: "test-model",
+          stream: false,
+        )
+      end
+
+    assert_equal "agent_core.resources.provider.simple_inference_provider.tool_result_requires_tool_call_id", err.code
+  end
+
   def test_chat_streaming_emits_text_and_message_complete
     sse =
       [
@@ -560,5 +602,74 @@ class AgentCore::Resources::Provider::SimpleInferenceProviderTest < Minitest::Te
 
     ids = complete.message.tool_calls.map(&:id)
     assert_equal ["tc_1", "tc_2"], ids
+  end
+
+  def test_chat_streaming_preserves_http_error_as_provider_error_event
+    adapter =
+      StubAdapter.new do |_req|
+        {
+          status: 400,
+          headers: { "content-type" => "application/json" },
+          body: JSON.generate({ "error" => { "message" => "bad request" } }),
+        }
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    events =
+      provider.chat(
+        messages: [AgentCore::Message.new(role: :user, content: "hi")],
+        model: "test-model",
+        stream: true,
+      ).to_a
+
+    error_event = events.find { |e| e.is_a?(AgentCore::StreamEvent::ErrorEvent) }
+    refute_nil error_event
+    assert_instance_of AgentCore::ProviderError, error_event.error
+    assert_equal 400, error_event.error.status
+  end
+
+  def test_chat_streaming_preserves_configuration_error_as_validation_error_event
+    adapter =
+      StubAdapter.new do |_req|
+        raise SimpleInference::ConfigurationError, "bad config"
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    events =
+      provider.chat(
+        messages: [AgentCore::Message.new(role: :user, content: "hi")],
+        model: "test-model",
+        stream: true,
+      ).to_a
+
+    error_event = events.find { |e| e.is_a?(AgentCore::StreamEvent::ErrorEvent) }
+    refute_nil error_event
+    assert_instance_of AgentCore::ConfigurationError, error_event.error
+  end
+
+  def test_chat_streaming_marks_timeout_error_as_recoverable_bootstrap_failure
+    adapter =
+      StubAdapter.new do |_req|
+        raise SimpleInference::TimeoutError, "timed out"
+      end
+
+    client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
+    provider = AgentCore::Resources::Provider::SimpleInferenceProvider.new(client: client)
+
+    events =
+      provider.chat(
+        messages: [AgentCore::Message.new(role: :user, content: "hi")],
+        model: "test-model",
+        stream: true,
+      ).to_a
+
+    error_event = events.find { |e| e.is_a?(AgentCore::StreamEvent::ErrorEvent) }
+    refute_nil error_event
+    assert_instance_of SimpleInference::TimeoutError, error_event.error
+    assert_equal true, error_event.recoverable?
   end
 end

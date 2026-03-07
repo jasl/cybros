@@ -29,6 +29,7 @@ module AgentCore
       # @param hint [String] model hint key (exact or fnmatch key; see TokenEstimator)
       # @param tokenizer_family [String, Symbol] :tiktoken|:hf_tokenizers|:heuristic|...
       # @param tokenizer_path [String, nil] required for hf_tokenizers families
+      # @param encoding_name [String, nil] optional explicit tiktoken encoding name
       # @param source_hint [String, nil] optional canonical hint
       # @param source_repo [String, nil] optional HF repo name
       # @param chars_per_token [Numeric, nil] optional heuristic configuration
@@ -38,6 +39,7 @@ module AgentCore
         hint:,
         tokenizer_family:,
         tokenizer_path: nil,
+        encoding_name: nil,
         source_hint: nil,
         source_repo: nil,
         chars_per_token: nil
@@ -63,6 +65,9 @@ module AgentCore
 
         repo = source_repo.to_s.strip
         entry["source_repo"] = repo unless repo.empty?
+
+        explicit_encoding = encoding_name.to_s.strip
+        entry["encoding_name"] = explicit_encoding unless explicit_encoding.empty?
 
         if hf_tokenizer_family?(family)
           path = tokenizer_path.to_s.strip
@@ -93,6 +98,7 @@ module AgentCore
             hint: h.fetch("hint"),
             tokenizer_family: h.fetch("tokenizer_family", nil),
             tokenizer_path: h.fetch("tokenizer_path", nil),
+            encoding_name: h.fetch("encoding_name", nil),
             source_hint: h.fetch("source_hint", nil),
             source_repo: h.fetch("source_repo", nil),
             chars_per_token: h.fetch("chars_per_token", nil),

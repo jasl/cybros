@@ -137,6 +137,25 @@ end
   - `DAG::Node#deny_approval!`（`awaiting_approval → rejected`）
   - `DAG::Node#stop!`（`pending|awaiting_approval|running → stopped`）
 
+### 3.3.1 `NodeBody` support hooks vs `Node#can_*?` vs App action policy
+
+为减少 App/UI 对引擎内部约束的重复拼装，当前约定这三层职责明确分离：
+
+- `NodeBody` instance hooks（例如 `#retriable?` / `#rerunnable?` / `#forkable?` / `#swipable?` / `#deletable?` / `#editable?`）
+  - 只表达 **type-level support**
+  - 例：`agent_message` 可以同时 `retriable? == true` 且 `rerunnable? == true`，并不矛盾；最终是否可操作由更上层决定
+- `DAG::Node#can_*?`
+  - 只表达 **当前节点在 graph/state/topology 下是否满足低层 mutation precondition**
+  - 例：`#can_rerun?` 还会检查 leaf / blocking children / finished state
+- App-facing action policy（当前由 `Conversation::NodeActionPolicy` 组装并投影到 message `action_policy`）
+  - 组合 `NodeBody` support hooks + `DAG::Node#can_*?` + conversation 语义（lane ownership、tail/non-tail、deferred visibility、queued retry guard 等）
+  - 这是 Controller/View/JS/future frontend client 应消费的最终动作字典
+
+结论：
+
+- DAG 引擎保留 `NodeBody` + `Node#can_*?` 的分层
+- App/UI 不应直接从 `state` 或 graph 位置自行推导按钮可见性，而应消费 `Conversation` 投影出的 action policy
+
 ---
 
 ## 4) 当 Public API 不够用时怎么办？

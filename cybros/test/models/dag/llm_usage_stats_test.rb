@@ -38,7 +38,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       metadata: {
         "usage" => { "input_tokens" => 100, "output_tokens" => 50, "cache_read_tokens" => 40 },
       },
-      body_output: { "provider" => "simple_inference", "model" => "gpt-5.2", "content" => "a1" },
+      body_output: { "provider_key" => "openai", "model_ref" => "openai/gpt-5.2", "content" => "a1" },
       created_at: day_1,
       finished_at: day_1,
       updated_at: day_1,
@@ -52,7 +52,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       metadata: {
         "usage" => { "input_tokens" => 10, "output_tokens" => 5, "cache_read_tokens" => 0 },
       },
-      body_output: { "provider" => "simple_inference", "model" => "gpt-5.2", "content" => "a2" },
+      body_output: { "provider_key" => "openai", "model_ref" => "openai/gpt-5.2", "content" => "a2" },
       created_at: day_2,
       finished_at: day_2,
       updated_at: day_2,
@@ -66,7 +66,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       metadata: {
         "usage" => { "input_tokens" => 20, "output_tokens" => 10, "cache_read_tokens" => 20 },
       },
-      body_output: { "provider" => "simple_inference", "model" => "deepseek-v3", "content" => "a3" },
+      body_output: { "provider_key" => "deepseek", "model_ref" => "deepseek/deepseek-v3", "content" => "a3" },
       created_at: day_2 + 1.second,
       finished_at: day_2 + 1.second,
       updated_at: day_2 + 1.second,
@@ -87,8 +87,8 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
     assert_equal 2, by_model.length
 
     gpt = by_model.first
-    assert_equal "simple_inference", gpt.fetch("provider")
-    assert_equal "gpt-5.2", gpt.fetch("model")
+    assert_equal "openai", gpt.fetch("provider")
+    assert_equal "openai/gpt-5.2", gpt.fetch("model")
     assert_equal 2, gpt.fetch("calls")
     assert_equal 110, gpt.fetch("input_tokens")
     assert_equal 55, gpt.fetch("output_tokens")
@@ -96,7 +96,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
     assert_in_delta 40.0 / 110.0, gpt.fetch("cache_hit_rate"), 1e-9
 
     deepseek = by_model.second
-    assert_equal "deepseek-v3", deepseek.fetch("model")
+    assert_equal "deepseek/deepseek-v3", deepseek.fetch("model")
     assert_in_delta 1.0, deepseek.fetch("cache_hit_rate"), 1e-9
 
     by_day = stats.fetch("by_day")
@@ -122,7 +122,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       lane_id: lane.id,
       turn_id: "0194f3c0-0000-7000-8000-00000000b111",
       metadata: { "usage" => { "input_tokens" => 10, "output_tokens" => 2, "cache_read_tokens" => 7 } },
-      body_output: { "provider" => "simple_inference", "model" => "gpt-5.2", "content" => "ok" },
+      body_output: { "provider_key" => "openai", "model_ref" => "openai/gpt-5.2", "content" => "ok" },
       created_at: t1,
       finished_at: t1,
       updated_at: t1,
@@ -134,7 +134,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       lane_id: lane.id,
       turn_id: "0194f3c0-0000-7000-8000-00000000b112",
       metadata: { "usage" => { "input_tokens" => "nope", "output_tokens" => "x", "cache_read_tokens" => "??" } },
-      body_output: { "provider" => "simple_inference", "model" => "gpt-5.2", "content" => "bad" },
+      body_output: { "provider_key" => "openai", "model_ref" => "openai/gpt-5.2", "content" => "bad" },
       created_at: t1 + 1.second,
       finished_at: t1 + 1.second,
       updated_at: t1 + 1.second,
@@ -165,7 +165,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       lane_id: main_lane.id,
       turn_id: "0194f3c0-0000-7000-8000-00000000b201",
       metadata: { "usage" => { "input_tokens" => 10, "output_tokens" => 1, "cache_read_tokens" => 0 } },
-      body_output: { "provider" => "simple_inference", "model" => "gpt-5.2", "content" => "main" },
+      body_output: { "provider_key" => "openai", "model_ref" => "openai/gpt-5.2", "content" => "main" },
       created_at: t1,
       finished_at: t1,
       updated_at: t1,
@@ -177,7 +177,7 @@ class DAG::LlmUsageStatsTest < ActiveSupport::TestCase
       lane_id: branch_lane.id,
       turn_id: "0194f3c0-0000-7000-8000-00000000b202",
       metadata: { "usage" => { "input_tokens" => 20, "output_tokens" => 2, "cache_read_tokens" => 10 } },
-      body_output: { "provider" => "simple_inference", "model" => "deepseek-v3", "content" => "branch" },
+      body_output: { "provider_key" => "deepseek", "model_ref" => "deepseek/deepseek-v3", "content" => "branch" },
       created_at: t2,
       finished_at: t2,
       updated_at: t2,

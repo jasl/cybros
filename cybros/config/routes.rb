@@ -4,6 +4,7 @@ Rails.application.routes.draw do
   resource :session, only: %i[new create destroy]
 
   get "dashboard", to: "dashboard#show"
+  get "statistics", to: "statistics#show"
   get "sidebar_conversations", to: "sidebar_conversations#index"
 
   namespace :settings do
@@ -13,8 +14,10 @@ Rails.application.routes.draw do
 
   namespace :system do
     namespace :settings do
-      resources :llm_providers, only: %i[index new create edit update destroy] do
-        post :fetch_models, on: :member
+      resources :llm_providers, only: %i[index edit update], param: :provider_key do
+        patch :default_model, on: :collection
+        post :device_flow_start, on: :member
+        post :device_flow_poll, on: :member
       end
       resources :agent_programs, only: %i[index new create show]
     end

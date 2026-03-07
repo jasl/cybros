@@ -43,4 +43,3 @@ test.describe("Connectivity health banner", () => {
     await expect(page.getByText("(server reachable)")).toBeVisible()
   })
 })
-

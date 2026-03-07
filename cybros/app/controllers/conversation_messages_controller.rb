@@ -5,7 +5,7 @@ class ConversationMessagesController < ApplicationController
   before_action :set_conversation
   before_action -> { throttle!(key: "messages", limit: 20, period: 60) }, only: :create
 
-  rescue_from ArgumentError, Cybros::Error do |e|
+  rescue_from ArgumentError, AgentCore::ValidationError, Cybros::Error do |e|
     respond_to do |format|
       format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
       format.html { render plain: e.message, status: :unprocessable_entity }
@@ -89,6 +89,7 @@ class ConversationMessagesController < ApplicationController
   def create
     content = params.fetch(:content, "").to_s
     content = content.strip
+    model_ref = params.fetch(:model_ref, "").to_s.strip.presence
 
     if content.blank?
       respond_to do |format|
@@ -98,7 +99,7 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    result = @conversation.append_user_message_and_project!(content: content, mode: :preview)
+    result = @conversation.append_user_message_and_project!(content: content, mode: :preview, model_ref: model_ref)
     created_messages = result.fetch(:messages)
 
     respond_to do |format|

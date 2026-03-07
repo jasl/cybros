@@ -15,7 +15,6 @@
 - `lib/agent_core/resources/tools/tool_call_repair_loop.rb`
 - `lib/agent_core/resources/tools/registry.rb`
 - `lib/agent_core/resources/memory/tools.rb`
-- `lib/agent_core/resources/provider/provider_failover.rb`
 
 ---
 
@@ -183,26 +182,20 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 - `task` 执行异常：`TaskExecutor` 返回 `ExecutionResult.errored`，节点进入 `errored`
   - 若 `task -> next_agent_message` 为 `sequence`：child 仍可执行
   - prompt 中对应为 tool_result error（见 `ContextAdapter`）
-- LLM provider 异常：`AgentMessageExecutor` 返回 `ExecutionResult.errored`，节点进入 `errored`（可 retry）
-  - 若配置了 `runtime.fallback_models`，部分 provider/tooling 协议错误会触发 failover（见 5.1）
-
-### 5.1 ProviderFailover（同 provider 多模型重试）
-
-当 `runtime.fallback_models` 非空时，LLM 调用会启用“同 provider 多模型重试”：
-
-- requested model：`runtime.model`
-- fallback models：`runtime.fallback_models`（按顺序尝试）
-- 触发条件（P0）：
-  - `ProviderError.status == 404`（model not found/unsupported）
-  - `ProviderError.status in [400, 422]` 且错误信息包含工具/协议相关关键词（`tools/function/schema/...`）
-- Streaming 限制（P0）：
-  - 仅覆盖 `provider.chat(stream: true)` 在拿到 enumerator 前就 raise 的场景
-  - 不处理 mid-stream 错误（不做“中途切换”）
-
-审计：
-
-- `agent_message.body.output["model"]` 记录实际使用的 `used_model`
-- 发生 failover 时，`agent_message.metadata["llm"]["failover"]` 记录 requested/used/attempts
+- 主 LLM 调用（`agent_message/character_message`）在进入 hard error 前，会先做一次**有上限的同节点自动恢复**：
+  - 受 `runtime.agent_call_recovery_attempts` 控制（默认 `1`）
+  - 仅覆盖窄范围可重试失败：
+    - `ProviderError.status` ∈ `408/409/429/5xx`
+    - stream bootstrap / protocol failure，且**尚未写出可见 output delta**
+      - 若 stream failure 包裹的是 `ProviderError`，仍按 `408/409/429/5xx` 白名单判定
+  - 不覆盖：
+    - `ContextWindowExceededError`
+    - capability / config validation error
+    - 已经写出可见 output delta 的 mid-stream failure
+  - 恢复成功：当前节点继续原本流程（final answer 或 tool loop）
+  - 恢复耗尽：当前节点返回 `ExecutionResult.errored`
+- LLM provider / stream 异常在未被上述恢复成功兜住时：`AgentMessageExecutor` 返回 `ExecutionResult.errored`，节点进入 `errored`（可 retry）
+  - 不做 provider/model failover：错误会原样传播，要求调用方修正配置、能力或上游状态后再试
 
 ---
 

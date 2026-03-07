@@ -50,7 +50,7 @@ module SimpleInference
 
       def each
         return enum_for(:each) unless block_given?
-        raise Errors::ConfigurationError, "ChatStream can only be consumed once" if @started
+        raise SimpleInference::ConfigurationError, "ChatStream can only be consumed once" if @started
 
         @started = true
         @result =

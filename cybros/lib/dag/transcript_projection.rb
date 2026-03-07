@@ -1,7 +1,8 @@
 module DAG
   class TranscriptProjection
-    def initialize(graph:)
+    def initialize(graph:, context_node_decorator: nil)
       @graph = graph
+      @context_node_decorator = context_node_decorator
     end
 
     def project(node_records:, mode:)
@@ -21,6 +22,7 @@ module DAG
     def apply_rules(context_nodes:)
       transcript = Array(context_nodes).select { |context_node| @graph.transcript_include?(context_node) }
       apply_preview_overrides!(transcript)
+      apply_context_node_decorator!(transcript)
       transcript
     end
 
@@ -76,6 +78,17 @@ module DAG
           output_preview["content"] = override
           payload["output_preview"] = output_preview
           context_node["payload"] = payload
+        end
+      end
+
+      def apply_context_node_decorator!(transcript)
+        return if @context_node_decorator.nil?
+
+        transcript.each do |context_node|
+          decorated = @context_node_decorator.call(context_node)
+          next unless decorated.is_a?(Hash)
+
+          context_node.replace(decorated)
         end
       end
   end

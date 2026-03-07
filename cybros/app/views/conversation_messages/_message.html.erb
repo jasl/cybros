@@ -5,11 +5,22 @@
 <% payload = {} unless payload.is_a?(Hash) %>
 <% metadata = message.fetch("metadata", {}) %>
 <% metadata = {} unless metadata.is_a?(Hash) %>
+<% action_policy = message.fetch("action_policy", {}) %>
+<% action_policy = {} unless action_policy.is_a?(Hash) %>
+<% actions = action_policy.fetch("actions", {}) %>
+<% actions = {} unless actions.is_a?(Hash) %>
+<% retry_action = actions.fetch("retry", {}) %>
+<% retry_action = {} unless retry_action.is_a?(Hash) %>
+<% regenerate_action = actions.fetch("regenerate", {}) %>
+<% regenerate_action = {} unless regenerate_action.is_a?(Hash) %>
+<% swipe_action = actions.fetch("swipe", {}) %>
+<% swipe_action = {} unless swipe_action.is_a?(Hash) %>
+<% branch_action = actions.fetch("branch", {}) %>
+<% branch_action = {} unless branch_action.is_a?(Hash) %>
+<% action_policy_json = json_escape(action_policy.to_json) %>
 <% preview = payload.dig("output_preview", "content").to_s %>
 <% output = payload.dig("output", "content").to_s %>
 <% input = payload.dig("input", "content").to_s %>
-<% llm_warning = metadata.fetch("llm_warning", {}) %>
-<% llm_warning = {} unless llm_warning.is_a?(Hash) %>
 <% terminal = Conversation::TERMINAL_NODE_STATES.include?(state) %>
 <% markdown_source = output.presence || preview %>
 <% markdown_source = markdown_source.to_s.truncate(20_000, omission: "\n\n… (truncated)") %>
@@ -22,7 +33,8 @@
       class="flex justify-end group"
       data-controller="message-actions"
       data-message-actions-node-id-value="<%= node_id %>"
-      data-message-actions-role-value="user">
+      data-message-actions-role-value="user"
+      data-message-actions-action-policy-value="<%= action_policy_json %>">
       <div class="max-w-[70%]">
         <div class="bg-base-200 rounded-3xl px-5 py-3" data-node-id="<%= node_id %>">
           <p class="whitespace-pre-wrap text-sm" data-role="user-text"><%= input %></p>
@@ -35,13 +47,15 @@
             <span class="icon-[lucide--copy] size-3"></span>
             Copy
           </button>
-          <button type="button"
-                  class="btn btn-ghost btn-xs"
-                  data-message-actions-target="branchButton"
-                  data-action="message-actions#branch">
-            <span class="icon-[lucide--git-branch] size-3"></span>
-            Branch
-          </button>
+          <% if branch_action.fetch("supported", false) %>
+            <button type="button"
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="branchButton"
+                    data-action="message-actions#branch">
+              <span class="icon-[lucide--git-branch] size-3"></span>
+              Branch
+            </button>
+          <% end %>
         </div>
       </div>
     </div>
@@ -50,30 +64,15 @@
       class="flex justify-start group"
       data-controller="message-actions"
       data-message-actions-node-id-value="<%= node_id %>"
-      data-message-actions-role-value="agent">
+      data-message-actions-role-value="agent"
+      data-message-actions-action-policy-value="<%= action_policy_json %>">
       <div class="max-w-[85%]">
         <div
           data-role="agent-bubble"
           data-node-id="<%= node_id %>"
           data-node-state="<%= state %>"
+          data-action-policy="<%= action_policy_json %>"
           class="bg-base-100 border border-base-300 rounded-3xl px-5 py-3">
-          <% if llm_warning.present? %>
-            <div role="alert" class="alert alert-warning alert-soft text-sm mb-2">
-              <span class="icon-[lucide--triangle-alert] size-4 shrink-0"></span>
-              <span class="flex-1">
-                Preferred model unavailable.
-                Using <span class="font-mono"><%= llm_warning.fetch("chosen_model", "").to_s %></span>
-                <% provider_name = llm_warning.fetch("provider_name", "").to_s %>
-                <% if provider_name.present? %>
-                  via <span class="font-semibold"><%= provider_name %></span>.
-                <% end %>
-                <% preferred = Array(llm_warning.fetch("preferred_models", [])).map(&:to_s).reject(&:blank?) %>
-                <% if preferred.any? %>
-                  Preferred: <span class="font-mono"><%= preferred.join(", ") %></span>
-                <% end %>
-              </span>
-            </div>
-          <% end %>
           <% if terminal && state == "errored" && error_text.present? %>
             <div class="text-sm text-error"><%= error_text %></div>
           <% elsif terminal && state == "stopped" && reason_text.present? %>
@@ -103,38 +102,52 @@
             Copy
           </button>
 
-          <button type="button"
-                  class="btn btn-ghost btn-xs"
-                  data-message-actions-target="regenerateButton"
-                  data-action="message-actions#regenerate">
-            <span class="icon-[lucide--refresh-cw] size-3"></span>
-            Regenerate
-          </button>
-
-          <div class="join hidden" data-message-actions-target="swipeNav">
+          <% if retry_action.fetch("available", false) %>
             <button type="button"
-                    class="btn btn-ghost btn-xs join-item"
-                    title="Previous version"
-                    data-message-actions-target="swipeLeft"
-                    data-action="message-actions#swipeLeft">
-              <span class="icon-[lucide--chevron-left] size-3"></span>
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="retryButton"
+                    data-action="message-actions#retry">
+              <span class="icon-[lucide--refresh-cw] size-3"></span>
+              Retry
             </button>
+          <% elsif regenerate_action.fetch("available", false) %>
             <button type="button"
-                    class="btn btn-ghost btn-xs join-item"
-                    title="Next version"
-                    data-message-actions-target="swipeRight"
-                    data-action="message-actions#swipeRight">
-              <span class="icon-[lucide--chevron-right] size-3"></span>
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="regenerateButton"
+                    data-action="message-actions#regenerate">
+              <span class="icon-[lucide--refresh-cw] size-3"></span>
+              Regenerate
             </button>
-          </div>
+          <% end %>
 
-          <button type="button"
-                  class="btn btn-ghost btn-xs"
-                  data-message-actions-target="branchButton"
-                  data-action="message-actions#branch">
-            <span class="icon-[lucide--git-branch] size-3"></span>
-            Branch
-          </button>
+          <% if swipe_action.fetch("supported", false) %>
+            <div class="join hidden" data-message-actions-target="swipeNav">
+              <button type="button"
+                      class="btn btn-ghost btn-xs join-item"
+                      title="Previous version"
+                      data-message-actions-target="swipeLeft"
+                      data-action="message-actions#swipeLeft">
+                <span class="icon-[lucide--chevron-left] size-3"></span>
+              </button>
+              <button type="button"
+                      class="btn btn-ghost btn-xs join-item"
+                      title="Next version"
+                      data-message-actions-target="swipeRight"
+                      data-action="message-actions#swipeRight">
+                <span class="icon-[lucide--chevron-right] size-3"></span>
+              </button>
+            </div>
+          <% end %>
+
+          <% if branch_action.fetch("supported", false) %>
+            <button type="button"
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="branchButton"
+                    data-action="message-actions#branch">
+              <span class="icon-[lucide--git-branch] size-3"></span>
+              Branch
+            </button>
+          <% end %>
         </div>
       </div>
     </div>

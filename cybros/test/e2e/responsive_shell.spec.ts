@@ -62,4 +62,3 @@ test.describe("Responsive agent shell", () => {
     await expect(page.getByText("System")).toBeVisible()
   })
 })
-

@@ -43,6 +43,38 @@ class AgentCore::DAG::RuntimeExecutionContextAttributesTest < Minitest::Test
     assert_equal({ stream: false }, updated.llm_options)
   end
 
+  def test_runtime_does_not_expose_failover_configuration
+    runtime = build_runtime
+
+    refute_respond_to runtime, :fallback_models
+    refute_respond_to runtime, :tool_call_repair_fallback_models
+    refute_respond_to runtime, :tool_name_repair_fallback_models
+  end
+
+  def test_agent_call_recovery_attempts_defaults_to_one
+    runtime = build_runtime
+
+    assert_equal 1, runtime.agent_call_recovery_attempts
+  end
+
+  def test_agent_call_recovery_attempts_must_be_an_integer
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        build_runtime(agent_call_recovery_attempts: "oops")
+      end
+
+    assert_equal "agent_core.dag.runtime.agent_call_recovery_attempts_must_be_an_integer", err.code
+  end
+
+  def test_agent_call_recovery_attempts_must_be_non_negative
+    err =
+      assert_raises(AgentCore::ValidationError) do
+        build_runtime(agent_call_recovery_attempts: -1)
+      end
+
+    assert_equal "agent_core.dag.runtime.agent_call_recovery_attempts_must_be_0", err.code
+  end
+
   def test_tool_name_normalize_index_requires_hash
     err =
       assert_raises(AgentCore::ValidationError) do

@@ -15,6 +15,7 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
       @calls << { messages: messages, model: model, tools: tools, stream: stream, options: options }
       resp = @responses.shift
       raise "unexpected provider.chat call (no remaining responses)" unless resp
+      raise resp if resp.is_a?(Exception)
       resp
     end
   end
@@ -66,7 +67,6 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolCallRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         max_output_tokens: 300,
@@ -119,7 +119,6 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolCallRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         max_output_tokens: 300,
@@ -137,6 +136,58 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
     assert_equal 1, repair.fetch("candidates")
     assert_equal 0, repair.fetch("repaired")
     assert_equal 1, repair.fetch("failed")
+    assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
+  end
+
+  def test_retries_provider_errors_on_the_same_requested_model
+    provider =
+      StubProvider.new(
+        responses: [
+          StandardError.new("boom"),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"arguments\":{\"text\":\"hi\"}}]}"),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tool_calls = [
+      AgentCore::ToolCall.new(
+        id: "tc_1",
+        name: "echo",
+        arguments: {},
+        arguments_parse_error: :invalid_json,
+        arguments_raw: "{bad",
+      ),
+    ]
+
+    visible_tools = [
+      {
+        name: "echo",
+        description: "Echo",
+        parameters: { type: "object", properties: { "text" => { type: "string" } } },
+      },
+    ]
+
+    result =
+      AgentCore::Resources::Tools::ToolCallRepairLoop.call(
+        provider: provider,
+        requested_model: "primary",
+        tool_calls: tool_calls,
+        visible_tools: visible_tools,
+        max_output_tokens: 300,
+        max_attempts: 2,
+        options: {},
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        run_id: "rid",
+      )
+
+    repaired = result.fetch(:tool_calls).first
+    assert_nil repaired.arguments_parse_error
+    assert_equal({ "text" => "hi" }, repaired.arguments)
+    assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
+    failures = result.fetch(:metadata).dig("tool_loop", "repair", "failures_sample")
+    assert failures.any? { |h| h.fetch("reason").to_s.include?("provider_error=StandardError") }
   end
 
   def test_repairs_schema_invalid_arguments
@@ -175,7 +226,6 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolCallRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         max_output_tokens: 300,
@@ -221,7 +271,6 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
         AgentCore::Resources::Tools::ToolCallRepairLoop.call(
           provider: provider,
           requested_model: "primary",
-          fallback_models: [],
           tool_calls: tool_calls,
           visible_tools: visible_tools,
           max_output_tokens: 300,
@@ -240,5 +289,27 @@ class AgentCore::Resources::Tools::ToolCallRepairLoopTest < Minitest::Test
     assert_equal 2, repair.fetch("candidates")
     assert_equal 1, repair.fetch("repaired")
     assert_equal 1, repair.fetch("failed")
+  end
+
+  def test_does_not_accept_fallback_models_argument
+    provider = StubProvider.new(responses: [])
+
+    err =
+      assert_raises(ArgumentError) do
+        AgentCore::Resources::Tools::ToolCallRepairLoop.call(
+          provider: provider,
+          requested_model: "primary",
+          fallback_models: [],
+          tool_calls: [],
+          visible_tools: [],
+          max_output_tokens: 300,
+          max_attempts: 1,
+          options: {},
+          instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          run_id: "rid",
+        )
+      end
+
+    assert_includes err.message, "fallback_models"
   end
 end

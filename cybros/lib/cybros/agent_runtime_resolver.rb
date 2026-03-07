@@ -1,15 +1,242 @@
 module Cybros
   module AgentRuntimeResolver
+    require_relative "llm/catalog"
+    require_relative "llm/capability_gated_provider"
+    require_relative "llm/codex_oauth"
+
     MAX_CONTEXT_TURNS = 1000
 
     module_function
 
+    def normalize_model_ref(model_ref:)
+      ref = model_ref.to_s.strip
+      provider_key, model_key = ref.split("/", 2).map(&:to_s)
+      provider_key = provider_key.to_s.strip
+      model_key = model_key.to_s.strip
+      return ref if provider_key.empty? || model_key.empty?
+
+      "#{provider_key}/#{model_key}"
+    end
+
     def model_resolution_for(conversation:)
+      catalog = Cybros::LLM::Catalog.effective
       agent_metadata = agent_metadata_for(conversation)
-      resolve_model_and_provider(agent_metadata, include_diagnostics: true)
+      preferred_models = model_prefer_from_agent_metadata(agent_metadata)
+      model_ref =
+        parse_explicit_model_ref(conversation&.metadata)&.join("/") ||
+          default_model_ref_for(agent_metadata: agent_metadata, catalog: catalog)
+      provider_key, model_key = validate_model_ref!(model_ref: model_ref).values_at(:provider_key, :model_key)
+      model_spec = catalog.model(provider_key, model_key)
+
+      {
+        provider: nil,
+        model: model_spec.fetch("api_model").to_s,
+        preferred_models: preferred_models,
+        matched_preference: preferred_models.any?,
+        provider_name: catalog.provider(provider_key).fetch("display_name", nil).to_s.presence,
+        provider_key: provider_key,
+        model_key: model_key,
+        model_ref: model_ref,
+      }
+    rescue AgentCore::ValidationError
+      raise
     rescue StandardError
+      if conversation&.metadata&.dig("llm", "model_ref").to_s.strip.present?
+        AgentCore::ValidationError.raise!(
+          "Selected model is no longer available. Please reselect a model.",
+          code: "cybros.llm.model_not_found",
+          details: {},
+        )
+      end
       { provider: nil, model: nil, preferred_models: [], matched_preference: false, provider_name: nil }
     end
+
+    def validate_model_ref!(model_ref:)
+      ref = normalize_model_ref(model_ref: model_ref)
+      provider_key, model_key = ref.split("/", 2).map(&:to_s)
+      provider_key = provider_key.to_s.strip
+      model_key = model_key.to_s.strip
+
+      if provider_key.empty? || model_key.empty?
+        AgentCore::ValidationError.raise!(
+          "Selected model is no longer available. Please reselect a model.",
+          code: "cybros.llm.model_not_found",
+          details: { model_ref: ref },
+        )
+      end
+
+      catalog = Cybros::LLM::Catalog.effective
+
+      provider_spec = catalog.provider(provider_key)
+      enabled = provider_spec.fetch("enabled", true) != false
+      AgentCore::ValidationError.raise!(
+        "Selected provider is disabled",
+        code: "cybros.llm.provider_disabled",
+        details: { provider_key: provider_key },
+      ) unless enabled
+
+      environments = provider_spec.fetch("environments", nil)
+      if environments.is_a?(Array) && !environments.include?(Rails.env.to_s)
+        AgentCore::ValidationError.raise!(
+          "Selected provider is not available in this environment",
+          code: "cybros.llm.provider_unavailable_in_environment",
+          details: { provider_key: provider_key, environment: Rails.env.to_s, allowed_environments: environments },
+        )
+      end
+
+      models = provider_spec.fetch("models", {})
+      model_spec = models.is_a?(Hash) ? models[model_key] : nil
+      raise KeyError, "model missing" unless model_spec.is_a?(Hash)
+
+      model_enabled = model_spec.fetch("enabled", true) != false
+      AgentCore::ValidationError.raise!(
+        "Selected model is disabled",
+        code: "cybros.llm.model_disabled",
+        details: { provider_key: provider_key, model_key: model_key },
+      ) unless model_enabled
+
+      ensure_credential_present!(provider_key: provider_key, provider_spec: provider_spec)
+
+      { provider_key: provider_key, model_key: model_key }
+    rescue KeyError
+      AgentCore::ValidationError.raise!(
+        "Selected model is no longer available. Please reselect a model.",
+        code: "cybros.llm.model_not_found",
+        details: { provider_key: provider_key, model_key: model_key, model_ref: ref },
+      )
+    end
+
+    def default_model_ref_for(agent_metadata:, catalog: Cybros::LLM::Catalog.effective)
+      preferred_model_ref = preferred_model_ref_for(agent_metadata: agent_metadata, catalog: catalog)
+      return preferred_model_ref if preferred_model_ref.present?
+
+      site_default_model_ref = Account.instance.llm_default_model_ref.to_s.strip
+      if site_default_model_ref.present?
+        normalized_site_default = normalize_model_ref(model_ref: site_default_model_ref)
+        if model_ref_in_catalog?(catalog: catalog, model_ref: normalized_site_default)
+          validate_model_ref!(model_ref: normalized_site_default)
+          return normalized_site_default
+        end
+      end
+
+      normalized_catalog_default = normalize_model_ref(model_ref: catalog.default_model_ref)
+      validate_model_ref!(model_ref: normalized_catalog_default)
+      normalized_catalog_default
+    end
+
+    def usable_model_options(catalog: Cybros::LLM::Catalog.effective, env_name: Rails.env.to_s)
+      raw_options =
+        catalog.enabled_provider_keys_for_env(env_name).flat_map do |provider_key|
+          provider_spec = catalog.provider(provider_key)
+          next [] unless credential_present_for_provider?(provider_key: provider_key, provider_spec: provider_spec)
+
+          models = provider_spec.fetch("models", {})
+          next [] unless models.is_a?(Hash)
+
+          models.map do |model_key, model_spec|
+            next nil unless model_spec.is_a?(Hash)
+            next nil if model_spec.fetch("enabled", true) == false
+
+            {
+              model_ref: "#{provider_key}/#{model_key}",
+              label: model_spec.fetch("display_name").to_s,
+              provider_key: provider_key,
+              provider_display_name: provider_spec.fetch("display_name").to_s,
+              model_key: model_key.to_s,
+              api_model: model_spec.fetch("api_model").to_s,
+            }
+          end.compact
+        end
+
+      label_counts = raw_options.each_with_object(Hash.new(0)) { |option, counts| counts[option.fetch(:label)] += 1 }
+      raw_options.map do |option|
+        next option if label_counts.fetch(option.fetch(:label)) == 1
+
+        option.merge(label: "#{option.fetch(:label)} (#{option.fetch(:provider_display_name)})")
+      end
+    end
+
+    def preferred_model_ref_for(agent_metadata:, catalog:)
+      preferences = model_prefer_from_agent_metadata(agent_metadata)
+      return nil if preferences.empty?
+
+      preferences.each do |preference|
+        resolved_model_ref = resolve_preference_to_model_ref(catalog: catalog, preference: preference)
+        next if resolved_model_ref.blank?
+
+        begin
+          validate_model_ref!(model_ref: resolved_model_ref)
+          return resolved_model_ref
+        rescue AgentCore::ValidationError
+          next
+        end
+      end
+
+      AgentCore::ValidationError.raise!(
+        "Preferred model is unavailable. Please update the agent configuration or model settings.",
+        code: "cybros.llm.model_preference_unavailable",
+        details: { preferred_models: preferences },
+      )
+    end
+    private_class_method :preferred_model_ref_for
+
+    def resolve_preference_to_model_ref(catalog:, preference:)
+      raw = preference.to_s.strip
+      return nil if raw.empty?
+
+      if raw.include?("/")
+        normalized = normalize_model_ref(model_ref: raw)
+        return normalized if model_ref_in_catalog?(catalog: catalog, model_ref: normalized)
+        return nil
+      end
+
+      matches =
+        usable_or_enabled_model_refs(catalog: catalog).select do |row|
+          row.fetch(:model_key) == raw || row.fetch(:api_model) == raw
+        end
+
+      if matches.length > 1
+        AgentCore::ValidationError.raise!(
+          "Preferred model is ambiguous. Use a fully-qualified model_ref.",
+          code: "cybros.llm.model_preference_ambiguous",
+          details: { preference: raw, matches: matches.map { |row| row.fetch(:model_ref) } },
+        )
+      end
+
+      matches.first&.fetch(:model_ref)
+    end
+    private_class_method :resolve_preference_to_model_ref
+
+    def usable_or_enabled_model_refs(catalog:)
+      catalog.enabled_provider_keys_for_env(Rails.env.to_s).flat_map do |provider_key|
+        provider_spec = catalog.provider(provider_key)
+        models = provider_spec.fetch("models", {})
+        next [] unless models.is_a?(Hash)
+
+        models.map do |model_key, model_spec|
+          next nil unless model_spec.is_a?(Hash)
+          next nil if model_spec.fetch("enabled", true) == false
+
+          {
+            model_ref: "#{provider_key}/#{model_key}",
+            model_key: model_key.to_s,
+            api_model: model_spec.fetch("api_model").to_s,
+          }
+        end.compact
+      end
+    end
+    private_class_method :usable_or_enabled_model_refs
+
+    def model_ref_in_catalog?(catalog:, model_ref:)
+      provider_key, model_key = normalize_model_ref(model_ref: model_ref).split("/", 2).map(&:to_s)
+      return false if provider_key.blank? || model_key.blank?
+
+      catalog.model(provider_key, model_key)
+      true
+    rescue KeyError
+      false
+    end
+    private_class_method :model_ref_in_catalog?
 
     def phase_0_tool_policy(base_tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new)
       AgentCore::Resources::Tools::Policy::Ruleset.new(
@@ -39,7 +266,7 @@ module Cybros
       conversation = conversation_for(node)
 
       agent_metadata = agent_metadata_for(conversation)
-      model_resolution = resolve_model_and_provider(agent_metadata)
+      llm_selection = resolve_llm_selection(node: node, agent_metadata: agent_metadata)
       profile_resolution = resolve_profile(agent_metadata)
       profile_name = profile_resolution.fetch(:profile_name)
       definition = profile_resolution.fetch(:definition)
@@ -75,7 +302,7 @@ module Cybros
             ),
         )
 
-      provider ||= model_resolution.fetch(:provider)
+      provider ||= llm_selection.fetch(:provider)
       tools_registry ||= build_tools_registry
       instrumenter ||= build_instrumenter
 
@@ -87,8 +314,7 @@ module Cybros
 
       runtime_kwargs = {
         provider: provider,
-        model: model_resolution.fetch(:model),
-        fallback_models: parse_fallback_models_env,
+        model: llm_selection.fetch(:api_model),
         tools_registry: tools_registry,
         tool_policy: tool_policy,
         instrumenter: instrumenter,
@@ -99,6 +325,9 @@ module Cybros
         directives_config: definition.fetch(:directives_config, nil),
         system_prompt_section_overrides: definition.fetch(:system_prompt_section_overrides, {}),
       }
+
+      runtime_kwargs[:token_counter] = llm_selection.fetch(:token_counter, nil) if llm_selection.key?(:token_counter)
+      runtime_kwargs[:context_window_tokens] = llm_selection.fetch(:context_window_tokens, nil) if llm_selection.key?(:context_window_tokens)
 
       runtime_kwargs[:context_turns] = context_turns if context_turns
 
@@ -129,6 +358,268 @@ module Cybros
       AgentCore::DAG::Runtime.new(**runtime_kwargs)
     end
 
+    def resolve_llm_selection(node:, agent_metadata:)
+      catalog = Cybros::LLM::Catalog.effective
+
+      conversation = conversation_for(node)
+      explicit_model_ref =
+        parse_explicit_model_ref(node&.metadata)&.join("/") ||
+          parse_explicit_model_ref(conversation&.metadata)&.join("/")
+      selected_model_ref =
+        if explicit_model_ref.present?
+          validate_model_ref!(model_ref: explicit_model_ref)
+          normalize_model_ref(model_ref: explicit_model_ref)
+        else
+          default_model_ref_for(agent_metadata: agent_metadata, catalog: catalog)
+        end
+
+      provider_key, model_key = selected_model_ref.split("/", 2).map(&:to_s)
+
+      provider_spec = catalog.provider(provider_key)
+      model_spec = catalog.model(provider_key, model_key)
+
+      built =
+        build_llm_selection(
+          provider_key: provider_key,
+          model_key: model_key,
+          provider_spec: provider_spec,
+          model_spec: model_spec,
+        )
+
+      built
+    end
+    private_class_method :resolve_llm_selection
+
+    def parse_explicit_model_ref(metadata)
+      return nil unless metadata.is_a?(Hash)
+
+      llm = metadata.fetch("llm", nil)
+      llm = {} unless llm.is_a?(Hash)
+
+      model_ref = llm.fetch("model_ref", nil).to_s.strip
+      provider_key = llm.fetch("provider_key", nil).to_s.strip
+      model_key = llm.fetch("model_key", nil).to_s.strip
+
+      if model_ref.present?
+        pk, mk = normalize_model_ref(model_ref: model_ref).split("/", 2).map(&:to_s)
+        provider_key = pk.to_s.strip
+        model_key = mk.to_s.strip
+      end
+
+      return nil if provider_key.empty? || model_key.empty?
+
+      [provider_key, model_key]
+    rescue StandardError
+      nil
+    end
+    private_class_method :parse_explicit_model_ref
+
+    def ensure_credential_present!(provider_key:, provider_spec:)
+      return if credential_present_for_provider?(provider_key: provider_key, provider_spec: provider_spec)
+
+      AgentCore::ValidationError.raise!(
+        "Provider credential missing. Please configure credentials and try again.",
+        code: "cybros.llm.credential_missing",
+        details: { provider_key: provider_key, credential_type: provider_spec.fetch("credential_type", "api_key").to_s },
+      )
+    end
+    private_class_method :ensure_credential_present!
+
+    def credential_present_for_provider?(provider_key:, provider_spec:)
+      requires = provider_spec.fetch("requires_credential") == true
+      return true unless requires
+
+      credential_type = provider_spec.fetch("credential_type", "api_key").to_s
+      credential = LLMProvider.find_by(provider_key: provider_key)
+
+      if credential_type == "oauth_codex"
+        refresh_token = credential&.refresh_token.to_s
+        access_token = credential&.access_token.to_s
+        expires_at = credential&.expires_at
+        refresh_token.present? || (access_token.present? && expires_at.is_a?(Time) && expires_at > (Time.current + 60))
+      else
+        credential&.api_key.to_s.present?
+      end
+    rescue StandardError
+      false
+    end
+    private_class_method :credential_present_for_provider?
+
+    def build_llm_selection(provider_key:, model_key:, provider_spec:, model_spec:)
+      enabled = provider_spec.fetch("enabled", true) != false
+      AgentCore::ValidationError.raise!(
+        "Selected provider is disabled",
+        code: "cybros.llm.provider_disabled",
+        details: { provider_key: provider_key },
+      ) unless enabled
+
+      model_enabled = model_spec.fetch("enabled", true) != false
+      AgentCore::ValidationError.raise!(
+        "Selected model is disabled",
+        code: "cybros.llm.model_disabled",
+        details: { provider_key: provider_key, model_key: model_key },
+      ) unless model_enabled
+
+      model_protocol = model_spec.dig("capabilities", "protocol").to_s
+      provider_protocol = provider_spec.fetch("wire_api").to_s
+      if model_protocol.present? && model_protocol != provider_protocol
+        AgentCore::ValidationError.raise!(
+          "Selected model protocol does not match provider protocol",
+          code: "cybros.llm.protocol_mismatch",
+          details: {
+            provider_key: provider_key,
+            model_key: model_key,
+            model_protocol: model_protocol,
+            provider_protocol: provider_protocol,
+          },
+        )
+      end
+
+      transport = provider_spec.fetch("transport").to_s
+      if provider_protocol == "responses" && transport == "websocket"
+        AgentCore::ValidationError.raise!(
+          "Responses websocket transport is not supported yet",
+          code: "cybros.llm.transport.websocket_not_supported_yet",
+          details: { provider_key: provider_key },
+        )
+      end
+
+      api_model = model_spec.fetch("api_model").to_s
+      tokenizer_hint = model_spec.fetch("tokenizer_hint", nil).to_s.strip
+      tokenizer_hint = Cybros::TokenEstimation.canonical_model_hint(api_model) if tokenizer_hint.empty?
+
+      token_estimator =
+        Cybros::TokenEstimation.estimator(
+          tokenizer_root_path: Cybros::TokenEstimation.tokenizer_root,
+          strict: false,
+        )
+      token_counter =
+        AgentCore::Resources::TokenCounter::Estimator.new(
+          token_estimator: token_estimator,
+          model_hint: tokenizer_hint,
+        )
+
+      base_url = provider_spec.fetch("base_url").to_s
+      headers = provider_spec.fetch("headers", {})
+      headers = {} unless headers.is_a?(Hash)
+      responses_path = provider_spec.fetch("responses_path", nil).to_s
+      responses_path = nil if responses_path.strip.empty?
+
+      provider_defaults = provider_spec.fetch("request_defaults", {})
+      provider_defaults = {} unless provider_defaults.is_a?(Hash)
+      model_defaults = model_spec.fetch("request_defaults", {})
+      model_defaults = {} unless model_defaults.is_a?(Hash)
+      request_defaults = provider_defaults.deep_merge(model_defaults)
+
+      requires_credential = provider_spec.fetch("requires_credential") == true
+      credential_type = provider_spec.fetch("credential_type", "api_key").to_s
+      credential = LLMProvider.find_by(provider_key: provider_key)
+      transport = provider_spec.fetch("transport", nil).to_s.strip
+
+      if requires_credential && credential_type == "oauth_codex" && credential
+        begin
+          Cybros::LLM::CodexOAuth.refresh_if_needed!(credential)
+          credential.reload
+        rescue Cybros::LLM::CodexOAuthError => e
+          AgentCore::ValidationError.raise!(
+            "OAuth refresh failed. Please re-authenticate.",
+            code: "cybros.llm.oauth_refresh_failed",
+            details: { provider_key: provider_key, error_code: e.error_code, message: e.message },
+          )
+        end
+      end
+
+      api_key =
+        if requires_credential && credential_type == "api_key"
+          credential&.api_key.to_s.presence
+        else
+          credential&.api_key.to_s.presence
+        end
+
+      oauth_present =
+        if requires_credential && credential_type == "oauth_codex"
+          credential&.refresh_token.to_s.present? || credential&.access_token.to_s.present?
+        else
+          true
+        end
+
+      built_provider =
+        if requires_credential && credential_type == "api_key" && api_key.blank?
+          nil
+        elsif requires_credential && credential_type == "oauth_codex" && oauth_present == false
+          nil
+        else
+          effective_headers = headers.dup
+          if credential_type == "oauth_codex"
+            at = credential&.access_token.to_s
+            if at.present?
+              ensure_safe_header_value!(at, header: "Authorization")
+              effective_headers["Authorization"] = "Bearer #{at}"
+            end
+            account_id = credential&.account_id.to_s
+            if account_id.present?
+              ensure_safe_header_value!(account_id, header: "ChatGPT-Account-Id")
+              effective_headers["ChatGPT-Account-Id"] = account_id
+            end
+          end
+
+          AgentCore::Resources::Provider::SimpleInferenceProvider.new(
+            base_url: base_url,
+            api_key: (credential_type == "oauth_codex" ? nil : api_key),
+            headers: effective_headers,
+            wire_api: provider_protocol.to_sym,
+            responses_path: responses_path,
+            transport: transport,
+            request_defaults: request_defaults,
+          )
+        end
+
+      supports_tools = model_spec.dig("capabilities", "tools", "tool_calling") == true
+      supports_images = model_spec.dig("capabilities", "input", "image") == true
+      model_ref = "#{provider_key}/#{model_key}"
+
+      gated_provider =
+        if built_provider
+          Cybros::LLM::CapabilityGatedProvider.new(
+            delegate: built_provider,
+            provider_key: provider_key,
+            model_ref: model_ref,
+            api_model: api_model,
+            supports_tools: supports_tools,
+            supports_images: supports_images,
+          )
+        end
+
+      {
+        provider: gated_provider,
+        api_model: api_model,
+        provider_key: provider_key,
+        model_key: model_key,
+        model_ref: model_ref,
+        token_counter: token_counter,
+        context_window_tokens: model_spec.fetch("context_window_tokens"),
+      }
+    rescue KeyError => e
+      AgentCore::ValidationError.raise!(
+        "Selected model is no longer available. Please reselect a model.",
+        code: "cybros.llm.model_not_found",
+        details: { provider_key: provider_key, model_key: model_key, error: e.message },
+      )
+    end
+    private_class_method :build_llm_selection
+
+    def ensure_safe_header_value!(value, header:)
+      s = value.to_s
+      return if s.exclude?("\r") && s.exclude?("\n")
+
+      AgentCore::ValidationError.raise!(
+        "Invalid credential value for request header",
+        code: "cybros.llm.invalid_credential_value",
+        details: { header: header },
+      )
+    end
+    private_class_method :ensure_safe_header_value!
+
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::Subagent::Tools.build)
@@ -154,71 +645,6 @@ module Cybros
       registry
     end
 
-    def resolve_model_and_provider(agent_metadata, include_diagnostics: false)
-      default_model = ENV.fetch("AGENT_CORE_MODEL", "gpt-4o-mini").to_s.strip
-      default_model = "gpt-4o-mini" if default_model.empty?
-
-      prefer = model_prefer_from_agent_metadata(agent_metadata)
-      prefer = [default_model] if prefer.empty?
-
-      provider = nil
-      chosen_model = nil
-      matched_preference = false
-
-      providers = fetch_llm_providers
-
-      prefer.each do |model|
-        matching = providers.select { |p| Array(p.model_allowlist).include?(model) }
-        next if matching.empty?
-
-        provider = matching.max_by { |p| p.priority.to_i }
-        chosen_model = model
-        matched_preference = true
-        break
-      end
-
-      if provider.nil?
-        provider = providers.max_by { |p| p.priority.to_i } if providers.any?
-      end
-
-      if chosen_model.nil?
-        allowlist = Array(provider&.model_allowlist).map(&:to_s).reject(&:blank?)
-        chosen_model =
-          if allowlist.include?(default_model)
-            default_model
-          else
-            allowlist.first || default_model
-          end
-      end
-
-      out = { provider: build_provider_from_record(provider) || build_default_provider, model: chosen_model }
-      if include_diagnostics
-        out[:preferred_models] = prefer
-        out[:matched_preference] = matched_preference
-        out[:provider_name] = provider&.name.to_s.presence
-      end
-
-      out
-    rescue StandardError
-      out = { provider: build_default_provider, model: default_model }
-      if include_diagnostics
-        out[:preferred_models] = prefer || []
-        out[:matched_preference] = false
-        out[:provider_name] = nil
-      end
-      out
-    end
-    private_class_method :resolve_model_and_provider
-
-    def fetch_llm_providers
-      return [] unless defined?(LLMProvider)
-
-      LLMProvider.order(priority: :desc).to_a
-    rescue StandardError
-      []
-    end
-    private_class_method :fetch_llm_providers
-
     def model_prefer_from_agent_metadata(agent_metadata)
       return [] unless agent_metadata.is_a?(Hash)
 
@@ -233,27 +659,6 @@ module Cybros
       []
     end
     private_class_method :model_prefer_from_agent_metadata
-
-    def build_provider_from_record(record)
-      return nil unless record
-
-      AgentCore::Resources::Provider::SimpleInferenceProvider.new(
-        base_url: record.base_url,
-        api_key: record.api_key.presence,
-        headers: record.headers || {},
-      )
-    rescue StandardError
-      nil
-    end
-    private_class_method :build_provider_from_record
-
-    def build_default_provider
-      AgentCore::Resources::Provider::SimpleInferenceProvider.new(
-        base_url: ENV["SIMPLE_INFERENCE_BASE_URL"],
-        api_key: ENV["SIMPLE_INFERENCE_API_KEY"],
-      )
-    end
-    private_class_method :build_default_provider
 
     def build_memory_store
       if Rails.env.test?
@@ -288,17 +693,6 @@ module Cybros
       AgentCore::Observability::Adapters::ActiveSupportNotificationsInstrumenter.new
     end
     private_class_method :build_instrumenter
-
-    def parse_fallback_models_env
-      ENV
-        .fetch("AGENT_CORE_FALLBACK_MODELS", "")
-        .split(",")
-        .map(&:strip)
-        .reject(&:empty?)
-    rescue StandardError
-      []
-    end
-    private_class_method :parse_fallback_models_env
 
     def parse_context_turns(value)
       return nil if value.nil?

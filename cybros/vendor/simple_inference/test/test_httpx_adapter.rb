@@ -67,11 +67,20 @@ class TestHTTPXAdapter < Minitest::Test
     adapter = SimpleInference::HTTPAdapters::HTTPX.new(client: FakeClient.build(response))
 
     e =
-      assert_raises(SimpleInference::Errors::ConnectionError) do
+      assert_raises(SimpleInference::ConnectionError) do
         adapter.call(method: :get, url: "https://example.test")
       end
 
     assert_includes e.message, "boom"
+  end
+
+  def test_initialize_raises_configuration_error_for_invalid_client
+    error =
+      assert_raises(SimpleInference::ConfigurationError) do
+        SimpleInference::HTTPAdapters::HTTPX.new(client: Object.new)
+      end
+
+    assert_includes error.message, "client must be"
   end
 
   def test_call_stream_yields_chunks_for_event_stream

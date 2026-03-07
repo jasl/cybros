@@ -1,6 +1,92 @@
 require "test_helper"
 
 class ConversationChatFacadeTest < ActiveSupport::TestCase
+  test "action_policy_for_node_id returns the app-facing policy dictionary" do
+    conversation = create_conversation!(title: "Chat")
+    conversation.append_user_message!(content: "Hello")
+
+    agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi v1")
+
+    policy = conversation.action_policy_for_node_id(agent.id)
+
+    assert_equal true, policy.dig("actions", "regenerate", "available")
+    assert_equal "in_place", policy.dig("actions", "regenerate", "mode")
+    assert_equal true, policy.dig("actions", "swipe", "available")
+  end
+
+  test "message_for_node_id includes action_policy" do
+    conversation = create_conversation!(title: "Chat")
+    conversation.append_user_message!(content: "Hello")
+
+    agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi v1")
+
+    message = conversation.message_for_node_id(node_id: agent.id, mode: :full)
+
+    assert_equal agent.id, message.fetch("node_id")
+    assert_equal true, message.dig("action_policy", "actions", "regenerate", "available")
+    assert_equal "in_place", message.dig("action_policy", "actions", "regenerate", "mode")
+  end
+
+  test "stop_node! stops a pending agent in the active lane" do
+    conversation = create_conversation!(title: "Chat")
+    result = conversation.append_user_message!(content: "Hello")
+    agent = result.fetch(:agent_node)
+    run = ConversationRun.find_by!(conversation_id: conversation.id, dag_node_id: agent.id)
+
+    conversation.stop_node!(node_id: agent.id)
+
+    assert_equal DAG::Node::STOPPED, agent.reload.state
+    assert_equal "user_cancelled", agent.metadata["reason"]
+    assert_equal "canceled", run.reload.state
+  end
+
+  test "message_for_node_id and stop_node! reject nodes from a different lane" do
+    root = create_conversation!(title: "Root")
+
+    first_turn = root.append_user_message!(content: "Hello")
+    first_agent = first_turn.fetch(:agent_node)
+    first_agent.mark_running!
+    first_agent.mark_finished!(content: "Done")
+
+    branch = root.create_child!(from_node_id: first_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+
+    second_turn = root.append_user_message!(content: "Root followup")
+    root_agent = second_turn.fetch(:agent_node)
+    root_agent.mark_running!
+
+    assert_raises(ActiveRecord::RecordNotFound) do
+      branch.message_for_node_id(node_id: root_agent.id, mode: :full)
+    end
+
+    assert_raises(ActiveRecord::RecordNotFound) do
+      branch.stop_node!(node_id: root_agent.id)
+    end
+  end
+
+  test "message_page includes action_policy for non-tail regenerate branch mode" do
+    conversation = create_conversation!(title: "Chat")
+
+    conversation.append_user_message!(content: "Hello")
+    first_agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    first_agent.mark_running!
+    first_agent.mark_finished!(content: "Hi v1")
+
+    conversation.append_user_message!(content: "Followup")
+    second_agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    second_agent.mark_running!
+    second_agent.mark_finished!(content: "Hi v2")
+
+    page = conversation.message_page(limit: 20, mode: :full)
+    first_message = page.fetch("messages").find { |message| message.fetch("node_id") == first_agent.id }
+
+    assert_equal "branch", first_message.dig("action_policy", "actions", "regenerate", "mode")
+    assert_equal false, first_message.dig("action_policy", "actions", "swipe", "available")
+  end
+
   test "append_user_message! creates user + pending agent and enqueues a run" do
     conversation = create_conversation!(title: "Chat")
 

@@ -4,7 +4,6 @@ module AgentCore
       Data.define(
         :provider,
         :model,
-        :fallback_models,
         :tools_registry,
         :tool_policy,
         :tool_name_aliases,
@@ -24,15 +23,14 @@ module AgentCore
         :summary_max_tokens,
         :llm_options,
         :directives_config,
+        :agent_call_recovery_attempts,
         :tool_call_repair_attempts,
-        :tool_call_repair_fallback_models,
         :tool_call_repair_max_output_tokens,
         :tool_call_repair_validate_schema,
         :tool_call_repair_schema_max_depth,
         :tool_call_repair_max_schema_bytes,
         :tool_call_repair_max_candidates,
         :tool_name_repair_attempts,
-        :tool_name_repair_fallback_models,
         :tool_name_repair_max_output_tokens,
         :tool_name_repair_max_candidates,
         :tool_name_repair_max_visible_tool_names,
@@ -53,7 +51,6 @@ module AgentCore
         def initialize(
           provider:,
           model:,
-          fallback_models: [],
           tools_registry:,
           tool_policy: nil,
           tool_name_aliases: {},
@@ -73,15 +70,14 @@ module AgentCore
           summary_max_tokens: AgentCore::ContextManagement::Summarizer::DEFAULT_MAX_OUTPUT_TOKENS,
           llm_options: {},
           directives_config: nil,
+          agent_call_recovery_attempts: 1,
           tool_call_repair_attempts: 1,
-          tool_call_repair_fallback_models: [],
           tool_call_repair_max_output_tokens: 300,
           tool_call_repair_validate_schema: true,
           tool_call_repair_schema_max_depth: 2,
           tool_call_repair_max_schema_bytes: 8_000,
           tool_call_repair_max_candidates: 10,
           tool_name_repair_attempts: 0,
-          tool_name_repair_fallback_models: [],
           tool_name_repair_max_output_tokens: 200,
           tool_name_repair_max_candidates: 10,
           tool_name_repair_max_visible_tool_names: 200,
@@ -107,12 +103,6 @@ module AgentCore
             "tools_registry is required",
             code: "agent_core.dag.runtime.tools_registry_is_required",
           ) if tools_registry.nil?
-
-          fallback_models =
-            Array(fallback_models)
-              .map { |m| m.to_s.strip }
-              .reject(&:empty?)
-              .freeze
 
           tool_name_aliases =
             if tool_name_aliases.nil?
@@ -243,6 +233,19 @@ module AgentCore
               )
             end
 
+          raw_agent_call_recovery_attempts = agent_call_recovery_attempts
+          agent_call_recovery_attempts = Integer(raw_agent_call_recovery_attempts, exception: false)
+          ValidationError.raise!(
+            "agent_call_recovery_attempts must be an Integer",
+            code: "agent_core.dag.runtime.agent_call_recovery_attempts_must_be_an_integer",
+            details: { value_class: raw_agent_call_recovery_attempts.class.name },
+          ) unless agent_call_recovery_attempts
+          ValidationError.raise!(
+            "agent_call_recovery_attempts must be >= 0",
+            code: "agent_core.dag.runtime.agent_call_recovery_attempts_must_be_0",
+            details: { agent_call_recovery_attempts: agent_call_recovery_attempts },
+          ) if agent_call_recovery_attempts.negative?
+
           raw_tool_call_repair_attempts = tool_call_repair_attempts
           tool_call_repair_attempts = Integer(raw_tool_call_repair_attempts, exception: false)
           ValidationError.raise!(
@@ -255,12 +258,6 @@ module AgentCore
             code: "agent_core.dag.runtime.tool_call_repair_attempts_must_be_0",
             details: { tool_call_repair_attempts: tool_call_repair_attempts },
           ) if tool_call_repair_attempts.negative?
-
-          tool_call_repair_fallback_models =
-            Array(tool_call_repair_fallback_models)
-              .map { |m| m.to_s.strip }
-              .reject(&:empty?)
-              .freeze
 
           raw_tool_call_repair_max_output_tokens = tool_call_repair_max_output_tokens
           tool_call_repair_max_output_tokens = Integer(raw_tool_call_repair_max_output_tokens, exception: false)
@@ -328,12 +325,6 @@ module AgentCore
             code: "agent_core.dag.runtime.tool_name_repair_attempts_must_be_0",
             details: { tool_name_repair_attempts: tool_name_repair_attempts },
           ) if tool_name_repair_attempts.negative?
-
-          tool_name_repair_fallback_models =
-            Array(tool_name_repair_fallback_models)
-              .map { |m| m.to_s.strip }
-              .reject(&:empty?)
-              .freeze
 
           raw_tool_name_repair_max_output_tokens = tool_name_repair_max_output_tokens
           tool_name_repair_max_output_tokens = Integer(raw_tool_name_repair_max_output_tokens, exception: false)
@@ -497,7 +488,6 @@ module AgentCore
           super(
             provider: provider,
             model: model,
-            fallback_models: fallback_models,
             tools_registry: tools_registry,
             tool_policy: tool_policy,
             tool_name_aliases: tool_name_aliases,
@@ -517,15 +507,14 @@ module AgentCore
             summary_max_tokens: summary_max_tokens,
             llm_options: llm_options.freeze,
             directives_config: directives_config,
+            agent_call_recovery_attempts: agent_call_recovery_attempts,
             tool_call_repair_attempts: tool_call_repair_attempts,
-            tool_call_repair_fallback_models: tool_call_repair_fallback_models,
             tool_call_repair_max_output_tokens: tool_call_repair_max_output_tokens,
             tool_call_repair_validate_schema: tool_call_repair_validate_schema,
             tool_call_repair_schema_max_depth: tool_call_repair_schema_max_depth,
             tool_call_repair_max_schema_bytes: tool_call_repair_max_schema_bytes,
             tool_call_repair_max_candidates: tool_call_repair_max_candidates,
             tool_name_repair_attempts: tool_name_repair_attempts,
-            tool_name_repair_fallback_models: tool_name_repair_fallback_models,
             tool_name_repair_max_output_tokens: tool_name_repair_max_output_tokens,
             tool_name_repair_max_candidates: tool_name_repair_max_candidates,
             tool_name_repair_max_visible_tool_names: tool_name_repair_max_visible_tool_names,

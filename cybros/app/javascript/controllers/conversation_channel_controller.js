@@ -3,6 +3,21 @@ import consumer from "../channels/consumer"
 import { boundedPush, compareEventIds } from "../lib/event_id"
 import { shouldShowStuckWarning } from "../lib/stuck_detection"
 import { orderNodeEventsForFlush } from "../lib/node_event_ordering"
+import { deriveConversationControlsState } from "../lib/conversation_controls_state"
+
+function parseActionPolicy(bubble) {
+  if (!bubble) return {}
+
+  try {
+    const raw = String(bubble.getAttribute("data-action-policy") || "")
+    if (!raw) return {}
+
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === "object" ? parsed : {}
+  } catch (_e) {
+    return {}
+  }
+}
 
 export default class extends Controller {
   static values = {
@@ -24,6 +39,7 @@ export default class extends Controller {
     this.pendingNodeStateByNodeId = new Map()
     this.pendingFlushTimerByNodeId = new Map()
     this.postAppendRefreshTimerByNodeId = new Map()
+    this.lastTailAgentNodeId = this.#tailAgentNodeId()
     this.mutationObserver = new MutationObserver((mutations) => this.#onMutations(mutations))
     this.mutationObserver.observe(this.element, { childList: true, subtree: true })
 
@@ -90,7 +106,7 @@ export default class extends Controller {
   }
 
   retry() {
-    const nodeId = this.activeNodeId || this.lastErroredNodeId
+    const nodeId = this.lastErroredNodeId
     if (!nodeId) return
 
     const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
@@ -106,7 +122,14 @@ export default class extends Controller {
       body: JSON.stringify({ node_id: nodeId }),
       credentials: "same-origin",
     })
-      .then(() => window.Turbo?.visit?.(window.location.href))
+      .then(async (response) => {
+        if (response.ok) {
+          window.Turbo?.visit?.(window.location.href)
+          return
+        }
+
+        await this.#toastRetryFailure(response)
+      })
       .catch(() => {})
   }
 
@@ -224,11 +247,13 @@ export default class extends Controller {
             this.#flushPendingFor(nodeId)
             this.#flushPendingNodeStateFor(nodeId)
             this.#schedulePostAppendRefresh(nodeId)
-            this.#reconcileControlsFromDom()
           }
         }
       }
     }
+
+    this.#refreshTailActionPolicies()
+    this.#reconcileControlsFromDom()
   }
 
   #schedulePostAppendRefresh(nodeId) {
@@ -244,13 +269,13 @@ export default class extends Controller {
     this.postAppendRefreshTimerByNodeId.set(nodeId, timerId)
   }
 
-  #refreshMessage(nodeId) {
+  #refreshMessage(nodeId, { force = false } = {}) {
     const bubble = this.#findAgentBubble(nodeId)
     if (!bubble) return
     if (!window.Turbo?.renderStreamMessage) return
 
     const state = String(bubble.getAttribute("data-node-state") || "")
-    if (["finished", "errored", "stopped", "rejected", "skipped"].includes(state)) {
+    if (!force && ["finished", "errored", "stopped", "rejected", "skipped"].includes(state)) {
       this.#reconcileControlsFromDom()
       return
     }
@@ -272,27 +297,22 @@ export default class extends Controller {
 
   #reconcileControlsFromDom() {
     const bubbles = Array.from(this.element.querySelectorAll('[data-role="agent-bubble"][data-node-id]'))
-    const last = bubbles[bubbles.length - 1]
-    if (!last) return
+    const controls = deriveConversationControlsState(
+      bubbles.map((bubble, index) => ({
+        nodeId: String(bubble.getAttribute("data-node-id") || ""),
+        isTail: index === bubbles.length - 1,
+        actionPolicy: parseActionPolicy(bubble),
+      })),
+    )
 
-    const state = String(last.getAttribute("data-node-state") || "")
-    const nodeId = String(last.getAttribute("data-node-id") || "")
+    this.activeNodeId = controls.activeNodeId
+    this.lastErroredNodeId = controls.lastErroredNodeId
 
-    if (state === "running" || state === "pending") {
-      this.activeNodeId = nodeId || this.activeNodeId
-      this.#showStop()
-      this.#hideRetry()
-      return
-    }
+    if (controls.showStop) this.#showStop()
+    else this.#hideStop()
 
-    this.#hideStop()
-
-    if (state === "errored") {
-      this.lastErroredNodeId = nodeId || this.lastErroredNodeId
-      this.#showRetry()
-    } else {
-      this.#hideRetry()
-    }
+    if (controls.showRetry) this.#showRetry()
+    else this.#hideRetry()
   }
 
   #flushPendingNodeStateFor(nodeId) {
@@ -316,6 +336,7 @@ export default class extends Controller {
       this.#showStop()
       this.#hideRetry()
       this.#hideStuck()
+      this.#schedulePostAppendRefresh(nodeId)
       this.#emitDebug()
       return
     }
@@ -325,10 +346,6 @@ export default class extends Controller {
       if (bubble) bubble.setAttribute("data-node-state", to)
       this.#hideSpinner(bubble)
       this.#hideStop()
-      if (to === "errored") {
-        this.lastErroredNodeId = nodeId
-        this.#showRetry()
-      }
       if (to === "errored") this.#showError(bubble, "Generation failed")
       this.#maybeRefreshTerminalMessage(nodeId, bubble)
       this.#reconcileControlsFromDom()
@@ -394,6 +411,30 @@ export default class extends Controller {
     return this.element.querySelector(selector)
   }
 
+  #tailAgentBubble() {
+    const bubbles = Array.from(this.element.querySelectorAll('[data-role="agent-bubble"][data-node-id]'))
+    return bubbles[bubbles.length - 1] || null
+  }
+
+  #tailAgentNodeId() {
+    return String(this.#tailAgentBubble()?.getAttribute("data-node-id") || "")
+  }
+
+  #refreshTailActionPolicies() {
+    const nextTailId = this.#tailAgentNodeId()
+    const prevTailId = String(this.lastTailAgentNodeId || "")
+
+    if (prevTailId && prevTailId !== nextTailId) {
+      this.#refreshMessage(prevTailId, { force: true })
+    }
+
+    if (nextTailId && nextTailId !== prevTailId) {
+      this.#refreshMessage(nextTailId, { force: true })
+    }
+
+    this.lastTailAgentNodeId = nextTailId
+  }
+
   #showSpinner(bubble) {
     if (!bubble) return
     bubble.querySelector("[data-role='spinner']")?.classList.remove("hidden")
@@ -438,7 +479,6 @@ export default class extends Controller {
 
     if (!shouldShowStuckWarning({ lastEventAtMs: this.lastEventAt, nowMs: Date.now(), thresholdSeconds: 30 })) return
     this.#showStuck()
-    this.#showRetry()
   }
 
   #showStuck() {
@@ -465,6 +505,27 @@ export default class extends Controller {
   #uuidLike(value) {
     const s = String(value || "")
     return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+  }
+
+  async #toastRetryFailure(response) {
+    let message = "Retry failed."
+
+    try {
+      const payload = await response.json()
+      const code = String(payload?.error || "")
+      if (code === "retry_already_queued") message = "Retry is already queued."
+      else if (code === "not_retryable") message = "This message cannot be retried."
+    } catch (_e) {
+      // best-effort
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("toast:show", {
+        detail: { message, type: "error" },
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
   }
 
   #emitDebug() {

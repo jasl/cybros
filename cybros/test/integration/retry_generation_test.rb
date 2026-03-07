@@ -56,7 +56,9 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
     new_node = DAG::Node.find(body["node_id"])
     assert_equal Messages::AgentMessage.node_type_key, new_node.node_type
     assert_equal DAG::Node::PENDING, new_node.state
-    assert_equal user.turn_id, new_node.turn_id
+    assert_equal agent.turn_id, new_node.turn_id
+    assert_equal agent.id, new_node.retry_of_id
+    assert agent.reload.compressed_at.present?
   end
 
   test "retry endpoint rejects non-agent nodes" do
@@ -140,5 +142,63 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
     post retry_conversation_path(conversation), params: { node_id: failed.id }
     assert_response :conflict
     assert_includes response.body, "retry_already_queued"
+  end
+
+  test "retry endpoint uses DAG retry replacement semantics for pending downstream nodes" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user_node = nil
+    failed = nil
+    downstream = nil
+    original_edge = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+      failed =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::ERRORED,
+          metadata: {},
+        )
+      downstream =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
+      original_edge = m.create_edge(from_node: failed, to_node: downstream, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    post retry_conversation_path(conversation), params: { node_id: failed.id }
+    assert_response :success
+
+    new_node = DAG::Node.find(JSON.parse(response.body).fetch("node_id"))
+    assert_equal failed.id, new_node.retry_of_id
+    assert failed.reload.compressed_at.present?
+
+    assert graph.edges.active.exists?(
+      from_node_id: user_node.id,
+      to_node_id: new_node.id,
+      edge_type: DAG::Edge::SEQUENCE,
+    )
+
+    assert graph.edges.active.exists?(
+      from_node_id: new_node.id,
+      to_node_id: downstream.id,
+      edge_type: DAG::Edge::SEQUENCE,
+    )
+
+    assert original_edge.reload.compressed_at.present?
   end
 end

@@ -10,9 +10,10 @@ This document summarizes the current parity status between TavernKit playground�
 ## Parity matrix
 
 | Capability | TavernKit spec (tests/services) | Cybros implementation | Cybros coverage | Status |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | Conversation tree fields (`kind`, parent/root, fork point) | `test/controllers/conversations_controller_test.rb` (branch tests); `test/services/messages/hider_test.rb` (“does not hide fork point messages”) | `Conversation` tree columns + `Conversation#create_child!` / `forked_from_node_id` in `app/models/conversation.rb` | `test/models/conversation_tree_test.rb`, `test/integration/conversation_branching_test.rb`, `test/models/conversation_chat_facade_test.rb` | Covered |
 | Branch from a message/node | `conversations_controller_test.rb` “branch creates…” | `POST /conversations/:id/branch` + `Conversation#create_child!` | `test/integration/conversation_branching_test.rb` | Covered (prefix-copy semantics differ; Cybros forks DAG lane instead of copying rows) |
+| Retry failed assistant in same conversation/lane | N/A (legacy scheduler/round driven) | `POST /conversations/:id/retry` + `Conversation#retry_agent_node!` now delegates to DAG retry replacement semantics (`retry_of_id`, archived failed attempt, pending downstream rewired) | `test/integration/retry_generation_test.rb`, `test/lib/dag/runner_test.rb` | Covered |
 | Regenerate on tail assistant (in-place) | `conversations_controller_test.rb` regenerate tests | `Conversation#regenerate!` creates swipe variant node | `test/integration/conversation_regenerate_swipe_test.rb`, `test/models/conversation_chat_facade_test.rb` | Covered (storage model differs) |
 | Regenerate on non-tail assistant (auto-branch) | `conversations_controller_test.rb` regenerate non-tail behavior | `Conversation#regenerate!` branches when target isn’t current tail | `test/integration/conversation_regenerate_swipe_test.rb` | Covered |
 | Swipe selection and context behavior | `conversations_controller_test.rb` + swipe model semantics | `Conversation#select_swipe!` uses DAG versions (`version_set_id` + `adopt_version!`) | `test/models/conversation_chat_facade_test.rb`, `test/integration/conversation_regenerate_swipe_test.rb` | Covered (DAG multi-version; no `MessageSwipe` table) |
@@ -20,6 +21,7 @@ This document summarizes the current parity status between TavernKit playground�
 | Soft delete/restore (visibility) | `messages_controller_test.rb` destroy tests; `Messages::Hider` semantics | `Conversation#soft_delete_node!` / `restore_node!` backed by `dag_nodes.deleted_at` / visibility patches | `test/integration/conversation_soft_delete_test.rb`, `test/models/dag/visibility_patches_test.rb` | Covered |
 | Soft delete rollback safety (“stop generating”, downstream cancel) | `test/services/messages/hider_test.rb` (queued/running cancel + fork point protection) | `Conversation#soft_delete_node!` stops downstream work **only when deleting head or trigger**, cancels associated `ConversationRun`s | `test/models/conversation_soft_delete_rollback_test.rb` | Covered (DAG-native; no Round/TurnScheduler) |
 | Linear message projection (timeline) | TavernKit `Message` is source-of-truth | `Conversation#message_page` (DAG-backed projection; bounded paging) | `test/models/conversation_chat_facade_test.rb` (“projection hides non-selected swipes”), `test/models/conversation_context_test.rb` | Covered (projection, not a DB `messages` table) |
+| Message action availability contract | TavernKit mostly derives from row state + controller logic | Projection now includes `action_policy` (`supported` / `available` / `mode` / `reason`) so Web UI and future clients consume a backend-owned action dictionary | `test/models/conversation_node_action_policy_test.rb`, `test/models/conversation_chat_facade_test.rb`, `test/integration/conversation_action_policy_ui_test.rb`, `test/models/event_turbo_streams_broadcast_test.rb` | Covered |
 | Pagination (before cursor) | TavernKit message seq-based paging | `Conversation#message_page` + controller cursors | `test/integration/conversation_pagination_test.rb` | Covered |
 | Authorization boundaries | TavernKit membership-based | `Current.user.conversations` scoping | `test/integration/conversation_authorization_test.rb` | Covered |
 | Translation trigger semantics (mode gating + job enqueue) | `test/controllers/messages_controller_test.rb` (mode=off, internal_lang==target_lang, enqueues job) | `Conversation#translate!` only sets `metadata.i18n.translation_pending[target_lang]` | `test/models/conversation_chat_facade_test.rb` | Partial (no mode gating, no job/run model yet) |
@@ -30,3 +32,6 @@ This document summarizes the current parity status between TavernKit playground�
 ## Notes
 
 - Search/index tools exclude `references/` (gitignored) content, so the TavernKit citations above are based on direct file reads of the referenced test/service files.
+- `retry` and `regenerate` are now explicitly separate product actions in Cybros projection semantics:
+  - `retry` targets failed/stopped assistant nodes
+  - `regenerate` targets completed assistant versions and may resolve to in-place rerun or auto-branch

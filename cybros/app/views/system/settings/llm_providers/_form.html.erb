@@ -1,82 +1,109 @@
-<%= form_with model: [:system, :settings, llm_provider], class: "space-y-4" do |f| %>
-  <% if llm_provider.errors.any? %>
-    <div role="alert" class="alert alert-error">
-      <span><%= llm_provider.errors.full_messages.first %></span>
+<% if llm_provider.credential_type == "api_key" %>
+  <%= form_with model: llm_provider, url: system_settings_llm_provider_path(llm_provider.provider_key), method: :patch, class: "space-y-4" do |f| %>
+    <% if llm_provider.errors.any? %>
+      <div role="alert" class="alert alert-error">
+        <span><%= llm_provider.errors.full_messages.first %></span>
+      </div>
+    <% end %>
+
+    <div class="grid grid-cols-1 gap-4">
+      <div>
+        <div class="text-xs opacity-60">Provider key</div>
+        <div class="font-mono text-sm"><%= llm_provider.provider_key %></div>
+      </div>
+
+      <div>
+        <div class="text-xs opacity-60">Credential type</div>
+        <div class="font-mono text-sm"><%= llm_provider.credential_type %></div>
+      </div>
+
+      <div>
+        <%= f.label :api_key, class: "label" do %>
+          <span class="label-text">API key</span>
+        <% end %>
+        <%= f.password_field :api_key, class: "input input-bordered w-full", placeholder: (llm_provider.persisted? ? "(unchanged)" : "") %>
+        <p class="text-xs opacity-70 mt-2">Leave blank to keep the existing key.</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <%= link_to "Back", system_settings_llm_providers_path, class: "btn btn-ghost" %>
     </div>
   <% end %>
-
-  <div class="grid grid-cols-1 gap-4">
-    <div>
-      <%= f.label :name, class: "label" do %>
-        <span class="label-text">Name</span>
-      <% end %>
-      <%= f.text_field :name, required: true, class: class_names("input input-bordered w-full validator", { "input-error": llm_provider.errors[:name].any? }) %>
-      <% if llm_provider.errors[:name].any? %>
-        <p class="validator-hint"><%= llm_provider.errors[:name].first %></p>
-      <% end %>
-    </div>
-
-    <div>
-      <%= f.label :base_url, class: "label" do %>
-        <span class="label-text">Base URL</span>
-      <% end %>
-      <%= f.url_field :base_url, required: true, class: class_names("input input-bordered w-full validator", { "input-error": llm_provider.errors[:base_url].any? }), placeholder: "https://openrouter.ai/api/v1" %>
-      <% if llm_provider.errors[:base_url].any? %>
-        <p class="validator-hint"><%= llm_provider.errors[:base_url].first %></p>
-      <% end %>
-    </div>
-
-    <div>
-      <%= f.label :api_key, class: "label" do %>
-        <span class="label-text">API key</span>
-      <% end %>
-      <%= f.password_field :api_key, class: "input input-bordered w-full", placeholder: (llm_provider.persisted? ? "(unchanged)" : "") %>
-    </div>
-
-    <div>
-      <%= f.label :headers, class: "label" do %>
-        <span class="label-text">Headers (JSON)</span>
-      <% end %>
-      <% headers_json_value = (defined?(@headers_json) && @headers_json.present?) ? @headers_json : JSON.pretty_generate(llm_provider.headers || {}) %>
-      <%= text_area_tag "llm_provider[headers_json]",
-                        headers_json_value,
-                        class: class_names("textarea textarea-bordered w-full font-mono validator", { "textarea-error": llm_provider.errors[:headers].any? }),
-                        rows: 6,
-                        placeholder: "{\n  \"X-Header\": \"value\"\n}" %>
-      <% if llm_provider.errors[:headers].any? %>
-        <p class="validator-hint"><%= llm_provider.errors[:headers].first %></p>
-      <% else %>
-        <p class="text-xs opacity-70 mt-2">Optional extra HTTP headers sent to the provider.</p>
-      <% end %>
-    </div>
-
-    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+<% else %>
+  <div class="space-y-4">
+    <div class="grid grid-cols-1 gap-4">
       <div>
-        <%= f.label :api_format, class: "label" do %>
-          <span class="label-text">API format</span>
-        <% end %>
-        <%= f.select :api_format, [["OpenAI-compatible", "openai"]], {}, class: "select select-bordered w-full" %>
+        <div class="text-xs opacity-60">Provider key</div>
+        <div class="font-mono text-sm"><%= llm_provider.provider_key %></div>
       </div>
 
       <div>
-        <%= f.label :priority, class: "label" do %>
-          <span class="label-text">Priority</span>
-        <% end %>
-        <%= f.number_field :priority, class: "input input-bordered w-full" %>
+        <div class="text-xs opacity-60">Credential type</div>
+        <div class="font-mono text-sm"><%= llm_provider.credential_type %></div>
       </div>
     </div>
 
-    <div>
-      <%= f.label :model_allowlist, class: "label" do %>
-        <span class="label-text">Model allowlist</span>
-      <% end %>
-      <%= text_area_tag "llm_provider[model_allowlist_text]", llm_provider.model_allowlist.join("\n"), class: "textarea textarea-bordered w-full font-mono", rows: 8, placeholder: "one model id per line" %>
-      <p class="text-xs opacity-70 mt-2">Only models listed here are eligible for selection.</p>
-    </div>
-  </div>
+    <% flow = @device_flow %>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <div class="font-medium">Device flow (Codex subscription)</div>
+            <div class="text-xs opacity-70">Open the link, enter the code, then poll to complete.</div>
+          </div>
+          <div class="flex items-center gap-2">
+            <% if flow.is_a?(Hash) && flow["device_auth_id"].to_s.present? %>
+              <%= button_to "Poll", device_flow_poll_system_settings_llm_provider_path(llm_provider.provider_key), method: :post, class: "btn btn-secondary btn-sm" %>
+            <% end %>
+            <%= button_to "Start", device_flow_start_system_settings_llm_provider_path(llm_provider.provider_key), method: :post, class: "btn btn-secondary btn-sm" %>
+          </div>
+        </div>
 
-  <div class="flex items-center gap-3">
-    <button type="submit" class="btn btn-primary">Save</button>
-    <%= link_to "Back", system_settings_llm_providers_path, class: "btn btn-ghost" %>
+        <% if flow.is_a?(Hash) && flow["device_auth_id"].to_s.present? %>
+          <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <div class="text-xs opacity-60">Verification URL</div>
+              <% url = flow["verification_uri_complete"].presence || flow["verification_uri"].to_s %>
+              <div class="mt-1">
+                <%= link_to url, url, class: "link link-primary break-all", target: "_blank", rel: "noreferrer" %>
+              </div>
+            </div>
+            <div>
+              <div class="text-xs opacity-60">User code</div>
+              <div class="mt-1 font-mono text-lg"><%= flow["user_code"].to_s %></div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="flex items-center justify-between gap-3">
+          <div class="font-medium">Connection status</div>
+          <% connected = llm_provider.refresh_token.to_s.present? || llm_provider.access_token.to_s.present? %>
+          <span class="badge <%= connected ? "badge-success" : "badge-warning" %>"><%= connected ? "Connected" : "Not connected" %></span>
+        </div>
+
+        <% if connected %>
+          <div class="mt-3 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+              <div class="text-xs opacity-60">Account ID</div>
+              <div class="font-mono"><%= llm_provider.account_id.to_s.presence || "(none)" %></div>
+            </div>
+            <div>
+              <div class="text-xs opacity-60">Expires at</div>
+              <div class="font-mono"><%= llm_provider.expires_at&.iso8601 || "(unknown)" %></div>
+            </div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-3">
+      <%= link_to "Back", system_settings_llm_providers_path, class: "btn btn-ghost" %>
+    </div>
   </div>
 <% end %>

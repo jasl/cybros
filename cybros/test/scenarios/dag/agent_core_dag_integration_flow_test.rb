@@ -17,6 +17,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       @calls << { messages: messages, model: model, tools: tools, stream: stream, options: options }
       resp = @responses.shift
       raise "unexpected provider.chat call (no remaining responses)" unless resp
+      raise resp if resp.is_a?(Exception)
 
       resp
     end
@@ -149,6 +150,311 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       assert_equal "Hi!", agent.body_output.fetch("content")
       assert_equal "test-model", agent.body_output.fetch("model")
       assert_equal "stub_provider", agent.body_output.fetch("provider")
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "retryable provider failure before output retries and completes the same turn" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d100a"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::ProviderError.new("rate limited", status: 429),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "Recovered."),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::FINISHED, agent.state
+      assert_equal "Recovered.", agent.body_output.fetch("content")
+      assert_equal 2, provider.calls.length
+
+      recovery = agent.metadata.dig("llm_call", "recovery")
+      refute_nil recovery
+      assert_equal 1, recovery.fetch("attempts")
+      assert_equal 1, recovery.fetch("recovered")
+      assert_equal 0, recovery.fetch("failed")
+      assert_equal false, recovery.fetch("exhausted")
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "retryable provider failure exhausts recovery attempts and leaves the node errored" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d100b"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::ProviderError.new("rate limited", status: 429),
+          AgentCore::ProviderError.new("still rate limited", status: 429),
+        ]
+      )
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 2, provider.calls.length
+
+      recovery = agent.metadata.dig("llm_call", "recovery")
+      refute_nil recovery
+      assert_equal 1, recovery.fetch("attempts")
+      assert_equal 0, recovery.fetch("recovered")
+      assert_equal 1, recovery.fetch("failed")
+      assert_equal true, recovery.fetch("exhausted")
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "mixed retryable then non-retryable failures do not mark recovery as exhausted" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d100bb"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::ProviderError.new("rate limited", status: 429),
+          AgentCore::ProviderError.new("bad request", status: 400),
+        ]
+      )
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 2, provider.calls.length
+
+      recovery = agent.metadata.dig("llm_call", "recovery")
+      refute_nil recovery
+      assert_equal 1, recovery.fetch("attempts")
+      assert_equal 0, recovery.fetch("recovered")
+      assert_equal 1, recovery.fetch("failed")
+      assert_equal false, recovery.fetch("exhausted")
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "non-retryable validation error does not retry the primary call" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d100c"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::ValidationError.new(
+            "Selected model does not support tool calling",
+            code: "cybros.llm.capabilities.tools_not_supported",
+            details: {},
+          ),
+        ]
+      )
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 1, provider.calls.length
+      assert_nil agent.metadata.dig("llm_call", "recovery")
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure
@@ -1445,6 +1751,337 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "streaming: retryable stream bootstrap failure retries before any output is committed" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d115a"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::ErrorEvent.new(error: StandardError.new("stream bootstrap failed"), recoverable: true)
+      end
+
+    second_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::MessageComplete.new(
+          message: AgentCore::Message.new(role: :assistant, content: "Recovered stream.")
+        )
+        y << AgentCore::StreamEvent::Done.new(stop_reason: :end_turn)
+      end
+
+    provider = StubProvider.new(responses: [first_enum, second_enum])
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: true },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::FINISHED, agent.state
+      assert_equal "Recovered stream.", agent.body_output.fetch("content")
+      assert_equal 2, provider.calls.length
+
+      recovery = agent.metadata.dig("llm_call", "recovery")
+      refute_nil recovery
+      assert_equal 1, recovery.fetch("attempts")
+      assert_equal 1, recovery.fetch("recovered")
+      assert_equal false, recovery.fetch("exhausted")
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "streaming: generic non-recoverable bootstrap failure before output does not retry" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d115ac"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::ErrorEvent.new(error: StandardError.new("stream bug"), recoverable: false)
+      end
+
+    second_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::MessageComplete.new(
+          message: AgentCore::Message.new(role: :assistant, content: "Should not retry")
+        )
+        y << AgentCore::StreamEvent::Done.new(stop_reason: :end_turn)
+      end
+
+    provider = StubProvider.new(responses: [first_enum, second_enum])
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: true },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 1, provider.calls.length
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "streaming: non-retryable provider error before output does not retry" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d115aa"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::ErrorEvent.new(error: AgentCore::ProviderError.new("bad request", status: 400))
+      end
+
+    second_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::MessageComplete.new(
+          message: AgentCore::Message.new(role: :assistant, content: "Should not retry")
+        )
+        y << AgentCore::StreamEvent::Done.new(stop_reason: :end_turn)
+      end
+
+    provider = StubProvider.new(responses: [first_enum, second_enum])
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: true },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 1, provider.calls.length
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "streaming: validation error subclasses before output do not retry" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d115ab"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::ErrorEvent.new(
+          error: AgentCore::ConfigurationError.new("bad config", code: "agent_core.bad_config", details: {})
+        )
+      end
+
+    second_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::MessageComplete.new(
+          message: AgentCore::Message.new(role: :assistant, content: "Should not retry")
+        )
+        y << AgentCore::StreamEvent::Done.new(stop_reason: :end_turn)
+      end
+
+    provider = StubProvider.new(responses: [first_enum, second_enum])
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: true },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 1, provider.calls.length
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "streaming: failure after visible output does not retry automatically" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d115b"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Hello", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    first_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::TextDelta.new(text: "Hel")
+        y << AgentCore::StreamEvent::ErrorEvent.new(error: StandardError.new("stream interrupted"))
+      end
+
+    second_enum =
+      Enumerator.new do |y|
+        y << AgentCore::StreamEvent::MessageComplete.new(
+          message: AgentCore::Message.new(role: :assistant, content: "Should not retry")
+        )
+        y << AgentCore::StreamEvent::Done.new(stop_reason: :end_turn)
+      end
+
+    provider = StubProvider.new(responses: [first_enum, second_enum])
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: true },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal 1, provider.calls.length
+      assert_match(/stream interrupted/, agent.metadata.fetch("error"))
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
   test "tool_call_repair_loop: repairs invalid_json tool arguments and executes tool" do
     conversation = create_conversation!
     graph = conversation.dag_graph
@@ -1789,7 +2426,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
-  test "provider_failover: retries with fallback model on tool/protocol ProviderError" do
+  test "provider_failover: does not retry with fallback models (hard error)" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     turn_id = "0194f3c0-0000-7000-8000-00000000d121"
@@ -1831,7 +2468,6 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       AgentCore::DAG::Runtime.new(
         provider: provider,
         model: "primary-model",
-        fallback_models: ["fallback-model"],
         tools_registry: AgentCore::Resources::Tools::Registry.new,
         tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
         llm_options: { stream: false },
@@ -1854,15 +2490,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       DAG::Runner.run_node!(agent.id)
 
       agent.reload
-      assert_equal DAG::Node::FINISHED, agent.state
-      assert_equal "fallback-model", agent.body_output.fetch("model")
-
-      failover = agent.metadata.dig("llm", "failover")
-      assert_equal "primary-model", failover.fetch("requested_model")
-      assert_equal "fallback-model", failover.fetch("used_model")
-      assert_equal 2, failover.fetch("attempts").length
-
-      assert_equal ["primary-model", "fallback-model"], provider.calls.map { |c| c.fetch(:model) }
+      assert_equal DAG::Node::ERRORED, agent.state
+      assert_equal ["primary-model"], provider.calls.map { |c| c.fetch(:model) }
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure
       AgentCore::DAG.runtime_resolver = original_runtime_resolver

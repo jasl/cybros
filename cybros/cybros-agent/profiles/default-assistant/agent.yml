@@ -3,7 +3,7 @@ description: "A helpful assistant"
 
 model:
   prefer:
-    - "gpt-4o-mini"
+    - "openai/gpt-5.4"
 
 tools:
   allow:

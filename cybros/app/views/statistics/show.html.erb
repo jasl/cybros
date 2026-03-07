@@ -1,0 +1,118 @@
+<% content_for :header_content do %>
+  <div class="flex items-center gap-2">
+    <span class="text-sm font-semibold">Statistics</span>
+  </div>
+<% end %>
+
+<div class="p-6 space-y-6" data-testid="statistics-page">
+  <% totals = (@stats || {}).fetch("totals", {}) %>
+
+  <div class="stats stats-horizontal w-full bg-base-100 border border-base-300 rounded-box shadow-sm">
+    <div class="stat min-w-64">
+      <div class="stat-title">Total tokens</div>
+      <div class="stat-value text-xl"><%= totals.fetch("total_tokens", 0) %></div>
+      <div class="stat-desc opacity-60">
+        <%= totals.fetch("calls", 0) %> calls · <%= totals.fetch("input_tokens", 0) %> in · <%= totals.fetch("output_tokens", 0) %> out
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title">By model</h2>
+
+        <% rows = (@stats || {}).fetch("by_model_ref", []) %>
+        <% if rows.empty? %>
+          <p class="opacity-70">No usage yet.</p>
+        <% else %>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Model ref</th>
+                  <th class="text-right">Calls</th>
+                  <th class="text-right">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% rows.each do |row| %>
+                  <tr>
+                    <td class="font-mono text-xs"><%= row.fetch("model_ref") %></td>
+                    <td class="text-right"><%= row.fetch("calls") %></td>
+                    <td class="text-right"><%= row.fetch("total_tokens") %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title">By day</h2>
+
+        <% rows = (@stats || {}).fetch("by_day", []) %>
+        <% if rows.empty? %>
+          <p class="opacity-70">No usage yet.</p>
+        <% else %>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th class="text-right">Calls</th>
+                  <th class="text-right">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% rows.each do |row| %>
+                  <tr>
+                    <td class="font-mono text-xs"><%= row.fetch("date") %></td>
+                    <td class="text-right"><%= row.fetch("calls") %></td>
+                    <td class="text-right"><%= row.fetch("total_tokens") %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <% unless @global_by_provider.nil? %>
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <h2 class="card-title">Global by provider</h2>
+        <% rows = Array(@global_by_provider) %>
+        <% if rows.empty? %>
+          <p class="opacity-70">No usage yet.</p>
+        <% else %>
+          <div class="overflow-x-auto">
+            <table class="table table-sm">
+              <thead>
+                <tr>
+                  <th>Provider key</th>
+                  <th class="text-right">Calls</th>
+                  <th class="text-right">Tokens</th>
+                </tr>
+              </thead>
+              <tbody>
+                <% rows.each do |row| %>
+                  <tr>
+                    <td class="font-mono text-xs"><%= row.fetch("provider_key") %></td>
+                    <td class="text-right"><%= row.fetch("calls") %></td>
+                    <td class="text-right"><%= row.fetch("total_tokens") %></td>
+                  </tr>
+                <% end %>
+              </tbody>
+            </table>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
+</div>

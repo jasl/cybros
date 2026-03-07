@@ -15,6 +15,7 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
       @calls << { messages: messages, model: model, tools: tools, stream: stream, options: options }
       resp = @responses.shift
       raise "unexpected provider.chat call (no remaining responses)" unless resp
+      raise resp if resp.is_a?(Exception)
       resp
     end
   end
@@ -54,7 +55,6 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolNameRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         tools_registry: registry,
@@ -105,7 +105,6 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolNameRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         tools_registry: registry,
@@ -126,6 +125,45 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
     assert_equal 2, meta.fetch("attempts")
     failures = meta.fetch("failures_sample")
     assert failures.any? { |h| h.fetch("reason").to_s.include?("json_parse_failed") }
+    assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
+  end
+
+  def test_retries_provider_errors_on_the_same_requested_model
+    provider =
+      StubProvider.new(
+        responses: [
+          StandardError.new("boom"),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"name\":\"echo\"}]}"),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tool_calls = [AgentCore::ToolCall.new(id: "tc_1", name: "no_such_tool", arguments: {})]
+    visible_tools = [{ name: "echo", description: "Echo", parameters: { type: "object", properties: {} } }]
+
+    registry = AgentCore::Resources::Tools::Registry.new
+    registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", description: "Echo", parameters: { type: "object", properties: {} }) { |_args, **_kw| })
+
+    result =
+      AgentCore::Resources::Tools::ToolNameRepairLoop.call(
+        provider: provider,
+        requested_model: "primary",
+        tool_calls: tool_calls,
+        visible_tools: visible_tools,
+        tools_registry: registry,
+        max_attempts: 2,
+        max_output_tokens: 200,
+        options: {},
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        run_id: "rid",
+      )
+
+    assert_equal({ "tc_1" => "echo" }, result.fetch(:tool_name_repairs))
+    assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
+    failures = result.fetch(:metadata).dig("tool_loop", "tool_name_repair", "failures_sample")
+    assert failures.any? { |h| h.fetch("reason").to_s.include?("provider_error=StandardError") }
   end
 
   def test_repair_name_must_be_in_visible_tools
@@ -149,7 +187,6 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
       AgentCore::Resources::Tools::ToolNameRepairLoop.call(
         provider: provider,
         requested_model: "primary",
-        fallback_models: [],
         tool_calls: tool_calls,
         visible_tools: visible_tools,
         tools_registry: registry,
@@ -170,5 +207,29 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
     assert_equal 1, meta.fetch("candidates_total")
     failures = meta.fetch("failures_sample")
     assert failures.any? { |h| h.fetch("tool_call_id") == "tc_1" && h.fetch("reason") == "name_not_in_visible_tools" }
+  end
+
+  def test_does_not_accept_fallback_models_argument
+    provider = StubProvider.new(responses: [])
+    registry = AgentCore::Resources::Tools::Registry.new
+
+    err =
+      assert_raises(ArgumentError) do
+        AgentCore::Resources::Tools::ToolNameRepairLoop.call(
+          provider: provider,
+          requested_model: "primary",
+          fallback_models: [],
+          tool_calls: [],
+          visible_tools: [],
+          tools_registry: registry,
+          max_attempts: 1,
+          max_output_tokens: 200,
+          options: {},
+          instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          run_id: "rid",
+        )
+      end
+
+    assert_includes err.message, "fallback_models"
   end
 end
