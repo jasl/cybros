@@ -20,23 +20,33 @@ module MockLLM
         include_usage = boolean(payload.dig("stream_options", "include_usage"))
 
         last_user_prompt = last_user_prompt(messages)
-        controls = parse_mock_controls(last_user_prompt)
+        shortcut_seconds = numeric_prompt_delay_seconds(last_user_prompt)
 
-        if controls[:invalid_directive]
-          return render_openai_error("invalid mock directive", status: :bad_request)
+        if shortcut_seconds
+          effective_prompt = nil
+          delay_seconds = clamp_mock_slow_seconds(shortcut_seconds, default_max: 9.0)
+          content = build_delayed_mock_content(seconds: shortcut_seconds)
+          usage = build_usage(messages, content)
+        else
+          controls = parse_mock_controls(last_user_prompt)
+
+          if controls[:invalid_directive]
+            return render_openai_error("invalid mock directive", status: :bad_request)
+          end
+
+          if controls[:error_status]
+            return render_openai_error(
+              controls[:error_message] || "mock error",
+              status: controls[:error_status],
+              type: openai_error_type_for_status(controls[:error_status]),
+            )
+          end
+
+          effective_prompt = controls[:prompt]
+          delay_seconds = controls[:slow_seconds]
+          content = build_mock_content(messages, prompt_override: effective_prompt)
+          usage = build_usage(messages, content, prompt_override: effective_prompt)
         end
-
-        if controls[:error_status]
-          return render_openai_error(
-            controls[:error_message] || "mock error",
-            status: controls[:error_status],
-            type: openai_error_type_for_status(controls[:error_status]),
-          )
-        end
-
-        effective_prompt = controls[:prompt]
-        content = build_mock_content(messages, prompt_override: effective_prompt)
-        usage = build_usage(messages, content, prompt_override: effective_prompt)
 
         if stream
           stream_chat_completion(
@@ -44,9 +54,10 @@ module MockLLM
             content: content,
             usage: usage,
             include_usage: include_usage,
-            delay_seconds: controls[:slow_seconds],
+            delay_seconds: delay_seconds,
           )
         else
+          sleep(delay_seconds) if delay_seconds.to_f.positive?
           render json: build_chat_completion_response(model: model, content: content, usage: usage)
         end
       rescue ActionDispatch::Http::Parameters::ParseError, JSON::ParserError
@@ -142,7 +153,7 @@ module MockLLM
           next
         end
 
-        slow_seconds = clamp_mock_slow_seconds(slow_seconds)
+        slow_seconds = clamp_mock_slow_seconds(slow_seconds, default_max: 0.2)
 
         effective_prompt =
           [inline_prompt.to_s, rest.to_s]
@@ -160,15 +171,21 @@ module MockLLM
         }
       end
 
-      def clamp_mock_slow_seconds(seconds)
+      def numeric_prompt_delay_seconds(prompt)
+        raw = prompt.to_s.strip
+        return nil unless raw.match?(/\A[1-9]\z/)
+
+        raw.to_f
+      end
+
+      def clamp_mock_slow_seconds(seconds, default_max:)
         return nil if seconds.nil?
 
         s = seconds.to_f
         s = 0.0 if s.negative?
 
-        # Prevent request-thread abuse via `sleep()` (ActionController::Live).
-        max = ENV.fetch("MOCK_LLM_MAX_SLOW_SECONDS", "0.2").to_f
-        max = 0.2 if max <= 0.0
+        max = ENV.fetch("MOCK_LLM_MAX_SLOW_SECONDS", default_max.to_s).to_f
+        max = default_max if max <= 0.0
 
         [s, max].min
       rescue ArgumentError, TypeError
@@ -209,7 +226,11 @@ module MockLLM
           MD
         end
 
-        "Mock: #{prompt}"
+        "Mock: #{prompt} [#{SecureRandom.hex(3)}]"
+      end
+
+      def build_delayed_mock_content(seconds:)
+        "Mock delayed #{seconds.to_i}s: #{SecureRandom.alphanumeric(24).downcase}"
       end
 
       def build_usage(messages, completion, prompt_override: nil)

@@ -1,6 +1,8 @@
 require "test_helper"
 
 class ConversationChatFacadeTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   test "action_policy_for_node_id returns the app-facing policy dictionary" do
     conversation = create_conversation!(title: "Chat")
     conversation.append_user_message!(content: "Hello")
@@ -67,7 +69,7 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     end
   end
 
-  test "message_page includes action_policy for non-tail regenerate branch mode" do
+  test "message_page hides regenerate for non-tail assistants while keeping branch available" do
     conversation = create_conversation!(title: "Chat")
 
     conversation.append_user_message!(content: "Hello")
@@ -83,7 +85,9 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     page = conversation.message_page(limit: 20, mode: :full)
     first_message = page.fetch("messages").find { |message| message.fetch("node_id") == first_agent.id }
 
-    assert_equal "branch", first_message.dig("action_policy", "actions", "regenerate", "mode")
+    assert_equal false, first_message.dig("action_policy", "actions", "regenerate", "available")
+    assert_equal "history_requires_branch", first_message.dig("action_policy", "actions", "regenerate", "reason")
+    assert_equal true, first_message.dig("action_policy", "actions", "branch", "available")
     assert_equal false, first_message.dig("action_policy", "actions", "swipe", "available")
   end
 
@@ -112,6 +116,110 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal conversation.id, run.conversation_id
     assert_equal agent.id, run.dag_node_id
     assert_equal "queued", run.state
+  end
+
+  test "append_user_message! silently repairs a stale pending tail before building the next turn" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first = conversation.append_user_message!(content: "u1")
+    first_user = first.fetch(:user_node)
+    stale_agent = first.fetch(:agent_node)
+    stale_run = ConversationRun.find_by!(conversation_id: conversation.id, dag_node_id: stale_agent.id)
+
+    second = conversation.append_user_message!(content: "u2")
+    second_user = second.fetch(:user_node)
+    second_agent = second.fetch(:agent_node)
+
+    assert_equal DAG::Node::STOPPED, stale_agent.reload.state
+    assert stale_agent.deleted?
+    assert stale_agent.context_excluded?
+    assert_equal "canceled", stale_run.reload.state
+
+    sequence_parent_id =
+      conversation.root_graph.edges.active
+        .where(to_node_id: second_user.id, edge_type: DAG::Edge::SEQUENCE)
+        .order(:id)
+        .pick(:from_node_id)
+    assert_equal first_user.id, sequence_parent_id
+    refute conversation.root_graph.edges.active.exists?(from_node_id: stale_agent.id, to_node_id: second_user.id, edge_type: DAG::Edge::SEQUENCE)
+    refute conversation.root_graph.edges.active.exists?(from_node_id: stale_agent.id, to_node_id: second_agent.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    page = conversation.message_page(limit: 20, mode: :full)
+    refute_includes page.fetch("messages").map { |message| message.fetch("node_id") }, stale_agent.id
+  end
+
+  test "start_pending_agent_node! claims the tail pending assistant and enqueues execution" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    agent = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+    run = ConversationRun.find_by!(conversation_id: conversation.id, dag_node_id: agent.id)
+    clear_enqueued_jobs
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob, args: [agent.id]) do
+      conversation.start_pending_agent_node!(node_id: agent.id, claimed_by: "manual-start:test")
+    end
+
+    assert_equal DAG::Node::RUNNING, agent.reload.state
+    assert_equal "manual-start:test", agent.claimed_by
+    assert agent.claimed_at.present?
+    assert_nil agent.started_at
+    assert_equal "queued", run.reload.state
+  end
+
+  test "start_pending_agent_node! silently repairs stale middle pending agents before claiming the tail" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first = conversation.append_user_message!(content: "u1")
+    stale_agent = first.fetch(:agent_node)
+    stale_run = ConversationRun.find_by!(conversation_id: conversation.id, dag_node_id: stale_agent.id)
+    second = conversation.append_user_message!(content: "u2", repair_pending_tail: false)
+    tail_agent = second.fetch(:agent_node)
+
+    clear_enqueued_jobs
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob, args: [tail_agent.id]) do
+      conversation.start_pending_agent_node!(node_id: tail_agent.id, claimed_by: "manual-start:test")
+    end
+
+    assert_equal DAG::Node::STOPPED, stale_agent.reload.state
+    assert stale_agent.deleted?
+    assert stale_agent.context_excluded?
+    assert_equal "canceled", stale_run.reload.state
+
+    assert_equal DAG::Node::RUNNING, tail_agent.reload.state
+    sequence_parent_id =
+      conversation.root_graph.edges.active
+        .where(to_node_id: second.fetch(:user_node).id, edge_type: DAG::Edge::SEQUENCE)
+        .order(:id)
+        .pick(:from_node_id)
+    assert_equal first.fetch(:user_node).id, sequence_parent_id
   end
 
   test "create_child! forks a lane and attaches it to a child conversation" do
@@ -146,6 +254,35 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal DAG::Lane::BRANCH, lane.role
     assert_equal main_lane.id, lane.parent_lane_id
     assert_equal child, lane.attachable
+  end
+
+  test "edit_user_message! replaces the latest user turn and queues a regenerated assistant" do
+    conversation = create_conversation!(title: "Chat")
+
+    first = conversation.append_user_message!(content: "Hello")
+    original_user = first.fetch(:user_node)
+    original_agent = first.fetch(:agent_node)
+    original_agent.mark_running!
+    original_agent.mark_finished!(content: "Hi")
+
+    result = conversation.edit_user_message!(node_id: original_user.id, content: "Hello again")
+    edited_user = result.fetch(:user_node)
+    regenerated_agent = result.fetch(:agent_node)
+
+    assert_equal original_user.turn_id, edited_user.turn_id
+    assert_equal "Hello again", edited_user.body_input.fetch("content")
+    assert_equal DAG::Node::PENDING, regenerated_agent.state
+    assert_equal conversation.id, ConversationRun.find_by!(dag_node_id: regenerated_agent.id).conversation_id
+
+    assert original_user.reload.compressed_at.present?
+    assert original_agent.reload.compressed_at.present?
+
+    visible_inputs =
+      conversation.message_page(limit: 20, mode: :full).fetch("messages").filter_map do |message|
+        message.dig("payload", "input", "content").to_s.presence
+      end
+
+    assert_equal ["Hello again"], visible_inputs
   end
 
   test "select_swipe! adopts a previous version in the same version_set" do
@@ -191,6 +328,108 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_nil DAG::NodeVisibilityPatch.find_by(graph_id: agent.graph_id, node_id: agent.id),
                "expected no deferred visibility patch when the node can be stopped and deleted immediately"
     assert_equal "canceled", run.reload.state
+  end
+
+  test "cancel_queued_turn! rebuilds the remaining queued turns in order" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first = conversation.append_user_message!(content: "u1")
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    second = conversation.append_user_message!(content: "u2")
+    third = conversation.append_user_message!(content: "u3")
+    fourth = conversation.append_user_message!(content: "u4")
+
+    conversation.cancel_queued_turn!(user_node_id: third.fetch(:user_node).id)
+
+    assert_equal %w[u2 u4], conversation.composer_state.dig("queue", "items").map { |item| item.fetch("content") }
+    assert conversation.root_graph.nodes.active.where(turn_id: third.fetch(:user_node).turn_id).empty?
+    assert_equal [], DAG::GraphAudit.scan(graph: conversation.root_graph)
+  end
+
+  test "message_page hides queued turns that are already summarized in the composer queue" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first = conversation.append_user_message!(content: "u1")
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    queued = conversation.append_user_message!(content: "queued follow up")
+
+    assert_equal ["queued follow up"], conversation.composer_state.dig("queue", "items").map { |item| item.fetch("content") }
+
+    transcript_inputs =
+      conversation.message_page(limit: 20, mode: :full).fetch("messages").filter_map do |message|
+        message.dig("payload", "input", "content").to_s.presence
+      end
+
+    refute_includes transcript_inputs, queued.fetch(:user_node).body_input.fetch("content")
+  end
+
+  test "steer_queued_turn! applies the selected queued content and preserves the remaining queue" do
+    conversation =
+      create_conversation!(
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first = conversation.append_user_message!(content: "u1")
+    first_user = first.fetch(:user_node)
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    second = conversation.append_user_message!(content: "u2")
+    third = conversation.append_user_message!(content: "u3")
+    fourth = conversation.append_user_message!(content: "u4")
+
+    conversation.steer_queued_turn!(user_node_id: third.fetch(:user_node).id)
+
+    active_current_user =
+      conversation.root_graph.nodes.active
+        .where(lane_id: conversation.chat_lane.id, turn_id: first_user.turn_id, node_type: Messages::UserMessage.node_type_key)
+        .order(:id)
+        .last
+
+    assert_equal "u3", active_current_user.body_input.fetch("content")
+    assert_equal %w[u2 u4], conversation.composer_state.dig("queue", "items").map { |item| item.fetch("content") }
+    assert conversation.root_graph.nodes.active.where(turn_id: third.fetch(:user_node).turn_id).empty?
+    assert_equal [], DAG::GraphAudit.scan(graph: conversation.root_graph)
   end
 
   test "translate! marks node metadata pending and clear_translations! removes it" do

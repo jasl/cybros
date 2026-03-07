@@ -2,16 +2,17 @@ require "test_helper"
 
 class ConversationRegenerateSwipeTest < ActionDispatch::IntegrationTest
   def sign_in_owner!
+    email = "regen-#{SecureRandom.hex(4)}@example.com"
     identity =
       Identity.create!(
-        email: "admin@example.com",
+        email: email,
         password: "Passw0rd",
         password_confirmation: "Passw0rd",
       )
 
     user = User.create!(identity: identity, role: :owner)
 
-    post session_path, params: { email: "admin@example.com", password: "Passw0rd" }
+    post session_path, params: { email: email, password: "Passw0rd" }
     assert_redirected_to root_path
     assert cookies[:session_token].present?
 
@@ -65,5 +66,11 @@ class ConversationRegenerateSwipeTest < ActionDispatch::IntegrationTest
     assert_redirected_to conversation_path(child)
     assert_equal "branch", child.kind
     assert_equal agent1.id, child.forked_from_node_id
+
+    page = child.message_page(limit: 20, mode: :full)
+
+    assert_equal [Messages::AgentMessage.node_type_key], page.fetch("messages").map { |message| message.fetch("node_type") }
+    assert_equal ["Hi v1"], page.fetch("messages").map { |message| message.dig("payload", "output", "content").to_s }
+    assert_equal 0, ConversationRun.where(conversation_id: child.id).count
   end
 end

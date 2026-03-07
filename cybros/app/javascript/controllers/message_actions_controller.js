@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { postAndTurboVisit } from "../lib/post_and_turbo_visit"
+import { postAndRenderTurboStream, postAndTurboVisit } from "../lib/post_and_turbo_visit"
 
 function actionEntry(policy, key) {
   const actions = policy?.actions
@@ -10,6 +10,16 @@ function actionEntry(policy, key) {
 
 function actionAvailable(policy, key) {
   return actionEntry(policy, key).available === true
+}
+
+function swipeDirectionAvailable(policy, direction) {
+  const entry = actionEntry(policy, "swipe")
+  if (entry.available !== true) return false
+
+  if (direction === "left") return entry.left_available === true
+  if (direction === "right") return entry.right_available === true
+
+  return false
 }
 
 function interruptedOutputPolicyOverrideValue() {
@@ -25,7 +35,7 @@ export default class extends Controller {
     actionPolicy: Object,
   }
 
-  static targets = ["copyButton", "retryButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeRight", "branchButton"]
+  static targets = ["copyButton", "editButton", "startButton", "retryButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeCount", "swipeRight", "branchButton"]
 
   connect() {
     this.updateVisibility()
@@ -38,10 +48,29 @@ export default class extends Controller {
 
   updateVisibility() {
     const policy = this.actionPolicyValue || {}
+    const swipe = actionEntry(policy, "swipe")
     const regenerate = actionEntry(policy, "regenerate")
 
     if (this.hasSwipeNavTarget) {
       this.swipeNavTarget.classList.toggle("hidden", !actionAvailable(policy, "swipe"))
+    }
+
+    if (this.hasSwipeLeftTarget) {
+      const canSwipeLeft = swipeDirectionAvailable(policy, "left")
+      this.swipeLeftTarget.toggleAttribute("disabled", !canSwipeLeft)
+      this.swipeLeftTarget.classList.toggle("btn-disabled", !canSwipeLeft)
+    }
+
+    if (this.hasSwipeRightTarget) {
+      const canSwipeRight = swipeDirectionAvailable(policy, "right")
+      this.swipeRightTarget.toggleAttribute("disabled", !canSwipeRight)
+      this.swipeRightTarget.classList.toggle("btn-disabled", !canSwipeRight)
+    }
+
+    if (this.hasSwipeCountTarget) {
+      const current = Number.parseInt(String(swipe.current ?? 0), 10)
+      const total = Number.parseInt(String(swipe.total ?? 0), 10)
+      this.swipeCountTarget.textContent = `${Number.isNaN(current) ? 0 : current} / ${Number.isNaN(total) ? 0 : total}`
     }
 
     if (this.hasRegenerateButtonTarget) {
@@ -56,10 +85,21 @@ export default class extends Controller {
       this.retryButtonTarget.classList.toggle("btn-disabled", !actionAvailable(policy, "retry"))
     }
 
+    if (this.hasStartButtonTarget) {
+      this.startButtonTarget.toggleAttribute("disabled", !actionAvailable(policy, "start"))
+      this.startButtonTarget.classList.toggle("btn-disabled", !actionAvailable(policy, "start"))
+    }
+
     if (this.hasBranchButtonTarget) {
       const canBranch = actionAvailable(policy, "branch")
       this.branchButtonTarget.toggleAttribute("disabled", !canBranch)
       this.branchButtonTarget.classList.toggle("btn-disabled", !canBranch)
+    }
+
+    if (this.hasEditButtonTarget) {
+      const canEdit = actionAvailable(policy, "edit")
+      this.editButtonTarget.toggleAttribute("disabled", !canEdit)
+      this.editButtonTarget.classList.toggle("btn-disabled", !canEdit)
     }
   }
 
@@ -83,6 +123,16 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/regenerate`
+    const regenerate = actionEntry(this.actionPolicyValue || {}, "regenerate")
+
+    if (regenerate.mode === "in_place") {
+      const ok = await postAndRenderTurboStream(url, { agent_node_id: nodeId })
+      if (ok) return
+
+      await postAndTurboVisit(url, { agent_node_id: nodeId }, { preserveScroll: true })
+      return
+    }
+
     await postAndTurboVisit(url, { agent_node_id: nodeId })
   }
 
@@ -102,6 +152,22 @@ export default class extends Controller {
     const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/retry`, body)
     if (!response?.ok) {
       await this.#toastRetryFailure(response)
+      return
+    }
+
+    window.Turbo?.visit?.(window.location.href)
+  }
+
+  async start(event) {
+    event.preventDefault()
+    const conversationId = this.conversationId()
+    const nodeId = String(this.nodeIdValue || "")
+    if (!conversationId || !nodeId) return
+    if (!actionAvailable(this.actionPolicyValue || {}, "start")) return
+
+    const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/start`, { node_id: nodeId })
+    if (!response?.ok) {
+      await this.#handleStartFailure(response)
       return
     }
 
@@ -128,11 +194,31 @@ export default class extends Controller {
     await postAndTurboVisit(url, { from_node_id: nodeId, title: "Branch", user_content: "" })
   }
 
+  edit(event) {
+    event.preventDefault()
+    if (!actionAvailable(this.actionPolicyValue || {}, "edit")) return
+
+    const conversationId = this.conversationId()
+    const nodeId = String(this.nodeIdValue || "")
+    const content = String(this.element.querySelector("[data-role='user-text']")?.textContent || "").trim()
+    if (!conversationId || !nodeId || !content) return
+
+    window.dispatchEvent(
+      new CustomEvent("conversation:user-message-edit", {
+        detail: {
+          conversationId,
+          nodeId,
+          content,
+        },
+      }),
+    )
+  }
+
   async #swipe(direction) {
     const conversationId = this.conversationId()
     const nodeId = String(this.nodeIdValue || "")
     if (!conversationId || !nodeId) return
-    if (!actionAvailable(this.actionPolicyValue || {}, "swipe")) return
+    if (!swipeDirectionAvailable(this.actionPolicyValue || {}, direction)) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/swipe`
     await postAndTurboVisit(url, { agent_node_id: nodeId, direction })
@@ -169,6 +255,28 @@ export default class extends Controller {
     window.dispatchEvent(
       new CustomEvent("toast:show", {
         detail: { message, type: "error" },
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  }
+
+  async #handleStartFailure(response) {
+    let code
+
+    try {
+      const payload = await response.json()
+      code = String(payload?.error || "")
+    } catch (_e) {}
+
+    if (code === "state_changed" || code === "node_not_found") {
+      window.Turbo?.visit?.(window.location.href)
+      return
+    }
+
+    window.dispatchEvent(
+      new CustomEvent("toast:show", {
+        detail: { message: "Start failed.", type: "error" },
         bubbles: true,
         cancelable: true,
       }),

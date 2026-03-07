@@ -19,7 +19,7 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
     DAG::Graph.delete_all
   end
 
-  test "terminal node_state_changed broadcasts turbo replace for agent message" do
+  test "terminal node_state_changed broadcasts turbo replaces for the agent message and transcript list" do
     user = create_user!
     conversation = create_conversation!(user: user, title: "Chat")
     graph = conversation.dag_graph
@@ -45,7 +45,9 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
     # In production this event is emitted after the node state has already been persisted.
     agent.update!(state: DAG::Node::FINISHED)
 
-    assert_broadcasts(stream_name, 1) do
+    existing_count = broadcasts(stream_name).size
+
+    assert_broadcasts(stream_name, 2) do
       Event.create!(
         conversation: conversation,
         subject: agent,
@@ -54,16 +56,71 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
       )
     end
 
-    raw = broadcasts(stream_name).last
-    assert raw.present?
+    payloads = broadcasts(stream_name).drop(existing_count).map { |raw| JSON.parse(raw) }
+    message_update = payloads.find { |html| html.include?(%(target="message_#{agent.id}")) }
+    list_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_list)
+    list_update = payloads.find { |html| html.include?(%(target="#{list_id}")) }
 
-    # Turbo stream payload is JSON-encoded by ActionCable helpers (escaped `<`).
-    html = JSON.parse(raw)
-    assert_includes html, %(<turbo-stream action="replace" target="message_#{agent.id}")
-    assert_includes html, %(data-controller="markdown")
-    assert_includes html, "**Done**"
-    assert_includes html, %(data-message-actions-action-policy-value=)
-    assert_includes html, %(&quot;regenerate&quot;:{&quot;supported&quot;:true,&quot;available&quot;:true,&quot;mode&quot;:&quot;in_place&quot;})
+    assert message_update.present?
+    assert list_update.present?
+
+    assert_includes message_update, %(<turbo-stream action="replace" target="message_#{agent.id}")
+    assert_includes message_update, %(data-controller="markdown")
+    assert_includes message_update, "**Done**"
+    assert_includes message_update, %(data-message-actions-action-policy-value=)
+    assert_includes message_update, %(&quot;regenerate&quot;:{&quot;supported&quot;:true,&quot;available&quot;:true,&quot;mode&quot;:&quot;in_place&quot;})
+  end
+
+  test "terminal node_state_changed also broadcasts a refreshed messages list when a queued turn becomes active" do
+    user = create_user!
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    stream_name = Turbo::StreamsChannel.send(:stream_name_from, [conversation, :messages])
+    assert stream_name.present?
+
+    first = conversation.append_user_message!(content: "first request")
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    conversation.append_user_message!(content: "queued follow up")
+
+    DAG::NodeBody.where(id: first_agent.body_id).update_all(
+      output_preview: { "content" => "done" },
+      updated_at: Time.current,
+    )
+    first_agent.update!(state: DAG::Node::FINISHED)
+
+    existing_count = broadcasts(stream_name).size
+
+    assert_broadcasts(stream_name, 2) do
+      Event.create!(
+        conversation: conversation,
+        subject: first_agent,
+        event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+        particulars: { "from" => DAG::Node::RUNNING, "to" => DAG::Node::FINISHED },
+      )
+    end
+
+    html_payloads = broadcasts(stream_name).drop(existing_count).map { |raw| JSON.parse(raw) }
+    list_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_list)
+    list_update = html_payloads.find { |html| html.include?(%(target="#{list_id}")) }
+
+    assert list_update.present?
+    assert_includes list_update, "queued follow up"
   end
 
   test "node_state broadcast includes stable envelope fields (event_id + turn_id)" do

@@ -23,7 +23,7 @@ module Messages
     end
 
     def forkable?
-      true
+      false
     end
 
     def mermaid_snippet(node:)

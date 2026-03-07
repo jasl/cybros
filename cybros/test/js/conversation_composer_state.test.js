@@ -1,37 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { deriveComposerFormState, deriveComposerPreviewText } from "../../app/javascript/lib/conversation_composer_state"
+import { deriveComposerFormState, prependQueuedContentToDraft } from "../../app/javascript/lib/conversation_composer_state"
 
 describe("deriveComposerFormState", () => {
-  test("uses the steer endpoint when steer mode is selected and available", () => {
+  test("forces queue mode while a run is active", () => {
     expect(
       deriveComposerFormState({
         railState: {
           running: true,
           queueAvailable: true,
-          steerAvailable: true,
           createUrl: "/conversations/1/messages",
-          steerUrl: "/conversations/1/steer_current_turn",
         },
-        selectedMode: "steer_current_turn",
-      }),
-    ).toEqual({
-      formAction: "/conversations/1/steer_current_turn",
-      resolvedMode: "steer_current_turn",
-      runningInputPolicyOverride: null,
-    })
-  })
-
-  test("falls back to queue when steer mode is selected but unavailable", () => {
-    expect(
-      deriveComposerFormState({
-        railState: {
-          running: true,
-          queueAvailable: true,
-          steerAvailable: false,
-          createUrl: "/conversations/1/messages",
-          steerUrl: "/conversations/1/steer_current_turn",
-        },
-        selectedMode: "steer_current_turn",
       }),
     ).toEqual({
       formAction: "/conversations/1/messages",
@@ -39,18 +17,29 @@ describe("deriveComposerFormState", () => {
       runningInputPolicyOverride: "queue",
     })
   })
+
+  test("uses a fresh turn when no run is active", () => {
+    expect(
+      deriveComposerFormState({
+        railState: {
+          running: false,
+          queueAvailable: false,
+          createUrl: "/conversations/1/messages",
+        },
+      }),
+    ).toEqual({
+      formAction: "/conversations/1/messages",
+      resolvedMode: "new_turn",
+      runningInputPolicyOverride: null,
+    })
+  })
 })
 
-describe("deriveComposerPreviewText", () => {
-  test("prefers the live draft and falls back to the queued candidate preview", () => {
-    expect(deriveComposerPreviewText({ draft: "  next draft  ", queuedPreview: "queued follow up" })).toEqual({
-      content: "next draft",
-      source: "draft",
-    })
-
-    expect(deriveComposerPreviewText({ draft: "   ", queuedPreview: "queued follow up" })).toEqual({
-      content: "queued follow up",
-      source: "queued_turn",
-    })
+describe("prependQueuedContentToDraft", () => {
+  test("puts the queued content ahead of an existing draft with a blank line separator", () => {
+    expect(prependQueuedContentToDraft({ queuedContent: "queued follow up", draft: "" })).toBe("queued follow up")
+    expect(prependQueuedContentToDraft({ queuedContent: "queued follow up", draft: "existing draft" })).toBe(
+      "queued follow up\nexisting draft",
+    )
   })
 })

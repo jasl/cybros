@@ -1,6 +1,8 @@
 require "test_helper"
 
 class ConversationsTest < ActionDispatch::IntegrationTest
+  include ActiveJob::TestHelper
+
   setup do
     LLMProvider.delete_all
   end
@@ -77,6 +79,8 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, conversation.title
     assert_includes response.body, "Message…"
+    assert_includes response.body, 'name="turbo-refresh-method" content="morph"'
+    assert_includes response.body, 'name="turbo-refresh-scroll" content="preserve"'
   end
 
   test "show renders hard-oversize product messages in the transcript" do
@@ -165,7 +169,27 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.3 Codex"
   end
 
-  test "show renders composer status rail above the input with queue state, steer control, and candidate next-input preview" do
+  test "show includes a hidden coalescing override so rapid follow-ups become queued turns" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select 'input[type="hidden"][name="input_policy_override[input_coalescing][enabled]"][value="false"]', count: 1
+  end
+
+  test "show renders a single queued message inline without an expand toggle" do
     user = sign_in_owner!
     conversation =
       create_conversation!(
@@ -186,16 +210,83 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [first_agent.id], claimed.map(&:id)
 
-    conversation.append_user_message!(content: "queued follow up")
+    conversation.append_user_message!(content: "queued follow up 1")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select '[data-testid="conversation-queued-alert"]', count: 1
+    assert_select '[data-testid="conversation-queued-alert-primary-item"]', count: 1, text: /queued follow up 1/
+    assert_select '[data-testid="conversation-queued-alert-toggle"]', count: 0
+    assert_select '[data-testid="conversation-queued-alert-overflow-item"]', count: 0
+  end
+
+  test "show renders the first queued message inline and only expands the remaining queued items" do
+    user = sign_in_owner!
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+    graph = conversation.dag_graph
+
+    first = conversation.append_user_message!(content: "first request")
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+
+    5.times do |index|
+      conversation.append_user_message!(content: "queued follow up #{index + 1}")
+    end
 
     get conversation_path(conversation)
     assert_response :success
 
     assert_match(/data-testid="conversation-composer-status-rail".*data-testid="conversation-composer-input"/m, response.body)
-    assert_includes response.body, "Queue next turn"
-    assert_includes response.body, "Steer current turn"
-    assert_includes response.body, "queued follow up"
+    refute_includes response.body, "Queue next turn"
+    refute_includes response.body, "Candidate next-input preview"
+    assert_select '[data-testid="conversation-queued-alert"]', count: 1
+    assert_select '[data-testid="conversation-queued-alert-primary-item"]', count: 1, text: /queued follow up 1/
+    assert_select '[data-testid="conversation-queued-alert-toggle"]', count: 1
+    assert_select '[data-testid="conversation-queued-alert-overflow-item"]', count: 3
+    assert_select '[data-testid="conversation-queued-alert-overflow-item"]', text: /queued follow up 2/
+    assert_select '[data-testid="conversation-queued-alert-overflow-item"]', text: /queued follow up 4/
     assert_select 'input[type="hidden"][name="interrupted_output_policy_override"]', count: 1
+  end
+
+  test "start claims the tail pending assistant and enqueues execution" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    agent = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+    clear_enqueued_jobs
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob, args: [agent.id]) do
+      post start_conversation_path(conversation), params: { node_id: agent.id }, as: :json
+    end
+
+    assert_response :success
+    assert_equal DAG::Node::RUNNING, agent.reload.state
   end
 
   test "show keeps stale model selection in reselect state instead of auto-falling back" do
@@ -239,6 +330,32 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.4"
   end
 
+  test "show groups model picker options by provider with plain model labels inside each group" do
+    user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", refresh_token: "rt")
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-openrouter")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="Codex (ChatGPT Pro/Plus)"] option', text: "GPT‑5.3 Codex"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4"
+    refute_includes response.body, "GPT‑5.4 (OpenAI)"
+    refute_includes response.body, "GPT‑5.4 (OpenRouter)"
+  end
+
   test "show requires reselection when default model is unusable and conversation has no stored model_ref" do
     user = sign_in_owner!
     Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
@@ -260,7 +377,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][required]'
   end
 
-  test "show disambiguates duplicate model names by provider when needed" do
+  test "show keeps duplicate model names separated by provider groups" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-openrouter")
@@ -277,8 +394,8 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
     get conversation_path(conversation)
     assert_response :success
-    assert_includes response.body, "GPT‑5.4 (OpenAI)"
-    assert_includes response.body, "GPT‑5.4 (OpenRouter)"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4"
   end
 
   test "create uses site default model when configured" do

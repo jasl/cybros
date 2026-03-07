@@ -2,29 +2,53 @@ require "test_helper"
 
 class RapidSendsTest < ActionDispatch::IntegrationTest
   def sign_in_owner!
+    email = "rapid-#{SecureRandom.hex(4)}@example.com"
     identity =
       Identity.create!(
-        email: "admin@example.com",
+        email: email,
         password: "Passw0rd",
         password_confirmation: "Passw0rd",
       )
 
     user = User.create!(identity: identity, role: :owner)
 
-    post session_path, params: { email: "admin@example.com", password: "Passw0rd" }
+    post session_path, params: { email: email, password: "Passw0rd" }
     assert_redirected_to root_path
     assert cookies[:session_token].present?
 
     user
   end
 
-  test "rapid sends create sequenced user/agent pairs with queue dependency" do
+  test "rapid sends create queued user/agent pairs once the first agent is already running" do
     user = sign_in_owner!
 
-    conversation = create_conversation!(user: user, title: "Chat")
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
 
-    5.times do |i|
-      post conversation_messages_path(conversation), params: { content: "m#{i + 1}" }
+    post conversation_messages_path(conversation), params: { content: "m1" }
+    assert_redirected_to conversation_path(conversation)
+
+    first_agent =
+      conversation.reload.root_graph.nodes.active
+        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+        .order(:id)
+        .last
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    4.times do |i|
+      post conversation_messages_path(conversation), params: { content: "m#{i + 2}" }
       assert_redirected_to conversation_path(conversation)
     end
 

@@ -11,7 +11,7 @@
 ### 1.1 Public entity
 
 - App 的第一实体是 `Conversation`（路由 `/conversations/...`）。
-- `Conversation` 对外暴露的“聊天 API”是 **facade**（`Conversation#append_user_message!`、`#append_user_message_and_project!`、`#retry_agent_node!`、`#steer_current_turn!`、`#regenerate!`、`#select_swipe!`、`#create_child!`、`#soft_delete_node!` 等）。
+- `Conversation` 对外暴露的“聊天 API”是 **facade**（`Conversation#append_user_message!`、`#append_user_message_and_project!`、`#edit_user_message!`、`#retry_agent_node!`、`#steer_current_turn!`、`#regenerate!`、`#select_swipe!`、`#create_child!`、`#soft_delete_node!` 等）。
 - Controller/Channel/View **不得**直接依赖 DAG 的内部结构细节（例如手写 edge 遍历、假设 main lane 等）。
 - 引擎层可注入 `DAG::GraphPolicy` 作为 defense-in-depth：即使绕过 facade 直接调用 DAG 的高阶写原语，也能被 policy 兜底拦截（不阻塞 runner/leaf repair 等引擎自动化路径；详见 `docs/dag/public_api.md`）。
 
@@ -24,7 +24,7 @@
 
 - Message projection 还会附带一个 **app-facing action policy dictionary**（当前键名：`action_policy`），作为 Web UI / future API client / native app 的统一动作契约。
 - 该字典的第一层分为：
-  - `actions`：面向产品动作（例如 `retry` / `regenerate` / `swipe` / `branch` / `delete`）
+  - `actions`：面向产品动作（例如 `retry` / `regenerate` / `swipe` / `branch` / `edit` / `delete`）
   - `capabilities`：保留给更低层的运行能力（例如 `execute`）
 - 每个 action entry 至少包含：
   - `supported`：该 node type 是否支持该动作类别
@@ -62,7 +62,9 @@
 
 - fork 节点必须属于当前 `Conversation#chat_lane`（避免跨 lane 误 fork）
 - fork 节点不得为 soft-deleted
-- fork 节点类型必须满足 `NodeBody#forkable? == true`（默认保守，只有“消息类节点”覆盖为 true）
+- fork 节点类型必须满足 `NodeBody#forkable? == true`
+  - 当前产品层只对 assistant message 暴露 branch；user message 不提供 branch
+- 当从 assistant branch 且未显式提供 `user_content` 时，child conversation 的第一条消息应是该 assistant 的 snapshot，不得自动插入空 user turn，也不得立刻自动生成一条新 assistant reply
 
 ---
 
@@ -90,10 +92,17 @@ Swipe 由同一 `version_set_id` 下的多个版本表示（DAG 多版本语义�
 ### 3.3 Regenerate 规则
 
 - **Tail agent regenerate**：在同一 conversation/lane 内创建新变体并默认选中。
-- **Non-tail regenerate**：自动创建 child conversation（branch），并在 child 上执行 regenerate（避免改写历史）。
+- **Non-tail regenerate**：自动创建 child conversation（branch），child 的第一条消息是被选中的 assistant snapshot；不在 child 上立刻自动 rerun（避免改写历史，也避免无输入的即时重放）。
 - `retry` 与 `regenerate` 是两个不同的产品动作：
   - `retry`：面向 `errored` / `stopped` 的失败恢复
   - `regenerate`：面向已完成 assistant version 的重新生成（可能是 in-place，也可能是 branch）
+
+### 3.4 Latest user edit
+
+- 只有当前 conversation/lane 中**最后一条可见 user message** 可以触发 `edit`。
+- edit 的产品语义是：保留审计历史、替换这条 user 输入，并基于新输入重新生成它后面的 assistant continuation。
+- 历史 user message 不暴露 edit；user message 也不暴露 branch。
+- edit 后仍应复用正常的 app-layer pre-turn 保护（例如 oversize guard / compact_context），而不是绕过这些输入策略。
 
 ---
 

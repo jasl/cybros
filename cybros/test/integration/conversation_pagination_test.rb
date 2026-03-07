@@ -35,9 +35,20 @@ class ConversationPaginationTest < ActionDispatch::IntegrationTest
     user = create_user!
     sign_in!(user)
 
-    conversation = create_conversation!(user: user, title: "Chat")
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
 
-    3.times do |i|
+    4.times do |i|
       post conversation_messages_path(conversation), params: { content: "m#{i + 1}" }
       assert_redirected_to conversation_path(conversation)
     end

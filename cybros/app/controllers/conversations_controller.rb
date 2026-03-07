@@ -9,8 +9,8 @@ class ConversationsController < AgentController
     end
   end
 
-  before_action :set_conversation, only: %i[show composer_status stop retry steer_current_turn branch regenerate swipe clear_translations]
-  before_action -> { throttle!(key: "stop_retry_steer", limit: 10, period: 60) }, only: %i[stop retry steer_current_turn]
+  before_action :set_conversation, only: %i[show composer_status start stop retry steer_current_turn branch regenerate swipe clear_translations]
+  before_action :throttle_conversation_actions!, only: %i[start stop retry steer_current_turn]
 
   def index
     before = params[:before].to_s.presence
@@ -70,6 +70,7 @@ class ConversationsController < AgentController
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
+      @llm_model_option_groups = build_model_option_groups(@llm_model_options)
 
       requested_model_ref = @conversation.metadata.dig("llm", "model_ref").to_s.presence
       resolved_default_model_ref = nil
@@ -104,6 +105,7 @@ class ConversationsController < AgentController
         "Conversation model options failed: #{e.class}: #{e.message}\n#{e.backtrace&.first(5)&.join("\n")}"
       )
       @llm_model_options = []
+      @llm_model_option_groups = []
       @selected_model_ref = nil
       @stale_model_ref = nil
     end
@@ -150,10 +152,15 @@ class ConversationsController < AgentController
     raise ActiveRecord::RecordNotFound unless AgentCore::Utils.uuid_like?(agent_node_id)
 
     result = @conversation.regenerate!(agent_node_id: agent_node_id)
-    if result.fetch(:mode) == :branched
-      redirect_to conversation_path(result.fetch(:conversation))
-    else
-      redirect_to conversation_path(@conversation)
+    respond_to do |format|
+      if result.fetch(:mode) == :branched
+        destination = conversation_path(result.fetch(:conversation))
+        format.turbo_stream { redirect_to destination }
+        format.html { redirect_to destination }
+      else
+        format.turbo_stream { render_conversation_update_streams }
+        format.html { redirect_to conversation_path(@conversation) }
+      end
     end
   end
 
@@ -179,6 +186,17 @@ class ConversationsController < AgentController
     render json: { ok: false, error: "node_not_found" }, status: :not_found
   rescue Cybros::Error
     render json: { ok: false, error: "node_not_running" }, status: :unprocessable_entity
+  end
+
+  def start
+    node_id = params[:node_id].to_s
+    @conversation.start_pending_agent_node!(node_id: node_id, claimed_by: "manual-start:web:#{Current.user.id}")
+    render json: { ok: true }
+  rescue ActiveRecord::RecordNotFound
+    render json: { ok: false, error: "node_not_found" }, status: :not_found
+  rescue Cybros::Error => e
+    status = e.message.to_s == "state_changed" ? :conflict : :unprocessable_entity
+    render json: { ok: false, error: e.message.to_s }, status: status
   end
 
   def retry
@@ -236,6 +254,10 @@ class ConversationsController < AgentController
 
   private
 
+    def throttle_conversation_actions!
+      throttle!(key: "start_stop_retry_steer", limit: 10, period: 60)
+    end
+
     def render_conversation_update_streams
       page = @conversation.message_page(limit: 30, mode: :full)
       messages = page.fetch("messages")
@@ -261,5 +283,17 @@ class ConversationsController < AgentController
 
       @conversation = Current.user.conversations.find_by(id: id)
       raise ActiveRecord::RecordNotFound if @conversation.nil?
+    end
+
+    def build_model_option_groups(options)
+      options
+        .group_by { |option| [option.fetch(:provider_key), option.fetch(:provider_display_name)] }
+        .map do |(provider_key, provider_display_name), grouped_options|
+          {
+            provider_key: provider_key,
+            provider_display_name: provider_display_name,
+            options: grouped_options,
+          }
+        end
     end
 end

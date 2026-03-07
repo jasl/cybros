@@ -1,27 +1,34 @@
 import { Controller } from "@hotwired/stimulus"
 import {
   deriveComposerFormState,
-  deriveComposerPreviewText,
   normalizeComposerRailState,
+  prependQueuedContentToDraft,
 } from "../lib/conversation_composer_state"
 
 export default class extends Controller {
   static targets = [
     "textarea",
     "statusRail",
-    "queueModeButton",
-    "steerModeButton",
-    "previewText",
-    "previewEmpty",
-    "previewSourceLabel",
+    "editMode",
+    "editModeLabel",
+    "editNodeIdInput",
     "runningInputPolicyInput",
+    "queueAlertExpanded",
+    "queueToggleButton",
+    "queueToggleIcon",
   ]
 
   connect() {
     this.defaultAction = this.element.action
-    this.selectedMode = null
+    this.queueExpanded = false
+    this.handleMessageEdit = this.handleMessageEdit.bind(this)
+    window.addEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.autoResize()
     this.#syncComposerState()
+  }
+
+  disconnect() {
+    window.removeEventListener("conversation:user-message-edit", this.handleMessageEdit)
   }
 
   statusRailTargetConnected() {
@@ -56,8 +63,8 @@ export default class extends Controller {
     if (event.detail?.success !== true) return
     if (!this.hasTextareaTarget) return
 
+    this.#clearEditState()
     this.textareaTarget.value = ""
-    this.selectedMode = null
     this.autoResize()
     this.#syncComposerState()
   }
@@ -67,29 +74,101 @@ export default class extends Controller {
     const el = this.textareaTarget
     el.style.height = "auto"
     el.style.height = `${el.scrollHeight}px`
-    this.#syncPreview()
   }
 
-  selectQueueMode(event) {
+  toggleQueueDetails(event) {
     event.preventDefault()
-    this.selectedMode = "queue"
-    this.#syncComposerState()
+    this.queueExpanded = !this.queueExpanded
+    this.#renderQueueAlert()
   }
 
-  selectSteerMode(event) {
+  handleMessageEdit(event) {
+    const detail = event?.detail
+    if (!detail || String(detail.conversationId || "") !== this.#conversationId()) return
+
+    const nodeId = String(detail.nodeId || "").trim()
+    const content = String(detail.content || "")
+    if (!nodeId || !content.trim()) return
+
+    if (this.hasTextareaTarget) {
+      this.textareaTarget.value = content
+      this.autoResize()
+      this.textareaTarget.focus()
+      this.textareaTarget.setSelectionRange?.(content.length, content.length)
+    }
+
+    if (this.hasEditNodeIdInputTarget) {
+      this.editNodeIdInputTarget.value = nodeId
+      this.editNodeIdInputTarget.disabled = false
+    }
+
+    if (this.hasEditModeTarget) {
+      this.editModeTarget.classList.remove("hidden")
+      this.editModeTarget.classList.add("flex")
+    }
+
+    if (this.hasEditModeLabelTarget) {
+      this.editModeLabelTarget.textContent = "Editing your last message. Sending will regenerate the latest assistant reply."
+    }
+  }
+
+  cancelEdit(event) {
     event.preventDefault()
-    this.selectedMode = "steer_current_turn"
-    this.#syncComposerState()
+    this.#clearEditState()
+    this.hasTextareaTarget && this.textareaTarget.focus()
+  }
+
+  async editQueuedItem(event) {
+    event.preventDefault()
+
+    const button = event.currentTarget
+    const url = String(button?.dataset?.actionUrl || "")
+    const queuedContent = String(button?.dataset?.queuedContent || "")
+    if (!url) return
+
+    const payload = await this.#submitQueueAction(url, { method: "POST" })
+    if (!payload) return
+
+    if (this.hasTextareaTarget) {
+      this.textareaTarget.value = prependQueuedContentToDraft({
+        queuedContent,
+        draft: this.textareaTarget.value,
+      })
+      this.autoResize()
+      this.textareaTarget.focus()
+    }
+  }
+
+  async steerQueuedItem(event) {
+    event.preventDefault()
+
+    const button = event.currentTarget
+    const url = String(button?.dataset?.actionUrl || "")
+    if (!url) return
+
+    await this.#submitQueueAction(url, {
+      method: "POST",
+      body: {
+        model_ref: this.#currentModelRef(),
+        interrupted_output_policy_override: this.#interruptedOutputPolicyOverride(),
+      },
+    })
+  }
+
+  async cancelQueuedItem(event) {
+    event.preventDefault()
+
+    const button = event.currentTarget
+    const url = String(button?.dataset?.actionUrl || "")
+    if (!url) return
+
+    await this.#submitQueueAction(url, { method: "DELETE" })
   }
 
   #syncComposerState() {
     const railState = this.#railState()
-    const formState = deriveComposerFormState({
-      railState,
-      selectedMode: this.selectedMode,
-    })
+    const formState = deriveComposerFormState({ railState })
 
-    this.selectedMode = formState.resolvedMode
     this.element.action = formState.formAction || this.defaultAction
 
     if (this.hasRunningInputPolicyInputTarget) {
@@ -98,8 +177,11 @@ export default class extends Controller {
       this.runningInputPolicyInputTarget.disabled = !value
     }
 
-    this.#renderModeButtons(railState, formState)
-    this.#syncPreview(railState)
+    if (railState.queuedCount <= 1) {
+      this.queueExpanded = false
+    }
+
+    this.#renderQueueAlert()
   }
 
   #railState() {
@@ -110,55 +192,87 @@ export default class extends Controller {
     return normalizeComposerRailState(this.statusRailTarget.dataset)
   }
 
-  #renderModeButtons(railState, formState) {
-    if (this.hasQueueModeButtonTarget) {
-      this.#renderModeButton(this.queueModeButtonTarget, {
-        selected: formState.resolvedMode === "queue",
-        disabled: !railState.running,
-        title: railState.running ? "" : railState.steerReason,
-      })
+  #renderQueueAlert() {
+    if (this.hasQueueAlertExpandedTarget) {
+      this.queueAlertExpandedTarget.classList.toggle("hidden", !this.queueExpanded)
     }
 
-    if (this.hasSteerModeButtonTarget) {
-      this.#renderModeButton(this.steerModeButtonTarget, {
-        selected: formState.resolvedMode === "steer_current_turn",
-        disabled: !railState.steerAvailable,
-        title: railState.steerReason,
-      })
+    if (this.hasQueueToggleIconTarget) {
+      this.queueToggleIconTarget.classList.toggle("rotate-180", this.queueExpanded)
+    }
+
+    if (this.hasQueueToggleButtonTarget) {
+      const label = this.queueExpanded ? "Collapse queued messages" : "Expand queued messages"
+      this.queueToggleButtonTarget.setAttribute("aria-label", label)
+      this.queueToggleButtonTarget.title = this.queueExpanded ? "Collapse" : "Expand"
     }
   }
 
-  #renderModeButton(button, { selected, disabled, title }) {
-    button.classList.toggle("btn-neutral", selected)
-    button.classList.toggle("text-base-content/70", !selected)
-    button.classList.toggle("border-base-content/15", !selected)
-    button.classList.toggle("btn-disabled", disabled)
-    button.disabled = disabled
-    button.setAttribute("aria-pressed", selected ? "true" : "false")
+  async #submitQueueAction(url, { method, body = {} }) {
+    const response = await this.#fetchJson(url, { method, body })
+    if (!response?.ok) {
+      this.#showToast("Queue action failed.")
+      return null
+    }
 
-    if (title) button.title = title
-    else button.removeAttribute("title")
+    const payload = await response.json().catch(() => null)
+    if (payload?.turbo_stream && window.Turbo?.renderStreamMessage) {
+      window.Turbo.renderStreamMessage(payload.turbo_stream)
+    }
+
+    return payload
   }
 
-  #syncPreview(railState = this.#railState()) {
-    const draft = this.hasTextareaTarget ? this.textareaTarget.value : ""
-    const preview = deriveComposerPreviewText({
-      draft,
-      queuedPreview: railState.candidatePreview,
+  async #fetchJson(url, { method, body }) {
+    const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
+    if (!token) return null
+
+    return fetch(url, {
+      method,
+      headers: {
+        "X-CSRF-Token": token,
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: JSON.stringify(body),
+      credentials: "same-origin",
     })
+  }
 
-    if (this.hasPreviewTextTarget) {
-      this.previewTextTarget.textContent = preview.content
-      this.previewTextTarget.classList.toggle("hidden", !preview.content)
+  #currentModelRef() {
+    const modelSelect = this.element.querySelector('select[name="model_ref"]')
+    return String(modelSelect?.value || "").trim()
+  }
+
+  #interruptedOutputPolicyOverride() {
+    const input = this.element.querySelector('input[name="interrupted_output_policy_override"]')
+    return String(input?.value || "").trim()
+  }
+
+  #showToast(message) {
+    window.dispatchEvent(
+      new CustomEvent("toast:show", {
+        detail: { message, type: "error" },
+        bubbles: true,
+        cancelable: true,
+      }),
+    )
+  }
+
+  #clearEditState() {
+    if (this.hasEditNodeIdInputTarget) {
+      this.editNodeIdInputTarget.value = ""
+      this.editNodeIdInputTarget.disabled = true
     }
 
-    if (this.hasPreviewEmptyTarget) {
-      this.previewEmptyTarget.classList.toggle("hidden", !!preview.content)
+    if (this.hasEditModeTarget) {
+      this.editModeTarget.classList.add("hidden")
+      this.editModeTarget.classList.remove("flex")
     }
+  }
 
-    if (this.hasPreviewSourceLabelTarget) {
-      this.previewSourceLabelTarget.textContent =
-        preview.source === "draft" ? "Draft" : preview.source === "queued_turn" ? "Queued turn" : ""
-    }
+  #conversationId() {
+    const root = this.element.closest?.("[data-conversation-channel-conversation-id-value]")
+    return String(root?.getAttribute?.("data-conversation-channel-conversation-id-value") || "")
   }
 }

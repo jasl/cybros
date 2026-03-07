@@ -154,7 +154,7 @@ class DAG::NodeTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: user.id, to_node_id: running.id, edge_type: DAG::Edge::SEQUENCE)
     assert_not user.can_edit?
 
-    assert user.can_fork?
+    assert_not user.can_fork?
     pending = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     assert_not pending.can_fork?
   end

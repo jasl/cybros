@@ -1,5 +1,5 @@
 import { Controller } from "@hotwired/stimulus"
-import { postAndTurboVisit } from "../lib/post_and_turbo_visit"
+import { postAndRenderTurboStream, postAndTurboVisit } from "../lib/post_and_turbo_visit"
 
 function isActiveElementInAnyInput() {
   const el = document.activeElement
@@ -38,6 +38,17 @@ function actionAvailable(policy, key) {
   const actions = policy?.actions
   const entry = actions && typeof actions === "object" ? actions[key] : null
   return entry?.available === true
+}
+
+function swipeDirectionAvailable(policy, direction) {
+  const actions = policy?.actions
+  const entry = actions && typeof actions === "object" ? actions.swipe : null
+  if (entry?.available !== true) return false
+
+  if (direction === "left") return entry.left_available === true
+  if (direction === "right") return entry.right_available === true
+
+  return false
 }
 
 export default class extends Controller {
@@ -91,10 +102,10 @@ export default class extends Controller {
 
       const nodeId = this.#tailAgentNodeId()
       if (!nodeId) return
-      if (!actionAvailable(this.#tailAgentActionPolicy(), "swipe")) return
+      const direction = event.key === "ArrowLeft" ? "left" : "right"
+      if (!swipeDirectionAvailable(this.#tailAgentActionPolicy(), direction)) return
 
       event.preventDefault()
-      const direction = event.key === "ArrowLeft" ? "left" : "right"
       this.#swipeTail(direction)
     }
   }
@@ -132,7 +143,10 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
 
     const url = `/conversations/${encodeURIComponent(conversationId)}/regenerate`
-    await postAndTurboVisit(url, { agent_node_id: nodeId })
+    const ok = await postAndRenderTurboStream(url, { agent_node_id: nodeId })
+    if (ok) return
+
+    await postAndTurboVisit(url, { agent_node_id: nodeId }, { preserveScroll: true })
   }
 
   async #retryTail() {

@@ -1,5 +1,5 @@
 class Conversation::NodeActionPolicy
-  ACTIONS = %w[retry regenerate swipe branch delete restore exclude include translate stop edit].freeze
+  ACTIONS = %w[retry start regenerate swipe branch delete restore exclude include translate stop edit].freeze
   CAPABILITIES = %w[execute].freeze
 
   def initialize(conversation:, node:)
@@ -21,6 +21,7 @@ class Conversation::NodeActionPolicy
     def action_entries
       {
         "retry" => retry_entry,
+        "start" => start_entry,
         "regenerate" => regenerate_entry,
         "swipe" => swipe_entry,
         "branch" => branch_entry,
@@ -65,26 +66,36 @@ class Conversation::NodeActionPolicy
       return unavailable_entry(reason: "not_terminal") unless node.terminal?
       return unavailable_entry(reason: "not_finished") unless node.finished?
 
-      if tail_agent?
-        return unavailable_entry(mode: "in_place", reason: "not_rerunnable_now") unless node.can_rerun?
+      return unavailable_entry(reason: "history_requires_branch") unless tail_agent?
+      return unavailable_entry(mode: "in_place", reason: "not_rerunnable_now") unless node.can_rerun?
 
-        return entry(supported: true, available: true, mode: "in_place")
-      end
+      entry(supported: true, available: true, mode: "in_place")
+    end
 
-      return unavailable_entry(mode: "branch", reason: "not_branchable") unless branch_supported?
+    def start_entry
+      supported = executable?
+      return unsupported_entry unless supported
+      return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
+      return unavailable_entry(reason: "deleted") if node.deleted?
+      return unavailable_entry(reason: "compressed") if node.compressed_at.present?
+      return unavailable_entry(reason: "not_pending") unless node.state == DAG::Node::PENDING
+      return unavailable_entry(reason: "already_claimed") if node.claimed_at.present? || node.started_at.present?
+      return unavailable_entry(reason: "not_tail") unless tail_message?
+      return unavailable_entry(reason: "already_executing") if executing_agent_present?
 
-      entry(supported: true, available: true, mode: "branch")
+      entry(supported: true, available: true)
     end
 
     def swipe_entry
       supported = node.body&.swipable? == true
       return unsupported_entry unless supported
+      metadata = swipe_metadata
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
       return unavailable_entry(reason: "not_tail") unless tail_agent?
       return unavailable_entry(reason: "not_finished") unless node.finished?
 
-      entry(supported: true, available: true)
+      entry(supported: true, available: true, **metadata)
     end
 
     def branch_entry
@@ -155,6 +166,7 @@ class Conversation::NodeActionPolicy
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
+      return unavailable_entry(reason: "not_latest_user_message") if user_message? && !latest_user_message?
       return unavailable_entry(reason: "not_editable_now") unless node.can_edit?
 
       entry(supported: true, available: true)
@@ -168,6 +180,27 @@ class Conversation::NodeActionPolicy
       return false unless node.node_type.to_s == Messages::AgentMessage.node_type_key
 
       conversation.chat_head_node_id(node_type: Messages::AgentMessage.node_type_key) == node.id.to_s
+    end
+
+    def user_message?
+      node.node_type.to_s == Messages::UserMessage.node_type_key
+    end
+
+    def latest_user_message?
+      return false unless user_message?
+
+      latest_user_id =
+        conversation.root_graph.nodes.active
+          .where(lane_id: conversation.chat_lane.id, node_type: Messages::UserMessage.node_type_key)
+          .order(id: :desc)
+          .limit(1)
+          .pick(:id)
+
+      latest_user_id.to_s == node.id.to_s
+    end
+
+    def tail_message?
+      conversation.chat_head_node_id == node.id.to_s
     end
 
     def retry_depth
@@ -235,12 +268,34 @@ class Conversation::NodeActionPolicy
       candidate.retry_of_id || candidate.metadata&.dig("retry_of_node_id")
     end
 
+    def swipe_metadata
+      versions = node.versions(include_inactive: true).to_a
+      total = versions.length
+      current_index = versions.index { |candidate| candidate.id.to_s == node.id.to_s }
+      current = current_index ? current_index + 1 : nil
+
+      {
+        current: current,
+        total: total,
+        left_available: current.present? && current > 1,
+        right_available: current.present? && total.positive? && current < total,
+      }
+    end
+
     def executable_available?
       return false unless executable?
       return false if node.deleted?
       return false if node.compressed_at.present?
 
       [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+    end
+
+    def executing_agent_present?
+      conversation.send(
+        :latest_executing_agent_for_lane,
+        graph: conversation.root_graph,
+        lane: conversation.chat_lane,
+      ).present?
     end
 
     def other_running_nodes_excluding_self?
@@ -251,13 +306,18 @@ class Conversation::NodeActionPolicy
       [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
     end
 
-    def entry(supported:, available:, mode: nil, reason: nil)
+    def entry(supported:, available:, mode: nil, reason: nil, **extras)
       out = {
         "supported" => supported == true,
         "available" => available == true,
       }
       out["mode"] = mode.to_s if mode.present?
       out["reason"] = reason.to_s if reason.present?
+      extras.each do |key, value|
+        next if value.nil?
+
+        out[key.to_s] = value
+      end
       out
     end
 

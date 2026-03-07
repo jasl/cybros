@@ -301,17 +301,21 @@ This section is written as a **Conversation façade API checklist** so the App n
   - [x] **Regenerate (swipe semantics)** (endpoint + UI)
     - [x] Calls: `Conversation#regenerate!(agent_node_id:)`
       - [x] tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`
-      - [x] non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }`
+      - [x] non-tail regenerate: returns `{ mode: :branched, conversation: <child_conversation> }` and opens a child snapshot instead of auto-rerunning
   - [x] **Swipe selection** (endpoint + UI)
     - [x] Calls: `Conversation#select_swipe!(agent_node_id:, direction:|position:)`
   - [x] **Branch from a message** (endpoint + UI)
     - [x] Calls: `Conversation#create_child!(from_node_id:, kind:, title:, user_content:)`
+    - [x] Product action is assistant-only; blank branch preserves the selected assistant as the child conversation’s first message
+  - [x] **Edit latest user message** (endpoint + UI)
+    - [x] Calls: `Conversation#edit_user_message!(node_id:, content:, model_ref:, input_policy_override:)`
+    - [x] Rewrites the last user turn and regenerates the following assistant continuation
 
 - [x] **Stuck detection**
   - [x] Heartbeat timeout → show warning + allow stop/retry
   - [x] Best-effort convergence via `messages/refresh` if realtime delivery is missed
 - [ ] **TavernKit “production feel” parity (follow-up)**
-  - [x] Message action layer: copy / regenerate / swipe / branch (`message_actions_controller` equivalent)
+  - [x] Message action layer: copy / regenerate / swipe / branch / edit (`message_actions_controller` equivalent)
   - [x] Keyboard shortcuts for chat: stop / regenerate / help (`chat_hotkeys_controller` equivalent)
   - [x] Typing indicator + connectivity health UX (disconnect alert + health check endpoint integration)
 

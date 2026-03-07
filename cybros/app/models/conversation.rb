@@ -194,6 +194,75 @@ class Conversation < ApplicationRecord
     }
   end
 
+  def edit_user_message!(node_id:, content:, model_ref: nil, input_policy_override: nil)
+    content = content.to_s.strip
+    return nil if content.blank?
+
+    with_dag_errors_wrapped do
+      graph = root_graph
+      lane = chat_lane
+      model_ref = resolve_model_ref!(requested_model_ref: model_ref)
+      policy = resolved_input_policy(app_override: input_policy_override)
+
+      user_node = nil
+      guard_node = nil
+      compact_task = nil
+      agent_node = nil
+      product_node = nil
+      created_new_run = false
+
+      graph.with_graph_lock! do
+        target = graph.nodes.active.find(node_id)
+        raise ArgumentError, "not a user node" unless target.node_type == Messages::UserMessage.node_type_key
+        raise ArgumentError, "wrong lane" unless target.lane_id.to_s == lane.id.to_s
+
+        edit_action = action_entry_for(target, "edit")
+        raise Cybros::Error, edit_action.fetch("reason", "not_editable_now") unless edit_action.fetch("available", false)
+
+        mutations = DAG::Mutations.new(graph: graph)
+        user_node = mutations.edit_replace!(node: target, new_input: { "content" => content })
+
+        created =
+          create_guarded_continuation_for_existing_turn!(
+            graph: graph,
+            lane: lane,
+            base_node: user_node,
+            user_node: user_node,
+            content: content,
+            model_ref: model_ref,
+            input_policy: policy,
+          )
+
+        guard_node = created[:guard_node]
+        compact_task = created[:compact_task]
+        agent_node = created[:agent_node]
+        product_node = created[:product_node]
+        created_new_run = agent_node.present?
+      end
+
+      if created_new_run
+        ConversationRun.create!(
+          conversation: self,
+          dag_node_id: agent_node.id,
+          state: "queued",
+          queued_at: Time.current,
+          debug: {},
+          error: {},
+        )
+
+        graph.kick!
+      end
+
+      {
+        user_node: user_node,
+        guard_node: guard_node,
+        compact_task: compact_task,
+        agent_node: agent_node,
+        product_node: product_node,
+      }
+    end
+  end
+
   def stop_node!(node_id:, reason: "user_cancelled")
     with_dag_errors_wrapped do
       node = find_chat_lane_node!(node_id)
@@ -204,6 +273,33 @@ class Conversation < ApplicationRecord
 
       cancel_runs_for_node!(node)
       node
+    end
+  end
+
+  def start_pending_agent_node!(node_id:, claimed_by:)
+    with_dag_errors_wrapped do
+      graph = root_graph
+      lane = chat_lane
+      claimed_by = claimed_by.to_s.presence || "manual-start:conversation:#{id}"
+      started_node = nil
+      enqueue_execution = false
+
+      graph.with_graph_lock! do
+        now = Time.current
+        repair_stale_pending_middle_agents!(graph: graph, lane: lane, now: now)
+
+        started_node = graph.nodes.find_by(id: node_id.to_s)
+        raise ActiveRecord::RecordNotFound if started_node.nil?
+        raise ActiveRecord::RecordNotFound unless started_node.lane_id.to_s == lane.id.to_s
+        raise Cybros::Error, "state_changed" unless startable_pending_agent?(node: started_node)
+        raise Cybros::Error, "state_changed" unless pending_agent_dependencies_satisfied?(graph: graph, agent_node: started_node)
+
+        claim_pending_agent_for_manual_start!(graph: graph, agent_node: started_node, claimed_by: claimed_by, now: now)
+        enqueue_execution = true
+      end
+
+      DAG::ExecuteNodeJob.perform_later(started_node.id) if enqueue_execution
+      started_node
     end
   end
 
@@ -387,6 +483,56 @@ class Conversation < ApplicationRecord
     end
   end
 
+  def queued_turn_items(now: Time.current)
+    graph = root_graph
+    lane = chat_lane
+    queue_anchor_agent = queue_anchor_agent_for_lane(graph: graph, lane: lane)
+    return [] if queue_anchor_agent.nil?
+
+    graph.nodes.active
+      .where(
+        lane_id: lane.id,
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::PENDING,
+      )
+      .where.not(turn_id: queue_anchor_agent.turn_id)
+      .order(:id)
+      .filter_map do |agent_node|
+        user_node =
+          graph.nodes.active
+            .where(
+              lane_id: lane.id,
+              turn_id: agent_node.turn_id,
+              node_type: Messages::UserMessage.node_type_key,
+            )
+            .order(:id)
+            .last
+
+        next if user_node.nil?
+
+        {
+          "turn_id" => agent_node.turn_id.to_s,
+          "user_node_id" => user_node.id.to_s,
+          "agent_node_id" => agent_node.id.to_s,
+          "content" => user_node.body_input["content"].to_s.strip,
+          "model_ref" => agent_node.metadata.dig("llm", "model_ref").to_s.presence,
+        }
+      end
+  end
+
+  def cancel_queued_turn!(user_node_id:)
+    rewrite_queued_turns!(selected_user_node_id: user_node_id, mode: :cancel)
+  end
+
+  def steer_queued_turn!(user_node_id:, model_ref: nil, interrupted_output_policy_override: nil)
+    rewrite_queued_turns!(
+      selected_user_node_id: user_node_id,
+      mode: :steer,
+      model_ref: model_ref,
+      interrupted_output_policy_override: interrupted_output_policy_override,
+    )
+  end
+
   def output_preview_for_node_id(node_id)
     id = node_id.to_s
     return {} if id.blank?
@@ -420,7 +566,7 @@ class Conversation < ApplicationRecord
     )
   end
 
-  def append_user_message!(content:, model_ref: nil, input_policy_override: nil)
+  def append_user_message!(content:, model_ref: nil, input_policy_override: nil, repair_pending_tail: true)
     content = content.to_s.strip
     return nil if content.blank?
 
@@ -468,6 +614,10 @@ class Conversation < ApplicationRecord
             merge_user_message_fragment!(user_node: user_node, content: content)
             refresh_pending_agent_for_fragment!(agent_node: agent_node, model_ref: model_ref, claim_after_at: claim_after_at)
           else
+            if running_agent.blank? && repair_pending_tail
+              repair_stale_pending_middle_agents!(graph: graph, lane: lane, now: now)
+              repair_stale_tail_pending_agent!(graph: graph, lane: lane, now: now)
+            end
             sequence_parent = head_leaf_for_lane(graph: graph, lane: lane)
             dependency_parent = head_leaf_for_lane(graph: graph, lane: lane, node_type: Messages::AgentMessage.node_type_key)
           end
@@ -549,14 +699,7 @@ class Conversation < ApplicationRecord
           )
 
         graph.mutate! do |m|
-          root_node =
-            m.fork_from!(
-              from_node: from_node,
-              node_type: Messages::UserMessage.node_type_key,
-              state: DAG::Node::FINISHED,
-              content: user_content.to_s,
-              metadata: {},
-            )
+          root_node = fork_child_root_node!(mutations: m, from_node: from_node, user_content: user_content)
         end
 
         root_node.lane.update!(attachable: child)
@@ -577,12 +720,17 @@ class Conversation < ApplicationRecord
       regenerate_action = action_entry_for(target, "regenerate")
       raise Cybros::Error, "cannot regenerate deleted node" if regenerate_action["reason"].to_s == "deleted"
       raise Cybros::Error, "cannot regenerate non-terminal agent" if regenerate_action["reason"].to_s == "not_terminal"
-      raise Cybros::Error, "agent is not rerunnable" unless regenerate_action.fetch("available", false)
+      raise Cybros::Error, "cannot regenerate unfinished agent" if regenerate_action["reason"].to_s == "not_finished"
 
-      if regenerate_action["mode"].to_s == "branch"
+      if target.id.to_s != chat_head_node_id(node_type: Messages::AgentMessage.node_type_key)
+        branch_action = action_entry_for(target, "branch")
+        raise Cybros::Error, "agent is not rerunnable" unless branch_action.fetch("available", false)
+
         child = create_child!(from_node_id: target.id, kind: "branch", title: "Branch", user_content: "")
         return { mode: :branched, conversation: child }
       end
+
+      raise Cybros::Error, "agent is not rerunnable" unless regenerate_action.fetch("available", false)
 
       new_agent = target.rerun!(metadata_patch: { "generated_by" => "regenerate" })
 
@@ -883,8 +1031,36 @@ class Conversation < ApplicationRecord
 
     def decorate_message_page(page)
       out = page.deep_dup
-      out["messages"] = decorate_messages(out.fetch("messages", []))
+      out["messages"] = filter_queued_turn_messages(decorate_messages(out.fetch("messages", [])))
       out
+    end
+
+    def fork_child_root_node!(mutations:, from_node:, user_content:)
+      seeded_user_content = user_content.to_s.strip
+
+      if from_node.node_type.to_s == Messages::AgentMessage.node_type_key && seeded_user_content.blank?
+        snapshot_metadata = from_node.metadata.is_a?(Hash) ? from_node.metadata.deep_dup : {}
+        snapshot_metadata.except!("usage", "output_stats", "timing", "worker", "error", "reason")
+        snapshot_metadata["generated_by"] = "branch_snapshot"
+        snapshot_metadata["forked_from_node_id"] = from_node.id.to_s
+
+        return mutations.fork_from!(
+          from_node: from_node,
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          body_input: from_node.body_input.deep_dup,
+          body_output: from_node.body_output.deep_dup,
+          metadata: snapshot_metadata,
+        )
+      end
+
+      mutations.fork_from!(
+        from_node: from_node,
+        node_type: Messages::UserMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        content: seeded_user_content,
+        metadata: {},
+      )
     end
 
     def decorate_transcript_page(page)
@@ -899,6 +1075,18 @@ class Conversation < ApplicationRecord
       nodes_by_id = root_graph.nodes.where(id: node_ids).includes(:body).to_a.index_by { |node| node.id.to_s }
 
       messages.map { |message| decorate_message(message, nodes_by_id: nodes_by_id) }
+    end
+
+    def filter_queued_turn_messages(messages, now: Time.current)
+      hidden_node_ids =
+        queued_turn_items(now: now).flat_map do |item|
+          [item["user_node_id"].to_s.presence, item["agent_node_id"].to_s.presence]
+        end.compact
+      return messages if hidden_node_ids.empty?
+
+      Array(messages).reject do |message|
+        hidden_node_ids.include?(message.is_a?(Hash) ? message["node_id"].to_s : nil)
+      end
     end
 
     def decorate_message(message, nodes_by_id: nil)
@@ -929,6 +1117,18 @@ class Conversation < ApplicationRecord
 
     def node_stoppable?(node)
       [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+    end
+
+    def startable_pending_agent?(node:)
+      return false unless node.node_type.to_s == Messages::AgentMessage.node_type_key
+      return false unless node.state == DAG::Node::PENDING
+      return false if node.compressed_at.present? || node.deleted?
+      return false if node.claimed_at.present? || node.started_at.present?
+      return false unless node.lane_id.to_s == chat_lane.id.to_s
+      return false unless head_leaf_for_lane(graph: root_graph, lane: chat_lane)&.id.to_s == node.id.to_s
+      return false if latest_executing_agent_for_lane(graph: root_graph, lane: chat_lane).present?
+
+      true
     end
 
     def with_dag_errors_wrapped
@@ -972,6 +1172,116 @@ class Conversation < ApplicationRecord
       run.mark_canceled!
     end
 
+    def rewrite_queued_turns!(selected_user_node_id:, mode:, model_ref: nil, interrupted_output_policy_override: nil)
+      with_dag_errors_wrapped do
+        selected_user_node_id = selected_user_node_id.to_s
+        queued_items = queued_turn_items
+        selected =
+          queued_items.find do |item|
+            item.fetch("user_node_id") == selected_user_node_id
+          end
+        raise ActiveRecord::RecordNotFound if selected.nil?
+
+        remaining =
+          queued_items.reject do |item|
+            item.fetch("user_node_id") == selected_user_node_id
+          end
+
+        archive_queued_turns!(queued_items: queued_items, reason: "rewrite_queued_turns")
+
+        if mode.to_sym == :steer
+          steer_queued_turn_model_ref = model_ref.to_s.strip.presence || selected["model_ref"]
+          steer_current_turn!(
+            content: selected.fetch("content"),
+            model_ref: steer_queued_turn_model_ref,
+            interrupted_output_policy_override: interrupted_output_policy_override,
+          )
+        end
+
+        remaining.each do |item|
+          append_user_message!(
+            content: item.fetch("content"),
+            model_ref: item["model_ref"],
+            input_policy_override: rewrite_queue_input_policy_override,
+            repair_pending_tail: false,
+          )
+        end
+
+        selected
+      end
+    end
+
+    def archive_queued_turns!(queued_items:, reason:)
+      graph = root_graph
+      lane = chat_lane
+
+      graph.with_graph_lock! do
+        running_agent = latest_executing_agent_for_lane(graph: graph, lane: lane)
+        raise Cybros::Error, "no_running_turn" if running_agent.nil?
+
+        now = Time.current
+
+        queued_items.each do |item|
+          turn_nodes =
+            graph.nodes.active
+              .where(lane_id: lane.id, turn_id: item.fetch("turn_id"))
+              .order(:id)
+              .to_a
+          next if turn_nodes.empty?
+
+          turn_nodes.each do |node|
+            stop_node_if_needed!(node, reason: reason)
+            cancel_runs_for_node!(node)
+          end
+
+          archive_turn_bundle!(
+            graph: graph,
+            turn_nodes: turn_nodes,
+            compressed_by_id: running_agent.id,
+            now: now,
+          )
+        end
+      end
+    end
+
+    def archive_turn_bundle!(graph:, turn_nodes:, compressed_by_id:, now:)
+      return if turn_nodes.empty?
+
+      node_ids = turn_nodes.map(&:id)
+      lane_id = turn_nodes.first.lane_id
+      turn_id = turn_nodes.first.turn_id
+
+      edge_ids =
+        graph.edges.active
+          .where("from_node_id IN (?) OR to_node_id IN (?)", node_ids, node_ids)
+          .pluck(:id)
+
+      graph.nodes.where(id: node_ids).update_all(
+        compressed_at: now,
+        compressed_by_id: compressed_by_id,
+        updated_at: now,
+      )
+
+      if edge_ids.any?
+        graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
+      end
+
+      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        graph: graph,
+        lane_id: lane_id,
+        turn_ids: [turn_id],
+      )
+    end
+
+    def rewrite_queue_input_policy_override
+      {
+        "running_input_policy" => "queue",
+        "input_coalescing" => {
+          "enabled" => false,
+        },
+      }
+    end
+
     def stop_node_if_needed!(node, reason: "soft_deleted")
       return if node.terminal?
 
@@ -997,6 +1307,17 @@ class Conversation < ApplicationRecord
       return visible if visible
 
       scope.order(:id).last
+    end
+
+    def queue_anchor_agent_for_lane(graph:, lane:)
+      graph.nodes.active
+        .where(
+          lane_id: lane.id,
+          node_type: Messages::AgentMessage.node_type_key,
+          state: [DAG::Node::PENDING, DAG::Node::RUNNING, DAG::Node::AWAITING_APPROVAL],
+        )
+        .order(:id)
+        .first
     end
 
     def resolve_model_ref!(requested_model_ref:)
@@ -1067,6 +1388,13 @@ class Conversation < ApplicationRecord
       claim_after_at = agent_node.claim_after_at
       return false if claim_after_at.present? && claim_after_at > now
 
+      pending_agent_dependencies_satisfied?(graph: graph, agent_node: agent_node)
+    end
+
+    def pending_agent_dependencies_satisfied?(graph:, agent_node:)
+      return false unless agent_node.state == DAG::Node::PENDING
+      return false if agent_node.compressed_at.present? || agent_node.deleted?
+
       graph.edges.active.where(to_node_id: agent_node.id, edge_type: [DAG::Edge::SEQUENCE, DAG::Edge::DEPENDENCY]).find_each do |edge|
         parent = graph.nodes.active.find_by(id: edge.from_node_id)
         next if parent.nil?
@@ -1080,6 +1408,158 @@ class Conversation < ApplicationRecord
       end
 
       true
+    end
+
+    def repair_stale_pending_middle_agents!(graph:, lane:, now:)
+      stale_pending_agents_for_lane(graph: graph, lane: lane).each do |agent_node|
+        sequence_children = active_sequence_children_for_node(graph: graph, node: agent_node)
+        next if sequence_children.empty?
+
+        stable_parent = stable_sequence_parent_for(node: agent_node)
+        sequence_children.each do |child|
+          ensure_active_sequence_edge!(graph: graph, from_node: stable_parent, to_node: child, now: now)
+        end
+
+        silently_archive_pending_agent_node!(graph: graph, node: agent_node, now: now)
+      end
+    end
+
+    def repair_stale_tail_pending_agent!(graph:, lane:, now:)
+      tail = head_leaf_for_lane(graph: graph, lane: lane)
+      return nil unless silently_repairable_pending_agent?(tail)
+
+      silently_archive_pending_agent_node!(graph: graph, node: tail, now: now)
+      tail
+    end
+
+    def stale_pending_agents_for_lane(graph:, lane:)
+      graph.nodes.active
+        .where(
+          lane_id: lane.id,
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          claimed_at: nil,
+          started_at: nil,
+        )
+        .where(deleted_at: nil)
+        .order(:id)
+        .to_a
+    end
+
+    def silently_repairable_pending_agent?(node)
+      return false unless node.is_a?(DAG::Node)
+      return false unless node.node_type.to_s == Messages::AgentMessage.node_type_key
+      return false unless node.state == DAG::Node::PENDING
+      return false if node.compressed_at.present? || node.deleted?
+      return false if node.claimed_at.present? || node.started_at.present?
+
+      true
+    end
+
+    def active_sequence_children_for_node(graph:, node:)
+      child_ids =
+        graph.edges.active
+          .where(from_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
+          .order(:id)
+          .pluck(:to_node_id)
+
+      return [] if child_ids.empty?
+
+      graph.nodes.active.where(id: child_ids).order(:id).to_a
+    end
+
+    def ensure_active_sequence_edge!(graph:, from_node:, to_node:, now:)
+      return if from_node.nil? || to_node.nil?
+
+      edge =
+        graph.edges.find_by(
+          from_node_id: from_node.id,
+          to_node_id: to_node.id,
+          edge_type: DAG::Edge::SEQUENCE,
+        )
+
+      return edge if edge.present? && edge.compressed_at.nil?
+
+      if edge
+        edge.update_columns(compressed_at: nil, updated_at: now)
+        return edge
+      end
+
+      DAG::Mutations.new(graph: graph).create_edge(
+        from_node: from_node,
+        to_node: to_node,
+        edge_type: DAG::Edge::SEQUENCE,
+        metadata: { "generated_by" => "silent_pending_repair" },
+      )
+    end
+
+    def silently_archive_pending_agent_node!(graph:, node:, now:)
+      edge_ids =
+        graph.edges.active
+          .where("from_node_id = :node_id OR to_node_id = :node_id", node_id: node.id)
+          .pluck(:id)
+
+      metadata = node.metadata.is_a?(Hash) ? node.metadata.deep_stringify_keys : {}
+
+      node.update_columns(
+        state: DAG::Node::STOPPED,
+        finished_at: node.finished_at || now,
+        metadata: metadata.merge("reason" => "superseded_pending", "generated_by" => "silent_pending_repair"),
+        claim_after_at: nil,
+        claimed_at: nil,
+        claimed_by: nil,
+        started_at: nil,
+        heartbeat_at: nil,
+        lease_expires_at: nil,
+        context_excluded_at: now,
+        deleted_at: now,
+        compressed_at: now,
+        compressed_by_id: node.id,
+        updated_at: now,
+      )
+
+      if edge_ids.any?
+        graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
+      end
+
+      cancel_runs_for_node!(node)
+
+      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        graph: graph,
+        lane_id: node.lane_id,
+        turn_ids: [node.turn_id],
+      )
+    end
+
+    def claim_pending_agent_for_manual_start!(graph:, agent_node:, claimed_by:, now:)
+      lease_expires_at = now + graph.claim_lease_seconds_for(nil)
+      affected_rows =
+        DAG::Node.where(
+          id: agent_node.id,
+          state: DAG::Node::PENDING,
+          compressed_at: nil,
+          deleted_at: nil,
+          claimed_at: nil,
+          started_at: nil,
+        ).update_all(
+          state: DAG::Node::RUNNING,
+          claim_after_at: nil,
+          started_at: nil,
+          claimed_at: now,
+          claimed_by: claimed_by,
+          lease_expires_at: lease_expires_at,
+          heartbeat_at: nil,
+          updated_at: now,
+        )
+
+      raise Cybros::Error, "state_changed" unless affected_rows == 1
+
+      agent_node.reload
+      graph.emit_event(
+        event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+        subject: agent_node,
+        particulars: { "from" => DAG::Node::PENDING, "to" => DAG::Node::RUNNING },
+      )
     end
 
     def latest_executing_agent_for_lane(graph:, lane:)

@@ -1,6 +1,27 @@
 require "test_helper"
 
 class MockLlmTest < ActionDispatch::IntegrationTest
+  def with_modified_env(key, value)
+    previous = ENV[key]
+    if value.nil?
+      ENV.delete(key)
+    else
+      ENV[key] = value
+    end
+
+    yield
+  ensure
+    if previous.nil?
+      ENV.delete(key)
+    else
+      ENV[key] = previous
+    end
+  end
+
+  def monotonic_time
+    Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  end
+
   def parse_sse_events(body)
     events = []
 
@@ -17,6 +38,18 @@ class MockLlmTest < ActionDispatch::IntegrationTest
     end
 
     events
+  end
+
+  test "single digit prompt is recognized as a delayed shortcut" do
+    controller = MockLLM::V1::ChatCompletionsController.new
+
+    with_modified_env("MOCK_LLM_MAX_SLOW_SECONDS", "9") do
+      assert_equal 3.0, controller.send(:numeric_prompt_delay_seconds, "3")
+      assert_equal 9.0, controller.send(:numeric_prompt_delay_seconds, "9")
+      assert_nil controller.send(:numeric_prompt_delay_seconds, "0")
+      assert_nil controller.send(:numeric_prompt_delay_seconds, "10")
+      assert_nil controller.send(:numeric_prompt_delay_seconds, "3 seconds")
+    end
   end
 
   test "models endpoint returns a mock model" do
@@ -44,8 +77,62 @@ class MockLlmTest < ActionDispatch::IntegrationTest
     assert_equal "chat.completion", body.fetch("object")
     assert_equal "mock-model", body.fetch("model")
     assert_equal "assistant", body.dig("choices", 0, "message", "role")
-    assert_equal "Mock: Hello", body.dig("choices", 0, "message", "content")
+    assert_match(/\AMock: Hello \[[0-9a-f]{6}\]\z/, body.dig("choices", 0, "message", "content"))
     assert body.fetch("usage").is_a?(Hash)
+  end
+
+  test "plain-text mock completions append a short random suffix" do
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: "Hello" }],
+           stream: false,
+         },
+         as: :json
+
+    assert_response :success
+    first_content = JSON.parse(response.body).dig("choices", 0, "message", "content")
+
+    post "/mock_llm/v1/chat/completions",
+         params: {
+           model: "mock-model",
+           messages: [{ role: "user", content: "Hello" }],
+           stream: false,
+         },
+         as: :json
+
+    assert_response :success
+    second_content = JSON.parse(response.body).dig("choices", 0, "message", "content")
+
+    assert_match(/\AMock: Hello \[[0-9a-f]{6}\]\z/, first_content)
+    assert_match(/\AMock: Hello \[[0-9a-f]{6}\]\z/, second_content)
+    refute_equal first_content, second_content
+  end
+
+  test "single digit prompt returns delayed random content for non-streaming completions" do
+    elapsed = nil
+
+    with_modified_env("MOCK_LLM_MAX_SLOW_SECONDS", "0.01") do
+      started_at = monotonic_time
+
+      post "/mock_llm/v1/chat/completions",
+           params: {
+             model: "mock-model",
+             messages: [{ role: "user", content: "3" }],
+             stream: false,
+           },
+           as: :json
+
+      elapsed = monotonic_time - started_at
+    end
+
+    assert_response :success
+
+    body = JSON.parse(response.body)
+    content = body.dig("choices", 0, "message", "content").to_s
+
+    assert_operator elapsed, :>=, 0.01
+    assert_match(/\AMock delayed 3s: [a-z0-9]{24}\z/, content)
   end
 
   test "chat completions errors when model is missing" do
@@ -108,11 +195,40 @@ class MockLlmTest < ActionDispatch::IntegrationTest
     assert events.any?
 
     deltas = events.map { |e| e.dig("choices", 0, "delta", "content") }.compact.join
-    assert_equal "Mock: Hello", deltas
+    assert_match(/\AMock: Hello \[[0-9a-f]{6}\]\z/, deltas)
 
     last = events.last
     assert_equal "stop", last.dig("choices", 0, "finish_reason")
     assert last.fetch("usage").is_a?(Hash)
+  end
+
+  test "single digit prompt returns delayed random content for streaming completions" do
+    elapsed = nil
+
+    with_modified_env("MOCK_LLM_MAX_SLOW_SECONDS", "0.01") do
+      started_at = monotonic_time
+
+      post "/mock_llm/v1/chat/completions",
+           params: {
+             model: "mock-model",
+             messages: [{ role: "user", content: "4" }],
+             stream: true,
+             stream_options: { include_usage: true },
+           },
+           as: :json
+
+      elapsed = monotonic_time - started_at
+    end
+
+    assert_response :success
+    assert_includes response.headers.fetch("content-type"), "text/event-stream"
+    assert_includes response.body, "[DONE]"
+
+    events = parse_sse_events(response.body)
+    deltas = events.map { |e| e.dig("choices", 0, "delta", "content") }.compact.join
+
+    assert_operator elapsed, :>=, 0.01
+    assert_match(/\AMock delayed 4s: [a-z0-9]{24}\z/, deltas)
   end
 
   test "markdown mode returns deterministic markdown content" do
@@ -181,6 +297,6 @@ class MockLlmTest < ActionDispatch::IntegrationTest
 
     events = parse_sse_events(response.body)
     deltas = events.map { |e| e.dig("choices", 0, "delta", "content") }.compact.join
-    assert_equal "Mock: Hello", deltas
+    assert_match(/\AMock: Hello \[[0-9a-f]{6}\]\z/, deltas)
   end
 end

@@ -114,9 +114,7 @@ module Cybros
     end
 
     def global_input_policy
-      INPUT_POLICY_GLOBAL_DEFAULTS.deep_dup
-    rescue StandardError
-      Marshal.load(Marshal.dump(INPUT_POLICY_GLOBAL_DEFAULTS))
+      deep_dup_value(INPUT_POLICY_GLOBAL_DEFAULTS)
     end
 
     def input_policy(profile)
@@ -143,6 +141,21 @@ module Cybros
       end
     rescue StandardError
       []
+    end
+
+    def deep_dup_value(value)
+      case value
+      when Hash
+        value.each_with_object({}) do |(key, inner), out|
+          out[key] = deep_dup_value(inner)
+        end
+      when Array
+        value.map { |inner| deep_dup_value(inner) }
+      when String
+        value.dup
+      else
+        value
+      end
     end
   end
 end

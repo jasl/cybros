@@ -40,6 +40,16 @@ class Event < ApplicationRecord
         partial: "conversation_messages/message",
         locals: { message: message },
       )
+
+      # A terminal turn can promote queued input into the visible transcript, so refresh the list as a unit.
+      page = conversation.message_page(limit: 30, mode: :full)
+      messages = page.fetch("messages")
+      Turbo::StreamsChannel.broadcast_replace_to(
+        [conversation, :messages],
+        target: ActionView::RecordIdentifier.dom_id(conversation, :messages_list),
+        partial: "conversation_messages/list",
+        locals: { conversation: conversation, messages: messages },
+      )
     rescue StandardError => e
       Cybros::RateLimitedLog.warn(
         "event.broadcast_node_state_change",

@@ -1,4 +1,5 @@
 require "test_helper"
+require "nokogiri"
 
 class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
   self.use_transactional_tests = false
@@ -104,6 +105,51 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_nil agent.claim_after_at
   end
 
+  test "create while a run is active keeps the queued follow-up out of the message list stream and inside the composer rail stream" do
+    user = create_user!
+    sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    first_result = conversation.append_user_message!(content: "first request")
+    first_agent = first_result.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, first_agent.reload.state
+
+    queued_content = "queued follow up"
+
+    post conversation_messages_path(conversation),
+         params: { content: queued_content },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+
+    list_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_list)
+    composer_rail_id = ActionView::RecordIdentifier.dom_id(conversation, :composer_status_rail)
+
+    list_fragment = turbo_stream_template_for(response.body, target: list_id)
+    rail_fragment = turbo_stream_template_for(response.body, target: composer_rail_id)
+
+    refute_includes list_fragment, queued_content
+    assert_includes rail_fragment, queued_content
+    assert_equal ["first request"], visible_user_inputs(conversation)
+    assert_equal [queued_content], conversation.composer_state.dig("queue", "items").map { |item| item.fetch("content") }
+  end
+
   test "create returns 422 when selected model_ref is invalid" do
     user = create_user!
     sign_in!(user)
@@ -184,4 +230,50 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
 
     assert_response :not_found
   end
+
+  test "regenerate for the tail assistant returns turbo streams instead of redirecting the page" do
+    user = create_user!
+    sign_in!(user)
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    post conversation_messages_path(conversation), params: { content: "Hello" }
+
+    agent = conversation.reload.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi v1")
+
+    post regenerate_conversation_path(conversation),
+         params: { agent_node_id: agent.id },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+    assert_includes response.media_type, "text/vnd.turbo-stream.html"
+
+    list_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_list)
+    composer_rail_id = ActionView::RecordIdentifier.dom_id(conversation, :composer_status_rail)
+
+    assert_includes response.body, %(turbo-stream action="replace" target="#{list_id}")
+    assert_includes response.body, %(turbo-stream action="replace" target="#{composer_rail_id}")
+  end
+
+  private
+
+    def turbo_stream_template_for(body, target:)
+      fragment = Nokogiri::HTML5.fragment(body)
+      stream = fragment.at_css(%(turbo-stream[target="#{target}"]))
+      assert_not_nil stream, "expected turbo-stream target=#{target.inspect}"
+
+      template = stream.at_css("template")
+      assert_not_nil template, "expected template for turbo-stream target=#{target.inspect}"
+
+      template.inner_html
+    end
+
+    def visible_user_inputs(conversation)
+      conversation.message_page(limit: 20, mode: :full).fetch("messages").filter_map do |message|
+        next unless message.fetch("node_type") == Messages::UserMessage.node_type_key
+
+        message.dig("payload", "input", "content").to_s.presence
+      end
+    end
 end

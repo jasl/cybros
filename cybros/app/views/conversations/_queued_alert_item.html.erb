@@ -1,0 +1,42 @@
+<% item_content = item.fetch("content", "").to_s %>
+<% queued_user_node_id = item.fetch("user_node_id", "").to_s %>
+
+<div
+  data-testid="<%= testid %>"
+  class="flex w-full items-start gap-3 rounded-3xl border border-base-300/60 bg-base-100/85 px-4 py-2">
+  <p class="min-w-0 flex-1 whitespace-pre-wrap break-words text-sm text-base-content"><%= item_content %></p>
+
+  <div class="flex items-center gap-1 shrink-0">
+    <button
+      type="button"
+      class="btn btn-ghost btn-xs btn-square"
+      data-action="message-form#editQueuedItem"
+      data-action-url="<%= edit_conversation_queue_item_path(conversation, queued_user_node_id) %>"
+      data-queued-content="<%= item_content %>"
+      aria-label="Edit queued message"
+      title="Edit">
+      <span class="icon-[lucide--pencil] size-3.5"></span>
+    </button>
+
+    <button
+      type="button"
+      class="btn btn-ghost btn-xs btn-square <%= steer_available ? "" : "btn-disabled" %>"
+      data-action="message-form#steerQueuedItem"
+      data-action-url="<%= steer_conversation_queue_item_path(conversation, queued_user_node_id) %>"
+      <%= steer_available ? "" : "disabled" %>
+      aria-label="Steer queued message"
+      title="<%= steer_available ? "Steer" : steer_reason %>">
+      <span class="icon-[lucide--corner-right-up] size-3.5"></span>
+    </button>
+
+    <button
+      type="button"
+      class="btn btn-ghost btn-xs btn-square"
+      data-action="message-form#cancelQueuedItem"
+      data-action-url="<%= conversation_queue_item_path(conversation, queued_user_node_id) %>"
+      aria-label="Cancel queued message"
+      title="Cancel">
+      <span class="icon-[lucide--x] size-3.5"></span>
+    </button>
+  </div>
+</div>

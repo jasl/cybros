@@ -3,7 +3,7 @@ class ConversationMessagesController < ApplicationController
 
   before_action :require_authentication
   before_action :set_conversation
-  before_action -> { throttle!(key: "messages", limit: 20, period: 60) }, only: :create
+  before_action :throttle_message_creates!, only: :create
 
   rescue_from ArgumentError, AgentCore::ValidationError, Cybros::Error do |e|
     respond_to do |format|
@@ -89,6 +89,7 @@ class ConversationMessagesController < ApplicationController
   def create
     content = params.fetch(:content, "").to_s
     content = content.strip
+    edit_node_id = params.fetch(:edit_node_id, "").to_s.strip.presence
     model_ref = params.fetch(:model_ref, "").to_s.strip.presence
     input_policy_override = params[:input_policy_override]
 
@@ -100,12 +101,21 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    @conversation.append_user_message_and_project!(
-      content: content,
-      mode: :preview,
-      model_ref: model_ref,
-      input_policy_override: input_policy_override,
-    )
+    if edit_node_id
+      @conversation.edit_user_message!(
+        node_id: edit_node_id,
+        content: content,
+        model_ref: model_ref,
+        input_policy_override: input_policy_override,
+      )
+    else
+      @conversation.append_user_message_and_project!(
+        content: content,
+        mode: :preview,
+        model_ref: model_ref,
+        input_policy_override: input_policy_override,
+      )
+    end
 
     respond_to do |format|
       format.turbo_stream { render_conversation_update_streams }
@@ -115,6 +125,10 @@ class ConversationMessagesController < ApplicationController
   end
 
   private
+
+    def throttle_message_creates!
+      throttle!(key: "messages", limit: 20, period: 60)
+    end
 
     def render_conversation_update_streams
       page = @conversation.message_page(limit: 30, mode: :full)

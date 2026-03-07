@@ -281,7 +281,9 @@ Use Chrome MCP tools to interact with the running dev app for UI testing and deb
 ### Playwright E2E (optional)
 
 - E2E tests live in `test/e2e/` and are **not** part of `bin/ci`.
-- Start the dev server (`bin/dev`) then run `bin/e2e`.
+- E2E runs against the development app, not `RAILS_ENV=test`.
+- For a manually managed server, start the development stack (`bin/dev`) then run `bin/e2e`.
+- For the self-managed helper, use `bin/ci_e2e`; it enforces `RAILS_ENV=development`.
 
 ### Request throttling (Phase 0.5)
 

@@ -11,12 +11,20 @@
 <% actions = {} unless actions.is_a?(Hash) %>
 <% retry_action = actions.fetch("retry", {}) %>
 <% retry_action = {} unless retry_action.is_a?(Hash) %>
+<% start_action = actions.fetch("start", {}) %>
+<% start_action = {} unless start_action.is_a?(Hash) %>
 <% regenerate_action = actions.fetch("regenerate", {}) %>
 <% regenerate_action = {} unless regenerate_action.is_a?(Hash) %>
 <% swipe_action = actions.fetch("swipe", {}) %>
 <% swipe_action = {} unless swipe_action.is_a?(Hash) %>
+<% swipe_current = Integer(swipe_action["current"], exception: false) %>
+<% swipe_total = Integer(swipe_action["total"], exception: false) %>
+<% swipe_left_available = swipe_action.fetch("left_available", false) == true %>
+<% swipe_right_available = swipe_action.fetch("right_available", false) == true %>
 <% branch_action = actions.fetch("branch", {}) %>
 <% branch_action = {} unless branch_action.is_a?(Hash) %>
+<% edit_action = actions.fetch("edit", {}) %>
+<% edit_action = {} unless edit_action.is_a?(Hash) %>
 <% action_policy_json = json_escape(action_policy.to_json) %>
 <% preview = payload.dig("output_preview", "content").to_s %>
 <% output = payload.dig("output", "content").to_s %>
@@ -47,13 +55,13 @@
             <span class="icon-[lucide--copy] size-3"></span>
             Copy
           </button>
-          <% if branch_action.fetch("supported", false) %>
+          <% if edit_action.fetch("available", false) %>
             <button type="button"
                     class="btn btn-ghost btn-xs"
-                    data-message-actions-target="branchButton"
-                    data-action="message-actions#branch">
-              <span class="icon-[lucide--git-branch] size-3"></span>
-              Branch
+                    data-message-actions-target="editButton"
+                    data-action="message-actions#edit">
+              <span class="icon-[lucide--pencil] size-3"></span>
+              Edit
             </button>
           <% end %>
         </div>
@@ -102,7 +110,15 @@
             Copy
           </button>
 
-          <% if retry_action.fetch("available", false) %>
+          <% if start_action.fetch("available", false) %>
+            <button type="button"
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="startButton"
+                    data-action="message-actions#start">
+              <span class="icon-[lucide--play] size-3"></span>
+              Start
+            </button>
+          <% elsif retry_action.fetch("available", false) %>
             <button type="button"
                     class="btn btn-ghost btn-xs"
                     data-message-actions-target="retryButton"
@@ -110,7 +126,7 @@
               <span class="icon-[lucide--refresh-cw] size-3"></span>
               Retry
             </button>
-          <% elsif regenerate_action.fetch("available", false) %>
+          <% elsif regenerate_action.fetch("available", false) && regenerate_action.fetch("mode", "in_place") != "branch" %>
             <button type="button"
                     class="btn btn-ghost btn-xs"
                     data-message-actions-target="regenerateButton"
@@ -121,19 +137,23 @@
           <% end %>
 
           <% if swipe_action.fetch("supported", false) %>
-            <div class="join hidden" data-message-actions-target="swipeNav">
+            <div class="join <%= swipe_action.fetch("available", false) ? "" : "hidden" %>" data-message-actions-target="swipeNav">
               <button type="button"
                       class="btn btn-ghost btn-xs join-item"
                       title="Previous version"
                       data-message-actions-target="swipeLeft"
-                      data-action="message-actions#swipeLeft">
+                      data-action="message-actions#swipeLeft"
+                      <%= "disabled" unless swipe_left_available %>>
                 <span class="icon-[lucide--chevron-left] size-3"></span>
               </button>
+              <span class="btn btn-ghost btn-xs join-item pointer-events-none font-mono tabular-nums"
+                    data-message-actions-target="swipeCount"><%= swipe_current || 0 %> / <%= swipe_total || 0 %></span>
               <button type="button"
                       class="btn btn-ghost btn-xs join-item"
                       title="Next version"
                       data-message-actions-target="swipeRight"
-                      data-action="message-actions#swipeRight">
+                      data-action="message-actions#swipeRight"
+                      <%= "disabled" unless swipe_right_available %>>
                 <span class="icon-[lucide--chevron-right] size-3"></span>
               </button>
             </div>

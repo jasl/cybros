@@ -76,7 +76,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     await signIn(page)
   })
 
-  test("composer rail shows queue, steer, and the candidate next-input preview while a run is active", async ({ page }) => {
+  test("composer rail shows the first queued message inline and moves it into the transcript when the current run finishes", async ({ page }) => {
     test.setTimeout(150_000)
     await createHighPriorityMockProvider(page)
 
@@ -93,19 +93,19 @@ test.describe("Conversation message actions + hotkeys", () => {
     })
     await page.getByRole("button", { name: "Send" }).click()
 
-    await expect(page.getByTestId("conversation-composer-status-rail")).toBeVisible()
-    await expect(page.getByRole("button", { name: "Queue next turn" })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Steer current turn" })).toBeVisible()
     await waitForTailAgentToStartRunning(page)
     await expect(page.getByRole("button", { name: "Stop" })).toBeVisible({ timeout: 20_000 })
 
     const queuedFollowUp = "queued follow up from e2e"
     await page.getByPlaceholder("Message…").fill(queuedFollowUp)
-    await expect(page.getByTestId("conversation-composer-candidate-preview")).toContainText(queuedFollowUp)
-
     await page.getByRole("button", { name: "Send" }).click()
-    await expect(page.getByTestId("conversation-composer-status-rail")).toContainText("queued turn")
-    await expect(page.getByTestId("conversation-composer-candidate-preview")).toContainText(queuedFollowUp)
+    await expect(page.getByTestId("conversation-composer-status-rail")).toBeVisible()
+    await expect(page.getByTestId("conversation-queued-alert-primary-item")).toContainText(queuedFollowUp)
+    await expect(page.getByTestId("conversation-queued-alert-toggle")).toHaveCount(0)
+
+    const messageList = page.locator("[id^='messages_list_conversation_']")
+    await expect(messageList).toContainText(queuedFollowUp, { timeout: 30_000 })
+    await expect(page.getByTestId("conversation-composer-status-rail")).not.toContainText(queuedFollowUp, { timeout: 30_000 })
   })
 
   test("copy copies the agent message markdown; branch navigates to a child conversation", async ({ page }) => {

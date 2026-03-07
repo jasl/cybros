@@ -149,7 +149,12 @@ module Cybros
               Conversation.create!(
                 user: source_conversation.user,
                 title: "Debug smoke #{Time.current.to_i}",
-                metadata: source_conversation.metadata.deep_dup,
+                metadata:
+                  source_conversation.metadata.deep_dup.deep_merge(
+                    "input_policy" => {
+                      "input_coalescing" => { "enabled" => false },
+                    },
+                  ),
               )
 
             begin

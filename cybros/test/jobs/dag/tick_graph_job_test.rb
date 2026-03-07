@@ -3,6 +3,7 @@ require "thread"
 
 class DAG::TickGraphJobTest < ActiveJob::TestCase
   include ActiveJob::TestHelper
+  include ActiveSupport::Testing::TimeHelpers
 
   self.use_transactional_tests = false
 
@@ -58,5 +59,34 @@ class DAG::TickGraphJobTest < ActiveJob::TestCase
   ensure
     release << true
     holder.join
+  end
+
+  test "tick reschedules itself for the earliest delayed pending node" do
+    travel_to(Time.zone.parse("2026-03-07 10:00:00")) do
+      conversation = create_conversation!
+      graph = conversation.dag_graph
+      parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+      delayed_time = 1.5.seconds.from_now
+      delayed =
+        graph.nodes.create!(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+          claim_after_at: delayed_time,
+        )
+      graph.edges.create!(from_node_id: parent.id, to_node_id: delayed.id, edge_type: DAG::Edge::DEPENDENCY)
+
+      DAG::TickGraphJob.perform_now(graph.id, limit: 10)
+
+      matching =
+        enqueued_jobs.find do |job|
+          job[:job] == DAG::TickGraphJob &&
+            Array(job[:args]).first == graph.id &&
+            job[:at].present?
+        end
+
+      assert matching, "expected a delayed tick to be enqueued"
+      assert_in_delta delayed_time.to_f, matching[:at].to_f, 0.05
+    end
   end
 end

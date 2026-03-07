@@ -139,6 +139,7 @@ module Cybros
 
             {
               model_ref: "#{provider_key}/#{model_key}",
+              model_display_name: model_spec.fetch("display_name").to_s,
               label: model_spec.fetch("display_name").to_s,
               provider_key: provider_key,
               provider_display_name: provider_spec.fetch("display_name").to_s,

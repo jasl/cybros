@@ -1,3 +1,5 @@
+<% turbo_refreshes_with method: :morph, scroll: :preserve %>
+
 <% content_for :right_sidebar do %>
   <div class="h-14 px-2 border-b border-base-300 bg-base-100">
   </div>
@@ -100,6 +102,17 @@
         <% end %>
 
         <%= render "conversations/composer_status_rail", conversation: @conversation, composer_state: @composer_state %>
+        <div
+          class="hidden items-center justify-between rounded-2xl border border-base-300 bg-base-200/70 px-3 py-2 text-xs"
+          data-message-form-target="editMode">
+          <span data-message-form-target="editModeLabel">Editing your last message. Sending will regenerate the latest assistant reply.</span>
+          <button
+            type="button"
+            class="btn btn-ghost btn-xs"
+            data-action="message-form#cancelEdit">
+            Cancel
+          </button>
+        </div>
         <input
           type="hidden"
           name="input_policy_override[running_input_policy]"
@@ -108,12 +121,22 @@
           data-message-form-target="runningInputPolicyInput">
         <input
           type="hidden"
+          name="input_policy_override[input_coalescing][enabled]"
+          value="false">
+        <input
+          type="hidden"
           name="interrupted_output_policy_override"
           value="">
+        <input
+          type="hidden"
+          name="edit_node_id"
+          value=""
+          disabled
+          data-message-form-target="editNodeIdInput">
 
         <div
           data-testid="conversation-composer-input"
-          class="mt-2 bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
+          class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
           <textarea
             name="content"
             rows="1"
@@ -142,10 +165,14 @@
                 <% if needs_model_reselection %>
                   <option value="" selected>Please reselect a model</option>
                 <% end %>
-                <% @llm_model_options.each do |opt| %>
-                  <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
-                    <%= opt.fetch(:label) %>
-                  </option>
+                <% @llm_model_option_groups.each do |group| %>
+                  <optgroup label="<%= group.fetch(:provider_display_name) %>">
+                    <% group.fetch(:options).each do |opt| %>
+                      <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
+                        <%= opt.fetch(:model_display_name, opt.fetch(:label)) %>
+                      </option>
+                    <% end %>
+                  </optgroup>
                 <% end %>
               </select>
             <% else %>

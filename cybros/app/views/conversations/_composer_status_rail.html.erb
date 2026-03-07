@@ -1,79 +1,80 @@
 <% running = composer_state.fetch("running", false) %>
 <% queue_state = composer_state.fetch("queue", {}) %>
 <% steer_state = composer_state.fetch("steer", {}) %>
-<% candidate_preview = composer_state.fetch("candidate_preview", {}) %>
 <% queued_count = queue_state.fetch("queued_count", 0).to_i %>
-<% preview_content = candidate_preview.fetch("content", "").to_s %>
-<% preview_source = candidate_preview.fetch("source", "").to_s %>
+<% queue_items = Array(queue_state.fetch("items", [])) %>
+<% overflow_count = queue_state.fetch("overflow_count", 0).to_i %>
+<% steer_available = steer_state.fetch("available", false) %>
 <% steer_reason = steer_state.fetch("reason", "").to_s %>
+<% primary_item = queue_items.first %>
+<% overflow_items = queue_items.drop(1) %>
+<% expandable_queue = queued_count > 1 %>
 
 <div
   id="<%= dom_id(conversation, :composer_status_rail) %>"
   data-testid="conversation-composer-status-rail"
   data-message-form-target="statusRail"
   data-create-url="<%= conversation_messages_path(conversation) %>"
-  data-steer-url="<%= steer_current_turn_conversation_path(conversation) %>"
   data-running="<%= running %>"
   data-queue-available="<%= queue_state.fetch("available", false) %>"
-  data-steer-available="<%= steer_state.fetch("available", false) %>"
+  data-steer-available="<%= steer_available %>"
   data-steer-reason="<%= steer_reason %>"
   data-queued-count="<%= queued_count %>"
-  data-candidate-preview="<%= preview_content %>"
-  class="rounded-[1.75rem] border border-base-300 bg-[radial-gradient(circle_at_top_left,_rgba(14,116,144,0.14),_transparent_35%),linear-gradient(135deg,_rgba(255,255,255,0.98),_rgba(241,245,249,0.9))] px-4 py-3 shadow-sm">
-  <div class="flex flex-wrap items-center gap-2">
-    <span class="text-[11px] font-semibold uppercase tracking-[0.22em] text-base-content/45">Composer</span>
+  class="<%= queued_count.positive? ? "mb-2" : "hidden" %>">
+  <% if queued_count.positive? %>
+    <div
+      role="alert"
+      data-testid="conversation-queued-alert"
+      class="alert alert-info alert-soft items-start px-3 py-2 text-sm">
+      <div class="min-w-0 w-full space-y-2">
+        <div class="flex items-center gap-3">
+          <div class="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+            <span><%= queued_count == 1 ? "Queued message" : "Queued messages" %></span>
+          </div>
+          <% if expandable_queue %>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs btn-square shrink-0"
+              data-testid="conversation-queued-alert-toggle"
+              data-message-form-target="queueToggleButton"
+              data-action="message-form#toggleQueueDetails"
+              aria-label="Expand queued messages"
+              title="Expand">
+              <span
+                class="icon-[lucide--chevron-down] size-4 transition-transform"
+                data-message-form-target="queueToggleIcon"></span>
+            </button>
+          <% end %>
+        </div>
 
-    <% if queued_count.positive? %>
-      <span class="badge badge-outline badge-sm"><%= pluralize(queued_count, "queued turn") %></span>
-    <% elsif running %>
-      <span class="badge badge-outline badge-sm">Run active</span>
-    <% else %>
-      <span class="badge badge-ghost badge-sm">Ready</span>
-    <% end %>
-  </div>
+        <% if primary_item.present? %>
+          <%= render "conversations/queued_alert_item",
+            conversation: conversation,
+            item: primary_item,
+            steer_available: steer_available,
+            steer_reason: steer_reason,
+            testid: "conversation-queued-alert-primary-item" %>
+        <% end %>
 
-  <div class="mt-3 flex flex-wrap items-center gap-2">
-    <button
-      type="button"
-      class="btn btn-sm rounded-full border-base-300 bg-base-100/80"
-      data-testid="conversation-composer-mode-queue"
-      data-message-form-target="queueModeButton"
-      data-action="message-form#selectQueueMode">
-      <span class="icon-[lucide--list-ordered] size-4"></span>
-      <%= queue_state.fetch("label", "Queue next turn") %>
-    </button>
+        <% if expandable_queue %>
+          <div class="hidden space-y-2" data-message-form-target="queueAlertExpanded">
+            <div class="flex flex-col-reverse gap-1.5">
+              <% overflow_items.each do |item| %>
+                <%= render "conversations/queued_alert_item",
+                  conversation: conversation,
+                  item: item,
+                  steer_available: steer_available,
+                  steer_reason: steer_reason,
+                  testid: "conversation-queued-alert-overflow-item" %>
+              <% end %>
+            </div>
 
-    <button
-      type="button"
-      class="btn btn-sm rounded-full border-base-300 bg-base-100/80"
-      data-testid="conversation-composer-mode-steer"
-      data-message-form-target="steerModeButton"
-      data-action="message-form#selectSteerMode">
-      <span class="icon-[lucide--crosshair] size-4"></span>
-      <%= steer_state.fetch("label", "Steer current turn") %>
-    </button>
-
-    <% if steer_reason.present? %>
-      <p class="text-xs text-base-content/60"><%= steer_reason %></p>
-    <% end %>
-  </div>
-
-  <div class="mt-3 rounded-[1.25rem] border border-base-300/70 bg-base-100/75 px-3 py-2.5">
-    <div class="flex flex-wrap items-center justify-between gap-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-base-content/45">
-      <span>Candidate next-input preview</span>
-      <span data-message-form-target="previewSourceLabel">
-        <%= preview_source == "queued_turn" ? "Queued turn" : (preview_content.present? ? "Draft" : "") %>
-      </span>
+            <% if overflow_count.positive? %>
+              <p class="text-xs text-base-content/60">Showing the earliest queued messages.</p>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
     </div>
-
-    <p
-      class="mt-1 whitespace-pre-wrap text-sm text-base-content <%= preview_content.present? ? "" : "hidden" %>"
-      data-testid="conversation-composer-candidate-preview"
-      data-message-form-target="previewText"><%= preview_content %></p>
-    <p
-      class="mt-1 text-sm text-base-content/50 <%= preview_content.present? ? "hidden" : "" %>"
-      data-message-form-target="previewEmpty">
-      Type a message to preview the next input.
-    </p>
-  </div>
+  <% end %>
 </div>

@@ -5,6 +5,12 @@ cd "$(dirname "$0")/.."
 
 export RAILS_ENV="${RAILS_ENV:-development}"
 
+if [[ "${RAILS_ENV}" != "development" ]]; then
+  echo "bin/ci_e2e must run with RAILS_ENV=development" >&2
+  echo "E2E uses the development app and jobs stack; use integration tests for test-environment coverage." >&2
+  exit 1
+fi
+
 PORT="${E2E_PORT:-3000}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
 

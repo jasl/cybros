@@ -1,4 +1,6 @@
 class Conversation::ComposerState
+  QUEUE_DISPLAY_LIMIT = 4
+
   def self.build(conversation:, now: Time.current)
     new(conversation: conversation, now: now).to_h
   end
@@ -9,22 +11,23 @@ class Conversation::ComposerState
   end
 
   def to_h
+    queue_items = queued_candidates
+    queue_anchor = queue_anchor_agent
+
     {
       "running" => running_agent.present?,
-      "running_node_id" => running_agent&.id&.to_s,
+      "running_node_id" => queue_anchor&.id&.to_s,
+      "running_turn_id" => queue_anchor&.turn_id&.to_s,
       "queue" => {
-        "label" => "Queue next turn",
-        "available" => running_agent.present?,
-        "queued_count" => queued_candidates.length,
+        "available" => queue_anchor.present?,
+        "queued_count" => queue_items.length,
+        "display_limit" => QUEUE_DISPLAY_LIMIT,
+        "overflow_count" => [queue_items.length - QUEUE_DISPLAY_LIMIT, 0].max,
+        "items" => queue_items.first(QUEUE_DISPLAY_LIMIT),
       },
       "steer" => {
-        "label" => "Steer current turn",
         "available" => steer_available?,
         "reason" => steer_reason,
-      },
-      "candidate_preview" => {
-        "content" => queued_candidate_content,
-        "source" => queued_candidate_content.present? ? "queued_turn" : nil,
       },
     }
   end
@@ -54,43 +57,19 @@ class Conversation::ComposerState
   end
 
   def queued_candidates
-    @queued_candidates ||=
-      begin
-        return [] if running_agent.nil?
+    @queued_candidates ||= conversation.queued_turn_items(now: now)
+  end
 
+  def queue_anchor_agent
+    @queue_anchor_agent ||=
       graph.nodes.active
         .where(
           lane_id: lane.id,
           node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
+          state: [DAG::Node::PENDING, DAG::Node::RUNNING, DAG::Node::AWAITING_APPROVAL],
         )
-        .where.not(turn_id: running_agent.turn_id)
         .order(:id)
-        .map do |agent_node|
-          user_node =
-            graph.nodes.active
-              .where(
-                lane_id: lane.id,
-                turn_id: agent_node.turn_id,
-                node_type: Messages::UserMessage.node_type_key,
-              )
-              .order(:id)
-              .last
-
-          next if user_node.nil?
-
-          {
-            agent_node: agent_node,
-            user_node: user_node,
-            content: user_node.body_input["content"].to_s.strip,
-          }
-        end
-        .compact
-      end
-  end
-
-  def queued_candidate_content
-    @queued_candidate_content ||= queued_candidates.first&.fetch(:content).to_s
+        .first
   end
 
   def steer_policy
