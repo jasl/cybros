@@ -93,7 +93,7 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_select '[data-role="run-state-activity"][data-activity-kind="subagent"]', count: 1
-    assert_select %[li[data-role="run-state-activity"][data-child-conversation-id="#{child.id}"]], count: 1
+    assert_select %(li[data-role="run-state-activity"][data-child-conversation-id="#{child.id}"]), count: 1
     assert_includes response.body, "Research Agent"
     assert_includes response.body, "Parent thinking"
     refute_includes response.body, "child_internal_task"

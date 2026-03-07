@@ -1243,7 +1243,7 @@ module AgentCore
           def diagnostic_level_for(node)
             agent =
               node.graph.nodes.active
-                .where(lane_id: node.lane_id, turn_id: node.turn_id, node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key])
+                .where(lane_id: node.lane_id, turn_id: node.turn_id, node_type: %w[agent_message character_message])
                 .order(:id)
                 .last
 
