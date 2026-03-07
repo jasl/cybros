@@ -47,10 +47,18 @@
       <% activities.each do |activity| %>
         <% activity_status = activity.fetch("status", "").to_s %>
         <% activity_phase = activity.fetch("phase", "").to_s %>
+        <% activity_kind = activity.fetch("kind", "").to_s %>
         <% activity_title = activity.fetch("title", "").to_s %>
         <% input_preview = activity.fetch("input_preview", "").to_s %>
         <% output_preview = activity.fetch("output_preview", "").to_s %>
         <% error_summary = activity.dig("error", "summary").to_s %>
+        <% links = activity.fetch("links", {}) %>
+        <% links = {} unless links.is_a?(Hash) %>
+        <% snapshot = activity.fetch("snapshot", {}) %>
+        <% snapshot = {} unless snapshot.is_a?(Hash) %>
+        <% counts = snapshot.fetch("counts", {}) %>
+        <% counts = {} unless counts.is_a?(Hash) %>
+        <% transcript_lines = Array(snapshot.fetch("transcript_lines", [])).select { |line| line.present? } %>
         <% activity_badge_class =
              case activity_status
              when "running" then "badge-info"
@@ -60,7 +68,17 @@
              else "badge-ghost"
              end %>
         <% detail =
-             if activity_status == "awaiting_approval"
+             if activity_kind == "subagent"
+               bits = []
+               child_status = snapshot.fetch("status", "").to_s
+               bits << "Child #{child_status.humanize.downcase}" if child_status.present?
+               bits << "#{counts.fetch("running", 0).to_i} running" if counts.fetch("running", 0).to_i.positive?
+               bits << "#{counts.fetch("pending", 0).to_i} pending" if counts.fetch("pending", 0).to_i.positive?
+               bits << "#{counts.fetch("awaiting_approval", 0).to_i} waiting" if counts.fetch("awaiting_approval", 0).to_i.positive?
+               wait_status = snapshot.fetch("wait_status", "").to_s
+               bits << "Wait #{wait_status.humanize.downcase}" if wait_status.present? && wait_status != "settled"
+               bits.join(" · ")
+             elsif activity_status == "awaiting_approval"
                "Waiting for approval"
              elsif input_preview.present?
                input_preview.truncate(120)
@@ -72,7 +90,9 @@
 
         <li data-role="run-state-activity"
             data-activity-status="<%= activity_status %>"
-            data-activity-kind="<%= activity.fetch("kind", "").to_s %>"
+            data-activity-kind="<%= activity_kind %>"
+            data-child-conversation-id="<%= links.fetch("child_conversation_id", "").to_s %>"
+            data-child-graph-id="<%= links.fetch("child_graph_id", "").to_s %>"
             class="rounded-2xl border border-base-300/80 bg-base-100/80 px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div>
@@ -85,7 +105,11 @@
           </div>
 
           <% if detail.present? %>
-            <div data-role="run-state-activity-detail" class="mt-2 text-xs opacity-70"><%= detail %></div>
+            <div data-role="<%= activity_kind == "subagent" ? "run-state-subagent-summary" : "run-state-activity-detail" %>" class="mt-2 text-xs opacity-70"><%= detail %></div>
+          <% end %>
+
+          <% if activity_kind == "subagent" && transcript_lines.any? %>
+            <div data-role="run-state-subagent-transcript" class="mt-2 text-xs opacity-60"><%= transcript_lines.last.truncate(120) %></div>
           <% end %>
 
           <% if error_summary.present? %>

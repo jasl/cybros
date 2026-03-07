@@ -1,5 +1,6 @@
 class Conversation::TurnExecutionProjector
   PREFLIGHT_TASK_NAMES = %w[compress_input compact_context].freeze
+  SUBAGENT_TOOL_NAMES = %w[subagent_run subagent_wait].freeze
   ASSISTANT_BUBBLE = "assistant_bubble"
   COMPOSER_ONLY = "composer_only"
   STANDARD_DIAGNOSTIC_LEVEL = "standard"
@@ -97,29 +98,51 @@ class Conversation::TurnExecutionProjector
       activity_events = task.node_events.select { |event| activity_event?(event) }.sort_by(&:created_at)
       last_event = activity_events.last
       last_payload = last_event&.payload.is_a?(Hash) ? last_event.payload : {}
+      subagent_snapshot = subagent_snapshot_for(task)
+      subagent_activity = subagent_activity?(task)
 
-      kind = last_payload["kind"].to_s.presence || activity_kind_for(task)
-      status = last_payload["status"].to_s.presence || activity_status_for(task)
+      kind = subagent_activity ? "subagent" : (last_payload["kind"].to_s.presence || activity_kind_for(task))
+      status =
+        if subagent_activity
+          subagent_activity_status_for(task, snapshot: subagent_snapshot)
+        else
+          last_payload["status"].to_s.presence || activity_status_for(task)
+        end
+      phase =
+        if subagent_activity
+          subagent_activity_phase_for(status: status, snapshot: subagent_snapshot)
+        else
+          last_payload["phase"].to_s.presence || activity_phase_for(task, kind: kind, status: status)
+        end
+      diagnostics = diagnostics_for(activity_events, diagnostic_level: diagnostic_level)
+      diagnostics = attach_subagent_diagnostics(diagnostics, snapshot: subagent_snapshot, diagnostic_level: diagnostic_level)
 
-      {
+      activity = {
         "activity_id" => last_payload["activity_id"].to_s.presence || "task:#{task.id}",
         "kind" => kind,
         "status" => status,
-        "phase" => last_payload["phase"].to_s.presence || activity_phase_for(task, kind: kind, status: status),
+        "phase" => phase,
         "sequence" => Integer(last_payload["sequence"], exception: false) || sequence_fallback,
-        "title" => activity_title_for(task),
+        "title" => subagent_activity ? subagent_title_for(task) : activity_title_for(task),
         "source_node_id" => last_payload["source_node_id"].to_s.presence || task.id,
         "tool_call_id" => task.body_input["tool_call_id"].to_s.presence,
-        "input_preview" => task.body_input["arguments_summary"].to_s.presence,
-        "output_preview" => task.body_output_preview["result"].presence,
-        "error" => activity_error_for(task, status: status, last_payload: last_payload),
+        "input_preview" => subagent_activity ? nil : task.body_input["arguments_summary"].to_s.presence,
+        "output_preview" => subagent_activity ? subagent_output_preview(subagent_snapshot) : task.body_output_preview["result"].presence,
+        "error" => subagent_activity ? subagent_error_for(task, status: status, snapshot: subagent_snapshot, last_payload: last_payload) : activity_error_for(task, status: status, last_payload: last_payload),
         "last_event_id" => last_event&.id,
-        "diagnostics" => diagnostics_for(activity_events, diagnostic_level: diagnostic_level),
+        "diagnostics" => diagnostics,
         "started_at" => task.started_at&.iso8601,
         "updated_at" => task.updated_at&.iso8601,
         "finished_at" => task.finished_at&.iso8601,
         "visibility" => activity_visibility_for(kind),
       }.compact
+
+      if subagent_activity
+        activity["links"] = subagent_links_for(subagent_snapshot)
+        activity["snapshot"] = subagent_snapshot_fields(subagent_snapshot)
+      end
+
+      activity.compact
     end
 
     def assistant_bubble_activities(activities)
@@ -169,12 +192,114 @@ class Conversation::TurnExecutionProjector
       kind == "preflight_task" ? COMPOSER_ONLY : ASSISTANT_BUBBLE
     end
 
+    def subagent_activity?(task)
+      SUBAGENT_TOOL_NAMES.include?(task_tool_name(task))
+    end
+
+    def task_tool_name(task)
+      input = task.body_input.is_a?(Hash) ? task.body_input : {}
+      input["name"].to_s.presence ||
+        input["requested_name"].to_s.presence ||
+        input["resolved_name"].to_s.presence
+    end
+
     def activity_title_for(task)
       input = task.body_input
       input["name"].to_s.presence ||
         input["requested_name"].to_s.presence ||
         input["resolved_name"].to_s.presence ||
         task.node_type.to_s
+    end
+
+    def subagent_title_for(task)
+      input = task.body_input.is_a?(Hash) ? task.body_input : {}
+      arguments = input["arguments"].is_a?(Hash) ? input["arguments"] : {}
+      arguments["name"].to_s.presence ||
+        arguments["title"].to_s.presence ||
+        "Subagent"
+    end
+
+    def subagent_snapshot_for(task)
+      [task.body_output["result"], task.body_output_preview["result"]].compact.each do |candidate|
+        tool_result = AgentCore::Resources::Tools::ToolResult.from_h(candidate)
+        snapshot = tool_result.metadata["subagent"]
+        return snapshot if snapshot.is_a?(Hash)
+      rescue StandardError
+        next
+      end
+
+      nil
+    end
+
+    def subagent_links_for(snapshot)
+      return nil unless snapshot.is_a?(Hash)
+
+      child_conversation_id = snapshot["child_conversation_id"].to_s.presence
+      child_graph_id = snapshot["child_graph_id"].to_s.presence
+      links = {}
+      links["child_conversation_id"] = child_conversation_id if child_conversation_id
+      links["child_graph_id"] = child_graph_id if child_graph_id
+      links.presence
+    end
+
+    def subagent_snapshot_fields(snapshot)
+      return nil unless snapshot.is_a?(Hash)
+
+      snapshot.slice(
+        "operation",
+        "status",
+        "counts",
+        "leaf",
+        "transcript_lines",
+        "wait_status",
+        "timed_out",
+        "timeout_ms",
+        "elapsed_ms",
+        "diagnostic_level",
+      ).presence
+    end
+
+    def subagent_output_preview(snapshot)
+      return nil unless snapshot.is_a?(Hash)
+
+      Array(snapshot["transcript_lines"]).last.to_s.presence
+    end
+
+    def subagent_activity_status_for(task, snapshot:)
+      task_status = activity_status_for(task)
+      return task_status unless snapshot.is_a?(Hash)
+      return task_status if %w[failed rejected skipped stopped].include?(task_status)
+
+      case snapshot["status"].to_s
+      when "running"
+        "running"
+      when "pending"
+        "pending"
+      when "awaiting_approval"
+        "awaiting_approval"
+      when "idle"
+        "completed"
+      when "missing"
+        "failed"
+      else
+        task_status
+      end
+    end
+
+    def subagent_activity_phase_for(status:, snapshot:)
+      return "authorization" if snapshot.is_a?(Hash) && snapshot["status"].to_s == "awaiting_approval"
+      return "terminal" if terminal_activity_status?(status)
+
+      "execution"
+    end
+
+    def attach_subagent_diagnostics(diagnostics, snapshot:, diagnostic_level:)
+      return diagnostics unless diagnostic_level == DEBUG_DIAGNOSTIC_LEVEL
+      return diagnostics unless snapshot.is_a?(Hash)
+
+      base = diagnostics.is_a?(Hash) ? diagnostics.deep_dup : {}
+      base["subagent"] = subagent_snapshot_fields(snapshot)
+      base
     end
 
     def activity_error_for(task, status:, last_payload: {})
@@ -187,6 +312,16 @@ class Conversation::TurnExecutionProjector
       return { "summary" => preview.to_s } if preview.present?
 
       { "summary" => "task failed" }
+    end
+
+    def subagent_error_for(task, status:, snapshot:, last_payload:)
+      return nil unless status == "failed"
+
+      if snapshot.is_a?(Hash) && snapshot["status"].to_s == "missing"
+        return { "summary" => "child conversation missing" }
+      end
+
+      activity_error_for(task, status: status, last_payload: last_payload)
     end
 
     def reduce_status(anchor:, activities:)
