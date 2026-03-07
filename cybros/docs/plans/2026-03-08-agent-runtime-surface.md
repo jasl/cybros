@@ -14,6 +14,15 @@ This plan intentionally stops at the **runtime layer**.
 
 It may introduce enough loader/config plumbing for programmable agents to opt into runtime surfaces, but it should not redesign programmable-agent authoring, editing, or UX in the same implementation pass.
 
+Also important: turn-execution activity projection is already landed in the current codebase. This plan should reuse:
+
+- structured task activity events
+- `Conversation::TurnExecutionProjector`
+- replay/refresh event-cursor logic
+- assistant-bubble `run_state` projection
+
+It should not assume that preflight/task execution UI truth still needs to be invented from scratch.
+
 ## Execution order and dependency constraints
 
 Recommended order:
@@ -192,9 +201,11 @@ Expected: PASS
 - Modify: `cybros/lib/agent_core/dag/context_budget_manager.rb`
 - Modify: `cybros/app/models/conversation/context_compaction_plan.rb`
 - Modify: `cybros/app/models/conversation.rb`
+- Modify: `cybros/app/models/conversation/turn_execution_projector.rb`
 - Test: `cybros/test/lib/agent_core/dag/context_budget_manager_prompt_sections_test.rb`
 - Test: create `cybros/test/lib/agent_core/dag/context_budget_manager_runtime_surface_test.rb`
 - Test: create `cybros/test/models/conversation/context_compaction_plan_test.rb`
+- Test: `cybros/test/models/conversation/turn_execution_projection_visibility_test.rb`
 
 ### Task 4 / Step 1: Write the failing test
 
@@ -204,6 +215,7 @@ Add tests that prove:
 - `compact_context` can influence keep/summarize/externalize decisions
 - runtime budget limits still win when the surface requests too much context
 - current app-layer compaction still has a safe fallback path when the surface passes or fails
+- durable preflight-task projection still records compaction work and keeps it `composer_only` for assistant-bubble `run_state`
 
 ### Task 4 / Step 2: Run test to verify it fails
 
@@ -229,6 +241,8 @@ Keep the runtime authoritative over:
 - token budget
 - compaction mechanism
 - durable transcript reads
+
+Preserve the current durable preflight-task shape so turn-execution projection and replay semantics stay truthful while compaction policy moves behind the surface.
 
 ### Task 4 / Step 4: Run test to verify it passes
 
@@ -290,9 +304,12 @@ Expected: PASS
 - Modify: `cybros/lib/agent_core/dag/executors/task_executor.rb`
 - Modify: `cybros/lib/agent_core/resources/tools/tool_result.rb`
 - Modify: `cybros/lib/agent_core/dag/context_adapter.rb`
+- Modify: `cybros/app/models/conversation/turn_execution_projector.rb`
 - Possibly create: `cybros/lib/agent_core/runtime_surface/tool_result_projection.rb`
 - Test: create `cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
 - Test: create `cybros/test/lib/agent_core/dag/context_adapter_projected_tool_result_test.rb`
+- Test: `cybros/test/models/conversation/turn_execution_projector_test.rb`
+- Test: `cybros/test/integration/conversation_messages_refresh_execution_test.rb`
 
 ### Task 6 / Step 1: Write the failing test
 
@@ -302,6 +319,7 @@ Add tests that prove:
 - `project_tool_result` controls what re-enters prompt context
 - `externalize` and `quarantine` produce safe projected results
 - fallback projection still redacts/truncates when the surface fails
+- activity previews and refresh/replay stay correct when raw result and model-visible projected result diverge
 
 ### Task 6 / Step 2: Run test to verify it fails
 
@@ -324,6 +342,13 @@ Refactor task execution so the durable flow becomes:
 4. persist the projected result that prompt assembly should consume
 
 Do not hand the surface unlimited raw output by default; prefer preview plus controlled artifact access.
+
+Explicitly decide and implement whether turn-execution activity previews use:
+
+- the projected result
+- or a separate safe activity preview derived alongside it
+
+Update `Conversation::TurnExecutionProjector` accordingly so UI/debug/replay consumers keep a stable contract.
 
 ### Task 6 / Step 4: Run test to verify it passes
 

@@ -417,6 +417,14 @@ should evolve into either:
 - built-in strategies under the runtime surface
 - or fallback implementations when the surface passes
 
+Important current-state constraint:
+
+- `compact_context` is already represented as a durable preflight task
+- turn execution projection already classifies it as `preflight_task`
+- assistant-bubble `run_state` intentionally hides it while broader turn execution still records it
+
+So the first runtime-surface pass should preserve that durable preflight/activity contract unless turn-execution semantics are intentionally redesigned.
+
 ### `review_tool_call`
 
 Purpose:
@@ -562,6 +570,13 @@ The projected result may be:
 - a quarantine stub
 - an externalized placeholder
 
+Important current-state constraint:
+
+- turn execution projection and `run_state` UI already read task output previews as user/operator-visible activity state
+- replay/refresh correctness already depends on that durable projection chain
+
+So the first runtime-surface pass must explicitly preserve or replace that contract. If model-visible projection and activity preview diverge, both need distinct durable shapes.
+
 ## Context Compaction Model
 
 Context compaction should also move into the runtime surface.
@@ -658,7 +673,12 @@ The first-pass integration points are:
    - produce raw result artifacts/preview
    - call `project_tool_result`
 
-6. error handling path
+6. `Conversation::TurnExecutionProjector`
+   - continue projecting durable task/preflight activity truth
+   - preserve `composer_only` vs `assistant_bubble` visibility semantics unless intentionally redesigned
+   - decide whether activity output preview uses projected result or a separate safe preview
+
+7. error handling path
    - call `handle_error` before exposing final user-visible errors
 
 Existing pieces should migrate into built-in fallback strategies rather than disappear immediately:
