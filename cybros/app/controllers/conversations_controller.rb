@@ -9,8 +9,8 @@ class ConversationsController < AgentController
     end
   end
 
-  before_action :set_conversation, only: %i[show stop retry branch regenerate swipe clear_translations]
-  before_action -> { throttle!(key: "stop_retry", limit: 10, period: 60) }, only: %i[stop retry]
+  before_action :set_conversation, only: %i[show composer_status stop retry steer_current_turn branch regenerate swipe clear_translations]
+  before_action -> { throttle!(key: "stop_retry_steer", limit: 10, period: 60) }, only: %i[stop retry steer_current_turn]
 
   def index
     before = params[:before].to_s.presence
@@ -66,6 +66,7 @@ class ConversationsController < AgentController
     @before_cursor = page.fetch("before_message_id", nil).to_s.presence
 
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
+    @composer_state = @conversation.composer_state
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
@@ -105,6 +106,25 @@ class ConversationsController < AgentController
       @llm_model_options = []
       @selected_model_ref = nil
       @stale_model_ref = nil
+    end
+  end
+
+  def composer_status
+    @composer_state = @conversation.composer_state
+
+    respond_to do |format|
+      format.turbo_stream do
+        render turbo_stream: turbo_stream.replace(
+          helpers.dom_id(@conversation, :composer_status_rail),
+          partial: "conversations/composer_status_rail",
+          locals: { conversation: @conversation, composer_state: @composer_state },
+        )
+      end
+
+      format.html do
+        render partial: "conversations/composer_status_rail",
+               locals: { conversation: @conversation, composer_state: @composer_state }
+      end
     end
   end
 
@@ -163,7 +183,11 @@ class ConversationsController < AgentController
 
   def retry
     failed_node_id = params[:node_id].to_s
-    new_id = @conversation.retry_agent_node!(failed_node_id: failed_node_id)
+    new_id =
+      @conversation.retry_agent_node!(
+        failed_node_id: failed_node_id,
+        interrupted_output_policy_override: params[:interrupted_output_policy_override],
+      )
     render json: { ok: true, node_id: new_id }
   rescue ActiveRecord::RecordNotFound
     render json: { ok: false, error: "node_not_found" }, status: :not_found
@@ -173,7 +197,63 @@ class ConversationsController < AgentController
     render json: { ok: false, error: code }, status: status
   end
 
+  def steer_current_turn
+    content = params.fetch(:content, "").to_s.strip
+    model_ref = params.fetch(:model_ref, "").to_s.strip.presence
+    input_policy_override = params[:input_policy_override]
+
+    result =
+      @conversation.steer_current_turn!(
+        content: content,
+        model_ref: model_ref,
+        input_policy_override: input_policy_override,
+        interrupted_output_policy_override: params[:interrupted_output_policy_override],
+      )
+    raise Cybros::Error, "blank_content" if result.nil?
+
+    respond_to do |format|
+      format.json do
+        render json: {
+          ok: true,
+          user_node_id: result[:user_node]&.id,
+          node_id: result[:agent_node]&.id,
+          product_node_id: result[:product_node]&.id,
+        }
+      end
+
+      format.turbo_stream { render_conversation_update_streams }
+      format.html { redirect_to conversation_path(@conversation) }
+    end
+  rescue ActiveRecord::RecordNotFound
+    render json: { ok: false, error: "node_not_found" }, status: :not_found
+  rescue Cybros::Error => e
+    respond_to do |format|
+      format.json { render json: { ok: false, error: e.message.to_s }, status: :unprocessable_entity }
+      format.turbo_stream { render plain: e.message, status: :unprocessable_entity }
+      format.html { render plain: e.message, status: :unprocessable_entity }
+    end
+  end
+
   private
+
+    def render_conversation_update_streams
+      page = @conversation.message_page(limit: 30, mode: :full)
+      messages = page.fetch("messages")
+      composer_state = @conversation.composer_state
+
+      render turbo_stream: [
+        turbo_stream.replace(
+          helpers.dom_id(@conversation, :messages_list),
+          partial: "conversation_messages/list",
+          locals: { conversation: @conversation, messages: messages },
+        ),
+        turbo_stream.replace(
+          helpers.dom_id(@conversation, :composer_status_rail),
+          partial: "conversations/composer_status_rail",
+          locals: { conversation: @conversation, composer_state: composer_state },
+        ),
+      ]
+    end
 
     def set_conversation
       id = params[:id].to_s

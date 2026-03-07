@@ -25,7 +25,7 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert cookies[:session_token].present?
   end
 
-  test "create returns turbo streams appending user + agent placeholder bubbles" do
+  test "create returns turbo streams replacing the message list and composer rail" do
     user = create_user!
     sign_in!(user)
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
@@ -41,9 +41,11 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
 
     list_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_list)
     empty_state_id = ActionView::RecordIdentifier.dom_id(conversation, :messages_empty_state)
+    composer_rail_id = ActionView::RecordIdentifier.dom_id(conversation, :composer_status_rail)
 
     assert_includes response.body, "turbo-stream"
-    assert_includes response.body, %(turbo-stream action="append" target="#{list_id}")
+    assert_includes response.body, %(turbo-stream action="replace" target="#{list_id}")
+    assert_includes response.body, %(turbo-stream action="replace" target="#{composer_rail_id}")
     assert_includes response.body, %(turbo-stream action="remove" target="#{empty_state_id}")
 
     # User bubble should render.
@@ -77,6 +79,29 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
 
     assert_response :unprocessable_entity
     assert_includes response.body, "Preferred model is unavailable"
+  end
+
+  test "create honors nested input policy override params from the composer form" do
+    user = create_user!
+    sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    post conversation_messages_path(conversation),
+         params: {
+           content: "Hello",
+           input_policy_override: {
+             input_coalescing: { window_ms: 0 },
+           },
+         },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+
+    agent = conversation.root_graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key).order(:id).last
+    assert_not_nil agent
+    assert_nil agent.claim_after_at
   end
 
   test "create returns 422 when selected model_ref is invalid" do

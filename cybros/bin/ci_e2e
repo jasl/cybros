@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 
 export RAILS_ENV="${RAILS_ENV:-development}"
 
-PORT="${E2E_PORT:-3100}"
+PORT="${E2E_PORT:-3000}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
 
 echo "CI E2E: starting server + jobs"

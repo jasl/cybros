@@ -170,6 +170,55 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal false, policy.dig("actions", "retry", "available")
   end
 
+  test "retry remains available beyond historical retry depth limit" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    user_node = nil
+    ancestors = []
+    failed = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      previous = nil
+      5.times do |index|
+        node =
+          m.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::STOPPED,
+            lane_id: conversation.chat_lane.id,
+            retry_of_id: previous&.id,
+            metadata: { "error" => "attempt #{index}" },
+          )
+        ancestors << node
+        previous = node
+      end
+
+      failed =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::ERRORED,
+          lane_id: conversation.chat_lane.id,
+          retry_of_id: ancestors.last.id,
+          metadata: { "error" => "boom" },
+        )
+
+      m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    policy = policy_for(conversation: conversation, node: failed)
+
+    assert_equal true, policy.dig("actions", "retry", "supported")
+    assert_equal true, policy.dig("actions", "retry", "available")
+  end
+
   test "user message exposes edit, branch, and delete actions" do
     conversation = create_conversation!
     graph = conversation.dag_graph

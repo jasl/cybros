@@ -158,16 +158,40 @@ class Conversation < ApplicationRecord
     Conversation::NodeActionPolicy.new(conversation: self, node: node).to_h
   end
 
+  def resolved_input_policy(app_override: nil, action: nil, interrupted_output_policy_override: nil)
+    Conversation::InputPolicyResolver.resolve(
+      conversation: self,
+      app_override: app_override,
+      action: action,
+      interrupted_output_policy_override: interrupted_output_policy_override,
+    )
+  end
+
   def action_policy_for_node_id(node_id)
     action_policy_for(find_chat_lane_node!(node_id))
   end
 
-  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil)
-    result = append_user_message!(content: content, model_ref: model_ref)
+  def composer_state(now: Time.current)
+    Conversation::ComposerState.build(conversation: self, now: now)
+  end
+
+  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil, input_policy_override: nil)
+    result = append_user_message!(content: content, model_ref: model_ref, input_policy_override: input_policy_override)
     raise Cybros::Error, "failed to append message" if result.nil?
 
-    node_ids = [result[:user_node]&.id, result[:agent_node]&.id].compact
-    { messages: messages_for_node_ids(node_ids: node_ids, mode: mode), node_ids: node_ids }
+    node_ids =
+      [
+        result[:user_node]&.id,
+        result[:guard_node]&.id,
+        result[:compact_task]&.id,
+        result[:product_node]&.id,
+        result[:agent_node]&.id,
+      ].compact
+    {
+      messages: messages_for_node_ids(node_ids: node_ids, mode: mode),
+      node_ids: node_ids,
+      composer_state: composer_state,
+    }
   end
 
   def stop_node!(node_id:, reason: "user_cancelled")
@@ -183,7 +207,7 @@ class Conversation < ApplicationRecord
     end
   end
 
-  def retry_agent_node!(failed_node_id:)
+  def retry_agent_node!(failed_node_id:, interrupted_output_policy_override: nil)
     with_dag_errors_wrapped do
       graph = root_graph
 
@@ -196,8 +220,6 @@ class Conversation < ApplicationRecord
       unless retry_action.fetch("available", false)
         code =
           case retry_action["reason"].to_s
-          when "retry_limit_reached"
-            "retry_limit_reached"
           when "retry_already_queued"
             "retry_already_queued"
           when "missing_parent"
@@ -207,6 +229,16 @@ class Conversation < ApplicationRecord
           end
         raise Cybros::Error, code
       end
+
+      retry_policy =
+        resolved_input_policy(
+          action: "retry",
+          interrupted_output_policy_override: interrupted_output_policy_override,
+        )
+      apply_interrupted_output_policy!(
+        node: failed_node,
+        interrupted_output_policy: retry_policy.fetch("interrupted_output_policy"),
+      )
 
       new_agent = failed_node.retry!
 
@@ -222,6 +254,136 @@ class Conversation < ApplicationRecord
       graph.kick!
 
       new_agent.id
+    end
+  end
+
+  def steer_current_turn!(content:, model_ref: nil, input_policy_override: nil, interrupted_output_policy_override: nil)
+    content = content.to_s.strip
+    return nil if content.blank?
+
+    with_dag_errors_wrapped do
+      graph = root_graph
+      lane = chat_lane
+      raise Cybros::Error, "no_running_turn" if latest_executing_agent_for_lane(graph: graph, lane: lane).nil?
+
+      steer_policy =
+        resolved_input_policy(
+          app_override: input_policy_override,
+          action: "steer_current_turn",
+          interrupted_output_policy_override: interrupted_output_policy_override,
+        )
+
+      unless steer_policy.fetch("steer_capability")
+        return append_user_message!(
+          content: content,
+          model_ref: model_ref,
+          input_policy_override: steer_fallback_input_policy_override(
+            input_policy_override: input_policy_override,
+            steer_policy: steer_policy,
+          ),
+        )
+      end
+
+      model_ref = resolve_model_ref!(requested_model_ref: model_ref)
+
+      user_node = nil
+      guard_node = nil
+      compact_task = nil
+      agent_node = nil
+      product_node = nil
+      created_new_run = false
+      fallback_required = false
+
+      graph.with_graph_lock! do
+        running_agent = latest_executing_agent_for_lane(graph: graph, lane: lane)
+        raise Cybros::Error, "no_running_turn" if running_agent.nil?
+
+        current_user = stable_sequence_parent_for(node: running_agent)
+        if current_user.nil? || current_user.node_type != Messages::UserMessage.node_type_key
+          fallback_required = true
+          next
+        end
+
+        if steer_blocked_by_side_effects?(user_node: current_user, steer_policy: steer_policy)
+          fallback_required = true
+          next
+        end
+
+        stop_causal_closure!(root_node: running_agent, reason: "steer_current_turn")
+
+        preserved_text =
+          if steer_policy.fetch("interrupted_output_policy") == "keep_context"
+            superseded_block_context_for(user_node: current_user, agent_node: running_agent)
+          end
+
+        mutations = DAG::Mutations.new(graph: graph)
+        user_node = mutations.edit_replace!(node: current_user, new_input: { "content" => content })
+        annotate_steered_user_node!(
+          user_node: user_node,
+          content: content,
+          steer_policy: steer_policy,
+        )
+
+        base_node =
+          maybe_create_steer_context_node!(
+            lane: lane,
+            mutations: mutations,
+            user_node: user_node,
+            preserved_text: preserved_text,
+            steer_policy: steer_policy,
+          ) || user_node
+
+        created =
+          create_guarded_continuation_for_existing_turn!(
+            graph: graph,
+            lane: lane,
+            base_node: base_node,
+            user_node: user_node,
+            content: content,
+            model_ref: model_ref,
+            input_policy: steer_policy,
+            additional_context_text: preserved_text,
+          )
+
+        guard_node = created[:guard_node]
+        compact_task = created[:compact_task]
+        agent_node = created[:agent_node]
+        product_node = created[:product_node]
+        created_new_run = agent_node.present?
+      end
+
+      if fallback_required
+        return append_user_message!(
+          content: content,
+          model_ref: model_ref,
+          input_policy_override:
+            steer_fallback_input_policy_override(
+              input_policy_override: input_policy_override,
+              steer_policy: steer_policy,
+            ),
+        )
+      end
+
+      if created_new_run
+        ConversationRun.create!(
+          conversation: self,
+          dag_node_id: agent_node.id,
+          state: "queued",
+          queued_at: Time.current,
+          debug: {},
+          error: {},
+        )
+
+        graph.kick!
+      end
+
+      {
+        user_node: user_node,
+        guard_node: guard_node,
+        compact_task: compact_task,
+        agent_node: agent_node,
+        product_node: product_node,
+      }
     end
   end
 
@@ -258,95 +420,101 @@ class Conversation < ApplicationRecord
     )
   end
 
-  def append_user_message!(content:, model_ref: nil)
+  def append_user_message!(content:, model_ref: nil, input_policy_override: nil)
     content = content.to_s.strip
     return nil if content.blank?
 
     with_dag_errors_wrapped do
       graph = root_graph
       lane = chat_lane
-
-      model_ref = model_ref.to_s.strip.presence
-      if model_ref
-        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: model_ref)
-        self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => model_ref } })
-        save! if changed?
-      elsif metadata.dig("llm", "model_ref").to_s.strip.present?
-        model_ref = metadata.dig("llm", "model_ref").to_s.strip
-        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: model_ref)
-      else
-        model_ref =
-          Cybros::AgentRuntimeResolver.default_model_ref_for(
-            agent_metadata: (metadata || {}).fetch("agent", {}),
-          )
-        self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => model_ref } })
-        save! if changed?
-      end
-
-      prev_leaf = head_leaf_for_lane(graph: graph, lane: lane)
-      prev_agent_leaf = head_leaf_for_lane(graph: graph, lane: lane, node_type: Messages::AgentMessage.node_type_key)
-
-      turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
+      model_ref = resolve_model_ref!(requested_model_ref: model_ref)
+      policy = resolved_input_policy(app_override: input_policy_override)
+      now = Time.current
+      claim_after_at = coalescing_claim_after_at(policy: policy, now: now)
+      running_input_policy = policy["running_input_policy"].to_s.presence || "queue"
 
       user_node = nil
+      guard_node = nil
+      compact_task = nil
       agent_node = nil
+      product_node = nil
+      created_new_turn = false
 
-      graph.mutate!(turn_id: turn_id) do |m|
-        user_node =
-          m.create_node(
-            node_type: Messages::UserMessage.node_type_key,
-            state: DAG::Node::FINISHED,
-            content: content,
-            lane_id: lane.id,
-            metadata: {},
-          )
+      graph.with_graph_lock! do
+        running_agent = latest_executing_agent_for_lane(graph: graph, lane: lane)
+        sequence_parent = nil
+        dependency_parent = nil
+        allow_context_compaction = running_agent.blank?
 
-        agent_node =
-          m.create_node(
-            node_type: Messages::AgentMessage.node_type_key,
-            state: DAG::Node::PENDING,
-            lane_id: lane.id,
-            metadata:
-              begin
-                out = {}
+        if running_agent.present? && running_input_policy == "interrupt_new_turn"
+          interrupted =
+            interrupt_new_turn!(
+              running_agent: running_agent,
+              interrupted_output_policy: policy.fetch("interrupted_output_policy"),
+            )
+          sequence_parent = interrupted.fetch(:stable_parent)
+          allow_context_compaction = true
+        else
+          coalesced_turn =
+            coalescible_turn_for_lane(
+              graph: graph,
+              lane: lane,
+              now: now,
+            )
 
-                if model_ref
-                  out["llm"] = { "model_ref" => model_ref }
-                end
-
-                out
-              end,
-          )
-
-        if prev_leaf
-          m.create_edge(from_node: prev_leaf, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
+          if claim_after_at.present? && coalesced_turn.present?
+            user_node = coalesced_turn.fetch(:user_node)
+            agent_node = coalesced_turn.fetch(:agent_node)
+            merge_user_message_fragment!(user_node: user_node, content: content)
+            refresh_pending_agent_for_fragment!(agent_node: agent_node, model_ref: model_ref, claim_after_at: claim_after_at)
+          else
+            sequence_parent = head_leaf_for_lane(graph: graph, lane: lane)
+            dependency_parent = head_leaf_for_lane(graph: graph, lane: lane, node_type: Messages::AgentMessage.node_type_key)
+          end
         end
-        m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
-        if prev_agent_leaf && !prev_agent_leaf.terminal?
-          m.create_edge(
-            from_node: prev_agent_leaf,
-            to_node: agent_node,
-            edge_type: DAG::Edge::DEPENDENCY,
-            metadata: { "generated_by" => "queue_policy" }
-          )
+        if user_node.nil? && agent_node.nil? && product_node.nil?
+          created =
+            create_guarded_user_turn!(
+              graph: graph,
+              lane: lane,
+              content: content,
+              model_ref: model_ref,
+              claim_after_at: claim_after_at,
+              sequence_parent: sequence_parent,
+              dependency_parent: dependency_parent,
+              input_policy: policy,
+              allow_context_compaction: allow_context_compaction,
+            )
+          user_node = created.fetch(:user_node)
+          guard_node = created[:guard_node]
+          compact_task = created[:compact_task]
+          agent_node = created[:agent_node]
+          product_node = created[:product_node]
+          created_new_turn = agent_node.present?
         end
       end
 
-      agent_leaf = agent_node || graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
+      if created_new_turn
+        ConversationRun.create!(
+          conversation: self,
+          dag_node_id: agent_node.id,
+          state: "queued",
+          queued_at: Time.current,
+          debug: {},
+          error: {},
+        )
 
-      ConversationRun.create!(
-        conversation: self,
-        dag_node_id: agent_leaf.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: {},
-        error: {},
-      )
+        graph.kick!
+      end
 
-      graph.kick!
-
-      { user_node: user_node, agent_node: agent_leaf }
+      {
+        user_node: user_node,
+        guard_node: guard_node,
+        compact_task: compact_task,
+        agent_node: agent_node,
+        product_node: product_node,
+      }
     end
   end
 
@@ -804,11 +972,11 @@ class Conversation < ApplicationRecord
       run.mark_canceled!
     end
 
-    def stop_node_if_needed!(node)
+    def stop_node_if_needed!(node, reason: "soft_deleted")
       return if node.terminal?
 
       begin
-        node.stop!(reason: "soft_deleted")
+        node.stop!(reason: reason)
       rescue StandardError
         nil
       end
@@ -829,5 +997,649 @@ class Conversation < ApplicationRecord
       return visible if visible
 
       scope.order(:id).last
+    end
+
+    def resolve_model_ref!(requested_model_ref:)
+      model_ref = requested_model_ref.to_s.strip.presence
+      if model_ref
+        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: model_ref)
+        self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => model_ref } })
+        save! if changed?
+        return model_ref
+      end
+
+      saved_model_ref = metadata.dig("llm", "model_ref").to_s.strip.presence
+      if saved_model_ref
+        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: saved_model_ref)
+        return saved_model_ref
+      end
+
+      resolved_model_ref =
+        Cybros::AgentRuntimeResolver.default_model_ref_for(
+          agent_metadata: (metadata || {}).fetch("agent", {}),
+        )
+
+      self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => resolved_model_ref } })
+      save! if changed?
+      resolved_model_ref
+    end
+
+    def coalescing_claim_after_at(policy:, now:)
+      coalescing = policy.fetch("input_coalescing", {})
+      return nil unless coalescing["enabled"]
+
+      window_ms = Integer(coalescing["window_ms"], exception: false).to_i
+      return nil if window_ms <= 0
+
+      now + (window_ms / 1000.0)
+    end
+
+    def coalescible_turn_for_lane(graph:, lane:, now:)
+      agent_node =
+        graph.nodes.active
+          .where(
+            lane_id: lane.id,
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            claimed_at: nil,
+            started_at: nil,
+          )
+          .order(:id)
+          .last
+      return nil if agent_node.nil?
+      return nil if pending_agent_claimable_now?(graph: graph, agent_node: agent_node, now: now)
+
+      user_node =
+        graph.nodes.active
+          .where(
+            lane_id: lane.id,
+            turn_id: agent_node.turn_id,
+            node_type: Messages::UserMessage.node_type_key,
+          )
+          .order(:id)
+          .last
+      return nil if user_node.nil?
+
+      { user_node: user_node, agent_node: agent_node }
+    end
+
+    def pending_agent_claimable_now?(graph:, agent_node:, now:)
+      claim_after_at = agent_node.claim_after_at
+      return false if claim_after_at.present? && claim_after_at > now
+
+      graph.edges.active.where(to_node_id: agent_node.id, edge_type: [DAG::Edge::SEQUENCE, DAG::Edge::DEPENDENCY]).find_each do |edge|
+        parent = graph.nodes.active.find_by(id: edge.from_node_id)
+        next if parent.nil?
+
+        case edge.edge_type
+        when DAG::Edge::SEQUENCE
+          return false unless parent.terminal?
+        when DAG::Edge::DEPENDENCY
+          return false unless parent.state == DAG::Node::FINISHED
+        end
+      end
+
+      true
+    end
+
+    def latest_executing_agent_for_lane(graph:, lane:)
+      graph.nodes.active
+        .where(
+          lane_id: lane.id,
+          node_type: Messages::AgentMessage.node_type_key,
+          state: [DAG::Node::RUNNING, DAG::Node::AWAITING_APPROVAL],
+        )
+        .order(:id)
+        .last
+    end
+
+    def interrupt_new_turn!(running_agent:, interrupted_output_policy:)
+      stable_parent = stable_sequence_parent_for(node: running_agent)
+      raise Cybros::Error, "missing_stable_parent" if stable_parent.nil?
+
+      interrupted_nodes = []
+
+      running_agent.causal_descendant_ids.each do |node_id|
+        node = root_graph.nodes.active.find_by(id: node_id)
+        next if node.nil?
+        next unless [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+
+        stop_node_if_needed!(node, reason: "interrupt_new_turn")
+        cancel_runs_for_node!(node)
+        interrupted_nodes << node if node.node_type == Messages::AgentMessage.node_type_key
+      end
+
+      interrupted_nodes.each do |node|
+        apply_interrupted_output_policy!(
+          node: node.reload,
+          interrupted_output_policy: interrupted_output_policy,
+        )
+      end
+
+      { stable_parent: stable_parent }
+    end
+
+    def stable_sequence_parent_for(node:)
+      from_node_id =
+        root_graph.edges.active
+          .where(to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
+          .order(:id)
+          .pick(:from_node_id)
+      return nil if from_node_id.blank?
+
+      root_graph.nodes.active.find_by(id: from_node_id)
+    end
+
+    def create_guarded_user_turn!(
+      graph:,
+      lane:,
+      content:,
+      model_ref:,
+      claim_after_at:,
+      sequence_parent:,
+      dependency_parent: nil,
+      input_policy:,
+      allow_context_compaction:
+    )
+      input_guard = Conversation::InputGuard.classify(conversation: self, content: content, input_policy: input_policy)
+      context_compaction_plan =
+        if allow_context_compaction && input_guard.classification != :hard
+          Conversation::ContextCompactionPlan.plan(
+            conversation: self,
+            content: effective_context_input_for(input_guard: input_guard, content: content),
+            input_policy: input_policy,
+          )
+        end
+
+      case input_guard.classification
+      when :soft
+        create_soft_oversize_turn!(
+          graph: graph,
+          lane: lane,
+          content: content,
+          model_ref: model_ref,
+          claim_after_at: claim_after_at,
+          sequence_parent: sequence_parent,
+          dependency_parent: dependency_parent,
+          input_guard: input_guard,
+          context_compaction_plan: context_compaction_plan,
+        )
+      when :hard
+        create_hard_oversize_turn!(
+          graph: graph,
+          lane: lane,
+          content: content,
+          sequence_parent: sequence_parent,
+        )
+      else
+        create_user_turn!(
+          graph: graph,
+          lane: lane,
+          content: content,
+          model_ref: model_ref,
+          claim_after_at: claim_after_at,
+          sequence_parent: sequence_parent,
+          dependency_parent: dependency_parent,
+          context_compaction_plan: context_compaction_plan,
+        )
+      end
+    end
+
+    def create_guarded_continuation_for_existing_turn!(
+      graph:,
+      lane:,
+      base_node:,
+      user_node:,
+      content:,
+      model_ref:,
+      input_policy:,
+      additional_context_text: nil
+    )
+      mutations = DAG::Mutations.new(graph: graph, turn_id: user_node.turn_id)
+      input_guard = Conversation::InputGuard.classify(conversation: self, content: content, input_policy: input_policy)
+      context_input = [effective_context_input_for(input_guard: input_guard, content: content), additional_context_text.presence].compact.join("\n\n")
+      context_compaction_plan =
+        if input_guard.classification != :hard
+          Conversation::ContextCompactionPlan.plan(
+            conversation: self,
+            content: context_input,
+            input_policy: input_policy,
+          )
+        end
+
+      case input_guard.classification
+      when :soft
+        guard_node =
+          mutations.create_node(
+            node_type: Messages::Task.node_type_key,
+            state: DAG::Node::FINISHED,
+            lane_id: lane.id,
+            body_input: {
+              "name" => "compress_input",
+              "content" => content,
+            },
+            body_output: {
+              "result" => AgentCore::Resources::Tools::ToolResult.success(
+                text: input_guard.compressed_content,
+                metadata: { "generated_by" => "compress_input" },
+              ).to_h,
+            },
+            metadata: {
+              "generated_by" => "soft_oversize",
+              "estimated_tokens" => input_guard.estimated_tokens,
+            },
+          )
+        mutations.create_edge(from_node: base_node, to_node: guard_node, edge_type: DAG::Edge::SEQUENCE)
+        user_node.request_exclude_from_context!(at: Time.current)
+
+        compact_task =
+          maybe_create_compact_context_task!(
+            graph: graph,
+            lane: lane,
+            mutations: mutations,
+            from_node: guard_node,
+            context_compaction_plan: context_compaction_plan,
+          )
+        agent_node =
+          mutations.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            lane_id: lane.id,
+            metadata: agent_node_metadata_for(model_ref: model_ref),
+          )
+        mutations.create_edge(from_node: compact_task || guard_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+
+        { guard_node: guard_node, compact_task: compact_task, agent_node: agent_node }
+      when :hard
+        product_node =
+          mutations.create_node(
+            node_type: Messages::ProductMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            lane_id: lane.id,
+            content: "This input is too large for a single turn. Shorten it, split it into smaller parts, or ask me to compress it first.",
+            metadata: {
+              "generated_by" => "hard_oversize",
+            },
+          )
+        mutations.create_edge(from_node: base_node, to_node: product_node, edge_type: DAG::Edge::SEQUENCE)
+
+        { agent_node: nil, product_node: product_node }
+      else
+        compact_task =
+          maybe_create_compact_context_task!(
+            graph: graph,
+            lane: lane,
+            mutations: mutations,
+            from_node: base_node,
+            context_compaction_plan: context_compaction_plan,
+          )
+        agent_node =
+          mutations.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            lane_id: lane.id,
+            metadata: agent_node_metadata_for(model_ref: model_ref),
+          )
+        mutations.create_edge(from_node: compact_task || base_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+
+        { compact_task: compact_task, agent_node: agent_node }
+      end
+    end
+
+    def create_user_turn!(
+      graph:,
+      lane:,
+      content:,
+      model_ref:,
+      claim_after_at:,
+      sequence_parent:,
+      dependency_parent: nil,
+      context_compaction_plan: nil
+    )
+      turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
+      mutations = DAG::Mutations.new(graph: graph, turn_id: turn_id)
+
+      user_node =
+        mutations.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: content,
+          lane_id: lane.id,
+          metadata: { "fragments" => [content] },
+        )
+
+      if sequence_parent
+        mutations.create_edge(from_node: sequence_parent, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
+      end
+
+      compact_task =
+        maybe_create_compact_context_task!(
+          graph: graph,
+          lane: lane,
+          mutations: mutations,
+          from_node: user_node,
+          context_compaction_plan: context_compaction_plan,
+        )
+
+      agent_node =
+        mutations.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: lane.id,
+          metadata: agent_node_metadata_for(model_ref: model_ref),
+          claim_after_at: claim_after_at,
+        )
+
+      mutations.create_edge(from_node: compact_task || user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+
+      if dependency_parent && !dependency_parent.terminal?
+        mutations.create_edge(
+          from_node: dependency_parent,
+          to_node: agent_node,
+          edge_type: DAG::Edge::DEPENDENCY,
+          metadata: { "generated_by" => "queue_policy" }
+        )
+      end
+
+      { user_node: user_node, compact_task: compact_task, agent_node: agent_node }
+    end
+
+    def create_soft_oversize_turn!(
+      graph:,
+      lane:,
+      content:,
+      model_ref:,
+      claim_after_at:,
+      sequence_parent:,
+      dependency_parent:,
+      input_guard:,
+      context_compaction_plan: nil
+    )
+      turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
+      mutations = DAG::Mutations.new(graph: graph, turn_id: turn_id)
+
+      user_node =
+        mutations.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: content,
+          lane_id: lane.id,
+          metadata: { "fragments" => [content] },
+        )
+
+      compress_task =
+        mutations.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          body_input: {
+            "name" => "compress_input",
+            "content" => content,
+          },
+          body_output: {
+            "result" => AgentCore::Resources::Tools::ToolResult.success(
+              text: input_guard.compressed_content,
+              metadata: { "generated_by" => "compress_input" },
+            ).to_h,
+          },
+          metadata: {
+            "generated_by" => "soft_oversize",
+            "estimated_tokens" => input_guard.estimated_tokens,
+          },
+        )
+
+      if sequence_parent
+        mutations.create_edge(from_node: sequence_parent, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
+      end
+      mutations.create_edge(from_node: user_node, to_node: compress_task, edge_type: DAG::Edge::SEQUENCE)
+
+      compact_task =
+        maybe_create_compact_context_task!(
+          graph: graph,
+          lane: lane,
+          mutations: mutations,
+          from_node: compress_task,
+          context_compaction_plan: context_compaction_plan,
+        )
+
+      agent_node =
+        mutations.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: lane.id,
+          metadata: agent_node_metadata_for(model_ref: model_ref),
+          claim_after_at: claim_after_at,
+        )
+
+      mutations.create_edge(from_node: compact_task || compress_task, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+
+      if dependency_parent && !dependency_parent.terminal?
+        mutations.create_edge(
+          from_node: dependency_parent,
+          to_node: agent_node,
+          edge_type: DAG::Edge::DEPENDENCY,
+          metadata: { "generated_by" => "queue_policy" }
+        )
+      end
+
+      user_node.request_exclude_from_context!(at: Time.current)
+
+      { user_node: user_node, guard_node: compress_task, compact_task: compact_task, agent_node: agent_node }
+    end
+
+    def create_hard_oversize_turn!(graph:, lane:, content:, sequence_parent:)
+      turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
+      mutations = DAG::Mutations.new(graph: graph, turn_id: turn_id)
+
+      user_node =
+        mutations.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: content,
+          lane_id: lane.id,
+          metadata: { "fragments" => [content] },
+        )
+
+      product_node =
+        mutations.create_node(
+          node_type: Messages::ProductMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          content: "This input is too large for a single turn. Shorten it, split it into smaller parts, or ask me to compress it first.",
+          metadata: {
+            "generated_by" => "hard_oversize",
+          },
+        )
+
+      if sequence_parent
+        mutations.create_edge(from_node: sequence_parent, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
+      end
+      mutations.create_edge(from_node: user_node, to_node: product_node, edge_type: DAG::Edge::SEQUENCE)
+
+      { user_node: user_node, agent_node: nil, product_node: product_node }
+    end
+
+    def effective_context_input_for(input_guard:, content:)
+      return input_guard.compressed_content.to_s if input_guard.classification == :soft
+
+      content
+    end
+
+    def steer_fallback_input_policy_override(input_policy_override:, steer_policy:)
+      override =
+        if input_policy_override.respond_to?(:to_unsafe_h)
+          input_policy_override.to_unsafe_h.deep_stringify_keys
+        elsif input_policy_override.is_a?(Hash)
+          input_policy_override.deep_stringify_keys
+        else
+          {}
+        end
+
+      override.deep_merge(
+        "running_input_policy" => "interrupt_new_turn",
+        "interrupted_output_policy" => steer_policy.fetch("interrupted_output_policy"),
+      )
+    end
+
+    def steer_blocked_by_side_effects?(user_node:, steer_policy:)
+      return false if steer_policy.fetch("steer_after_side_effects")
+
+      descendant_ids = user_node.causal_descendant_ids - [user_node.id]
+      root_graph.nodes.active.where(id: descendant_ids, node_type: Messages::Task.node_type_key).exists?
+    end
+
+    def stop_causal_closure!(root_node:, reason:)
+      root_node.causal_descendant_ids.each do |node_id|
+        node = root_graph.nodes.active.find_by(id: node_id)
+        next if node.nil?
+        next unless [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+
+        stop_node_if_needed!(node, reason: reason)
+        cancel_runs_for_node!(node)
+      end
+    end
+
+    def superseded_block_context_for(user_node:, agent_node:)
+      user_text = user_node.body_input["content"].to_s.strip
+      assistant_text =
+        agent_node.body_output["content"].to_s.presence ||
+          agent_node.body_output.dig("message", "content").to_s.presence ||
+          agent_node.body_output_preview["content"].to_s.presence
+
+      parts = []
+      parts << "Superseded user input:\n#{user_text}" if user_text.present?
+      parts << "Interrupted assistant output:\n#{assistant_text}" if assistant_text.present?
+      parts.join("\n\n").presence
+    end
+
+    def annotate_steered_user_node!(user_node:, content:, steer_policy:)
+      metadata = user_node.metadata.is_a?(Hash) ? user_node.metadata.deep_stringify_keys : {}
+      metadata["fragments"] = [content]
+      metadata["steer_cleanup_policy"] = steer_policy.fetch("steer_cleanup_policy")
+      metadata["workspace_cleanup_todo"] = true
+      metadata["generated_by"] = "steer_current_turn"
+      user_node.update!(metadata: metadata)
+    end
+
+    def maybe_create_steer_context_node!(lane:, mutations:, user_node:, preserved_text:, steer_policy:)
+      return nil unless steer_policy.fetch("interrupted_output_policy") == "keep_context"
+
+      text = preserved_text.to_s.strip
+      return nil if text.blank?
+
+      node =
+        mutations.create_node(
+          node_type: Messages::SystemMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          turn_id: user_node.turn_id,
+          lane_id: lane.id,
+          content: "<superseded_turn_context>\n#{text}\n</superseded_turn_context>",
+          metadata: {
+            "generated_by" => "steer_current_turn",
+            "steer_cleanup_policy" => steer_policy.fetch("steer_cleanup_policy"),
+            "workspace_cleanup_todo" => true,
+          },
+        )
+      mutations.create_edge(from_node: user_node, to_node: node, edge_type: DAG::Edge::SEQUENCE)
+      node
+    end
+
+    def maybe_create_compact_context_task!(graph:, lane:, mutations:, from_node:, context_compaction_plan:)
+      return nil unless context_compaction_plan&.required?
+
+      apply_context_compaction!(
+        graph: graph,
+        lane: lane,
+        turn_ids: context_compaction_plan.compacted_turn_ids,
+      )
+
+      compact_task =
+        mutations.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          body_input: {
+            "name" => "compact_context",
+            "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
+          },
+          body_output: {
+            "result" => AgentCore::Resources::Tools::ToolResult.success(
+              text: context_compaction_plan.summary_text,
+              metadata: {
+                "generated_by" => "compact_context",
+                "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
+              },
+            ).to_h,
+          },
+          metadata: {
+            "generated_by" => "context_overflow",
+            "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
+            "estimated_tokens" => context_compaction_plan.estimated_tokens,
+            "effective_prompt_budget_tokens" => context_compaction_plan.effective_prompt_budget_tokens,
+          },
+        )
+
+      mutations.create_edge(from_node: from_node, to_node: compact_task, edge_type: DAG::Edge::SEQUENCE)
+      compact_task
+    end
+
+    def apply_context_compaction!(graph:, lane:, turn_ids:)
+      ids = Array(turn_ids).map(&:to_s).select(&:present?).uniq
+      return if ids.empty?
+
+      nodes = graph.nodes.active.where(lane_id: lane.id, turn_id: ids).to_a
+      return if nodes.empty?
+
+      at = Time.current
+      lane.send(:apply_compact_context_visibility!, keep_nodes: [], exclude_nodes: nodes, at: at, now: at)
+    end
+
+    def apply_interrupted_output_policy!(node:, interrupted_output_policy:)
+      policy = interrupted_output_policy.to_s
+
+      case policy
+      when "discard_context"
+        return if node.context_excluded?
+
+        if node.can_exclude_from_context?
+          node.exclude_from_context!
+        else
+          node.request_exclude_from_context!
+        end
+      when "keep_context"
+        return unless node.context_excluded?
+
+        if node.can_include_in_context?
+          node.include_in_context!
+        else
+          node.request_include_in_context!
+        end
+      end
+    end
+
+    def merge_user_message_fragment!(user_node:, content:)
+      metadata = user_node.metadata.is_a?(Hash) ? user_node.metadata.deep_stringify_keys : {}
+      fragments = Array(metadata["fragments"]).map(&:to_s)
+      if fragments.empty?
+        initial_content = user_node.body_input["content"].to_s
+        fragments << initial_content if initial_content.present?
+      end
+      fragments << content
+
+      user_node.body_input = user_node.body_input.merge("content" => fragments.join("\n"))
+      user_node.metadata = metadata.merge("fragments" => fragments)
+      user_node.save!
+    end
+
+    def refresh_pending_agent_for_fragment!(agent_node:, model_ref:, claim_after_at:)
+      metadata = agent_node.metadata.is_a?(Hash) ? agent_node.metadata.deep_stringify_keys : {}
+      metadata.merge!(agent_node_metadata_for(model_ref: model_ref))
+      agent_node.update!(metadata: metadata, claim_after_at: claim_after_at)
+    end
+
+    def agent_node_metadata_for(model_ref:)
+      return {} unless model_ref
+
+      { "llm" => { "model_ref" => model_ref } }
     end
 end

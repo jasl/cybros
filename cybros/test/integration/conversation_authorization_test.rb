@@ -7,7 +7,7 @@ class ConversationAuthorizationTest < ActionDispatch::IntegrationTest
     assert cookies[:session_token].present?
   end
 
-  test "user cannot access another user's conversation (show + messages + stop + retry)" do
+  test "user cannot access another user's conversation (show + messages + stop + retry + steer_current_turn)" do
     user_a = create_user!
     user_b = create_user!
     convo_b = create_conversation!(user: user_b, title: "B")
@@ -27,6 +27,9 @@ class ConversationAuthorizationTest < ActionDispatch::IntegrationTest
     assert_response :not_found
 
     post retry_conversation_path(convo_b), params: { node_id: "0194f3c0-0000-7000-8000-00000000ffff" }
+    assert_response :not_found
+
+    post steer_current_turn_conversation_path(convo_b), params: { content: "revise" }
     assert_response :not_found
   end
 

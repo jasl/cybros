@@ -2,6 +2,28 @@ module Cybros
   module AgentProfiles
     DEFAULT_PROFILE = "coding"
     DEFAULT_MEMORY_SEARCH_LIMIT = 5
+    INPUT_POLICY_GLOBAL_DEFAULTS = {
+      "input_coalescing" => {
+        "enabled" => true,
+        "window_ms" => 1500,
+      },
+      "running_input_policy" => "queue",
+      "interrupted_output_policy" => "keep_context",
+      "steer_capability" => false,
+      "steer_cleanup_policy" => "none",
+      "steer_after_side_effects" => false,
+      "oversize" => {
+        "single_message" => {
+          "soft_threshold_ratio" => 0.25,
+          "hard_threshold_ratio" => 0.5,
+          "soft_strategy" => "compress_input",
+          "hard_strategy" => "product_guard",
+        },
+        "multi_message" => {
+          "strategy" => "compact_context",
+        },
+      },
+    }.freeze
 
     PROFILES = {
       "coding" => ["*"],
@@ -33,6 +55,13 @@ module Cybros
       ],
       "subagent" => [],
       "repair" => [],
+    }.freeze
+
+    INPUT_POLICY_OVERRIDES = {
+      "coding" => {
+        "interrupted_output_policy" => "discard_context",
+        "steer_capability" => true,
+      },
     }.freeze
 
     module_function
@@ -69,6 +98,7 @@ module Cybros
         include_skill_locations: false,
         directives_config: nil,
         system_prompt_section_overrides: {},
+        input_policy: input_policy(key),
       }
     rescue StandardError
       {
@@ -79,7 +109,20 @@ module Cybros
         include_skill_locations: false,
         directives_config: nil,
         system_prompt_section_overrides: {},
+        input_policy: input_policy(DEFAULT_PROFILE),
       }
+    end
+
+    def global_input_policy
+      INPUT_POLICY_GLOBAL_DEFAULTS.deep_dup
+    rescue StandardError
+      Marshal.load(Marshal.dump(INPUT_POLICY_GLOBAL_DEFAULTS))
+    end
+
+    def input_policy(profile)
+      global_input_policy.deep_merge(INPUT_POLICY_OVERRIDES.fetch(normalize(profile), {}).deep_dup)
+    rescue StandardError
+      global_input_policy
     end
 
     def prompt_mode(profile)

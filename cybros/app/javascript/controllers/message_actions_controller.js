@@ -12,6 +12,12 @@ function actionAvailable(policy, key) {
   return actionEntry(policy, key).available === true
 }
 
+function interruptedOutputPolicyOverrideValue() {
+  const input = document.querySelector('input[name="interrupted_output_policy_override"]')
+  const value = String(input?.value || "").trim()
+  return value || null
+}
+
 export default class extends Controller {
   static values = {
     nodeId: String,
@@ -87,7 +93,13 @@ export default class extends Controller {
     if (!conversationId || !nodeId) return
     if (!actionAvailable(this.actionPolicyValue || {}, "retry")) return
 
-    const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/retry`, { node_id: nodeId })
+    const interruptedOutputPolicyOverride = interruptedOutputPolicyOverrideValue()
+    const body = { node_id: nodeId }
+    if (interruptedOutputPolicyOverride) {
+      body.interrupted_output_policy_override = interruptedOutputPolicyOverride
+    }
+
+    const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/retry`, body)
     if (!response?.ok) {
       await this.#toastRetryFailure(response)
       return

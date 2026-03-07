@@ -27,6 +27,7 @@ module DAG
             WHERE dag_nodes.graph_id = #{graph_quoted}
               AND dag_nodes.state = 'pending'
               AND dag_nodes.compressed_at IS NULL
+              AND (dag_nodes.claim_after_at IS NULL OR dag_nodes.claim_after_at <= #{connection.quote(now)})
               AND NOT EXISTS (
                 SELECT 1
                 FROM dag_edges

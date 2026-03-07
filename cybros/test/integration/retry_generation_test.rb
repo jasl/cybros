@@ -201,4 +201,105 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
 
     assert original_edge.reload.compressed_at.present?
   end
+
+  test "retry endpoint allows manual retry beyond historical depth 5" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user_node = nil
+    ancestors = []
+    failed = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+
+      previous = nil
+      5.times do |index|
+        node =
+          m.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::STOPPED,
+            lane_id: conversation.chat_lane.id,
+            retry_of_id: previous&.id,
+            metadata: { "reason" => "attempt_#{index}" },
+          )
+        ancestors << node
+        previous = node
+      end
+
+      failed =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::ERRORED,
+          lane_id: conversation.chat_lane.id,
+          retry_of_id: ancestors.last.id,
+          metadata: { "error" => "boom" },
+        )
+
+      m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    assert_difference -> { ConversationRun.count }, +1 do
+      post retry_conversation_path(conversation), params: { node_id: failed.id }
+    end
+
+    assert_response :success
+    body = JSON.parse(response.body)
+    assert body["node_id"].present?
+  end
+
+  test "retry endpoint action override can discard interrupted output from future context" do
+    user = sign_in_owner!
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "input_policy" => {
+            "interrupted_output_policy" => "keep_context",
+          },
+        },
+      )
+    graph = conversation.dag_graph
+
+    user_node = nil
+    stopped = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+      stopped =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::STOPPED,
+          body_output: { "content" => "partial" },
+          metadata: { "reason" => "interrupt_new_turn" },
+        )
+
+      m.create_edge(from_node: user_node, to_node: stopped, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    post retry_conversation_path(conversation),
+         params: {
+           node_id: stopped.id,
+           interrupted_output_policy_override: "discard_context",
+         }
+
+    assert_response :success
+    assert stopped.reload.context_excluded?
+  end
 end

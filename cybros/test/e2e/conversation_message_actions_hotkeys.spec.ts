@@ -1,6 +1,24 @@
 import { test, expect } from "@playwright/test"
 import { signIn, createHighPriorityMockProvider } from "./helpers"
 
+async function addHiddenComposerInput(page, { name, value }) {
+  await page.locator('form[data-controller~="message-form"]').evaluate(
+    (form, { inputName, inputValue }) => {
+      let input = form.querySelector(`input[name="${inputName}"]`)
+      if (!(input instanceof HTMLInputElement)) {
+        input = document.createElement("input")
+        input.type = "hidden"
+        input.name = inputName
+        form.appendChild(input)
+      }
+
+      input.disabled = false
+      input.value = inputValue
+    },
+    { inputName: name, inputValue: String(value) },
+  )
+}
+
 async function createConversationAndWaitForMarkdown(page) {
   await createHighPriorityMockProvider(page)
 
@@ -39,9 +57,55 @@ async function waitForTailAgentToFinishWithMarkdown(page) {
   await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "finished")
 }
 
+async function waitForTailAgentToStartRunning(page) {
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    const tailBubble = page.locator('[data-role="agent-bubble"]').last()
+    const state = (await tailBubble.getAttribute("data-node-state").catch(() => "")) || ""
+    if (state === "running") return
+
+    await page.waitForTimeout(750)
+    await page.reload()
+  }
+
+  await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "running")
+}
+
 test.describe("Conversation message actions + hotkeys", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
+  })
+
+  test("composer rail shows queue, steer, and the candidate next-input preview while a run is active", async ({ page }) => {
+    test.setTimeout(150_000)
+    await createHighPriorityMockProvider(page)
+
+    await page.goto("/conversations")
+    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Composer ${Date.now()}`)
+    await page.locator("main").getByRole("button", { name: "New" }).click()
+    await expect(page).toHaveURL(/\/conversations\//)
+
+    const longPrompt = "please continue slowly and keep streaming ".repeat(80)
+    await page.getByPlaceholder("Message…").fill(`!mock slow=0.03 -- ${longPrompt}`)
+    await addHiddenComposerInput(page, {
+      name: "input_policy_override[input_coalescing][window_ms]",
+      value: 0,
+    })
+    await page.getByRole("button", { name: "Send" }).click()
+
+    await expect(page.getByTestId("conversation-composer-status-rail")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Queue next turn" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Steer current turn" })).toBeVisible()
+    await waitForTailAgentToStartRunning(page)
+    await expect(page.getByRole("button", { name: "Stop" })).toBeVisible({ timeout: 20_000 })
+
+    const queuedFollowUp = "queued follow up from e2e"
+    await page.getByPlaceholder("Message…").fill(queuedFollowUp)
+    await expect(page.getByTestId("conversation-composer-candidate-preview")).toContainText(queuedFollowUp)
+
+    await page.getByRole("button", { name: "Send" }).click()
+    await expect(page.getByTestId("conversation-composer-status-rail")).toContainText("queued turn")
+    await expect(page.getByTestId("conversation-composer-candidate-preview")).toContainText(queuedFollowUp)
   })
 
   test("copy copies the agent message markdown; branch navigates to a child conversation", async ({ page }) => {

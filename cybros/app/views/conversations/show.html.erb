@@ -72,19 +72,8 @@
         has_more: @has_more,
         before_cursor: @before_cursor %>
 
-      <p
-        id="<%= dom_id(@conversation, :messages_empty_state) %>"
-        class="text-center text-sm opacity-50 py-12 <%= @messages.empty? ? "" : "hidden" %>">
-        No messages yet. Start a conversation below.
-      </p>
-
-      <div
-        id="<%= dom_id(@conversation, :messages_list) %>"
-        data-chat-scroll-target="list"
-        data-turbo-stream-buffer-scope
-        class="space-y-5">
-        <%= render partial: "conversation_messages/message", collection: @messages, as: :message %>
-      </div>
+      <%= render "conversation_messages/empty_state", conversation: @conversation, messages: @messages %>
+      <%= render "conversation_messages/list", conversation: @conversation, messages: @messages %>
     </div>
   </div>
 
@@ -102,7 +91,7 @@
         <span>Streaming seems stuck. You can stop generation if it does not recover.</span>
       </div>
 
-      <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit" } do %>
+      <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
         <% needs_model_reselection = @model_picker_alert_message.present? && @selected_model_ref.blank? %>
         <% if @model_picker_alert_message.present? %>
           <div role="alert" class="alert alert-warning alert-soft text-sm">
@@ -110,9 +99,21 @@
           </div>
         <% end %>
 
+        <%= render "conversations/composer_status_rail", conversation: @conversation, composer_state: @composer_state %>
+        <input
+          type="hidden"
+          name="input_policy_override[running_input_policy]"
+          value=""
+          disabled
+          data-message-form-target="runningInputPolicyInput">
+        <input
+          type="hidden"
+          name="interrupted_output_policy_override"
+          value="">
+
         <div
           data-testid="conversation-composer-input"
-          class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
+          class="mt-2 bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
           <textarea
             name="content"
             rows="1"

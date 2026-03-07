@@ -19,6 +19,12 @@ function parseActionPolicy(bubble) {
   }
 }
 
+function interruptedOutputPolicyOverrideValue() {
+  const input = document.querySelector('input[name="interrupted_output_policy_override"]')
+  const value = String(input?.value || "").trim()
+  return value || null
+}
+
 export default class extends Controller {
   static values = {
     conversationId: String,
@@ -39,6 +45,7 @@ export default class extends Controller {
     this.pendingNodeStateByNodeId = new Map()
     this.pendingFlushTimerByNodeId = new Map()
     this.postAppendRefreshTimerByNodeId = new Map()
+    this.composerStatusRefreshTimer = null
     this.lastTailAgentNodeId = this.#tailAgentNodeId()
     this.mutationObserver = new MutationObserver((mutations) => this.#onMutations(mutations))
     this.mutationObserver.observe(this.element, { childList: true, subtree: true })
@@ -81,8 +88,10 @@ export default class extends Controller {
     for (const id of this.postAppendRefreshTimerByNodeId.values()) {
       window.clearTimeout(id)
     }
+    if (this.composerStatusRefreshTimer) window.clearTimeout(this.composerStatusRefreshTimer)
     this.pendingFlushTimerByNodeId.clear()
     this.postAppendRefreshTimerByNodeId.clear()
+    this.composerStatusRefreshTimer = null
     this.pendingEventsByNodeId.clear()
     this.pendingNodeStateByNodeId.clear()
   }
@@ -112,6 +121,12 @@ export default class extends Controller {
     const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
     if (!token) return
 
+    const interruptedOutputPolicyOverride = interruptedOutputPolicyOverrideValue()
+    const body = { node_id: nodeId }
+    if (interruptedOutputPolicyOverride) {
+      body.interrupted_output_policy_override = interruptedOutputPolicyOverride
+    }
+
     fetch(`/conversations/${this.conversationIdValue}/retry`, {
       method: "POST",
       headers: {
@@ -119,7 +134,7 @@ export default class extends Controller {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      body: JSON.stringify({ node_id: nodeId }),
+      body: JSON.stringify(body),
       credentials: "same-origin",
     })
       .then(async (response) => {
@@ -337,6 +352,7 @@ export default class extends Controller {
       this.#hideRetry()
       this.#hideStuck()
       this.#schedulePostAppendRefresh(nodeId)
+      this.#scheduleComposerStatusRefresh()
       this.#emitDebug()
       return
     }
@@ -349,8 +365,33 @@ export default class extends Controller {
       if (to === "errored") this.#showError(bubble, "Generation failed")
       this.#maybeRefreshTerminalMessage(nodeId, bubble)
       this.#reconcileControlsFromDom()
+      this.#scheduleComposerStatusRefresh()
       this.#emitDebug()
     }
+  }
+
+  #scheduleComposerStatusRefresh() {
+    if (this.composerStatusRefreshTimer) return
+
+    this.composerStatusRefreshTimer = window.setTimeout(() => {
+      this.composerStatusRefreshTimer = null
+      this.#refreshComposerStatus()
+    }, 100)
+  }
+
+  #refreshComposerStatus() {
+    if (!window.Turbo?.renderStreamMessage) return
+
+    fetch(`/conversations/${encodeURIComponent(this.conversationIdValue)}/composer_status`, {
+      method: "GET",
+      headers: { Accept: "text/vnd.turbo-stream.html" },
+      credentials: "same-origin",
+    })
+      .then((res) => (res.ok ? res.text() : ""))
+      .then((html) => {
+        if (html) window.Turbo.renderStreamMessage(html)
+      })
+      .catch(() => {})
   }
 
   #maybeRefreshTerminalMessage(nodeId, bubble) {

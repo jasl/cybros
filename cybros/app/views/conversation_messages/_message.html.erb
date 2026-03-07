@@ -151,5 +151,13 @@
         </div>
       </div>
     </div>
+  <% elsif type == Messages::ProductMessage.node_type_key %>
+    <div class="flex justify-start">
+      <div class="max-w-[85%]">
+        <div class="bg-warning/10 border border-warning/30 rounded-3xl px-5 py-3 text-sm text-base-content">
+          <div class="whitespace-pre-wrap"><%= output.presence || preview %></div>
+        </div>
+      </div>
+    </div>
   <% end %>
 </div>
