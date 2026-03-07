@@ -6,6 +6,14 @@
 
 **Architecture:** Reuse DAG nodes, `turn_id`, task-side planning input, task state, and node events as durable truth. Add a turn-execution projector in the App layer, emit structured activity lifecycle events from execution paths, and move the UI from tool-specific text progress to activity-aware projections. Treat `turn_execution` as both the product-facing execution read model and the concise execution log surface, with explicit debug-mode diagnostics and an internal export surface that feeds the existing DAG debug CLI. Keep historical cleanup policy out of the first implementation as long as completed-turn execution history remains safely disposable. Harden subagent support in parallel so parent-visible subagent activities can rely on stable worker and orchestration semantics.
 
+Frozen contract boundaries:
+
+- `turn_execution` is the only canonical execution contract; `agent_message.run_state` is always a projection
+- `assistant_bubble` visibility projects into the assistant bubble, while `composer_only` remains outside it
+- Milestone 1 keeps parent-side subagent calls as ordinary task activities and does not mirror child internals
+- `turn_execution` remains consumable by internal debug/export tooling outside the assistant bubble
+- exact cleanup TTLs remain operational policy, not architecture
+
 **Tech Stack:** Ruby 4.0, Rails 8 alpha, ActiveSupport tests, DAG engine (`DAG::Graph`, `DAG::Node`, `DAG::Runner`, `DAG::TranscriptProjection`), AgentCore executors, ActionCable `ConversationChannel`, Stimulus frontend controller, Turbo Streams.
 
 ## Scope
@@ -112,10 +120,12 @@ Expected: no unresolved ambiguity remains about bubble vs composer vs child-conv
 Make the docs explicitly freeze:
 
 - same-turn projector scope
+- same-conversation scope for projector truth
 - parent-visible subagent scope
 - Milestone 1 parent-side subagent calls remain ordinary task activities
 - no child-internal mirroring in Milestone 1
 - debug-mode and cleanup boundaries (`standard` vs `debug`, what later cleanup may remove)
+- `assistant_bubble` vs `composer_only` projection rules
 - `turn_execution` remains consumable by debug tooling outside the assistant bubble
 - exact cleanup policy and TTLs are non-blocking operational choices, not architecture blockers
 

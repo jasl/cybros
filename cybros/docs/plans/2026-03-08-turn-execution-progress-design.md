@@ -187,6 +187,36 @@ Suggested read shape:
 }
 ```
 
+Frozen contract notes:
+
+- `event_cursor` is the latest durable execution event sequence/id visible to the projector for this turn. It is a replay/debug cursor, not a UI-local counter.
+- `activities[]` is ordered as a concise execution timeline. The canonical ordering key is durable `sequence`; any secondary sort is only a deterministic tie-breaker for equal-sequence records and must not change activity identity.
+- `diagnostic_level` changes diagnostic richness only. It must not change `activity_id`, `kind`, `status`, `phase`, `source_node_id`, or ordering.
+
+Suggested per-activity ordering and diagnostic shape:
+
+```json
+{
+  "activity_id": "task:uuid",
+  "kind": "tool_call",
+  "status": "failed",
+  "phase": "execution",
+  "sequence": 9,
+  "last_event_id": 42,
+  "source_node_id": "task_uuid",
+  "visibility": "assistant_bubble",
+  "diagnostic_level": "debug",
+  "error": {
+    "summary": "tool execution failed",
+    "code": "tool_runtime_error"
+  },
+  "diagnostics": {
+    "executor": "task_executor",
+    "replay_gap": false
+  }
+}
+```
+
 ### `turn_execution.status`
 
 Recommended values:
@@ -253,6 +283,36 @@ Recommended values:
 - `skipped`
 - `stopped`
 
+### `visibility`
+
+Recommended first-pass values:
+
+- `assistant_bubble`
+- `composer_only`
+
+Frozen behavior:
+
+- `assistant_bubble` activities are eligible for projection into `agent_message.run_state`
+- `composer_only` activities remain part of canonical `turn_execution`, but are not rendered in the assistant bubble by default
+- visibility affects projection only; it does not change canonical activity identity or status reduction
+
+Suggested example:
+
+```json
+[
+  {
+    "activity_id": "task:compact_context",
+    "kind": "preflight_task",
+    "visibility": "composer_only"
+  },
+  {
+    "activity_id": "task:tool_1",
+    "kind": "tool_call",
+    "visibility": "assistant_bubble"
+  }
+]
+```
+
 ## Projection Surfaces
 
 ### 1. `turn_execution`
@@ -278,6 +338,36 @@ This is a projection of `turn_execution`, not a separate source of truth.
 
 The assistant bubble should only include activities whose `visibility` is `assistant_bubble`.
 
+Suggested projected shape:
+
+```json
+{
+  "status": "running",
+  "phase": "execution",
+  "diagnostic_level": "standard",
+  "event_cursor": 42,
+  "summary": {
+    "activity_count": 2,
+    "running_count": 1,
+    "awaiting_count": 0,
+    "failed_count": 0,
+    "latest_message": "Running memory_search"
+  },
+  "activities": [
+    {
+      "activity_id": "task:uuid",
+      "kind": "tool_call",
+      "status": "running",
+      "phase": "execution",
+      "sequence": 7,
+      "title": "memory_search",
+      "source_node_id": "task_uuid",
+      "visibility": "assistant_bubble"
+    }
+  ]
+}
+```
+
 ### 3. `composer_state`
 
 Still used by:
@@ -288,6 +378,19 @@ Still used by:
 - pre-send product guidance
 
 This remains intentionally separate from assistant-bubble execution state.
+
+## Frozen Scope Boundaries
+
+### Same-turn projector scope
+
+The projector scope is intentionally narrow:
+
+- project only nodes that belong to the same conversation and the same `turn_id`
+- treat same-turn descendant task/activity facts as the canonical input set for Milestone 1
+- do not merge multiple turns into one `turn_execution`
+- do not make assistant-bubble projection depend on prior cable delivery or client-local aggregation
+
+This keeps `turn_execution` rebuildable from durable truth and prevents bubble state from drifting from DAG truth.
 
 ## Activity Mapping
 
@@ -359,6 +462,8 @@ Important boundary:
 - the child conversation remains a separate graph
 - v1 does not mirror the child's internal task list into the parent
 - parent-visible subagent state comes from parent-side orchestration facts and child snapshots only
+- Milestone 1 parent-side `subagent_spawn` / `subagent_poll` remain ordinary task activities
+- Milestone 2 may project `subagent_run` / `subagent_wait` as `kind = "subagent"`, but still only from parent-visible orchestration facts
 
 ## Event Contract
 
@@ -477,6 +582,11 @@ Initial activation can remain internal-only in the first milestone:
 
 No end-user-visible debug toggle is required in the first milestone.
 
+Frozen invariant:
+
+- `standard` and `debug` must project the same canonical activity identity and ordering for the same turn
+- `debug` may expose richer bounded diagnostics, but it is still observation-only and must not alter permissions, scheduling, or business flow
+
 Debug-mode-only content may include:
 
 - executor timing details
@@ -574,12 +684,14 @@ These are better parent-facing activity anchors than raw `spawn/poll` alone.
 - add baseline observability, event sequencing, and debug-mode-aware projection
 - let parent-side subagent-related calls appear in the execution timeline as ordinary task activities
 - do not mirror child internals
+- keep `turn_execution` directly consumable by debug tooling outside the assistant bubble
 
 ### Milestone 2
 
 - harden subagent worker profile
 - add `subagent_run` / `subagent_wait`
 - add dedicated parent-visible `kind = "subagent"` activity snapshots
+- keep child execution as a separate conversation/graph and avoid merging child DAG internals into the parent
 
 ### Milestone 3
 
