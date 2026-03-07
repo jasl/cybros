@@ -22,6 +22,7 @@ module AgentCore
             activity_kind: activity_kind,
             phase: activity_phase,
             source_node_id: node.id,
+            diagnostic_level: diagnostic_level_for(node),
           )
 
           result =
@@ -47,6 +48,7 @@ module AgentCore
               activity_kind: activity_kind,
               phase: activity_phase,
               source_node_id: node.id,
+              diagnostic_level: diagnostic_level_for(node),
               data: { "error" => result.text.to_s },
             )
           else
@@ -55,6 +57,7 @@ module AgentCore
               activity_kind: activity_kind,
               phase: activity_phase,
               source_node_id: node.id,
+              diagnostic_level: diagnostic_level_for(node),
             )
           end
 
@@ -71,6 +74,7 @@ module AgentCore
             activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node)),
             phase: activity_phase_for(activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node))),
             source_node_id: node.id,
+            diagnostic_level: diagnostic_level_for(node),
             data: { "error" => "ToolNotFoundError: #{e.message}" },
           )
           ::DAG::ExecutionResult.errored(error: "ToolNotFoundError: #{e.message}")
@@ -80,6 +84,7 @@ module AgentCore
             activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node)),
             phase: activity_phase_for(activity_kind: activity_kind_for(node, tool_name: tool_call_name_from_input(node))),
             source_node_id: node.id,
+            diagnostic_level: diagnostic_level_for(node),
             data: { "error" => "#{e.class}: #{e.message}" },
           )
           ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}")
@@ -102,6 +107,23 @@ module AgentCore
           def tool_call_name_from_input(node)
             input = node.body_input.is_a?(Hash) ? node.body_input : {}
             input.fetch("name", input.fetch("requested_name", "")).to_s
+          end
+
+          def diagnostic_level_for(node)
+            agent =
+              node.graph.nodes.active
+                .where(lane_id: node.lane_id, turn_id: node.turn_id, node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key])
+                .order(:id)
+                .last
+
+            level =
+              if agent&.metadata.is_a?(Hash)
+                agent.metadata.dig("turn_execution", "diagnostic_level")
+              end
+
+            level.to_s == "debug" ? "debug" : "standard"
+          rescue StandardError
+            "standard"
           end
 
           def tool_call_from_input(node)

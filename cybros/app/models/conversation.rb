@@ -175,8 +175,14 @@ class Conversation < ApplicationRecord
     Conversation::ComposerState.build(conversation: self, now: now)
   end
 
-  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil, input_policy_override: nil)
-    result = append_user_message!(content: content, model_ref: model_ref, input_policy_override: input_policy_override)
+  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil, input_policy_override: nil, diagnostic_level: nil)
+    result =
+      append_user_message!(
+        content: content,
+        model_ref: model_ref,
+        input_policy_override: input_policy_override,
+        diagnostic_level: diagnostic_level,
+      )
     raise Cybros::Error, "failed to append message" if result.nil?
 
     node_ids =
@@ -303,9 +309,10 @@ class Conversation < ApplicationRecord
     end
   end
 
-  def retry_agent_node!(failed_node_id:, interrupted_output_policy_override: nil)
+  def retry_agent_node!(failed_node_id:, interrupted_output_policy_override: nil, diagnostic_level: nil)
     with_dag_errors_wrapped do
       graph = root_graph
+      diagnostic_level = normalize_turn_execution_diagnostic_level(diagnostic_level)
 
       failed_node = graph.nodes.find_by(id: failed_node_id.to_s)
       raise ActiveRecord::RecordNotFound if failed_node.nil?
@@ -337,13 +344,14 @@ class Conversation < ApplicationRecord
       )
 
       new_agent = failed_node.retry!
+      apply_turn_execution_diagnostic_level!(new_agent, diagnostic_level: diagnostic_level)
 
       ConversationRun.create!(
         conversation: self,
         dag_node_id: new_agent.id,
         state: "queued",
         queued_at: Time.current,
-        debug: {},
+        debug: turn_execution_debug_payload(diagnostic_level),
         error: {},
       )
 
@@ -566,13 +574,14 @@ class Conversation < ApplicationRecord
     )
   end
 
-  def append_user_message!(content:, model_ref: nil, input_policy_override: nil, repair_pending_tail: true)
+  def append_user_message!(content:, model_ref: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
     content = content.to_s.strip
     return nil if content.blank?
 
     with_dag_errors_wrapped do
       graph = root_graph
       lane = chat_lane
+      diagnostic_level = normalize_turn_execution_diagnostic_level(diagnostic_level)
       model_ref = resolve_model_ref!(requested_model_ref: model_ref)
       policy = resolved_input_policy(app_override: input_policy_override)
       now = Time.current
@@ -646,12 +655,14 @@ class Conversation < ApplicationRecord
       end
 
       if created_new_turn
+        apply_turn_execution_diagnostic_level!(agent_node, diagnostic_level: diagnostic_level)
+
         ConversationRun.create!(
           conversation: self,
           dag_node_id: agent_node.id,
           state: "queued",
           queued_at: Time.current,
-          debug: {},
+          debug: turn_execution_debug_payload(diagnostic_level),
           error: {},
         )
 
@@ -1119,6 +1130,26 @@ class Conversation < ApplicationRecord
       out["action_policy"] = action_policy_for(node)
       out["run_state"] = turn_execution_projector.run_state_for_node_id(node.id)
       out
+    end
+
+    def normalize_turn_execution_diagnostic_level(value)
+      value.to_s == "debug" ? "debug" : "standard"
+    end
+
+    def turn_execution_debug_payload(diagnostic_level)
+      {
+        "turn_execution" => {
+          "diagnostic_level" => normalize_turn_execution_diagnostic_level(diagnostic_level),
+        },
+      }
+    end
+
+    def apply_turn_execution_diagnostic_level!(node, diagnostic_level:)
+      metadata = node.metadata.is_a?(Hash) ? node.metadata.deep_dup : {}
+      metadata["turn_execution"] = {
+        "diagnostic_level" => normalize_turn_execution_diagnostic_level(diagnostic_level),
+      }
+      node.update!(metadata: metadata)
     end
 
     def action_entry_for(node, action_key)

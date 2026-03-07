@@ -3,6 +3,7 @@ class Conversation::TurnExecutionProjector
   ASSISTANT_BUBBLE = "assistant_bubble"
   COMPOSER_ONLY = "composer_only"
   STANDARD_DIAGNOSTIC_LEVEL = "standard"
+  DEBUG_DIAGNOSTIC_LEVEL = "debug"
 
   def initialize(conversation:)
     @conversation = conversation
@@ -18,14 +19,15 @@ class Conversation::TurnExecutionProjector
     return nil if turn_nodes.empty?
 
     anchor = anchor_node_for(turn_nodes)
-    activities = project_activities(turn_nodes)
+    diagnostic_level = diagnostic_level_for(anchor)
+    activities = project_activities(turn_nodes, diagnostic_level: diagnostic_level)
 
     {
       "turn_id" => turn_id,
       "anchor_node_id" => anchor&.id,
       "status" => reduce_status(anchor: anchor, activities: activities),
       "phase" => reduce_phase(anchor: anchor, activities: activities),
-      "diagnostic_level" => STANDARD_DIAGNOSTIC_LEVEL,
+      "diagnostic_level" => diagnostic_level,
       "event_cursor" => event_cursor_for(turn_nodes),
       "started_at" => started_at_for(turn_nodes),
       "updated_at" => updated_at_for(turn_nodes),
@@ -75,31 +77,44 @@ class Conversation::TurnExecutionProjector
       turn_nodes.last
     end
 
-    def project_activities(turn_nodes)
+    def project_activities(turn_nodes, diagnostic_level:)
       tasks = turn_nodes.select { |node| node.node_type.to_s == Messages::Task.node_type_key }
 
-      tasks.each_with_index.map do |task, index|
-        kind = activity_kind_for(task)
-        status = activity_status_for(task)
-        {
-          "activity_id" => "task:#{task.id}",
-          "kind" => kind,
-          "status" => status,
-          "phase" => activity_phase_for(task, kind: kind, status: status),
-          "sequence" => index + 1,
-          "title" => activity_title_for(task),
-          "source_node_id" => task.id,
-          "tool_call_id" => task.body_input["tool_call_id"].to_s.presence,
-          "input_preview" => task.body_input["arguments_summary"].to_s.presence,
-          "output_preview" => task.body_output_preview["result"].presence,
-          "error" => activity_error_for(task, status: status),
-          "diagnostics" => nil,
-          "started_at" => task.started_at&.iso8601,
-          "updated_at" => task.updated_at&.iso8601,
-          "finished_at" => task.finished_at&.iso8601,
-          "visibility" => activity_visibility_for(kind),
-        }.compact
-      end
+      projected =
+        tasks.each_with_index.map do |task, index|
+          project_activity(task, sequence_fallback: index + 1, diagnostic_level: diagnostic_level)
+        end
+
+      projected.sort_by { |activity| [activity.fetch("sequence"), activity.fetch("source_node_id").to_s] }
+    end
+
+    def project_activity(task, sequence_fallback:, diagnostic_level:)
+      activity_events = task.node_events.select { |event| activity_event?(event) }.sort_by(&:created_at)
+      last_event = activity_events.last
+      last_payload = last_event&.payload.is_a?(Hash) ? last_event.payload : {}
+
+      kind = last_payload["kind"].to_s.presence || activity_kind_for(task)
+      status = last_payload["status"].to_s.presence || activity_status_for(task)
+
+      {
+        "activity_id" => last_payload["activity_id"].to_s.presence || "task:#{task.id}",
+        "kind" => kind,
+        "status" => status,
+        "phase" => last_payload["phase"].to_s.presence || activity_phase_for(task, kind: kind, status: status),
+        "sequence" => Integer(last_payload["sequence"], exception: false) || sequence_fallback,
+        "title" => activity_title_for(task),
+        "source_node_id" => last_payload["source_node_id"].to_s.presence || task.id,
+        "tool_call_id" => task.body_input["tool_call_id"].to_s.presence,
+        "input_preview" => task.body_input["arguments_summary"].to_s.presence,
+        "output_preview" => task.body_output_preview["result"].presence,
+        "error" => activity_error_for(task, status: status, last_payload: last_payload),
+        "last_event_id" => last_event&.id,
+        "diagnostics" => diagnostics_for(activity_events, diagnostic_level: diagnostic_level),
+        "started_at" => task.started_at&.iso8601,
+        "updated_at" => task.updated_at&.iso8601,
+        "finished_at" => task.finished_at&.iso8601,
+        "visibility" => activity_visibility_for(kind),
+      }.compact
     end
 
     def assistant_bubble_activities(activities)
@@ -157,8 +172,11 @@ class Conversation::TurnExecutionProjector
         task.node_type.to_s
     end
 
-    def activity_error_for(task, status:)
+    def activity_error_for(task, status:, last_payload: {})
       return nil unless status == "failed"
+
+      event_error = last_payload.fetch("data", {}).is_a?(Hash) ? last_payload.fetch("data", {}).fetch("error", nil) : nil
+      return { "summary" => event_error.to_s } if event_error.present?
 
       preview = task.body_output_preview["result"].presence || task.body_output["result"]
       return { "summary" => preview.to_s } if preview.present?
@@ -215,6 +233,34 @@ class Conversation::TurnExecutionProjector
 
     def terminal_activity_status?(status)
       %w[completed failed rejected skipped stopped].include?(status.to_s)
+    end
+
+    def activity_event?(event)
+      DAG::NodeEvent::ACTIVITY_EVENT_KINDS.include?(event.kind.to_s)
+    end
+
+    def diagnostics_for(activity_events, diagnostic_level:)
+      return nil unless diagnostic_level == DEBUG_DIAGNOSTIC_LEVEL
+
+      last_event = activity_events.last
+      last_payload = last_event&.payload.is_a?(Hash) ? last_event.payload : {}
+
+      {
+        "event_count" => activity_events.length,
+        "last_event_id" => last_event&.id,
+        "last_event_kind" => last_event&.kind.to_s.presence,
+        "last_event_data" => last_payload["data"].is_a?(Hash) ? last_payload["data"] : {},
+      }.compact
+    end
+
+    def diagnostic_level_for(anchor)
+      level =
+        if anchor&.metadata.is_a?(Hash)
+          anchor.metadata.dig("turn_execution", "diagnostic_level")
+        end
+
+      level = level.to_s
+      level == DEBUG_DIAGNOSTIC_LEVEL ? DEBUG_DIAGNOSTIC_LEVEL : STANDARD_DIAGNOSTIC_LEVEL
     end
 
     def summary_for(activities)

@@ -101,7 +101,7 @@ class ConversationChannel < ApplicationCable::Channel
           text = output_preview.fetch("content", "").to_s
         end
 
-        {
+        envelope = {
           "type" => "node_event",
           "conversation_id" => conversation.id.to_s,
           "turn_id" => (node_event.respond_to?(:turn_id) ? node_event.turn_id : nil).to_s,
@@ -112,6 +112,23 @@ class ConversationChannel < ApplicationCable::Channel
           "payload" => node_event.payload || {},
           "occurred_at" => node_event.created_at&.iso8601,
         }
+
+        merge_activity_fields!(envelope, node_event.payload || {})
+        envelope
+      end
+
+      def merge_activity_fields!(envelope, payload)
+        payload = payload.is_a?(Hash) ? payload : {}
+        return envelope unless DAG::NodeEvent::ACTIVITY_EVENT_KINDS.include?(envelope["kind"])
+
+        envelope["sequence"] = payload["sequence"]
+        envelope["activity_id"] = payload["activity_id"]
+        envelope["activity_kind"] = payload["kind"]
+        envelope["activity_status"] = payload["status"]
+        envelope["activity_phase"] = payload["phase"]
+        envelope["source_node_id"] = payload["source_node_id"].to_s if payload["source_node_id"].present?
+        envelope["diagnostic_level"] = payload["diagnostic_level"]
+        envelope
       end
   end
 
@@ -193,7 +210,7 @@ class ConversationChannel < ApplicationCable::Channel
           end
           replay_kinds_counts[kind] += 1
 
-          {
+          envelope = {
             "type" => "node_event",
             "conversation_id" => @conversation.id.to_s,
             "turn_id" => turn_id,
@@ -204,6 +221,9 @@ class ConversationChannel < ApplicationCable::Channel
             "payload" => event_hash.fetch("payload", {}),
             "occurred_at" => event_hash.fetch("created_at", nil),
           }
+
+          self.class.send(:merge_activity_fields!, envelope, event_hash.fetch("payload", {}))
+          envelope
         end
 
       if batch.any?
