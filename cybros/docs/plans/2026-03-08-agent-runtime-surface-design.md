@@ -705,10 +705,35 @@ What is fixed now is only the runtime boundary:
 - Cybros enforces the hard limits
 - programmable agents are one future consumer of that surface
 
-## Open Questions
+## Frozen Implementation Decisions
 
-- What embedded script language should first implement the runtime surface?
-- How should script snapshots be persisted for replay and audit?
-- Should `compact_context` be able to request durable summary-node materialization directly in v1, or only return a projected view?
-- How much of `projected_result` should be stored as node output preview versus transient prompt-only projection?
-- Should approval-mode selection live on conversation metadata, account settings, agent profile, or multiple scopes?
+The following decisions are now fixed for the first implementation pass:
+
+- The first pass does **not** require a general-purpose dynamic script engine.
+  - `AgentRuntimeSurface` will first land as a Ruby contract with safe no-op and built-in implementations.
+  - A later script-backed adapter may implement the same contract without changing the runtime boundary.
+- The first pass does **not** require durable source snapshots for arbitrary runtime scripts.
+  - Audit must record stable surface identity, stage decisions, merged outcomes, and safe summarized inputs.
+  - Full script snapshot/version persistence is deferred until a script-backed adapter actually lands.
+- `compact_context` in v1 returns a projected compaction decision, not direct summary-node authoring power.
+  - The runtime may continue to materialize durable preflight tasks or durable summaries through its own existing mechanisms.
+  - The surface chooses strategy; the runtime owns durable mutation.
+- `project_tool_result` in v1 must persist enough durable data for both prompt replay and activity replay.
+  - Persist a safe model-visible projected result for prompt assembly.
+  - Persist a safe activity preview for turn-execution projection if that preview differs from the model-visible projection.
+  - Do not rely on transient-only projection state for correctness.
+- Approval-mode resolution in v1 is fixed to:
+  - explicit app/runtime override
+  - conversation metadata
+  - agent profile default
+  - system default `manual_only`
+  - account-wide approval-mode settings are explicitly out of scope for this pass.
+
+## Deferred Non-blocking Choices
+
+The following choices are still deferred, but they do not block implementation of this runtime contract:
+
+- which embedded language a future script-backed adapter should use
+- how future script versions are edited, stored, and debugged in programmable-agent UX
+- whether later versions add account-scoped approval-mode settings
+- whether later versions let `compact_context` request richer durable compaction primitives directly

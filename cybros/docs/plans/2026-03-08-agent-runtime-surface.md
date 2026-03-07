@@ -23,6 +23,16 @@ Also important: turn-execution activity projection is already landed in the curr
 
 It should not assume that preflight/task execution UI truth still needs to be invented from scratch.
 
+## Execution posture
+
+This plan assumes the current experimental delivery mode:
+
+- breaking changes are allowed
+- backward compatibility is not required
+- compatibility shims should be avoided unless they reduce concrete implementation risk
+- database reset / clearing local data is acceptable when it simplifies the implementation
+- no task in this plan should be blocked on preserving old runtime-surface-adjacent behavior purely for migration comfort
+
 ## Execution order and dependency constraints
 
 Recommended order:
@@ -47,6 +57,23 @@ Hard dependencies:
 - Task 5 must land before Task 9 because programmable-agent opt-in needs a stable tool-review merge contract.
 - Task 6 must land before Task 10 because verification must prove model-visible results no longer depend on raw output bodies.
 - Task 8 should land before Task 9 so programmable-agent integration inherits stable audit hooks.
+
+## Acceptance criteria
+
+This plan is complete only when all of the following are true:
+
+- `AgentCore::DAG::Runtime` carries a validated `runtime_surface` with a safe no-op default.
+- all runtime-surface lifecycle stages use typed inputs and typed decisions rather than boolean hooks.
+- the runtime surface remains advisory only; static policy, DAG invariants, approvals, and sandbox ceilings still decide final authority.
+- `prepare_turn`, `compact_context`, `review_tool_call`, `project_tool_result`, `finalize_output`, and `handle_error` are all wired into the runtime with safe fallback behavior.
+- surface failure cannot break turn correctness; every stage falls back to a bounded runtime-owned default path.
+- preflight compaction work still remains durably visible in turn execution while assistant-bubble `run_state` keeps current visibility semantics.
+- raw tool results are no longer treated as identical to model-visible projected results.
+- replay, refresh, and debug/export surfaces remain correct when activity preview and model-visible projection differ.
+- audit/observability captures safe summarized stage inputs, decisions, and merged outcomes without logging sensitive raw bodies.
+- the first pass does not depend on solving programmable-agent authoring UX or a general-purpose script engine.
+- the focused tests added across the tasks are green.
+- broader regression checks across `test/lib/agent_core`, `test/lib/cybros`, `test/models/conversation`, and the relevant integration/channel tests are green.
 
 ---
 
