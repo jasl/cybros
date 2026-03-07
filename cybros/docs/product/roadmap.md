@@ -232,6 +232,7 @@ This section is written as a **Conversation façade API checklist** so the App n
 - [x] **Durable HTTP truth (Turbo Streams)**
   - [x] **`POST /conversations/:conversation_id/messages`** (`ConversationMessagesController#create`)
     - [x] Calls: `Conversation#append_user_message!(content:)` (or `append_user_message_and_project!` for immediate projection)
+    - [x] Input policy resolution happens inside the Conversation facade (`coalescing`, `queue`, `interrupt_new_turn`, oversize guards, transient context compaction)
     - [x] Returns: `text/vnd.turbo-stream.html`
       - [x] `append` user bubble + paired agent placeholder bubble
       - [x] `remove` empty state
@@ -278,6 +279,9 @@ This section is written as a **Conversation façade API checklist** so the App n
 - [x] **Streaming indicator (UI state machine)**
   - [x] Anchored to the currently streaming assistant bubble (`data-role="agent-bubble"` + `data-node-id`)
   - [x] Driven by `node_event` + `node_state` (terminal state hides controls and converges via Turbo replace/refresh)
+- [x] **Composer status rail**
+  - [x] Queue / steer / candidate next-input preview render above the composer input
+  - [x] Composer rail is refreshed independently from assistant bubble `run_state`
 
 - [x] **User actions (end-to-end) map to Conversation façade APIs**
   - [x] **Stop/cancel** (endpoint + UI)
@@ -286,9 +290,14 @@ This section is written as a **Conversation façade API checklist** so the App n
     - [x] UI: hide Stop once terminal; show reason on stopped nodes
   - [x] **Retry (same conversation/lane)** (endpoint + UI)
     - [x] Endpoint: `POST /conversations/:id/retry`
-    - [x] Calls: `Conversation#retry_agent_node!(failed_node_id:)`
+    - [x] Calls: `Conversation#retry_agent_node!(failed_node_id:, interrupted_output_policy_override:)`
     - [x] Output: returns new agent node id (queued) and relies on Turbo Streams + realtime for UI convergence
-    - [x] Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_limit_reached`, `retry_already_queued`, `missing_parent`
+    - [x] Error codes (stable): `node_not_found`, `not_an_agent_node`, `not_retryable`, `retry_already_queued`, `missing_parent`
+    - [x] Manual retry is not capped; automatic retry remains engine/runtime policy
+  - [x] **Steer current turn** (endpoint + UI)
+    - [x] Endpoint: `POST /conversations/:id/steer_current_turn`
+    - [x] Calls: `Conversation#steer_current_turn!(content:, model_ref:, input_policy_override:, interrupted_output_policy_override:)`
+    - [x] Same-turn replacement is gated by resolved input policy and falls back to `interrupt_new_turn` only when an active run exists
   - [x] **Regenerate (swipe semantics)** (endpoint + UI)
     - [x] Calls: `Conversation#regenerate!(agent_node_id:)`
       - [x] tail regenerate: returns `{ mode: :in_place, node: <new_agent_node> }`

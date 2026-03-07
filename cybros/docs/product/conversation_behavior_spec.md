@@ -11,7 +11,7 @@
 ### 1.1 Public entity
 
 - App 的第一实体是 `Conversation`（路由 `/conversations/...`）。
-- `Conversation` 对外暴露的“聊天 API”是 **facade**（`Conversation#append_user_message!`、`#regenerate!`、`#select_swipe!`、`#create_child!`、`#soft_delete_node!` 等）。
+- `Conversation` 对外暴露的“聊天 API”是 **facade**（`Conversation#append_user_message!`、`#append_user_message_and_project!`、`#retry_agent_node!`、`#steer_current_turn!`、`#regenerate!`、`#select_swipe!`、`#create_child!`、`#soft_delete_node!` 等）。
 - Controller/Channel/View **不得**直接依赖 DAG 的内部结构细节（例如手写 edge 遍历、假设 main lane 等）。
 - 引擎层可注入 `DAG::GraphPolicy` 作为 defense-in-depth：即使绕过 facade 直接调用 DAG 的高阶写原语，也能被 policy 兜底拦截（不阻塞 runner/leaf repair 等引擎自动化路径；详见 `docs/dag/public_api.md`）。
 
@@ -151,3 +151,54 @@ restore 反向操作，恢复可见性（timeline + context）。
 
 - UI/Controller 路径必须优先走 `Conversation` 的 bounded read APIs（如 `message_page` / `transcript_page`），避免无意间触发全图闭包/全图扫描；App 不应直接拿到 `DAG::Lane` 并调用其方法。
 - 200+ turns + 多分支情况下，产品层在任何用户请求路径上不得调用“危险 API”（例如全量 mermaid/closure）作为默认行为。
+
+---
+
+## 7) Input policies / retry / composer rail
+
+### 7.1 Policy resolution 是 App 层真相源
+
+- `Conversation#resolved_input_policy(app_override:, action:, interrupted_output_policy_override:)` 是运行时的唯一 policy resolver。
+- precedence 固定为：
+  - app/channel override
+  - `conversation.metadata["input_policy"]`
+  - agent/profile default
+  - global default
+- 只有 `retry` 与 `steer_current_turn` 允许动作级 `interrupted_output_policy_override`，且其优先级高于所有静态默认值。
+- Controller/View/JS 不应自行 merge policy hash，也不应直接依赖 profile YAML 作为运行时真相源。
+
+### 7.2 User input append 统一走 Conversation facade
+
+- 所有用户输入入口都应走 `Conversation#append_user_message!`（或 `#append_user_message_and_project!`）。
+- append 路径在 App 层统一处理：
+  - user-message coalescing
+  - `queue` / `interrupt_new_turn`
+  - 单条 oversize guard
+  - 多消息历史 overflow 的 transient `compact_context`
+- `append_user_message_and_project!` 额外返回：
+  - 新建/更新消息 projection
+  - 对应 `node_ids`
+  - `composer_state`
+
+### 7.3 Retry / steer 的产品语义
+
+- `Conversation#retry_agent_node!` 支持 **不限次人工 retry**；自动 retry 仍由 engine/runtime 的独立恢复策略控制。
+- manual retry 不再向产品层暴露 `retry_limit_reached`。
+- `Conversation#steer_current_turn!` 是显式 same-turn user-version replacement API，不是普通 append 的别名。
+- 当 steer policy 不允许同 turn 替换时，产品层可以按 policy 回退到 `interrupt_new_turn`；但如果当前没有 active run，则 `steer_current_turn!` 必须拒绝，而不是悄悄 append 一个新 turn。
+
+### 7.4 Oversize 与 transcript 可见性
+
+- 单条 soft oversize：插入已完成的 `task(compress_input)`，由压缩结果进入后续 assistant turn。
+- 单条 hard oversize：保留原始 `user_message`，并追加 transcript-visible 的 `product_message`；此路径不创建 assistant node/run，也不暴露 assistant actions。
+- 多消息/历史 overflow：插入 transient `task(compact_context)`，仅作为 app-layer pre-turn compaction 机制，不替代 engine-layer `auto_compact`，也不创建 durable `summary`。
+
+### 7.5 Composer rail 是独立的 conversation state surface
+
+- `Conversation#composer_state` 是 web composer status rail 的后端真相源。
+- rail 承载：
+  - queue availability / queued count
+  - steer availability / reason
+  - candidate next-input preview
+- queue / steer / candidate preview 属于 composer/conversation state，不属于 assistant bubble `run_state`。
+- UI 应消费 `composer_state`，而不是根据消息列表或运行中 bubble 自行猜测 queue/steer 状态。
