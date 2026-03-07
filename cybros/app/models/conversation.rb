@@ -1019,6 +1019,23 @@ class Conversation < ApplicationRecord
 
   private
 
+    def turn_execution_projector
+      @turn_execution_projector ||= Conversation::TurnExecutionProjector.new(conversation: self)
+    end
+
+  public
+
+    def turn_execution_for_turn_id(turn_id)
+      turn_execution_projector.turn_execution_for_turn_id(turn_id)
+    end
+
+    def turn_execution_for_node_id(node_id)
+      node = find_chat_lane_node!(node_id)
+      turn_execution_projector.turn_execution_for_turn_id(node.turn_id)
+    end
+
+  private
+
     def transcript_projection
       DAG::TranscriptProjection.new(
         graph: root_graph,
@@ -1100,6 +1117,7 @@ class Conversation < ApplicationRecord
       return out if node.nil?
 
       out["action_policy"] = action_policy_for(node)
+      out["run_state"] = turn_execution_projector.run_state_for_node_id(node.id)
       out
     end
 
