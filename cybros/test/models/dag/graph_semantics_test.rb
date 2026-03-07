@@ -85,4 +85,22 @@ class DAG::GraphSemanticsTest < ActiveSupport::TestCase
   ensure
     graph.singleton_class.send(:remove_method, :claim_lease_seconds_for)
   end
+
+  test "scheduler skips pending nodes whose claim_after_at is in the future" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    parent = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    delayed = graph.nodes.create!(
+      node_type: Messages::AgentMessage.node_type_key,
+      state: DAG::Node::PENDING,
+      metadata: {},
+      claim_after_at: 5.minutes.from_now,
+    )
+    graph.edges.create!(from_node_id: parent.id, to_node_id: delayed.id, edge_type: DAG::Edge::DEPENDENCY)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+    assert_equal [], claimed.map(&:id)
+    assert_equal DAG::Node::PENDING, delayed.reload.state
+  end
 end

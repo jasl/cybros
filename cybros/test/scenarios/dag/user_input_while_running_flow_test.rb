@@ -18,69 +18,40 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "user input while agent running: queue policy blocks the next reply until the running reply finishes" do
-    conversation = create_conversation!
+  test "user input while agent running: queue policy keeps the current turn running and schedules the next turn afterward" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "input_policy" => {
+            "running_input_policy" => "queue",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
     graph = conversation.dag_graph
     lane = graph.main_lane
 
-    turn_1 = "0194f3c0-0000-7000-8000-00000000e101"
-    turn_2 = "0194f3c0-0000-7000-8000-00000000e102"
-
-    user_1 = nil
-    agent_1 = nil
-
-    graph.mutate!(turn_id: turn_1) do |m|
-      user_1 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f101",
-          node_type: Messages::UserMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          content: "u1",
-          metadata: {}
-        )
-      agent_1 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f102",
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: { "reply" => "a1" }
-        )
-      m.create_edge(from_node: user_1, to_node: agent_1, edge_type: DAG::Edge::SEQUENCE)
-    end
+    first = conversation.append_user_message!(content: "u1")
+    user_1 = first.fetch(:user_node)
+    agent_1 = first.fetch(:agent_node)
+    agent_1.update!(metadata: agent_1.metadata.merge("reply" => "a1"))
 
     claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [agent_1.id], claimed.map(&:id)
     assert_equal DAG::Node::RUNNING, agent_1.reload.state
 
-    user_2 = nil
-    agent_2 = nil
+    second = conversation.append_user_message!(content: "u2")
+    user_2 = second.fetch(:user_node)
+    agent_2 = second.fetch(:agent_node)
+    agent_2.update!(metadata: agent_2.metadata.merge("reply" => "a2"))
 
-    graph.mutate!(turn_id: turn_2) do |m|
-      user_2 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f103",
-          node_type: Messages::UserMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          content: "u2",
-          metadata: {}
-        )
-      agent_2 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f104",
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: { "reply" => "a2" }
-        )
-      m.create_edge(from_node: user_2, to_node: agent_2, edge_type: DAG::Edge::SEQUENCE)
-
-      # Queue policy: the next reply is blocked until the in-flight reply finishes.
-      m.create_edge(
-        from_node: agent_1,
-        to_node: agent_2,
-        edge_type: DAG::Edge::DEPENDENCY,
-        metadata: { "generated_by" => "queue_policy" }
-      )
-    end
+    assert graph.edges.active.exists?(from_node_id: agent_1.id, to_node_id: user_2.id, edge_type: DAG::Edge::SEQUENCE)
+    assert graph.edges.active.exists?(
+      from_node_id: agent_1.id,
+      to_node_id: agent_2.id,
+      edge_type: DAG::Edge::DEPENDENCY,
+      metadata: { "generated_by" => "queue_policy" }
+    )
 
     claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [], claimed.map(&:id), "agent_2 must not be claimable while agent_1 is running"
@@ -118,70 +89,86 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
     end
   end
 
-  test "user input while agent running: restart policy stops the in-flight reply and excludes it from context" do
-    conversation = create_conversation!
+  test "user input while agent running: interrupt_new_turn stops the interrupted closure and starts a fresh turn from the last stable parent" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "input_policy" => {
+            "running_input_policy" => "interrupt_new_turn",
+            "interrupted_output_policy" => "keep_context",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
     graph = conversation.dag_graph
     lane = graph.main_lane
 
-    turn_1 = "0194f3c0-0000-7000-8000-00000000e201"
-    turn_2 = "0194f3c0-0000-7000-8000-00000000e202"
-
-    user_1 = nil
-    agent_1 = nil
-
-    graph.mutate!(turn_id: turn_1) do |m|
-      user_1 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f201",
-          node_type: Messages::UserMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          content: "u1",
-          metadata: {}
-        )
-      agent_1 =
-        m.create_node(
-          id: "0194f3c0-0000-7000-8000-00000000f202",
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::PENDING,
-          metadata: { "reply" => "a1" }
-        )
-      m.create_edge(from_node: user_1, to_node: agent_1, edge_type: DAG::Edge::SEQUENCE)
-    end
+    first = conversation.append_user_message!(content: "u1")
+    user_1 = first.fetch(:user_node)
+    agent_1 = first.fetch(:agent_node)
+    agent_1.update!(metadata: agent_1.metadata.merge("reply" => "a1"))
 
     claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
     assert_equal [agent_1.id], claimed.map(&:id)
     assert_equal DAG::Node::RUNNING, agent_1.reload.state
 
-    assert agent_1.stop!(reason: "restart_by_user")
-    agent_1.reload
-    assert_equal DAG::Node::STOPPED, agent_1.state
+    stale_turn = "0194f3c0-0000-7000-8000-00000000e202"
+    stale_user = nil
+    stale_agent = nil
 
-    agent_1.exclude_from_context!
-    assert agent_1.reload.context_excluded?
-
-    user_2 = nil
-    agent_2 = nil
-
-    graph.mutate!(turn_id: turn_2) do |m|
-      user_2 =
+    graph.mutate!(turn_id: stale_turn) do |m|
+      stale_user =
         m.create_node(
           id: "0194f3c0-0000-7000-8000-00000000f203",
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "u2",
-          metadata: {}
+          lane_id: lane.id,
+          content: "stale",
+          metadata: { "fragments" => ["stale"] }
         )
-      agent_2 =
+      stale_agent =
         m.create_node(
           id: "0194f3c0-0000-7000-8000-00000000f204",
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING,
-          metadata: { "reply" => "a2" }
+          lane_id: lane.id,
+          metadata: { "reply" => "stale" }
         )
 
-      m.create_edge(from_node: user_1, to_node: user_2, edge_type: DAG::Edge::SEQUENCE)
-      m.create_edge(from_node: user_2, to_node: agent_2, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: agent_1, to_node: stale_user, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: stale_user, to_node: stale_agent, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(
+        from_node: agent_1,
+        to_node: stale_agent,
+        edge_type: DAG::Edge::DEPENDENCY,
+        metadata: { "generated_by" => "queue_policy" }
+      )
     end
+
+    stale_run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: stale_agent.id,
+        state: "queued",
+        queued_at: Time.current,
+        debug: {},
+        error: {},
+      )
+
+    second = conversation.append_user_message!(content: "u2")
+    user_2 = second.fetch(:user_node)
+    agent_2 = second.fetch(:agent_node)
+    agent_2.update!(metadata: agent_2.metadata.merge("reply" => "a2"))
+
+    assert_equal DAG::Node::STOPPED, agent_1.reload.state
+    assert_equal DAG::Node::STOPPED, stale_agent.reload.state
+    assert_equal "canceled", stale_run.reload.state
+
+    sequence_parent_id =
+      graph.edges.active.where(to_node_id: user_2.id, edge_type: DAG::Edge::SEQUENCE).order(:id).pick(:from_node_id)
+    assert_equal user_1.id, sequence_parent_id
+    refute graph.edges.active.exists?(from_node_id: agent_1.id, to_node_id: user_2.id, edge_type: DAG::Edge::SEQUENCE)
+    refute graph.edges.active.exists?(to_node_id: agent_2.id, edge_type: DAG::Edge::DEPENDENCY)
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, FixedReplyExecutor.new)
@@ -202,12 +189,83 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
           node.dig("payload", "input", "content").to_s.presence ||
             node.dig("payload", "output_preview", "content").to_s
         end
-      assert_equal ["u1", "Stopped: restart_by_user", "u2", "a2"], contents
+      assert_includes contents, "u1"
+      assert_includes contents, "Stopped: interrupt_new_turn"
+      assert_equal ["u2", "a2"], contents.last(2)
 
       context = lane.context_for(agent_2.id)
       context_ids = context.map { |n| n.fetch("node_id") }
-      assert_equal [user_1.id, user_2.id, agent_2.id], context_ids
+      assert_includes context_ids, user_1.id
+      assert_includes context_ids, agent_1.id
+      assert_includes context_ids, stale_agent.id
+      assert_includes context_ids, user_2.id
+      assert_includes context_ids, agent_2.id
+
+      assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "user input while agent running: interrupt_new_turn with discard_context keeps interrupted output visible but removes it from future context" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "input_policy" => {
+            "running_input_policy" => "interrupt_new_turn",
+            "interrupted_output_policy" => "discard_context",
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+    graph = conversation.dag_graph
+    lane = graph.main_lane
+
+    first = conversation.append_user_message!(content: "u1")
+    user_1 = first.fetch(:user_node)
+    agent_1 = first.fetch(:agent_node)
+    agent_1.update!(metadata: agent_1.metadata.merge("reply" => "a1"))
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+    assert_equal [agent_1.id], claimed.map(&:id)
+    assert_equal DAG::Node::RUNNING, agent_1.reload.state
+
+    second = conversation.append_user_message!(content: "u2")
+    user_2 = second.fetch(:user_node)
+    agent_2 = second.fetch(:agent_node)
+    agent_2.update!(metadata: agent_2.metadata.merge("reply" => "a2"))
+
+    assert_equal DAG::Node::STOPPED, agent_1.reload.state
+    assert agent_1.context_excluded?
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(Messages::AgentMessage.node_type_key, FixedReplyExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent_2.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent_2.id)
+      assert_equal DAG::Node::FINISHED, agent_2.reload.state
+
+      transcript_page = lane.transcript_page(limit_turns: 10)
+      contents =
+        transcript_page.fetch("transcript").map do |node|
+          node.dig("payload", "input", "content").to_s.presence ||
+            node.dig("payload", "output_preview", "content").to_s
+        end
+      assert_includes contents, "u1"
+      assert_includes contents, "Stopped: interrupt_new_turn"
+      assert_equal ["u2", "a2"], contents.last(2)
+
+      context = lane.context_for(agent_2.id)
+      context_ids = context.map { |n| n.fetch("node_id") }
+      assert_includes context_ids, user_1.id
       refute_includes context_ids, agent_1.id
+      assert_equal [user_1.id, user_2.id, agent_2.id], context_ids
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure

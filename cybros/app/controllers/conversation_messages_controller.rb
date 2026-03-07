@@ -90,6 +90,7 @@ class ConversationMessagesController < ApplicationController
     content = params.fetch(:content, "").to_s
     content = content.strip
     model_ref = params.fetch(:model_ref, "").to_s.strip.presence
+    input_policy_override = params[:input_policy_override]
 
     if content.blank?
       respond_to do |format|
@@ -99,29 +100,44 @@ class ConversationMessagesController < ApplicationController
       return
     end
 
-    result = @conversation.append_user_message_and_project!(content: content, mode: :preview, model_ref: model_ref)
-    created_messages = result.fetch(:messages)
+    @conversation.append_user_message_and_project!(
+      content: content,
+      mode: :preview,
+      model_ref: model_ref,
+      input_policy_override: input_policy_override,
+    )
 
     respond_to do |format|
-      format.turbo_stream do
-        list_id = helpers.dom_id(@conversation, :messages_list)
-        empty_state_id = helpers.dom_id(@conversation, :messages_empty_state)
-
-        render turbo_stream: [
-          turbo_stream.append(
-            list_id,
-            partial: "conversation_messages/messages_batch",
-            locals: { messages: created_messages }
-          ),
-          turbo_stream.remove(empty_state_id),
-        ]
-      end
+      format.turbo_stream { render_conversation_update_streams }
 
       format.html { redirect_to conversation_path(@conversation) }
     end
   end
 
   private
+
+    def render_conversation_update_streams
+      page = @conversation.message_page(limit: 30, mode: :full)
+      @messages = page.fetch("messages")
+      @composer_state = @conversation.composer_state
+      empty_state_id = helpers.dom_id(@conversation, :messages_empty_state)
+
+      streams = [
+        turbo_stream.replace(
+          helpers.dom_id(@conversation, :messages_list),
+          partial: "conversation_messages/list",
+          locals: { conversation: @conversation, messages: @messages },
+        ),
+        turbo_stream.replace(
+          helpers.dom_id(@conversation, :composer_status_rail),
+          partial: "conversations/composer_status_rail",
+          locals: { conversation: @conversation, composer_state: @composer_state },
+        ),
+      ]
+      streams << turbo_stream.remove(empty_state_id) if @messages.any?
+
+      render turbo_stream: streams
+    end
 
     def set_conversation
       id = params[:conversation_id].to_s

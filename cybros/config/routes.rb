@@ -25,6 +25,7 @@ Rails.application.routes.draw do
 
   resources :agent_programs, only: %i[index new create show]
   resources :conversations, only: %i[index show create] do
+    get :composer_status, on: :member
     post :branch, on: :member
     post :regenerate, on: :member
     post :swipe, on: :member
@@ -42,6 +43,7 @@ Rails.application.routes.draw do
     end
     post :stop, on: :member
     post :retry, on: :member
+    post :steer_current_turn, on: :member
   end
 
   # OpenAI-compatible mock LLM API for development/testing.

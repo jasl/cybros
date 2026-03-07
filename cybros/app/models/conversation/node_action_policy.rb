@@ -51,7 +51,6 @@ class Conversation::NodeActionPolicy
       end
 
       return unavailable_entry(reason: "not_retryable_now") unless node.can_retry?
-      return unavailable_entry(reason: "retry_limit_reached") if retry_depth >= 5
       return unavailable_entry(reason: "retry_already_queued") if retry_already_queued?
       return unavailable_entry(reason: "missing_parent") unless sequence_parent_id.present?
 

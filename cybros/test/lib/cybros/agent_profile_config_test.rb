@@ -96,4 +96,21 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
 
     assert_equal "cybros.agent_profile_config.agent_profile_contains_unknown_keys", err.code
   end
+
+  def test_builtin_profile_definition_exposes_input_policy_defaults
+    policy = Cybros::AgentProfiles.definition("coding").fetch(:input_policy)
+
+    assert_equal true, policy.dig("input_coalescing", "enabled")
+    assert_equal 1500, policy.dig("input_coalescing", "window_ms")
+    assert_equal "queue", policy.fetch("running_input_policy")
+    assert_equal "discard_context", policy.fetch("interrupted_output_policy")
+    assert_equal true, policy.fetch("steer_capability")
+    assert_equal "none", policy.fetch("steer_cleanup_policy")
+    assert_equal false, policy.fetch("steer_after_side_effects")
+    assert_equal 0.25, policy.dig("oversize", "single_message", "soft_threshold_ratio")
+    assert_equal 0.5, policy.dig("oversize", "single_message", "hard_threshold_ratio")
+    assert_equal "compress_input", policy.dig("oversize", "single_message", "soft_strategy")
+    assert_equal "product_guard", policy.dig("oversize", "single_message", "hard_strategy")
+    assert_equal "compact_context", policy.dig("oversize", "multi_message", "strategy")
+  end
 end

@@ -79,6 +79,34 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Message…"
   end
 
+  test "show renders hard-oversize product messages in the transcript" do
+    user = sign_in_owner!
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+            "oversize" => {
+              "single_message" => {
+                "soft_threshold_ratio" => 0.00005,
+                "hard_threshold_ratio" => 0.0002,
+              },
+            },
+          },
+        },
+      )
+
+    conversation.append_user_message!(content: "y" * 200)
+
+    get conversation_path(conversation)
+    assert_response :success
+    assert_includes response.body, "This input is too large for a single turn."
+  end
+
   test "stop accepts pending agent nodes" do
     user = sign_in_owner!
     conversation = create_conversation!(user: user, title: "Chat")
@@ -135,6 +163,39 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "Codex (ChatGPT Pro/Plus) · GPT‑5.3 Codex"
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][aria-label="Model"]'
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.3 Codex"
+  end
+
+  test "show renders composer status rail above the input with queue state, steer control, and candidate next-input preview" do
+    user = sign_in_owner!
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+    graph = conversation.dag_graph
+
+    first = conversation.append_user_message!(content: "first request")
+    first_agent = first.fetch(:agent_node)
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+    assert_equal [first_agent.id], claimed.map(&:id)
+
+    conversation.append_user_message!(content: "queued follow up")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_match(/data-testid="conversation-composer-status-rail".*data-testid="conversation-composer-input"/m, response.body)
+    assert_includes response.body, "Queue next turn"
+    assert_includes response.body, "Steer current turn"
+    assert_includes response.body, "queued follow up"
+    assert_select 'input[type="hidden"][name="interrupted_output_policy_override"]', count: 1
   end
 
   test "show keeps stale model selection in reselect state instead of auto-falling back" do
