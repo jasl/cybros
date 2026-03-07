@@ -5,6 +5,8 @@
 <% payload = {} unless payload.is_a?(Hash) %>
 <% metadata = message.fetch("metadata", {}) %>
 <% metadata = {} unless metadata.is_a?(Hash) %>
+<% run_state = message.fetch("run_state", nil) %>
+<% run_state = {} unless run_state.is_a?(Hash) %>
 <% action_policy = message.fetch("action_policy", {}) %>
 <% action_policy = {} unless action_policy.is_a?(Hash) %>
 <% actions = action_policy.fetch("actions", {}) %>
@@ -26,6 +28,7 @@
 <% edit_action = actions.fetch("edit", {}) %>
 <% edit_action = {} unless edit_action.is_a?(Hash) %>
 <% action_policy_json = json_escape(action_policy.to_json) %>
+<% run_state_json = run_state.any? ? json_escape(run_state.to_json) : nil %>
 <% preview = payload.dig("output_preview", "content").to_s %>
 <% output = payload.dig("output", "content").to_s %>
 <% input = payload.dig("input", "content").to_s %>
@@ -80,6 +83,9 @@
           data-node-id="<%= node_id %>"
           data-node-state="<%= state %>"
           data-action-policy="<%= action_policy_json %>"
+          <% if run_state_json.present? %>
+            data-run-state="<%= run_state_json %>"
+          <% end %>
           class="bg-base-100 border border-base-300 rounded-3xl px-5 py-3">
           <% if terminal && state == "errored" && error_text.present? %>
             <div class="text-sm text-error"><%= error_text %></div>
