@@ -27,7 +27,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "subagent profile denies tool calls as tool_not_in_profile and subagent_poll returns transcript preview" do
+  test "subagent profile denies memory tools as tool_not_in_profile and subagent_poll returns transcript preview" do
     parent = create_conversation!
     parent_graph = parent.dag_graph
     parent_turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -86,7 +86,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
                 role: :assistant,
                 content: "Calling tool",
                 tool_calls: [
-                  AgentCore::ToolCall.new(id: "tc_1", name: "echo", arguments: { "text" => "hi" }),
+                  AgentCore::ToolCall.new(id: "tc_1", name: "memory_search", arguments: { "query" => "hi", "limit" => 1 }),
                 ],
               ),
             stop_reason: :tool_use,
@@ -99,20 +99,6 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
       )
 
     tools_registry = Cybros::AgentRuntimeResolver.build_tools_registry
-    tools_registry.register(
-      AgentCore::Resources::Tools::Tool.new(
-        name: "echo",
-        description: "Echo",
-        parameters: {
-          type: "object",
-          additionalProperties: false,
-          properties: { "text" => { "type" => "string" } },
-          required: ["text"],
-        },
-      ) do |args, **|
-        AgentCore::Resources::Tools::ToolResult.success(text: "echo=#{args.fetch("text")}")
-      end
-    )
 
     runtime =
       lambda do |node:|

@@ -42,7 +42,7 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 - 当 app 注入的 base policy 允许时，`agent_profile` 会通过 `Policy::Profiled` 作为额外收敛层生效：
   - 未命中 profile 的工具会被拒绝（reason=`tool_not_in_profile`），并产出可审计的 tool_result。
   - 原则上这不会扩大原有授权边界。
-  - 当前 phase 0 例外：runtime 仍在 profile delegate 外层 auto-allow `memory_*` / `skills_*`，因此 `subagent` profile 目前还不能被视为“零工具、强隔离”的正式 worker profile。
+  - 当前实现中，phase 0 convenience auto-allow 只保留给父侧 profile；`subagent` worker 不再继承 `memory_*` / `skills_*` 自动放行，因此默认是显式授权前零工具的最小 worker profile。
 
 当前默认限制：
 
@@ -50,6 +50,7 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 - `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
 - `subagent_poll` 做 parent ownership 强校验：只能读取 “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验），否则返回校验错误（避免越权读取）。
 - `subagent_poll.child_conversation_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- debug / diagnostic mode 仅增加观察信息，不会隐式放宽 subagent worker 的工具权限。
 
 建议后续加强（未落地）：
 

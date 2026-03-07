@@ -60,8 +60,8 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 
 当前已知 caveat：
 
-- phase 0 runtime 仍会在 profile delegate 外层 auto-allow `memory_*` / `skills_*`
-- 因此 `subagent` profile 目前应视为“较小能力面”的 MVP，而不是“零工具、强隔离”的正式 worker profile
+- phase 0 convenience auto-allow 只保留给父侧 `coding` / `review` / `repair` profile；`subagent` worker 不再继承 `memory_*` / `skills_*` 自动放行
+- 因此 `subagent` profile 现在是“默认零工具、显式授权才放开”的最小 worker profile
 
 安全约束（当前默认）：
 
@@ -71,7 +71,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
   - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
 - `subagent_poll` 会做 parent ownership 强校验：只能读取“本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 一致性校验）。
 - `subagent_poll.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
-- profiles 仍然是主要收敛层，但当前 phase 0 的 `memory_*` / `skills_*` auto-allow 例外意味着它还不是绝对交集语义。
+- profiles 现在是 worker boundary 的硬收敛层；debug 诊断也不会绕过该边界。
 - `context_turns` 仅接受 1..1000；非法值会触发校验错误（避免 silent coercion）。
 
 ### 1.2) 未来增强（建议，未落地）
@@ -86,7 +86,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 - 输入校验/防滥用：
   - subagent spawn 配额：限制单个 parent conversation 的 spawn 数量/频率（例如 per minute/per day），并记录可审计的拒绝原因（rate_limited/quota_exceeded）
 - 更强的 worker 隔离：
-  - 收紧 phase 0 `memory_*` / `skills_*` auto-allow，使 `subagent` profile 真正变成最小权限 worker
+  - 继续收紧高权限 profile 的默认能力面，并为 subagent worker 增加更细粒度的显式授权模板
 - 更高层编排原语（可选）：
   - `subagent_run`：`spawn + wait/poll`，支持超时（以及返回“仍在运行”的引用，避免阻塞工具执行）。
   - `subagent_cancel` / `subagent_kill`：对子会话的 pending/running 节点执行 stop/deny 等操作（需定义清晰的语义：软取消/硬终止、对已完成节点的幂等行为、审计字段等）。

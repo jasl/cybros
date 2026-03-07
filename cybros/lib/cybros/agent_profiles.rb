@@ -46,6 +46,13 @@ module Cybros
       "repair" => 0,
     }.freeze
 
+    PHASE_0_AUTO_ALLOW_MEMORY_AND_SKILLS = {
+      "coding" => true,
+      "review" => true,
+      "subagent" => false,
+      "repair" => true,
+    }.freeze
+
     PROMPT_INJECTION_SPECS = {
       "coding" => [
         { type: "repo_docs", filenames: ["AGENTS.md"], max_total_bytes: 50_000, order: 10, prompt_modes: [:full] },
@@ -98,6 +105,7 @@ module Cybros
         include_skill_locations: false,
         directives_config: nil,
         system_prompt_section_overrides: {},
+        phase_0_auto_allow_memory_and_skills: phase_0_auto_allow_memory_and_skills(key),
         input_policy: input_policy(key),
       }
     rescue StandardError
@@ -109,6 +117,7 @@ module Cybros
         include_skill_locations: false,
         directives_config: nil,
         system_prompt_section_overrides: {},
+        phase_0_auto_allow_memory_and_skills: phase_0_auto_allow_memory_and_skills(DEFAULT_PROFILE),
         input_policy: input_policy(DEFAULT_PROFILE),
       }
     end
@@ -141,6 +150,12 @@ module Cybros
       end
     rescue StandardError
       []
+    end
+
+    def phase_0_auto_allow_memory_and_skills(profile)
+      PHASE_0_AUTO_ALLOW_MEMORY_AND_SKILLS.fetch(normalize(profile), true)
+    rescue StandardError
+      true
     end
 
     def deep_dup_value(value)

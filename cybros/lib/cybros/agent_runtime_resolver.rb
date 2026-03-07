@@ -294,14 +294,20 @@ module Cybros
         end
 
       tool_policy =
-        phase_0_tool_policy(
-          base_tool_policy:
+        begin
+          profiled_policy =
             AgentCore::Resources::Tools::Policy::Profiled.new(
               allowed: Array(definition.fetch(:tool_patterns)),
               delegate: delegate,
               tool_groups: nil,
-            ),
-        )
+            )
+
+          if definition.fetch(:phase_0_auto_allow_memory_and_skills, true)
+            phase_0_tool_policy(base_tool_policy: profiled_policy)
+          else
+            profiled_policy
+          end
+        end
 
       provider ||= llm_selection.fetch(:provider)
       tools_registry ||= build_tools_registry
