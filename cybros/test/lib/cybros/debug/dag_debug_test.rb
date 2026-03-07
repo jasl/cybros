@@ -198,6 +198,46 @@ class Cybros::CLI::DAGDebugTest < ActiveSupport::TestCase
     assert summary.fetch("incoming_edges").any? { |edge| edge.fetch("from_node_id") == user.id }
   end
 
+  test "turn_execution_snapshot exports projected execution diagnostics for a target node" do
+    clear_enqueued_jobs
+    conversation = create_conversation!
+    turn = conversation.append_user_message!(content: "Hello", diagnostic_level: "debug")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    task =
+      conversation.root_graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::RUNNING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        metadata: {},
+        body_input: {
+          "name" => "memory_search",
+          "requested_name" => "memory_search",
+          "tool_call_id" => "tc_1",
+          "arguments" => {},
+          "arguments_summary" => "{}",
+        },
+      )
+
+    DAG::NodeEventStream.new(node: task).activity_started!(
+      activity_id: "task:#{task.id}",
+      activity_kind: "tool_call",
+      phase: "execution",
+      diagnostic_level: "debug",
+      data: { "executor" => "task_executor" },
+    )
+
+    snapshot = Cybros::CLI::DAGDebug.turn_execution_snapshot(agent.id)
+    expected = conversation.turn_execution_for_node_id(agent.id)
+
+    assert_equal expected, snapshot
+    assert_equal "debug", snapshot.fetch("diagnostic_level")
+    assert_equal "task:#{task.id}", snapshot.dig("activities", 0, "activity_id")
+    assert_equal "task_executor", snapshot.dig("activities", 0, "diagnostics", "last_event_data", "executor")
+  end
+
   test "context_snapshot returns context closure and built prompt summary" do
     clear_enqueued_jobs
     conversation = create_conversation!

@@ -38,4 +38,19 @@ class DagDebugCommandStatusTest < ActiveSupport::TestCase
 
     assert_equal 1, status
   end
+
+  test "command_exit_status keeps execution exports observation-only" do
+    result = {
+      "turn_id" => "turn_1",
+      "status" => "failed",
+      "phase" => "terminal",
+      "activities" => [
+        { "activity_id" => "task:1", "status" => "failed" },
+      ],
+    }
+
+    status = Cybros::CLI::DAGDebug.command_exit_status(command: "execution", result: result)
+
+    assert_equal 0, status
+  end
 end

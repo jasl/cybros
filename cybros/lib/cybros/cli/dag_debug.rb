@@ -42,6 +42,17 @@ module Cybros
           }
         end
 
+        def turn_execution_snapshot(node_id)
+          node = fetch_node(node_id)
+          conversation = node.graph.attachable
+          raise Cybros::Error, "conversation_not_found" unless conversation.is_a?(Conversation)
+
+          execution = conversation.turn_execution_for_node_id(node.id)
+          raise Cybros::Error, "turn_execution_not_found" unless execution.is_a?(Hash)
+
+          execution
+        end
+
         def capture_node(node_id, execute: false, retry_first: false, unsafe_direct_execute: false)
           source_node = fetch_node(node_id)
           captured_calls = []

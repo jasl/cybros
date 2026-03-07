@@ -20,6 +20,8 @@ module DagDebugCLI
       run_context(argv)
     when "capture"
       run_capture(argv)
+    when "execution"
+      run_execution(argv)
     when "retry"
       run_retry(argv)
     when "smoke"
@@ -76,6 +78,19 @@ module DagDebugCLI
     end
 
     exit_with_result_status(command: "capture", result: result)
+  end
+
+  def run_execution(argv)
+    options = parse_common_flags(argv)
+    node_id = argv.shift.to_s
+    abort usage("execution requires <node_id>") if node_id.empty?
+
+    result = Cybros::CLI::DAGDebug.turn_execution_snapshot(node_id)
+    emit(result, json: options[:json]) do
+      pretty_execution(result)
+    end
+
+    exit_with_result_status(command: "execution", result: result)
   end
 
   def run_retry(argv)
@@ -205,6 +220,31 @@ module DagDebugCLI
     lines.join("\n")
   end
 
+  def pretty_execution(result)
+    lines = []
+    lines << "Turn: #{result.fetch("turn_id")} #{result.fetch("status")}/#{result.fetch("phase")} cursor=#{result.fetch("event_cursor", "(none)")}"
+    lines << "Diagnostic level: #{result.fetch("diagnostic_level", "standard")}"
+    summary = result.fetch("summary", {})
+    if summary.is_a?(Hash)
+      lines << "Summary: activities=#{summary.fetch("activity_count", 0)} running=#{summary.fetch("running_count", 0)} waiting=#{summary.fetch("awaiting_count", 0)} failed=#{summary.fetch("failed_count", 0)}"
+    end
+
+    lines << "Activities: #{Array(result.fetch("activities", [])).length}"
+      Array(result.fetch("activities", [])).each do |activity|
+        next unless activity.is_a?(Hash)
+
+        lines << "  [#{activity.fetch("sequence")}] #{activity.fetch("status")} #{activity.fetch("kind")} #{activity.fetch("title")}"
+        lines << "      activity_id=#{activity.fetch("activity_id", "(none)")} source_node_id=#{activity.fetch("source_node_id", "(none)")}"
+        if activity.dig("error", "summary").to_s.present?
+          lines << "      error=#{activity.dig("error", "summary")}"
+        end
+      if activity.fetch("diagnostics", nil).is_a?(Hash)
+        lines << "      diagnostics=#{activity.fetch("diagnostics").inspect}"
+      end
+    end
+    lines.join("\n")
+  end
+
   def pretty_retry(result)
     lines = []
     lines << "Source node: #{result.dig("source_node", "id")} (#{result.dig("source_node", "state")})"
@@ -240,6 +280,7 @@ module DagDebugCLI
         bin/rails runner script/dag_debug.rb inspect <node_id> [--json]
         bin/rails runner script/dag_debug.rb context <node_id> [--json]
         bin/rails runner script/dag_debug.rb capture <node_id> [--execute] [--retry-first] [--json]
+        bin/rails runner script/dag_debug.rb execution <node_id> [--json]
         bin/rails runner script/dag_debug.rb retry <node_id> [--json]
         bin/rails runner script/dag_debug.rb smoke --conversation-id <id> --model-ref <ref> --prompt <text> [--json]
     USAGE
