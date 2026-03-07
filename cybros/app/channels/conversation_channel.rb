@@ -160,20 +160,12 @@ class ConversationChannel < ApplicationCable::Channel
       return if @node_id.blank?
 
       after_cursor = @cursor.to_s
-      output_preview = @conversation.output_preview_for_node_id(@node_id)
-      turn_id = @conversation.turn_id_for_node_id(@node_id).to_s
 
       events =
-        @conversation.node_event_page_for(
+        @conversation.execution_event_page_for_node_id(
           @node_id,
           after_event_id: @cursor,
           limit: 200,
-          kinds: [
-            "output_delta",
-            "output_compacted",
-            "progress",
-            "log",
-          ],
         )
 
       if events.empty?
@@ -206,6 +198,7 @@ class ConversationChannel < ApplicationCable::Channel
           kind = event_hash.fetch("kind").to_s
           text = event_hash.fetch("text").to_s
           if kind == "output_compacted" && text.blank?
+            output_preview = @conversation.output_preview_for_node_id(event_hash.fetch("node_id"))
             text = output_preview.fetch("content", "").to_s
           end
           replay_kinds_counts[kind] += 1
@@ -213,8 +206,8 @@ class ConversationChannel < ApplicationCable::Channel
           envelope = {
             "type" => "node_event",
             "conversation_id" => @conversation.id.to_s,
-            "turn_id" => turn_id,
-            "node_id" => @node_id.to_s,
+            "turn_id" => event_hash.fetch("turn_id", nil).to_s,
+            "node_id" => event_hash.fetch("node_id").to_s,
             "event_id" => event_hash.fetch("event_id"),
             "kind" => kind,
             "text" => text,

@@ -559,10 +559,16 @@ class Conversation < ApplicationRecord
   end
 
   def cursor_for_existing_output(node_id)
+    message = message_for_node_id(node_id: node_id, mode: :preview)
+    run_state_cursor = message.dig("run_state", "event_cursor").to_s.presence
+    return run_state_cursor if run_state_cursor.present?
+
     preview = output_preview_for_node_id(node_id)
     return nil if preview.fetch("content", "").to_s.blank?
 
     latest_node_event_id_for(node_id)
+  rescue ActiveRecord::RecordNotFound
+    nil
   end
 
   def node_event_page_for(node_id, after_event_id:, limit:, kinds:)
@@ -572,6 +578,32 @@ class Conversation < ApplicationRecord
       limit: limit,
       kinds: Array(kinds).map(&:to_s),
     )
+  end
+
+  def execution_event_page_for_node_id(node_id, after_event_id:, limit:)
+    node = find_chat_lane_node!(node_id)
+
+    raw_limit = Integer(limit.to_s, exception: false)
+    raise ArgumentError, "limit must be an integer" if raw_limit.nil?
+    raise ArgumentError, "limit must be >= 1" if raw_limit < 1
+
+    scope = execution_event_scope_for_node(node).order(:id)
+    scope = scope.where("id > ?", after_event_id.to_s) if after_event_id.to_s.present?
+
+    scope
+      .limit([raw_limit, 200].min)
+      .select(:id, :node_id, :turn_id, :kind, :text, :payload, :created_at)
+      .map do |event|
+        {
+          "event_id" => event.id,
+          "node_id" => event.node_id,
+          "turn_id" => event.turn_id,
+          "kind" => event.kind,
+          "text" => event.text,
+          "payload" => event.payload,
+          "created_at" => event.created_at&.iso8601,
+        }
+      end
   end
 
   def append_user_message!(content:, model_ref: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
@@ -1061,6 +1093,33 @@ class Conversation < ApplicationRecord
       out = page.deep_dup
       out["messages"] = filter_queued_turn_messages(decorate_messages(out.fetch("messages", [])))
       out
+    end
+
+    def execution_event_scope_for_node(node)
+      output_scope =
+        root_graph.node_events.where(
+          node_id: node.id,
+          kind: [DAG::NodeEvent::OUTPUT_DELTA, DAG::NodeEvent::OUTPUT_COMPACTED],
+        )
+
+      task_node_ids =
+        root_graph.nodes.active
+          .where(
+            lane_id: node.lane_id,
+            turn_id: node.turn_id,
+            node_type: Messages::Task.node_type_key,
+          )
+          .pluck(:id)
+
+      return output_scope if task_node_ids.empty?
+
+      activity_scope =
+        root_graph.node_events.where(
+          node_id: task_node_ids,
+          kind: DAG::NodeEvent::ACTIVITY_EVENT_KINDS,
+        )
+
+      output_scope.or(activity_scope)
     end
 
     def fork_child_root_node!(mutations:, from_node:, user_content:)
