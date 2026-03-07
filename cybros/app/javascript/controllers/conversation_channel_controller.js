@@ -466,16 +466,6 @@ export default class extends Controller {
 
   #applyNodeEvent(bubble, event) {
     const kind = String(event.kind || "")
-    const progressEl = bubble.querySelector("[data-role='progress']")
-
-    if (kind === "progress" || kind === "log") {
-      if (!progressEl) return
-      const text = String(event.text || "").trim()
-      progressEl.textContent = text
-      if (text) progressEl.classList.remove("hidden")
-      else progressEl.classList.add("hidden")
-      return
-    }
 
     if (this.#isActivityEvent(kind)) return
 
@@ -483,7 +473,6 @@ export default class extends Controller {
     if (!textEl) return
 
     if (kind === "output_delta") {
-      progressEl?.classList.add("hidden")
       const delta = String(event.text || "")
       if (delta) textEl.appendChild(document.createTextNode(delta))
       return

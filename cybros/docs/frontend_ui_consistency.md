@@ -452,7 +452,7 @@ Core rule:
 Conversation UI uses a dual-channel model:
 
 - **Turbo Streams**: durable message DOM (append/replace/remove). Must be sufficient to reconstruct correct UI after refresh/reconnect.
-- **ActionCable**: best-effort acceleration for ephemeral progress + streaming deltas. It must be safe to lose without permanent drift.
+- **ActionCable**: best-effort acceleration for streamed text and execution refresh triggers. It must be safe to lose without permanent drift.
 
 Message DOM contracts (treated as API):
 
@@ -462,9 +462,14 @@ Message DOM contracts (treated as API):
 - Per-message wrapper: `id="message_<node_id>"`
 - Agent bubble selector: `[data-role="agent-bubble"][data-node-id="<node_id>"]`
 - Agent bubble subtargets (non-terminal messages):
-  - `[data-role="progress"]` for `progress/log` events (in-place update)
-  - `[data-role="text"]` for `output_delta/output_compacted` streaming
+  - `[data-role="run-state"]` for projected execution state rendered from durable `turn_execution`
+  - `[data-role="text"]` for `output_delta/output_compacted` text streaming
   - `[data-role="spinner"]`, `[data-role="error"]`
+
+Execution-progress rule:
+
+- `activity_*` cable events are not rendered as client-side mini state. They only identify the owning bubble and trigger a durable refresh/replay path.
+- assistant bubble execution UI must converge from projected `turn_execution`, not from ad-hoc `progress/log` text patches.
 
 Durability rule:
 

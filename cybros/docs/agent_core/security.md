@@ -46,16 +46,19 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 
 当前默认限制：
 
-- 禁止 nested spawn：subagent 会话内调用 `subagent_spawn` 会直接返回校验错误。
+- 禁止 nested spawn：subagent 会话内调用 `subagent_spawn` / `subagent_run` 会直接返回校验错误。
 - `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
+- `subagent_run` 已落地为 `spawn + child_graph.kick! + 初始 bounded snapshot`；`subagent_wait` 已落地为 bounded child snapshot + timeout-safe wait surface（超时返回成功快照，不抛 tool error）。
 - `subagent_poll` 做 parent ownership 强校验：只能读取 “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验），否则返回校验错误（避免越权读取）。
 - `subagent_poll.child_conversation_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- `subagent_wait` 继承相同的 parent ownership / UUID 校验约束。
 - debug / diagnostic mode 仅增加观察信息，不会隐式放宽 subagent worker 的工具权限。
+- `subagent_run.diagnostic_level = "debug"` 只会写入 child 初始 turn 的 execution diagnostics，不会改变 worker profile、tool policy、业务流转或执行结果。
 
 建议后续加强（未落地）：
 
-- 对 `subagent_spawn` 增加配额/速率限制（conversation/user/account scope 均可；以审计可回放为前提记录拒绝原因）。
-- 可选提供更高层编排原语（`subagent_run`/`subagent_cancel`/`subagent_kill`），但需要先定清语义（阻塞/超时/幂等/审计字段）。
+- 对 `subagent_spawn` / `subagent_run` 增加配额/速率限制（conversation/user/account scope 均可；以审计可回放为前提记录拒绝原因）。
+- 可选新增 `subagent_cancel` / `subagent_kill`，但需要先定清语义（阻塞/超时/幂等/审计字段）。
 
 ---
 
