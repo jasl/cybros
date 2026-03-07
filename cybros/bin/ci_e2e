@@ -12,6 +12,8 @@ echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"
 
 bundle exec ruby -v >/dev/null
+bun run build >/dev/null
+bun run build:css >/dev/null
 
 bin/rails runner - <<'RUBY'
 identity = Identity.find_by(email: "admin@example.com")
