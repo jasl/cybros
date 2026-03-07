@@ -862,31 +862,42 @@ module AgentCore
         def responses_content(msg)
           case msg.content
           when String
-            [{ "type" => "input_text", "text" => msg.content }]
+            [responses_text_part(role: msg.role, text: msg.content)]
           when Array
-            msg.content.filter_map { |block| responses_part(block) }
+            msg.content.filter_map { |block| responses_part(block, role: msg.role) }
           when nil
             []
           else
-            [{ "type" => "input_text", "text" => msg.content.to_s }]
+            [responses_text_part(role: msg.role, text: msg.content.to_s)]
           end
         end
 
-        def responses_part(block)
+        def responses_part(block, role:)
           case block
           when TextContent
-            { "type" => "input_text", "text" => block.text.to_s }
+            responses_text_part(role: role, text: block.text.to_s)
           when ImageContent
-            { "type" => "input_image", "image_url" => openai_image_url(block) }
+            if role == :assistant
+              responses_text_part(role: role, text: image_placeholder(block))
+            else
+              { "type" => "input_image", "image_url" => openai_image_url(block) }
+            end
           when DocumentContent
-            { "type" => "input_text", "text" => document_placeholder(block) }
+            responses_text_part(role: role, text: document_placeholder(block))
           when AudioContent
-            { "type" => "input_text", "text" => audio_placeholder(block) }
+            responses_text_part(role: role, text: audio_placeholder(block))
           when ToolUseContent, ToolResultContent
-            { "type" => "input_text", "text" => block.to_h.to_s }
+            responses_text_part(role: role, text: block.to_h.to_s)
           else
-            { "type" => "input_text", "text" => block.to_s }
+            responses_text_part(role: role, text: block.to_s)
           end
+        end
+
+        def responses_text_part(role:, text:)
+          {
+            "type" => role == :assistant ? "output_text" : "input_text",
+            "text" => text.to_s,
+          }
         end
 
         def validate_responses_client_method!(client, method_name)
@@ -983,6 +994,18 @@ module AgentCore
             "[document: #{mime || "unknown"} base64]"
           else
             "[document]"
+          end
+        end
+
+        def image_placeholder(block)
+          mime = block.media_type.to_s.presence || "unknown"
+          case block.source_type
+          when :url
+            "[image: #{mime} url=#{block.url}]"
+          when :base64
+            "[image: #{mime} base64]"
+          else
+            "[image]"
           end
         end
 

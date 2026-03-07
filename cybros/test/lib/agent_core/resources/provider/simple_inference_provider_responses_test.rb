@@ -87,6 +87,43 @@ class SimpleInferenceProviderResponsesTest < ActiveSupport::TestCase
     assert_equal [{ "type" => "input_text", "text" => "hi" }], request[:input].first.fetch("content")
   end
 
+  test "streaming responses encodes assistant history as output_text content" do
+    client =
+      FakeResponsesClient.new(
+        events: [
+          { "type" => "response.output_text.delta", "delta" => "Hi" },
+          { "type" => "response.completed", "response" => { "usage" => { "input_tokens" => 1, "output_tokens" => 1 } } },
+        ],
+      )
+
+    provider =
+      AgentCore::Resources::Provider::SimpleInferenceProvider.new(
+        client: client,
+        wire_api: :responses,
+      )
+
+    provider.chat(
+      messages: [
+        AgentCore::Message.new(role: :user, content: "你是什么模型？"),
+        AgentCore::Message.new(role: :assistant, content: "我是一个 AI 助手。"),
+        AgentCore::Message.new(role: :user, content: "你有什么能力？"),
+      ],
+      model: "m",
+      tools: nil,
+      stream: true,
+    ).to_a
+
+    request = client.calls.fetch(0)
+    assert_equal(
+      [
+        { "role" => "user", "content" => [{ "type" => "input_text", "text" => "你是什么模型？" }] },
+        { "role" => "assistant", "content" => [{ "type" => "output_text", "text" => "我是一个 AI 助手。" }] },
+        { "role" => "user", "content" => [{ "type" => "input_text", "text" => "你有什么能力？" }] },
+      ],
+      request[:input],
+    )
+  end
+
   test "streaming responses defaults store to false" do
     client =
       FakeResponsesClient.new(
