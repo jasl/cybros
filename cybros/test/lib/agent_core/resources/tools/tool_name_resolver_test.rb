@@ -80,7 +80,7 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
   end
 
   def test_resolve_default_aliases_include_subagent_tools
-    tools = ["subagent_spawn", "subagent_poll"]
+    tools = ["subagent_spawn", "subagent_poll", "subagent_run", "subagent_wait"]
     include_check = ->(name) { tools.include?(name) }
 
     res =
@@ -101,6 +101,26 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
       )
 
     assert_equal "subagent_poll", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent.run",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_run", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent-wait",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_wait", res.resolved_name
     assert_equal :alias, res.method
   end
 end

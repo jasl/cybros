@@ -189,6 +189,8 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 
 - `subagent_spawn`
 - `subagent_poll`
+- `subagent_run`
+- `subagent_wait`
 
 并以 `conversations.metadata["agent"]` 控制 child conversation 的 `agent_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
 
@@ -196,13 +198,17 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 
 - 禁止 nested spawn（subagent 内再 spawn 直接报错）
 - `subagent_poll.limit_turns` 最大 50，且 transcript_lines 为预览用途（单行会做 bytes 截断）
+- `subagent_run` = `spawn + child_graph.kick! + 初始 snapshot`；返回字段稳定包含 `child_conversation_id`、`child_graph_id`、`status`、`counts`、`leaf`、`transcript_lines`、`diagnostic_level`
+- `subagent_wait` 返回 bounded child snapshot，并支持 `timeout_ms`；超时时仍返回成功结果，但会带 `wait_status = "timeout"` / `timed_out = true`
+- `subagent_run.diagnostic_level` 可显式传 `standard|debug`，只会写入 child 初始 turn 的 execution diagnostics；不会放宽 `subagent` worker 的默认窄权限边界
 - `subagent_poll` 会校验 parent ownership：只能 poll “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验）；不满足会返回 validation error
 - `subagent_poll.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）
+- `subagent_wait` 继承相同的 ownership / UUID 校验约束
 
 已知限制 / 建议后续（未落地）：
 
-- 建议为 `subagent_spawn` 加入配额/速率限制（避免滥用造成大量 child 会话）。
-- 可选新增更高层编排原语：`subagent_run`（spawn+wait/超时）、`subagent_cancel`/`subagent_kill`（终止/取消子会话）。
+- 建议为 `subagent_spawn` / `subagent_run` 加入配额/速率限制（避免滥用造成大量 child 会话）。
+- 可选新增 `subagent_cancel` / `subagent_kill`（终止/取消子会话）。
 
 ### 3.2 Skills tools
 

@@ -9,6 +9,24 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     @poll_tool ||= Cybros::Subagent::Tools.build.find { |t| t.name == "subagent_poll" }
   end
 
+  def run_tool
+    @run_tool ||= Cybros::Subagent::Tools.build.find { |t| t.name == "subagent_run" }
+  end
+
+  def wait_tool
+    @wait_tool ||= Cybros::Subagent::Tools.build.find { |t| t.name == "subagent_wait" }
+  end
+
+  test "build exposes low-level and high-level subagent tools" do
+    names = Cybros::Subagent::Tools.build.map(&:name).sort
+
+    assert_equal %w[subagent_poll subagent_run subagent_spawn subagent_wait], names
+    assert spawn_tool
+    assert poll_tool
+    assert run_tool
+    assert wait_tool
+  end
+
   test "subagent_spawn creates child conversation and seeds a minimal executable turn" do
     parent =
       create_conversation!(
