@@ -196,7 +196,7 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 
 - 禁止 nested spawn（subagent 内再 spawn 直接报错）
 - `subagent_poll.limit_turns` 最大 50，且 transcript_lines 为预览用途（单行会做 bytes 截断）
-- `subagent_poll` 会校验 parent ownership：只能 poll “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `subagent.parent_*` 校验）；不满足会返回 validation error
+- `subagent_poll` 会校验 parent ownership：只能 poll “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验）；不满足会返回 validation error
 - `subagent_poll.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）
 
 已知限制 / 建议后续（未落地）：

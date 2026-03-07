@@ -419,7 +419,7 @@ Implement a unified composer-adjacent status surface:
 
 Prefer extracting a reusable partial/component rather than scattering more alert-only state into `show.html.erb`.
 
-Do not couple this composer rail to future assistant-bubble tool progress. It should remain a separate conversation/composer state surface.
+Do not couple this composer rail to future assistant-bubble execution progress. It should remain a separate conversation/composer state surface.
 
 ### Task 9 / Step 4: Run test to verify it passes
 

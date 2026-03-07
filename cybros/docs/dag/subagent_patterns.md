@@ -30,6 +30,12 @@
 - `subagent_spawn`：创建 child `Conversation/Graph`，写入 metadata 契约，并在 child 图中生成最小可执行 turn（`developer_message` finished + `user_message` finished + `agent_message` pending + `sequence` edges）。
 - `subagent_poll`：基于 child id 返回子会话状态（`running/pending/awaiting_approval/idle/missing`）、main lane leaf、以及 bounded transcript 预览（默认 10 turns，最大 50）。
 
+当前能力定位应明确为 **MVP 原语**，不是完整的多代理 orchestration：
+
+- `subagent_spawn` 只负责创建并 seed child conversation
+- `subagent_spawn` 当前不会自动 `kick!` child graph，也不会等待 child 跑到稳定态
+- 父图若要真正“等待/聚合” child 结果，仍需要 app/executor 侧继续编排
+
 child conversation metadata 契约（写入 `conversations.metadata`）：
 
 ```json
@@ -52,27 +58,35 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 
 - `AgentCore::DAG.runtime_resolver` 会读取 `conversation.metadata["agent"]`，并用 `Policy::Profiled` 包裹 base policy，使 `agent_profile/context_turns` 立刻影响该会话的工具可见性与授权判定。
 
+当前已知 caveat：
+
+- phase 0 runtime 仍会在 profile delegate 外层 auto-allow `memory_*` / `skills_*`
+- 因此 `subagent` profile 目前应视为“较小能力面”的 MVP，而不是“零工具、强隔离”的正式 worker profile
+
 安全约束（当前默认）：
 
 - 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 为 `subagent` 或以 `subagent:` 开头时，`subagent_spawn` 直接返回错误。
 - bounded 输出（避免 tool 输出膨胀）：
   - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
   - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
-- `subagent_poll` 目前按 `child_conversation_id` 直接读取会话，不校验其是否为“本会话 spawn 的 child”；如需更强隔离，可在工具层增加 parent 校验或通过 tool policy 限制可见性。
-- profiles 是“额外收敛层”：tool 可见性与授权结果取决于 `agent_profile` 与 app 注入的 base policy 的 **交集**（runtime 默认仍可保持 deny-by-default）。
+- `subagent_poll` 会做 parent ownership 强校验：只能读取“本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 一致性校验）。
+- `subagent_poll.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- profiles 仍然是主要收敛层，但当前 phase 0 的 `memory_*` / `skills_*` auto-allow 例外意味着它还不是绝对交集语义。
 - `context_turns` 仅接受 1..1000；非法值会触发校验错误（避免 silent coercion）。
 
 ### 1.2) 未来增强（建议，未落地）
 
-下述能力当前 **已在文档中定稿**，但为了保持 P1 的实现最小可用与代码库纯粹，暂未实现（需要时再做）：
+下述能力当前仍未落地：
 
-- `subagent_poll` 的 **parent ownership 强校验**：
-  - 目标：避免模型拿到任意 `child_conversation_id` 就能读取预览（即便只是 bounded transcript）。
-  - 建议实现：在 `subagent_poll` 中读取 `child.metadata["subagent"]["parent_conversation_id"]`，并与当前执行上下文的 parent conversation id 做一致性校验；不一致则返回校验错误（或 `missing`）。
-  - 过渡策略：在落地前，通过 tool policy/ACL（或 controller 层）限制 `subagent_poll` 的可见性与调用方范围。
+- 自动推进 child conversation：
+  - `subagent_spawn` 之后自动 `kick!` child graph，或由更高层原语负责触发执行
+- 更正式的 parent-child 关系建模：
+  - 当前 parent 信息只写在 `conversations.metadata["subagent"]`
+  - `Conversation.parent_conversation` / `child_conversations` 关联尚未被 `subagent_spawn` 正式使用
 - 输入校验/防滥用：
-  - `child_conversation_id` 做 UUID 格式校验（避免无效 uuid 触发数据库层异常/噪声；也能更快 fail-fast）。
-  - subagent spawn 配额：限制单个 parent conversation 的 spawn 数量/频率（例如 per minute/per day），并记录可审计的拒绝原因（rate_limited/quota_exceeded）。
+  - subagent spawn 配额：限制单个 parent conversation 的 spawn 数量/频率（例如 per minute/per day），并记录可审计的拒绝原因（rate_limited/quota_exceeded）
+- 更强的 worker 隔离：
+  - 收紧 phase 0 `memory_*` / `skills_*` auto-allow，使 `subagent` profile 真正变成最小权限 worker
 - 更高层编排原语（可选）：
   - `subagent_run`：`spawn + wait/poll`，支持超时（以及返回“仍在运行”的引用，避免阻塞工具执行）。
   - `subagent_cancel` / `subagent_kill`：对子会话的 pending/running 节点执行 stop/deny 等操作（需定义清晰的语义：软取消/硬终止、对已完成节点的幂等行为、审计字段等）。
@@ -81,7 +95,7 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 
 v1 不提供跨图 edges；推荐由 App executor 定义同步策略：
 
-- **同步等待**：父图 task executor 创建子图并执行到稳定（或等待 child 图 leaf 完成），再返回结果给父图。
+- **同步等待**：父图 task executor 创建子图、显式触发 child 执行，并等待 child 图 leaf 完成，再返回结果给父图。
 - **异步等待**：父图 task executor 仅创建/触发 child 图执行，然后返回一个引用；父图后续节点可轮询 child 图状态，或订阅 child 的 node events/graph events 做回调式推进。
 
 ## 3) 事件与回放
@@ -102,3 +116,8 @@ v1 不提供跨图 edges；推荐由 App executor 定义同步策略：
 - 父图 `task` 创建 child Conversation/Graph
 - 父图 `agent_message` 用 bounded API 读取子图 transcript 并输出总结
 - 父/子两张图的 `GraphAudit.scan` 均为空
+
+另见：
+
+- `test/lib/cybros/subagent/tools_test.rb`
+- `test/scenarios/dag/subagent_tools_profile_enforcement_flow_test.rb`
