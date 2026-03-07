@@ -25,6 +25,10 @@ module DAG
       messages.last&.fetch("node_id", nil)
     end
 
+    def allocate_activity_sequence!
+      self.class.allocate_activity_sequence!(graph_id: graph_id, lane_id: lane_id, turn_id: id)
+    end
+
     def message_nodes(mode: :preview, include_deleted: false)
       candidate_types = graph.transcript_candidate_node_types
       return [] if candidate_types.empty?
@@ -43,6 +47,27 @@ module DAG
     end
 
     private
+
+      def self.allocate_activity_sequence!(graph_id:, lane_id:, turn_id:)
+        now = Time.current
+
+        with_connection do |connection|
+          sql = <<~SQL
+            UPDATE dag_turns
+               SET next_activity_seq = next_activity_seq + 1,
+                   updated_at = #{connection.quote(now)}
+             WHERE graph_id = #{connection.quote(graph_id)}
+               AND lane_id = #{connection.quote(lane_id)}
+               AND id = #{connection.quote(turn_id)}
+            RETURNING next_activity_seq
+          SQL
+
+          value = connection.select_value(sql)
+          raise ActiveRecord::RecordNotFound, "turn not found for activity sequence allocation" if value.nil?
+
+          value.to_i
+        end
+      end
 
       def lane_must_match_graph
         return if graph_id.blank? || lane_id.blank?

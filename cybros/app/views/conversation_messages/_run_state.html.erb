@@ -1,0 +1,98 @@
+<% run_state = local_assigns.fetch(:run_state, {}) %>
+<% run_state = {} unless run_state.is_a?(Hash) %>
+<% status = run_state.fetch("status", "").to_s %>
+<% phase = run_state.fetch("phase", "").to_s %>
+<% summary = run_state.fetch("summary", {}) %>
+<% summary = {} unless summary.is_a?(Hash) %>
+<% hidden_summary = run_state.fetch("hidden_summary", {}) %>
+<% hidden_summary = {} unless hidden_summary.is_a?(Hash) %>
+<% activities = Array(run_state.fetch("activities", [])).select { |activity| activity.is_a?(Hash) } %>
+<% latest_message = summary.fetch("latest_message", "").to_s %>
+<% hidden_failed = hidden_summary.fetch("failed_count", 0).to_i %>
+<% hidden_awaiting = hidden_summary.fetch("awaiting_count", 0).to_i %>
+<% summary_bits = [] %>
+<% summary_bits << "#{summary.fetch("running_count", 0).to_i} running" if summary.fetch("running_count", 0).to_i.positive? %>
+<% summary_bits << "#{summary.fetch("awaiting_count", 0).to_i} waiting" if summary.fetch("awaiting_count", 0).to_i.positive? %>
+<% summary_bits << "#{summary.fetch("failed_count", 0).to_i} failed" if summary.fetch("failed_count", 0).to_i.positive? %>
+<% summary_bits << "#{summary.fetch("activity_count", activities.length).to_i} visible" %>
+<% status_badge_class =
+     case status
+     when "running" then "badge-info"
+     when "awaiting_approval" then "badge-warning"
+     when "failed", "stopped" then "badge-error"
+     else "badge-ghost"
+     end %>
+
+<div data-role="run-state" class="rounded-2xl border border-base-300/80 bg-base-200/40 px-4 py-3">
+  <div class="flex flex-wrap items-center justify-between gap-2" data-role="run-state-summary">
+    <div class="flex flex-wrap items-center gap-2">
+      <span class="badge badge-sm <%= status_badge_class %>"><%= status.humanize.presence || "Running" %></span>
+      <span class="text-xs font-medium uppercase tracking-[0.16em] opacity-60"><%= phase.humanize.presence || "Execution" %></span>
+      <span class="text-xs opacity-70"><%= latest_message.presence || "Execution in progress" %></span>
+    </div>
+    <span class="text-[11px] opacity-55"><%= summary_bits.join(" · ") %></span>
+  </div>
+
+  <% if hidden_failed.positive? || hidden_awaiting.positive? %>
+    <% hidden_bits = [] %>
+    <% hidden_bits << pluralize(hidden_failed, "hidden failure") if hidden_failed.positive? %>
+    <% hidden_bits << pluralize(hidden_awaiting, "hidden approval wait") if hidden_awaiting.positive? %>
+    <div data-role="run-state-hidden-summary" class="mt-2 text-xs text-warning">
+      <%= hidden_bits.join(" · ") %>
+    </div>
+  <% end %>
+
+  <% if activities.any? %>
+    <ol class="mt-3 space-y-2">
+      <% activities.each do |activity| %>
+        <% activity_status = activity.fetch("status", "").to_s %>
+        <% activity_phase = activity.fetch("phase", "").to_s %>
+        <% activity_title = activity.fetch("title", "").to_s %>
+        <% input_preview = activity.fetch("input_preview", "").to_s %>
+        <% output_preview = activity.fetch("output_preview", "").to_s %>
+        <% error_summary = activity.dig("error", "summary").to_s %>
+        <% activity_badge_class =
+             case activity_status
+             when "running" then "badge-info"
+             when "awaiting_approval" then "badge-warning"
+             when "failed", "stopped" then "badge-error"
+             when "completed" then "badge-success"
+             else "badge-ghost"
+             end %>
+        <% detail =
+             if activity_status == "awaiting_approval"
+               "Waiting for approval"
+             elsif input_preview.present?
+               input_preview.truncate(120)
+             elsif output_preview.present?
+               output_preview.truncate(120)
+             else
+               ""
+             end %>
+
+        <li data-role="run-state-activity"
+            data-activity-status="<%= activity_status %>"
+            data-activity-kind="<%= activity.fetch("kind", "").to_s %>"
+            class="rounded-2xl border border-base-300/80 bg-base-100/80 px-3 py-2">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="text-sm font-medium"><%= activity_title %></div>
+              <div class="text-[11px] opacity-60">
+                #<%= activity.fetch("sequence") %> · <%= activity_phase.humanize.presence || "Execution" %>
+              </div>
+            </div>
+            <span class="badge badge-sm <%= activity_badge_class %>"><%= activity_status.humanize.presence || "Running" %></span>
+          </div>
+
+          <% if detail.present? %>
+            <div data-role="run-state-activity-detail" class="mt-2 text-xs opacity-70"><%= detail %></div>
+          <% end %>
+
+          <% if error_summary.present? %>
+            <div data-role="run-state-diagnostic" class="mt-2 text-xs text-error"><%= error_summary %></div>
+          <% end %>
+        </li>
+      <% end %>
+    </ol>
+  <% end %>
+</div>

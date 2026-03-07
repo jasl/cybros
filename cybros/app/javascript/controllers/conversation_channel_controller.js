@@ -45,6 +45,8 @@ export default class extends Controller {
     this.pendingNodeStateByNodeId = new Map()
     this.pendingFlushTimerByNodeId = new Map()
     this.postAppendRefreshTimerByNodeId = new Map()
+    this.activityRefreshTimerByNodeId = new Map()
+    this.pendingTurnRefreshTimerByTurnId = new Map()
     this.composerStatusRefreshTimer = null
     this.lastTailAgentNodeId = this.#tailAgentNodeId()
     this.mutationObserver = new MutationObserver((mutations) => this.#onMutations(mutations))
@@ -88,9 +90,17 @@ export default class extends Controller {
     for (const id of this.postAppendRefreshTimerByNodeId.values()) {
       window.clearTimeout(id)
     }
+    for (const id of this.activityRefreshTimerByNodeId.values()) {
+      window.clearTimeout(id)
+    }
+    for (const id of this.pendingTurnRefreshTimerByTurnId.values()) {
+      window.clearTimeout(id)
+    }
     if (this.composerStatusRefreshTimer) window.clearTimeout(this.composerStatusRefreshTimer)
     this.pendingFlushTimerByNodeId.clear()
     this.postAppendRefreshTimerByNodeId.clear()
+    this.activityRefreshTimerByNodeId.clear()
+    this.pendingTurnRefreshTimerByTurnId.clear()
     this.composerStatusRefreshTimer = null
     this.pendingEventsByNodeId.clear()
     this.pendingNodeStateByNodeId.clear()
@@ -162,15 +172,24 @@ export default class extends Controller {
       if (this.cursor && eventId && compareEventIds(eventId, this.cursor) <= 0) return
 
       const nodeId = String(data.node_id || "")
-      const bubble = this.#findAgentBubble(nodeId)
+      const kind = String(data.kind || "")
+      const bubble = this.#findAgentBubbleForEvent(data)
       if (bubble) {
         this.#applyNodeEvent(bubble, data)
-        if (String(data.kind || "") === "output_delta") {
-          this.activeNodeId = nodeId
+        const bubbleNodeId = String(bubble.getAttribute("data-node-id") || nodeId)
+        if (kind === "output_delta") {
+          this.activeNodeId = bubbleNodeId
           this.#showSpinner(bubble)
           this.#showStop()
+        } else if (this.#isActivityEvent(kind)) {
+          this.activeNodeId = bubbleNodeId
+          this.#showSpinner(bubble)
+          this.#showStop()
+          this.#scheduleActivityRefresh(bubbleNodeId)
         }
         this.#maybeScrollToBottom()
+      } else if (this.#isActivityEvent(kind)) {
+        this.#scheduleTurnRefresh(String(data.turn_id || ""))
       } else if (nodeId) {
         this.#bufferNodeEvent(nodeId, data)
       }
@@ -282,6 +301,33 @@ export default class extends Controller {
         this.#refreshMessage(nodeId)
       }, 750)
     this.postAppendRefreshTimerByNodeId.set(nodeId, timerId)
+  }
+
+  #scheduleActivityRefresh(nodeId) {
+    if (!nodeId) return
+    if (this.activityRefreshTimerByNodeId.has(nodeId)) return
+
+    const timerId =
+      window.setTimeout(() => {
+        this.activityRefreshTimerByNodeId.delete(nodeId)
+        this.#refreshMessage(nodeId, { force: true })
+      }, 100)
+    this.activityRefreshTimerByNodeId.set(nodeId, timerId)
+  }
+
+  #scheduleTurnRefresh(turnId) {
+    if (!turnId) return
+    if (this.pendingTurnRefreshTimerByTurnId.has(turnId)) return
+
+    const timerId =
+      window.setTimeout(() => {
+        this.pendingTurnRefreshTimerByTurnId.delete(turnId)
+        const bubble = this.#findAgentBubbleByTurnId(turnId)
+        const nodeId = String(bubble?.getAttribute("data-node-id") || "")
+        if (nodeId) this.#refreshMessage(nodeId, { force: true })
+      }, 100)
+
+    this.pendingTurnRefreshTimerByTurnId.set(turnId, timerId)
   }
 
   #refreshMessage(nodeId, { force = false } = {}) {
@@ -431,6 +477,8 @@ export default class extends Controller {
       return
     }
 
+    if (this.#isActivityEvent(kind)) return
+
     const textEl = bubble.querySelector("[data-role='text']")
     if (!textEl) return
 
@@ -452,6 +500,24 @@ export default class extends Controller {
     return this.element.querySelector(selector)
   }
 
+  #findAgentBubbleByTurnId(turnId) {
+    if (!turnId) return null
+    const selector = `[data-role="agent-bubble"][data-turn-id="${CSS.escape(turnId)}"]`
+    return this.element.querySelector(selector)
+  }
+
+  #findAgentBubbleForEvent(event) {
+    const nodeId = String(event.node_id || "")
+    const bubble = this.#findAgentBubble(nodeId)
+    if (bubble) return bubble
+
+    if (this.#isActivityEvent(String(event.kind || ""))) {
+      return this.#findAgentBubbleByTurnId(String(event.turn_id || ""))
+    }
+
+    return null
+  }
+
   #tailAgentBubble() {
     const bubbles = Array.from(this.element.querySelectorAll('[data-role="agent-bubble"][data-node-id]'))
     return bubbles[bubbles.length - 1] || null
@@ -459,6 +525,17 @@ export default class extends Controller {
 
   #tailAgentNodeId() {
     return String(this.#tailAgentBubble()?.getAttribute("data-node-id") || "")
+  }
+
+  #isActivityEvent(kind) {
+    return [
+      "activity_planned",
+      "activity_started",
+      "activity_updated",
+      "activity_waiting",
+      "activity_finished",
+      "activity_failed",
+    ].includes(String(kind || ""))
   }
 
   #refreshTailActionPolicies() {

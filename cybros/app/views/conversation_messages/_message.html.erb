@@ -1,5 +1,6 @@
 <% node_id = message.fetch("node_id").to_s %>
 <% type = message.fetch("node_type").to_s %>
+<% turn_id = message.fetch("turn_id", "").to_s %>
 <% state = message.fetch("state", "").to_s %>
 <% payload = message.fetch("payload", {}) %>
 <% payload = {} unless payload.is_a?(Hash) %>
@@ -81,6 +82,7 @@
         <div
           data-role="agent-bubble"
           data-node-id="<%= node_id %>"
+          data-turn-id="<%= turn_id %>"
           data-node-state="<%= state %>"
           data-action-policy="<%= action_policy_json %>"
           <% if run_state_json.present? %>
@@ -100,8 +102,10 @@
             </div>
           <% else %>
             <% spinner_hidden = !%w[pending running].include?(state) %>
-            <div data-role="progress" class="text-xs opacity-60 mb-1 hidden"></div>
-            <span data-role="text" class="whitespace-pre-wrap text-sm leading-relaxed"><%= preview %></span>
+            <% if run_state.any? %>
+              <%= render "conversation_messages/run_state", run_state: run_state %>
+            <% end %>
+            <span data-role="text" class="block whitespace-pre-wrap text-sm leading-relaxed <%= run_state.any? ? "mt-3" : "" %>"><%= preview %></span>
             <span data-role="spinner" class="loading loading-dots loading-xs ml-1 align-middle <%= spinner_hidden ? "hidden" : "" %>"></span>
           <% end %>
           <div data-role="error" class="mt-2 text-sm text-error hidden"></div>

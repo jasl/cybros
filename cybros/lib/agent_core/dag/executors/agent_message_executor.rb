@@ -547,6 +547,7 @@ module AgentCore
           def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:)
             graph = node.graph
             tool_policy = runtime.tool_policy
+            diagnostic_level = diagnostic_level_for(node)
 
             tool_calls = message.tool_calls
             tool_loop_metadata = {}
@@ -683,6 +684,16 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                  emit_failed_activity!(
+                    task: task,
+                    phase: planned_phase_for(task),
+                    diagnostic_level: diagnostic_level,
+                    data: {
+                      "reason" => "invalid_args",
+                      "error" => tool_error.text.to_s,
+                    },
+                  )
                   next
                 end
 
@@ -714,6 +725,16 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                  emit_failed_activity!(
+                    task: task,
+                    phase: planned_phase_for(task),
+                    diagnostic_level: diagnostic_level,
+                    data: {
+                      "reason" => "tool_not_found",
+                      "error" => tool_error.text.to_s,
+                    },
+                  )
                   next
                 end
 
@@ -777,6 +798,16 @@ module AgentCore
 
                       m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                       m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                      emit_failed_activity!(
+                        task: task,
+                        phase: planned_phase_for(task),
+                        diagnostic_level: diagnostic_level,
+                        data: {
+                          "reason" => "invalid_args",
+                          "error" => tool_error.text.to_s,
+                        },
+                      )
                       next
                     end
                   end
@@ -800,6 +831,7 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
 
                   tasks_created += 1
                 when :confirm
@@ -852,6 +884,16 @@ module AgentCore
 
                       m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                       m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                      emit_failed_activity!(
+                        task: task,
+                        phase: planned_phase_for(task),
+                        diagnostic_level: diagnostic_level,
+                        data: {
+                          "reason" => "invalid_args",
+                          "error" => tool_error.text.to_s,
+                        },
+                      )
                       next
                     end
                   end
@@ -887,6 +929,8 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: edge_type)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                  emit_waiting_activity!(task: task, diagnostic_level: diagnostic_level, data: approval)
 
                   tasks_created += 1
                 else
@@ -917,6 +961,16 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                  emit_failed_activity!(
+                    task: task,
+                    phase: "authorization",
+                    diagnostic_level: diagnostic_level,
+                    data: {
+                      "reason" => decision.reason.to_s,
+                      "error" => tool_error.text.to_s,
+                    },
+                  )
                 end
               end
             end
@@ -1113,6 +1167,60 @@ module AgentCore
             }
           end
 
+          def emit_planned_activity!(task:, diagnostic_level:)
+            stream = ::DAG::NodeEventStream.new(node: task)
+            activity_kind = activity_kind_for_task(task)
+
+            stream.activity_planned!(
+              activity_id: activity_id_for(task),
+              activity_kind: activity_kind,
+              phase: planned_phase_for(task),
+              source_node_id: task.id,
+              diagnostic_level: diagnostic_level,
+            )
+          end
+
+          def emit_waiting_activity!(task:, diagnostic_level:, data:)
+            stream = ::DAG::NodeEventStream.new(node: task)
+
+            stream.activity_waiting!(
+              activity_id: activity_id_for(task),
+              activity_kind: activity_kind_for_task(task),
+              phase: "authorization",
+              source_node_id: task.id,
+              diagnostic_level: diagnostic_level,
+              data: data,
+            )
+          end
+
+          def emit_failed_activity!(task:, phase:, diagnostic_level:, data:)
+            stream = ::DAG::NodeEventStream.new(node: task)
+
+            stream.activity_failed!(
+              activity_id: activity_id_for(task),
+              activity_kind: activity_kind_for_task(task),
+              phase: phase,
+              source_node_id: task.id,
+              diagnostic_level: diagnostic_level,
+              data: data,
+            )
+          end
+
+          def activity_id_for(task)
+            "task:#{task.id}"
+          end
+
+          def activity_kind_for_task(task)
+            name = task.body_input.fetch("name", task.body_input.fetch("requested_name", "")).to_s
+            %w[compress_input compact_context].include?(name) ? "preflight_task" : "tool_call"
+          rescue StandardError
+            "tool_call"
+          end
+
+          def planned_phase_for(task)
+            activity_kind_for_task(task) == "preflight_task" ? "preflight" : "planning"
+          end
+
           def summarize_arguments(arguments)
             json = JSON.generate(arguments)
             AgentCore::Utils.truncate_utf8_bytes(json, max_bytes: 4_000)
@@ -1130,6 +1238,23 @@ module AgentCore
             )
           rescue StandardError
             nil
+          end
+
+          def diagnostic_level_for(node)
+            agent =
+              node.graph.nodes.active
+                .where(lane_id: node.lane_id, turn_id: node.turn_id, node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key])
+                .order(:id)
+                .last
+
+            level =
+              if agent&.metadata.is_a?(Hash)
+                agent.metadata.dig("turn_execution", "diagnostic_level")
+              end
+
+            level.to_s == "debug" ? "debug" : "standard"
+          rescue StandardError
+            "standard"
           end
 
           def deep_merge_metadata(a, b)

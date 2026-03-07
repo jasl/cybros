@@ -44,25 +44,30 @@ class Conversation::TurnExecutionProjector
     turn_execution_for_turn_id(node.turn_id)
   end
 
-  def run_state_for_node_id(node_id)
-    node = scoped_nodes.find_by(id: node_id.to_s)
-    return nil unless assistant_message_node?(node)
+    def run_state_for_node_id(node_id)
+      node = scoped_nodes.find_by(id: node_id.to_s)
+      return nil unless assistant_message_node?(node)
 
-    execution = turn_execution_for_turn_id(node.turn_id)
-    return nil unless execution.is_a?(Hash)
+      execution = turn_execution_for_turn_id(node.turn_id)
+      return nil unless execution.is_a?(Hash)
 
-    visible_activities = assistant_bubble_activities(execution.fetch("activities", []))
-    return nil if visible_activities.empty?
+      all_activities = Array(execution.fetch("activities", []))
+      visible_activities = assistant_bubble_activities(all_activities)
+      hidden_summary = summary_for(all_activities - visible_activities)
+      hidden_notice = hidden_summary.fetch("failed_count", 0).to_i.positive? || hidden_summary.fetch("awaiting_count", 0).to_i.positive?
 
-    {
-      "status" => execution.fetch("status"),
-      "phase" => execution.fetch("phase"),
-      "diagnostic_level" => execution.fetch("diagnostic_level"),
-      "event_cursor" => execution["event_cursor"],
-      "summary" => summary_for(visible_activities),
-      "activities" => visible_activities,
-    }
-  end
+      return nil if visible_activities.empty? && !hidden_notice
+
+      {
+        "status" => execution.fetch("status"),
+        "phase" => execution.fetch("phase"),
+        "diagnostic_level" => execution.fetch("diagnostic_level"),
+        "event_cursor" => execution["event_cursor"],
+        "summary" => summary_for(visible_activities),
+        "hidden_summary" => hidden_summary,
+        "activities" => visible_activities,
+      }
+    end
 
   private
 
@@ -189,11 +194,11 @@ class Conversation::TurnExecutionProjector
       anchor_state = anchor&.state.to_s
 
       return "stopped" if anchor_state == DAG::Node::STOPPED || statuses.include?("stopped")
-      return "awaiting_approval" if statuses.include?("awaiting_approval")
       return "running" if statuses.include?("running")
-      return "pending" if statuses.include?("pending")
+      return "awaiting_approval" if statuses.include?("awaiting_approval")
       return "failed" if statuses.include?("failed")
       return "completed" if statuses.present? && statuses.all? { |status| terminal_activity_status?(status) }
+      return "pending" if statuses.any? { |status| pending_activity_status?(status) }
 
       case anchor_state
       when DAG::Node::RUNNING
@@ -215,7 +220,13 @@ class Conversation::TurnExecutionProjector
 
     def reduce_phase(anchor:, activities:)
       active = Array(activities).reject { |activity| terminal_activity_status?(activity.fetch("status")) }
-      return active.first.fetch("phase") if active.any?
+      running = active.select { |activity| activity.fetch("status") == "running" }
+      return highest_precedence_phase_for(running) if running.any?
+
+      awaiting = active.select { |activity| activity.fetch("status") == "awaiting_approval" }
+      return "authorization" if awaiting.any?
+
+      return earliest_known_phase_for(active) if active.any?
 
       return "terminal" if Array(activities).any? && Array(activities).all? { |activity| terminal_activity_status?(activity.fetch("status")) }
 
@@ -235,8 +246,29 @@ class Conversation::TurnExecutionProjector
       %w[completed failed rejected skipped stopped].include?(status.to_s)
     end
 
+    def pending_activity_status?(status)
+      %w[planned pending queued].include?(status.to_s)
+    end
+
     def activity_event?(event)
       DAG::NodeEvent::ACTIVITY_EVENT_KINDS.include?(event.kind.to_s)
+    end
+
+    def highest_precedence_phase_for(activities)
+      ranked = Array(activities).map { |activity| activity.fetch("phase").to_s }
+      ranked.max_by { |phase| phase_precedence.fetch(phase, -1) }
+    end
+
+    def earliest_known_phase_for(activities)
+      ranked = Array(activities).map { |activity| activity.fetch("phase").to_s }
+      ranked.min_by { |phase| phase_precedence.fetch(phase, phase_precedence.length) }
+    end
+
+    def phase_precedence
+      @phase_precedence ||=
+        %w[preflight planning authorization execution finalization terminal]
+          .each_with_index
+          .to_h
     end
 
     def diagnostics_for(activity_events, diagnostic_level:)

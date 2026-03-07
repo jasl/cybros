@@ -8,6 +8,7 @@ module DAG
       @graph_id = node.graph_id
       @node_id = node.id
       @body_id = node.body_id
+      @lane_id = node.lane_id
       @turn_id = node.turn_id
 
       @flush_interval = Float(flush_interval)
@@ -197,7 +198,15 @@ module DAG
       end
 
       def next_activity_sequence
-        DAG::NodeEvent.where(graph_id: @graph_id, turn_id: @turn_id, kind: DAG::NodeEvent::ACTIVITY_EVENT_KINDS).count + 1
+        turn =
+          @node.turn ||
+            DAG::Turn.find_by!(
+              graph_id: @graph_id,
+              lane_id: @lane_id,
+              id: @turn_id,
+            )
+
+        turn.allocate_activity_sequence!
       end
 
       def emit(kind:, text: nil, payload: {})

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_07_010000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_08_020000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -255,6 +255,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_07_010000) do
     t.uuid "graph_id", null: false
     t.uuid "lane_id", null: false
     t.jsonb "metadata", default: {}, null: false
+    t.bigint "next_activity_seq", default: 0, null: false
     t.datetime "updated_at", null: false
     t.index ["graph_id", "id"], name: "index_dag_turns_graph_visible", where: "(anchor_node_id IS NOT NULL)"
     t.index ["graph_id", "lane_id", "anchored_seq"], name: "index_dag_turns_graph_lane_anchored_seq_unique", unique: true, where: "(anchored_seq IS NOT NULL)"

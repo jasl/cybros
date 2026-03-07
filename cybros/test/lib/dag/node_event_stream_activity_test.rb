@@ -56,4 +56,53 @@ class DAG::NodeEventStreamActivityTest < ActiveSupport::TestCase
     assert events.first.fetch("event_id").present?
     assert events.second.fetch("event_id").present?
   end
+
+  test "activity sequence allocation uses the turn-local monotonic counter" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    turn_record = graph.turns.find_by!(id: agent.turn_id, lane_id: conversation.chat_lane.id)
+    turn_record.update!(next_activity_seq: 40)
+
+    first_task =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::RUNNING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        metadata: {},
+        body_input: { "name" => "memory_search", "tool_call_id" => "tc_1" },
+      )
+    second_task =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::RUNNING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        metadata: {},
+        body_input: { "name" => "read_file", "tool_call_id" => "tc_2" },
+      )
+
+    DAG::NodeEventStream.new(node: first_task).activity_planned!(
+      activity_id: "task:#{first_task.id}",
+      activity_kind: "tool_call",
+      phase: "planning",
+    )
+    DAG::NodeEventStream.new(node: second_task).activity_planned!(
+      activity_id: "task:#{second_task.id}",
+      activity_kind: "tool_call",
+      phase: "planning",
+    )
+
+    events =
+      DAG::NodeEvent
+        .where(graph_id: graph.id, node_id: [first_task.id, second_task.id], kind: DAG::NodeEvent::ACTIVITY_EVENT_KINDS)
+        .order(:id)
+        .to_a
+
+    assert_equal [41, 42], events.map { |event| event.payload.fetch("sequence") }
+    assert_equal 42, turn_record.reload.next_activity_seq
+  end
 end

@@ -118,6 +118,50 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     )
   end
 
+  test "running activity status and phase win over awaiting approval when both are active" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    waiting_task =
+      create_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::AWAITING_APPROVAL,
+        name: "write_file",
+        tool_call_id: "tc_wait",
+      )
+    running_task =
+      create_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::RUNNING,
+        name: "read_file",
+        tool_call_id: "tc_run",
+      )
+
+    DAG::NodeEventStream.new(node: waiting_task).activity_waiting!(
+      activity_id: "task:#{waiting_task.id}",
+      activity_kind: "tool_call",
+      phase: "authorization",
+    )
+    DAG::NodeEventStream.new(node: running_task).activity_started!(
+      activity_id: "task:#{running_task.id}",
+      activity_kind: "tool_call",
+      phase: "execution",
+    )
+
+    execution = conversation.turn_execution_for_turn_id(agent.turn_id)
+
+    assert_equal "running", execution.fetch("status")
+    assert_equal "execution", execution.fetch("phase")
+  end
+
   test "message_for_node_id derives run_state from the turn execution projector" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
