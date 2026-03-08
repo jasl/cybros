@@ -6,6 +6,17 @@
 
 <div class="p-6 space-y-6" data-testid="statistics-page">
   <% totals = (@stats || {}).fetch("totals", {}) %>
+  <% reliability = @tool_reliability || {} %>
+  <% reliability_summary = reliability.fetch("summary", {}) %>
+  <% format_rate = ->(rate) do
+       rate = rate.is_a?(Hash) ? rate : {}
+       value = rate["value"]
+       value.nil? ? "N/A" : number_to_percentage(value * 100, precision: 1, strip_insignificant_zeros: true)
+     end %>
+  <% format_rate_desc = ->(rate, label) do
+       rate = rate.is_a?(Hash) ? rate : {}
+       "#{rate.fetch("count", 0)} / #{rate.fetch("total", 0)} #{label}"
+     end %>
 
   <div class="stats stats-horizontal w-full bg-base-100 border border-base-300 rounded-box shadow-sm">
     <div class="stat min-w-64">
@@ -115,4 +126,204 @@
       </div>
     </div>
   <% end %>
+
+  <div class="space-y-6" data-testid="statistics-tool-reliability">
+    <div class="card bg-base-100 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="flex items-center justify-between gap-4">
+          <h2 class="card-title">Runtime tool reliability</h2>
+          <div class="text-sm opacity-60">
+            <span><%= reliability_summary.fetch("total_calls", 0) %> runtime tool-call facts</span>
+          </div>
+        </div>
+
+        <div class="stats stats-vertical lg:stats-horizontal w-full bg-base-200/40 border border-base-300 rounded-box">
+          <div class="stat">
+            <div class="stat-title">Executable rate</div>
+            <div class="stat-value text-lg"><%= format_rate.call(reliability_summary.fetch("executable_rate", {})) %></div>
+            <div class="stat-desc"><%= format_rate_desc.call(reliability_summary.fetch("executable_rate", {}), "model attempts") %></div>
+          </div>
+
+          <div class="stat">
+            <div class="stat-title">First-pass success</div>
+            <div class="stat-value text-lg"><%= format_rate.call(reliability_summary.fetch("first_pass_success_rate", {})) %></div>
+            <div class="stat-desc"><%= format_rate_desc.call(reliability_summary.fetch("first_pass_success_rate", {}), "model attempts") %></div>
+          </div>
+
+          <div class="stat">
+            <div class="stat-title">Repair-assisted success</div>
+            <div class="stat-value text-lg"><%= format_rate.call(reliability_summary.fetch("repair_assisted_success_rate", {})) %></div>
+            <div class="stat-desc"><%= format_rate_desc.call(reliability_summary.fetch("repair_assisted_success_rate", {}), "model attempts") %></div>
+          </div>
+
+          <div class="stat">
+            <div class="stat-title">Tool success</div>
+            <div class="stat-value text-lg"><%= format_rate.call(reliability_summary.fetch("tool_success_rate", {})) %></div>
+            <div class="stat-desc"><%= format_rate_desc.call(reliability_summary.fetch("tool_success_rate", {}), "entered execution") %></div>
+          </div>
+
+          <div class="stat min-w-72">
+            <div class="stat-title">Policy and approval</div>
+            <div class="stat-value text-base">
+              <div class="grid grid-cols-1 gap-1">
+                <div>Policy denied: <%= reliability_summary.dig("side_outcomes", "policy_denied") || 0 %></div>
+                <div>Awaiting approval: <%= reliability_summary.dig("side_outcomes", "awaiting_approval") || 0 %></div>
+                <div>Approval rejected: <%= reliability_summary.dig("side_outcomes", "approval_rejected") || 0 %></div>
+              </div>
+            </div>
+            <div class="stat-desc">
+              Invalid args: <%= reliability_summary.dig("model_failures", "invalid_args") || 0 %> ·
+              Tool not found: <%= reliability_summary.dig("model_failures", "tool_not_found") || 0 %>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+      <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title">By reliability model</h2>
+
+          <% rows = reliability.fetch("by_model_ref", []) %>
+          <% if rows.empty? %>
+            <p class="opacity-70">No runtime tool facts yet.</p>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Model ref</th>
+                    <th class="text-right">Calls</th>
+                    <th class="text-right">Executable</th>
+                    <th class="text-right">First-pass</th>
+                    <th class="text-right">Repair</th>
+                    <th class="text-right">Tool success</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% rows.each do |row| %>
+                    <tr>
+                      <td class="font-mono text-xs"><%= row.fetch("model_ref") %></td>
+                      <td class="text-right"><%= row.fetch("total_calls") %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("executable_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("first_pass_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("repair_assisted_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("tool_success_rate", {})) %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title">By tool</h2>
+
+          <% rows = reliability.fetch("by_tool_name", []) %>
+          <% if rows.empty? %>
+            <p class="opacity-70">No runtime tool facts yet.</p>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Tool</th>
+                    <th class="text-right">Calls</th>
+                    <th class="text-right">Executable</th>
+                    <th class="text-right">First-pass</th>
+                    <th class="text-right">Repair</th>
+                    <th class="text-right">Tool success</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% rows.each do |row| %>
+                    <tr>
+                      <td class="font-mono text-xs"><%= row.fetch("resolved_name") %></td>
+                      <td class="text-right"><%= row.fetch("total_calls") %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("executable_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("first_pass_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("repair_assisted_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("tool_success_rate", {})) %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title">By failure class</h2>
+
+          <% rows = reliability.fetch("by_failure_class", []) %>
+          <% if rows.empty? %>
+            <p class="opacity-70">No runtime tool failures yet.</p>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Failure class</th>
+                    <th class="text-right">Count</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% rows.each do |row| %>
+                    <tr>
+                      <td class="font-mono text-xs"><%= row.fetch("failure_class") %></td>
+                      <td class="text-right"><%= row.fetch("count") %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+
+      <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title">By reliability day</h2>
+
+          <% rows = reliability.fetch("by_day", []) %>
+          <% if rows.empty? %>
+            <p class="opacity-70">No runtime tool facts yet.</p>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th class="text-right">Calls</th>
+                    <th class="text-right">Executable</th>
+                    <th class="text-right">First-pass</th>
+                    <th class="text-right">Repair</th>
+                    <th class="text-right">Tool success</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% rows.each do |row| %>
+                    <tr>
+                      <td class="font-mono text-xs"><%= row.fetch("date") %></td>
+                      <td class="text-right"><%= row.fetch("total_calls") %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("executable_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("first_pass_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("repair_assisted_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("tool_success_rate", {})) %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  </div>
 </div>
