@@ -3,7 +3,7 @@
 ## Status
 
 - Current feature work is frozen.
-- Existing product docs before this rebaseline are archived under `docs/archive/pre-runtime-rebaseline/product/`.
+- Existing product docs before this rebaseline remain available in git history at commit `84b7e3d`.
 - Breaking changes are allowed across the DAG engine, product models, and integration layers.
 
 ## Phase 0.75: Contract Freeze

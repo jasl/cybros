@@ -2,7 +2,7 @@
 
 The previous conversation behavior spec was frozen during the runtime rebaseline.
 
-- Archived copy: `docs/archive/pre-runtime-rebaseline/product/conversation_behavior_spec.md`
+- Historical copy: git commit `84b7e3d`
 - Replacements:
   - `docs/product/domain_model.md`
   - `docs/product/execution_model.md`

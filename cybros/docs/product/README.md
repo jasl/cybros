@@ -2,9 +2,9 @@
 
 This directory is the active product-definition set for the runtime rebaseline approved on 2026-03-08.
 
-The old product docs were frozen and copied to:
+The old pre-rebaseline product docs were removed from the working tree after archival cleanup.
 
-- `docs/archive/pre-runtime-rebaseline/product/`
+If historical context is needed, read them from git history at commit `84b7e3d`.
 
 Use the documents in this directory as the normative product source of truth.
 
