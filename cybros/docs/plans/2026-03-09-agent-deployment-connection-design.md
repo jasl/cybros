@@ -11,6 +11,8 @@ Refine the programmable-agent v1 architecture around:
 - network transport as the real production path
 - a realistic E2E flow for start -> register -> inspect -> invoke
 
+Implementation of this design is gated by `docs/plans/2026-03-09-programmable-agent-preflight-design.md`.
+
 ## Problem Statement
 
 The 2026-03-08 rebaseline clarified the runtime split, but two parts remained underdefined:
@@ -41,13 +43,9 @@ Before a `ConversationRun` exists, Cybros opens a mutable run-planning object.
 
 This document calls it `RunDraft`.
 
-The exact implementation may be:
+V1 should treat it as durable runtime state rather than an in-memory convenience object.
 
-- a service object
-- a serialized runtime structure
-- a first-class model later
-
-V1 does not require a dedicated table immediately, but it does require a separate semantic layer.
+Whether the storage is implemented as a table or an equivalent durable record, it must survive approval parks, retries, and stale-draft detection.
 
 `turn.prepare` operates on the draft, not on an already-finalized `ConversationRun`.
 
@@ -147,7 +145,7 @@ Reason:
 
 ### 8. Sessions Are Logical, Not Transport-Specific
 
-A lifecycle action or one turn uses one bounded logical session.
+A lifecycle request or one turn-hook invocation uses one bounded logical session.
 
 That session may be carried by:
 
@@ -159,6 +157,12 @@ But the correctness contract is transport-independent:
 - sessions may end on success, failure, or approval park
 - resume always uses a new session
 - the agent must not rely on transport continuity
+
+Related runtime artifacts should stay distinct:
+
+- bounded session for authorization scope
+- durable invocation record for one logical call
+- durable operation receipts for de-duplicated callbacks
 
 ### 9. `agent_config` Is Opaque JSON In V1
 
@@ -173,6 +177,10 @@ Cybros is responsible for:
 The agent is responsible for interpreting it correctly.
 
 Shared and cross-agent operational state belongs in conversation KV, not `agent_config`.
+
+Canonical contract ownership stays on `AgentProgram`.
+
+`AgentDeployment` may cache inspected schema snapshots for compatibility and audit, but it does not replace the program contract as the source of truth.
 
 ### 10. Automation Resolves Deployment At Execution Time
 
@@ -206,7 +214,7 @@ The intended v1 lifecycle is:
 4. Cybros calls `turn.prepare`
 5. the agent may:
    - return prompt fragments
-   - mutate public state
+   - request staged public-state mutations
    - propose a different execution target
 6. policy resolves the draft
 7. if approval is required, draft finalization pauses
@@ -243,7 +251,10 @@ The first realistic E2E path should prove:
 8. the resulting run audit shows:
    - resolved deployment
    - deployment fingerprint
+   - deployment activation epoch
    - execution target
+   - effective public settings
+   - effective `agent_config`
    - provider and governor facts
 
 If this E2E path becomes twisted or requires hidden side channels, the product model should be reconsidered before implementation continues.

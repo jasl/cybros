@@ -12,7 +12,13 @@ Expected responsibilities:
 - manifest snapshot
 - global config contract
 - per-conversation config contract
+- config-schema fingerprint or version
 - agent-defined configuration semantics
+
+Important boundary:
+
+- this is the canonical owner of agent configuration semantics
+- deployment inspection may cache compatible schema snapshots, but does not replace the program contract
 
 ### AgentDeployment
 
@@ -25,9 +31,14 @@ Expected responsibilities:
 - auth or secret reference
 - resolved revision or fingerprint
 - health status
-- capability and schema discovery snapshots
+- capability and inspection snapshots
 - deployment-local runtime metadata
 - activation state
+
+Important boundary:
+
+- this is the runnable binding Cybros invokes
+- it is not the canonical owner of agent configuration semantics
 
 V1 recommendation:
 
@@ -89,20 +100,30 @@ V1 recommendation:
 
 ### RunDraft
 
-A mutable planning object used to assemble one concrete `ConversationRun`.
+A durable planning record used to assemble at most one concrete `ConversationRun`.
 
 Expected responsibilities:
 
+- draft status and expiry
 - proposed execution target
+- staged public-settings patch
+- staged `agent_config` patch
+- staged KV operations
 - resolved active deployment
+- pinned deployment binding for the draft
 - provisional prompt inputs
+- invocation idempotency context
 - policy and approval decisions before queueing
+- optional link to the materialized `ConversationRun`
 
 V1 rule:
 
 - `turn.prepare` operates on the draft
+- draft-time public mutations stay staged until finalization
 - approval may block draft finalization
+- a draft may end as `materialized`, `rejected`, `expired`, `stale`, or `canceled`
 - draft finalization materializes immutable `ConversationRun`
+- `ConversationRun` must not carry draft-only lifecycle states
 
 ### ConversationRun
 
@@ -114,10 +135,13 @@ V1 snapshot fields should include:
 - agent program id
 - agent deployment id
 - deployment revision or fingerprint
+- deployment activation epoch
 - provider credential id
 - execution target
 - model selection
-- effective public settings and `agent_config`
+- effective public settings
+- effective `agent_config`
+- `agent_config` schema fingerprint or version
 - capability/policy profile
 - resolved runtime governor snapshot
 - queued/started/finished state
@@ -127,6 +151,7 @@ V1 rule:
 - the run is materialized only after draft finalization
 - the run snapshot is finalized when the run is queued
 - the snapshot remains immutable across approval, resume, retry, and completion
+- the run only represents an execution attempt, never an unfinalized draft
 
 ### ConversationKVEntry
 
@@ -137,8 +162,13 @@ V1 properties:
 - shared across agent switches by default
 - JSON value
 - size limit
-- audit trail
+- current-state only in v1
 - namespace-by-key convention
+
+Important boundary:
+
+- this is operational working state, not append-only audit history
+- v1 does not require a per-write KV history table
 
 Recommended prefixes:
 
@@ -163,6 +193,60 @@ V1 recommendation:
 - resolve the active deployment at execution time and snapshot the resolved deployment facts per automation run
 - UI may come later
 - conversation templates are deferred
+
+## Agent RPC Runtime State
+
+### AgentRpcSession
+
+A bounded authorization record for one lifecycle request or one turn-hook invocation attempt.
+
+Expected responsibilities:
+
+- pinned deployment binding
+- conversation and run scope
+- allowed callback methods
+- expiry
+- session status
+
+Important boundary:
+
+- this is an internal runtime-state artifact, not a user-facing product selector
+- replay or resume opens a new session instead of reviving an old one
+
+### AgentRpcInvocation
+
+A durable logical record for one lifecycle or turn-hook call.
+
+Expected responsibilities:
+
+- method
+- scope type and scope id
+- `invocation_id`
+- request hash
+- result or error snapshot
+- replay-safe status
+
+V1 rule:
+
+- uniqueness is keyed by pinned deployment binding, method, scope, and `invocation_id`
+- replay after a lost reply reuses the same invocation record and opens a fresh session
+
+### AgentRpcOperationReceipt
+
+A de-duplicated receipt for one agent-to-Cybros callback side effect.
+
+Expected responsibilities:
+
+- `operation_id`
+- parent invocation
+- callback method
+- payload hash
+- applied or replayed status
+
+V1 rule:
+
+- de-duplication must survive session replay for the same logical invocation
+- callback receipts are internal runtime state, not public conversation history
 
 ## LLM Provider Domain
 
@@ -221,6 +305,23 @@ V1 mapping:
 
 - attach to `ProviderCredential`
 
+### ProviderBudgetReservation
+
+A durable reservation or settlement record for provider-side rate budgets.
+
+Expected responsibilities:
+
+- request units
+- estimated token reservation
+- actual token settlement
+- expiry or reconciliation state
+- provider request identifier for recovery
+
+Important boundary:
+
+- this is budget state, not execution-slot state
+- it must not be modeled as a generic lease for host occupancy
+
 ### RuntimeSettings
 
 Deployment-scoped operator settings for the Cybros runtime.
@@ -270,6 +371,41 @@ Important boundary:
 - this protects Nexus-managed execution
 - it does not rate-limit `AgentProgram` RPC calls
 
+### ExecutionCapacityLease
+
+A durable occupancy lease for execution work admitted against an execution quota.
+
+Expected responsibilities:
+
+- execution subject (`ExecutionLocation` or `ExecutionTarget`)
+- reserved slot count
+- holder identity
+- heartbeat or expiry
+- recovery status
+- execution request identifier for reconciliation
+
+Important boundary:
+
+- this is slot occupancy state, not a rate-budget counter
+
+### RuntimeWait
+
+A durable parked-work record for blocked runtime progress.
+
+Expected responsibilities:
+
+- owner identity
+- wait reason
+- retry or wake-up time
+- ordering metadata
+- terminal or resumed status
+
+V1 reason types:
+
+- `provider_limit`
+- `execution_quota`
+- `deployment_backoff`
+
 ## Conversation State Layers
 
 ### Public Settings
@@ -281,14 +417,38 @@ Examples:
 - title
 - default execution target
 - model preference
-- per-conversation agent config
 - mode or persona selection
+
+Important boundary:
+
+- this is distinct from `agent_config`
+- this is the source for effective public settings snapshotted into `ConversationRun`
+
+### Agent Config
+
+Conversation-scoped JSON config interpreted by the selected `AgentProgram`.
+
+Examples:
+
+- feature toggles
+- persona tuning
+- workflow defaults
+
+Important boundary:
+
+- this is not operational KV
+- the canonical schema contract lives on `AgentProgram`
 
 ### Agent KV
 
 Conversation-scoped working state for programmable agents.
 
 This is not memory or knowledge retrieval. It is operational state.
+
+V1 boundary:
+
+- current-state only
+- no append-only KV audit history is required in v1
 
 ### System State
 
@@ -300,6 +460,11 @@ Examples:
 - stream cursors
 - run bookkeeping
 - internal policy decisions
+- run drafts
+- agent RPC sessions, invocations, and operation receipts
+- provider budget reservations
+- execution capacity leases
+- runtime waits
 
 ## Relationship Sketch
 
@@ -308,10 +473,14 @@ User
   -> Conversations
 Conversation
   -> AgentProgram
-  -> AgentDeployment
   -> ExecutionTarget
+  -> RunDrafts
   -> ConversationRuns
   -> ConversationKVEntries
+RunDraft
+  -> AgentDeployment
+ConversationRun
+  -> AgentDeployment
 ExecutionTarget
   -> ExecutionLocation
   -> Workspace

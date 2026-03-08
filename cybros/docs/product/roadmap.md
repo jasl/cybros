@@ -44,6 +44,24 @@ Acceptance:
 - Cybros product models are the canonical source for execution-target semantics
 - target-switch confirmation semantics are blocking and auditable
 
+## Phase 0.95: Implementation Preflight
+
+Goal: lock the runtime invariants that must not drift during Phase 1 and Phase 2 implementation.
+
+Deliverables:
+
+- draft-stage mutation semantics for `turn.prepare`
+- deployment identity and session-scope rules
+- invocation idempotency and resume rules
+- deployment pinning and activation-drift rules
+- durable admission and parking semantics for runtime governance
+
+Acceptance:
+
+- the preflight invariants are documented
+- active product docs reflect the same invariants
+- active implementation plans no longer point at superseded design sources
+
 ## Phase 1: Runtime Kernel Re-baseline
 
 Goal: move the product model from metadata-driven conversations to first-class runtime entities.
@@ -55,11 +73,14 @@ Deliverables:
 - `Workspace`
 - `ExecutionTarget`
 - `RunDraft`
+- agent RPC session/invocation/operation runtime state
 - provider-credential limiter configuration
 - job concurrency configuration
 - execution quota configuration
+- provider budget reservation and execution capacity lease primitives
 - `Conversation` default agent program relation
 - `Conversation` default execution target relation
+- `Conversation` public settings store
 - `ConversationKV`
 - `ConversationRun` execution snapshot
 - `ConversationRun` materialization contract
@@ -77,7 +98,8 @@ Acceptance:
 - fresh and migrated environments bootstrap a usable default agent deployment, execution target, and runtime settings before conversation creation flips to first-class relations
 - `ConversationRun` snapshot data is versioned and remains immutable across approval, resume, retry, and completion flows
 - agent-config has an explicit public mutation surface and audit trail before programmable-agent schema validation is tightened in later phases
-- agent-visible conversation KV exists and is audited
+- agent-visible conversation KV exists as current-state operational storage
+- replay-safe session, invocation, and callback de-duplication state exists for `agent_rpc`
 - automation records can bind to agent and execution target primitives
 - provider credentials can carry independent runtime limits
 - execution locations and targets can carry execution quotas

@@ -62,6 +62,12 @@ Cybros records:
 - config schemas
 - healthcheck result
 - supported features
+- normalized deployment identity claims and pinned fingerprint inputs
+
+Important boundary:
+
+- `AgentProgram` remains the canonical owner of manifest and config-contract semantics
+- deployment inspection snapshots are compatibility and audit facts, not a replacement source of truth
 
 ### Activate
 
@@ -80,11 +86,16 @@ The agent contract should eventually provide:
 - manifest
 - global config schema
 - per-conversation config schema
-- setup command or setup entrypoint
 - healthcheck command or healthcheck entrypoint
 - turn handler or hook endpoints
 
 The transport and method boundary for those capabilities is defined by `agent_rpc`.
+
+Contract ownership rule:
+
+- `AgentProgram` owns the canonical manifest and config-contract versions or fingerprints
+- `AgentDeployment` caches inspected runtime claims and compatibility snapshots for the deployed instance
+- `ConversationRun` snapshots the effective contract fingerprint used for one execution attempt
 
 ## Deployment Model
 
@@ -113,13 +124,24 @@ This control is declarative and policy-gated.
 
 The agent requests changes through public APIs, and the Cybros kernel remains authoritative for prompt assembly, DAG mutation, approvals, retries, and audit.
 
+During `turn.prepare`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
+
 This does not include direct writes to system state.
+
+## Session Rule
+
+- registration does not grant ambient write authority
+- each bounded session is scoped to one deployment binding plus one conversation/run context
+- callback authorization must expire with the session
+- each replay or resume attempt opens a fresh bounded session
+- callback de-duplication must survive session replay for the same logical invocation
 
 ## KV Rules
 
 - default visibility is shared within the conversation even when agent changes
 - namespace isolation is by key convention in v1
 - `system.*` is reserved and not agent-writable
+- KV is current-state storage in v1, not append-only audit history
 
 ## Default Template
 

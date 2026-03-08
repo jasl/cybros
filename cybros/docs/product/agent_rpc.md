@@ -17,7 +17,7 @@ The protocol must:
 
 - remain language-agnostic
 - stay independent from Ruby-only runtime semantics
-- support setup, inspection, health, and turn invocation
+- support inspection, health, and turn invocation
 - let the agent query and mutate approved conversation state
 - keep Cybros internals free to evolve behind the boundary
 
@@ -81,11 +81,26 @@ V1 should use bounded bidirectional sessions.
 
 That means:
 
-- one logical session may stay open for one lifecycle operation or one turn
+- one logical session may stay open for one lifecycle request or one turn-hook invocation
 - the agent may issue callbacks into Cybros public APIs during that bounded session
 - the session ends when the operation returns, fails, or parks
 
 The system should reopen a fresh session for later retry or resume work.
+
+Important boundary:
+
+- a session is an authorization attempt, not the durable identity of the logical call
+- a multi-hook turn may span multiple sessions and multiple invocations
+
+## Protocol Runtime State
+
+The protocol needs three distinct internal runtime artifacts:
+
+- `agent_rpc_session`: one bounded authorization scope for one invocation attempt
+- `agent_rpc_invocation`: one durable logical lifecycle or turn-hook call keyed by pinned binding, scope, method, and `invocation_id`
+- `agent_rpc_operation_receipt`: one de-duplicated callback side effect keyed by invocation and `operation_id`
+
+These are system-state artifacts, not product-facing entities.
 
 ## Envelope
 
@@ -206,6 +221,18 @@ The agent must not:
 
 Cybros remains authoritative for final prompt assembly, DAG mutation, tool-loop orchestration, policy merge, approval handling, and durable audit.
 
+## Draft Mutation Staging
+
+`turn.prepare` is a planning hook, not a direct-write hook.
+
+When the agent requests settings/config/KV changes during `turn.prepare`, Cybros stages those operations on the `RunDraft`.
+
+Those staged operations commit only when draft finalization succeeds.
+
+If the draft parks for approval, is rejected, expires, or becomes stale, Cybros must discard the staged operations instead of leaving orphaned durable side effects behind.
+
+Run-scoped methods that operate on a materialized `ConversationRun` may perform durable public-state mutations under the normal policy boundary.
+
 ## Re-entry And Resume
 
 Turn-scoped methods must be re-entrant.
@@ -226,6 +253,41 @@ If Cybros retries or resumes work:
 - it includes explicit resume context when needed
 
 The agent must not rely on transport continuity for correctness.
+
+Cybros must persist invocation bookkeeping keyed by the pinned deployment binding, method, scope, and `invocation_id`.
+
+If a reply is lost after request delivery, Cybros may re-issue the same `invocation_id` only to the same pinned deployment binding.
+
+If that binding changed, or the prior outcome cannot be established safely, Cybros should fail with a structured stale-or-unknown outcome error instead of guessing.
+
+Agent-to-Cybros mutation requests must also carry an `operation_id`.
+
+Cybros must de-duplicate those operations across replayed sessions for the same pinned deployment binding, scope, and logical invocation.
+
+The agent should reuse the same `operation_id` when replaying the same logical callback during invocation replay.
+
+## Session Authorization
+
+Registration is outside the protocol, but each bounded session still needs an explicit authorization scope.
+
+At minimum, the scoped session context must bind:
+
+- `agent_deployment_id`
+- `agent_program_id`
+- pinned deployment fingerprint or revision
+- activation epoch
+- `run_draft_id` or `conversation_run_id`
+- `conversation_id`
+- allowed callback methods
+- expiry
+
+Cybros must reject callbacks that fall outside that scoped session.
+
+Recommended scope split:
+
+- `RunDraft` sessions may call `conversation.settings.*`, `conversation.config.*`, `conversation.kv.*`, and `execution_target.propose`
+- `ConversationRun` sessions may call `conversation.settings.*`, `conversation.config.*`, and `conversation.kv.*`
+- `execution_target.propose` is draft-only because execution-target choice must freeze before `ConversationRun` materialization
 
 ## Mutation Rules
 
@@ -290,6 +352,8 @@ Deployment registration is outside the wire protocol.
 V1 uses explicit operator-managed registration of `AgentDeployment` connection details.
 
 Once registered, Cybros uses `initialize`, `agent.describe`, `agent.health`, and `agent.schemas.get` to inspect and validate that deployment.
+
+Inspection and invocation should pin the same normalized deployment identity inputs that Cybros later snapshots into the run record.
 
 ## Schema Conventions
 

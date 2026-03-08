@@ -26,7 +26,7 @@ Cybros itself is not the app-specific intelligence. It is the operating system l
 - `Dangerous execution is separate`: shell, file mutation, browser, desktop, and deployment actions run through managed execution targets, not inside the agent deployment environment itself.
 - `Execution target is explicit`: every run must know which `location + workspace` it used.
 - `No cross-location sync in v1`: the same repo on two machines is treated as two workspaces.
-- `Agent has high conversation control`: the agent may mutate public conversation settings and its shared per-conversation KV through policy-gated APIs.
+- `Agent has high conversation control`: the agent may request public conversation setting and KV changes through policy-gated APIs, but draft-time changes stay staged until Cybros finalizes the run plan.
 
 ## Non-Goals For V1
 
@@ -41,4 +41,4 @@ Cybros itself is not the app-specific intelligence. It is the operating system l
 - agent programs are trusted and self-hosted
 - agent deployments are out-of-process
 - dangerous execution stays in Nexus-managed targets
-- policy and audit remain the system boundary for user-visible control
+- policy, session scoping, and audit remain the system boundary for user-visible control

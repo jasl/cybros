@@ -66,7 +66,7 @@ Rules:
 - shared across agent switches in v1
 - JSON values
 - writable by agent through public APIs
-- audited
+- current-state only in v1
 - not used for long-term retrieval
 - no implicit TTL in v1
 
@@ -126,9 +126,12 @@ Examples:
 - agent program id
 - agent deployment id
 - deployment fingerprint
+- deployment activation epoch
 - execution target
 - selected model
+- effective public settings
 - effective `agent_config`
+- `agent_config` schema fingerprint
 - effective policy profile
 
 Rules:
@@ -151,6 +154,11 @@ Examples:
 - queue bookkeeping
 - internal policy decisions
 - transport recovery markers
+- run drafts
+- agent RPC sessions, invocations, and operation receipts
+- provider budget reservations
+- execution capacity leases
+- runtime waits
 
 Rules:
 

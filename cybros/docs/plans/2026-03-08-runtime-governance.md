@@ -4,7 +4,7 @@
 
 **Goal:** Add first-class runtime governance for provider-credential limits, job concurrency, and execution quotas.
 
-**Architecture:** Keep the three governors separate. Attach LLM limits to provider credentials, keep job throughput in dedicated deployment-scoped runtime settings, and attach execution quotas to execution locations with optional execution-target overrides. Collect observability data now and defer richer dashboards until later phases. The long-term LLM model should separate `ProviderSpec` from `ProviderCredential`, while v1 keeps one active credential per `provider_key` and defers credential-level load balancing and failover.
+**Architecture:** Keep the three governors separate. Attach LLM limits to provider credentials, keep job throughput in dedicated deployment-scoped runtime settings, and attach execution quotas to execution locations with optional execution-target overrides. Use one shared durable coordination layer, but split admission semantics between provider-side budget reservations and execution-side capacity leases so denied work can park without monopolizing worker throughput. Collect observability data now and defer richer dashboards until later phases. The long-term LLM model should separate `ProviderSpec` from `ProviderCredential`, while v1 keeps one active credential per `provider_key` and defers credential-level load balancing and failover.
 
 **Tech Stack:** Ruby on Rails, PostgreSQL, Solid Queue, AgentCore/DAG, Nexus
 
@@ -30,7 +30,8 @@ Every behavior-changing task in this plan should name exact verification files a
 - Modify: `docs/product/roadmap.md`
 - Modify: `docs/product/migration_alignment.md`
 - Modify: `docs/plans/2026-03-08-phase-1-schema-cut-list.md`
-- Modify: `docs/plans/2026-03-08-runtime-rebaseline.md`
+- Modify: `docs/plans/README.md`
+- Modify: `docs/plans/2026-03-09-programmable-agent-preflight-design.md`
 
 **Step 1: Write the normative product doc**
 
@@ -48,13 +49,13 @@ Update reading order and core product references.
 
 **Step 3: Verify coherence**
 
-Run: `rg -n "runtime governance|ProviderCredentialLimiter|ExecutionQuota|job concurrency" docs/product docs/plans/2026-03-08-phase-1-schema-cut-list.md docs/plans/2026-03-08-runtime-rebaseline.md`
-Expected: the concept appears in the product docs, schema cut list, and rebaseline plan.
+Run: `rg -n "runtime governance|ProviderCredentialLimiter|ExecutionQuota|job concurrency" docs/product docs/plans/2026-03-08-phase-1-schema-cut-list.md docs/plans/2026-03-09-programmable-agent-preflight-design.md`
+Expected: the concept appears in the product docs, schema cut list, and preflight doc.
 
 **Step 4: Commit**
 
 ```bash
-git add docs/product docs/plans/2026-03-08-phase-1-schema-cut-list.md docs/plans/2026-03-08-runtime-rebaseline.md docs/plans/2026-03-08-runtime-governance-design.md docs/plans/2026-03-08-runtime-governance.md
+git add docs/product docs/plans/README.md docs/plans/2026-03-08-phase-1-schema-cut-list.md docs/plans/2026-03-09-programmable-agent-preflight-design.md docs/plans/2026-03-08-runtime-governance-design.md docs/plans/2026-03-08-runtime-governance.md
 git commit -m "docs: define runtime governance baseline"
 ```
 
@@ -143,35 +144,47 @@ git commit -m "feat: add execution quota config"
 ### Task 4: Resolve Runtime Governors During Run Planning
 
 **Files:**
+- Create: `app/services/runtime_governance/admission_coordinator.rb`
 - Create: `app/services/runtime_governance/provider_credential_limiter.rb`
+- Create: `app/services/runtime_governance/provider_budget_reservations.rb`
 - Create: `app/services/runtime_governance/job_concurrency_settings.rb`
 - Create: `app/services/runtime_governance/execution_quota_resolver.rb`
+- Create: `app/services/runtime_governance/execution_capacity_leases.rb`
+- Create: `app/services/runtime_governance/runtime_waits.rb`
 - Modify: `lib/cybros/agent_runtime_resolver.rb`
 - Modify: `app/models/conversation_run.rb`
+- Test: `test/services/runtime_governance/admission_coordinator_test.rb`
 - Test: `test/services/runtime_governance/provider_credential_limiter_test.rb`
 - Test: `test/services/runtime_governance/execution_quota_resolver_test.rb`
+- Test: `test/services/runtime_governance/provider_budget_reservations_test.rb`
+- Test: `test/services/runtime_governance/execution_capacity_leases_test.rb`
+- Test: `test/services/runtime_governance/runtime_waits_test.rb`
 - Test: `test/lib/cybros/agent_runtime_resolver_test.rb`
 
 **Step 1: Write the failing tests**
 
 Cover:
 
+- shared coordination across provider reservations and execution leases
+- provider reservation and settlement semantics
+- execution lease acquire, heartbeat, and recovery semantics
+- durable denial metadata and parked retry semantics
 - provider limiter resolution by credential
 - execution quota resolution by location with target override
 - resolved runtime governor facts being available during run planning
 
 **Step 2: Run the targeted tests**
 
-Run: `bin/rails test test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_quota_resolver_test.rb test/lib/cybros/agent_runtime_resolver_test.rb`
+Run: `bin/rails test test/services/runtime_governance/admission_coordinator_test.rb test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_quota_resolver_test.rb test/lib/cybros/agent_runtime_resolver_test.rb`
 Expected: failures due to missing resolver code.
 
 **Step 3: Implement the minimal runtime-governance services**
 
-Do not enforce everything inside the resolver. Resolve facts cleanly first.
+Do not enforce everything inside the resolver. Resolve facts cleanly first, and make limiter and quota enforcement depend on one shared durable coordination layer with distinct provider-budget and execution-lease primitives.
 
 **Step 4: Re-run the targeted tests**
 
-Run: `bin/rails test test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_quota_resolver_test.rb test/lib/cybros/agent_runtime_resolver_test.rb`
+Run: `bin/rails test test/services/runtime_governance/admission_coordinator_test.rb test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_quota_resolver_test.rb test/lib/cybros/agent_runtime_resolver_test.rb`
 Expected: PASS.
 
 **Step 5: Commit**
@@ -195,7 +208,11 @@ git commit -m "feat: resolve runtime governance during run planning"
 Cover:
 
 - permit acquisition before provider requests
+- provider request identifier propagation for recovery
+- reservation settlement after request completion
 - limiter denial or backoff behavior
+- denied work parking without monopolizing worker throughput
+- recovery behavior after lost reply or abandoned reservation
 - limiter-hit observability facts
 - real conversation-run flow blocked or delayed by provider-credential limits
 
@@ -209,7 +226,7 @@ Expected: FAIL once the dev server is running because limiter pressure is not ye
 
 **Step 3: Implement minimal provider-limit enforcement**
 
-Keep the provider limiter credential-scoped and independent from worker concurrency.
+Keep the provider limiter credential-scoped and independent from worker concurrency. Denied work must park durably instead of spinning inside a worker, and reservation recovery must reconcile rather than blindly replay external requests.
 
 **Step 4: Re-run the targeted tests**
 
@@ -242,6 +259,9 @@ Cover:
 - location quota enforced by default
 - target override applied when present
 - quota denial surfaced as durable run facts
+- execution request identifier propagation for reconciliation
+- lease expiry or heartbeat recovery
+- quota-denied work parking and later retry without holding the worker slot
 - real execution-planning flow records the denial without bypassing the quota boundary
 
 **Step 2: Run the targeted tests**
@@ -254,7 +274,7 @@ Expected: FAIL once the dev server is running because quota denials are not yet 
 
 **Step 3: Implement minimal execution-quota enforcement**
 
-Protect Nexus-managed work only. Do not rate-limit `AgentProgram` RPC.
+Protect Nexus-managed work only. Do not rate-limit `AgentProgram` RPC. Quota-denied work must park durably instead of spinning in-process, and execution recovery must reconcile abandoned leases before replaying work.
 
 **Step 4: Re-run the targeted tests**
 
@@ -332,6 +352,9 @@ Cover:
 - provider limiter hit events
 - execution quota denial events
 - per-location queue depth or saturation facts where available
+- lease recovery events
+- provider reservation reconciliation events
+- deployment backoff wait events
 - operator-visible observability for a real quota or limiter event through the browser
 
 **Step 2: Run the targeted tests**
@@ -348,6 +371,7 @@ Collect enough data for:
 
 - agent-work views
 - host-work views
+- timeout and recovery diagnosis
 
 Do not build the full dashboard yet.
 

@@ -84,15 +84,17 @@ Agent-owned outputs include:
 
 - prompt fragments and workflow decisions
 - hook results
-- public API requests for settings, agent config, and KV
+- staged public API requests for settings, agent config, and KV
 - execution-target proposals
 
 Kernel-owned final authority includes:
 
 - final prompt assembly
+- draft mutation commit or discard
 - DAG node and edge mutation
 - tool-loop orchestration
 - tool-policy merge
+- deployment pinning and session authorization
 - approval and retry/resume
 - durable run snapshots and audit
 
@@ -102,7 +104,9 @@ The kernel may merge, defer, reject, or require approval for agent intent when p
 
 - Product code uses `Conversation` public APIs, not raw DAG internals.
 - Agent control is high-level and policy-gated.
+- `turn.prepare` is planning-only; draft-time public mutations are not durably committed until finalization.
 - Execution routing is explicit and auditable.
+- A finalized run pins one deployment binding for execution instead of silently drifting to a new active deployment.
 - Provider limits, job concurrency, and execution quotas are separate governors.
 - The system snapshots run-time decisions per run instead of mutating history.
 - Compatibility layers are optional, not required.

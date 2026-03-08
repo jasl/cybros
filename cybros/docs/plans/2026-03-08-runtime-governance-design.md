@@ -4,6 +4,8 @@
 
 Define how Cybros should govern resource usage when DAG execution fans out across remote LLM APIs, background jobs, and managed execution hosts.
 
+Implementation of this model is gated by `docs/plans/2026-03-09-programmable-agent-preflight-design.md`.
+
 ## Problem Statement
 
 Cybros is intentionally built around concurrent DAG execution.
@@ -119,14 +121,47 @@ At minimum the kernel should produce enough data to visualize:
 - optional `cpu_limit`
 - optional `memory_limit`
 
+## Admission And Parking Rules
+
+Provider credential limits and execution quotas require one shared durable coordination layer, but not one identical admission primitive.
+
+Provider admission should use durable reservation and settlement semantics for:
+
+- request budgets
+- token budgets
+- burst budgets
+
+Execution admission should use durable capacity leases for:
+
+- concurrent execution slots
+- admitted execution queue occupancy
+- lease expiry or heartbeat recovery
+
+The minimum required behavior is:
+
+- atomic admission decisions
+- explicit release or settlement
+- durable denial or backoff reason
+- reconciliation after crashes or abandoned work
+- durable request identifiers for provider calls and execution requests
+
+If work is denied or delayed, the scheduler should park it durably and release worker capacity instead of spinning inside the worker pool.
+
+Blocked work should use a durable wait state with explicit reasons:
+
+- `provider_limit`
+- `execution_quota`
+- `deployment_backoff`
+
 ## Run-Time Flow
 
 At execution time:
 
 1. the job system advances runnable DAG work
-2. provider-bound LLM calls must pass the credential limiter
+2. provider-bound LLM calls must pass the credential limiter through the rate-budget admission path
 3. agent RPC calls proceed without their own limiter by default
-4. execution-bound work must pass the resolved execution quota
+4. execution-bound work must pass the resolved execution quota through the capacity-lease admission path
+5. denied work parks durably instead of monopolizing scheduler throughput
 
 If one of these governors blocks progress, the reason should be durable and observable.
 
