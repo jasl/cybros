@@ -126,7 +126,8 @@ module AgentCore
           result =
             case state
             when ::DAG::Node::FINISHED
-              AgentCore::Resources::Tools::ToolResult.from_h(output.fetch("result"))
+              persisted_result = output.key?("result") ? output.fetch("result") : output.fetch("raw_result", nil)
+              AgentCore::Resources::Tools::ToolResult.from_h(persisted_result)
             when ::DAG::Node::AWAITING_APPROVAL
               AgentCore::Resources::Tools::ToolResult.error(text: "Tool '#{name}' is awaiting approval.")
             when ::DAG::Node::REJECTED

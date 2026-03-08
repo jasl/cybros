@@ -71,6 +71,8 @@
 - `prompt_injection_sources`：`AgentCore::Resources::PromptInjections::Source::*`
 - `instrumenter`：`AgentCore::Observability::Instrumenter`（默认 `NullInstrumenter`）
 - `execution_context_attributes`：执行上下文属性（Hash，Symbol keys；executor 会基于它构建 `ExecutionContext.attributes`，并自动注入 `dag.graph_id/node_id/lane_id/turn_id`；可用于注入 `cwd/workspace_dir/channel/agent/...` 等 app 侧信息）
+- `runtime_surface`：`AgentCore::RuntimeSurface::Base` 兼容对象（默认安全 no-op）
+- `runtime_surface_runner`：`AgentCore::RuntimeSurface::Runner`（负责 helper 注入、timeout/output limit 与 fallback）
 - `token_counter`：`AgentCore::Resources::TokenCounter::*`（用于 token budget 的估算；默认 `AgentCore::Resources::TokenCounter::Estimator`，失败时回退到 `Heuristic`）
 - `directives_config`：Hash or nil（nil 表示禁用；Hash 表示启用并使用 `AgentCore::Directives::Runner` 进行 envelope 输出；当前不支持 tool calling）
 - `agent_call_recovery_attempts`：主 `agent_message/character_message` LLM 调用的自动恢复次数（默认 `1`；表示“首次失败后最多再试几次”）
@@ -97,6 +99,15 @@
 
 - `max_tool_calls_per_turn`：单次 LLM 调用（单个 `agent_message/character_message` 节点）最多展开的 tool_calls 数（默认 20；nil 表示不限制）
 - `max_steps_per_turn`：同一 `turn_id` 内允许的 agent step 数（默认 10；防止无限 tool loop）
+
+runtime surface 约束：
+
+- surface lifecycle：`prepare_turn` / `compact_context` / `review_tool_call` / `project_tool_result` / `finalize_output` / `handle_error`
+- 所有 stage 都只收 typed input，返回 typed decision；不要在 app 侧依赖布尔 hook
+- surface 永远是 advisory middleware：
+  - 静态 tool policy、schema 校验、审批、DAG invariants、sandbox ceilings 仍是最终 authority
+  - runner 或 surface 出错时必须回退 runtime-owned default path
+- `execution_context_attributes[:runtime_surface]` 应只放安全归一化后的 metadata（如 `type/helpers/stage_limits`），不要放 raw script/source
 
 LLM options：
 
@@ -149,6 +160,19 @@ Tool calling 稳定性（Runner 级自愈）：
 - `tool_name_repair_max_output_tokens`：tool name repair 调用输出上限（默认 `200`；prompt-only JSON）
 - `tool_name_repair_max_candidates`：单次 tool name repair 最多发送的候选数（默认 `10`）
 - `tool_name_repair_max_visible_tool_names`：tool name repair prompt 中 visible 工具名列表上限（默认 `200`；超限会截断并在 metadata 标记）
+
+Tool result / output surface：
+
+- `TaskExecutor` 会 durable 保存 `raw_result`、`result`（projected）、`activity_preview`、`artifact_refs`
+- provider prompt history 与 `ContextAdapter` 只消费 projected `result`
+- `TurnExecutionProjector` / refresh / replay 可继续依赖 durable `activity_preview` 或 raw preview，因此 UI 预览不要求与模型可见 projection 完全相同
+- 非 streaming 最终输出会经过 `finalize_output`
+- 用户可见错误会经过 `handle_error`
+
+Programmable-agent 现状：
+
+- 当前仅支持让 `AgentProgram` 通过安全配置快照 opt into runtime-surface config
+- 不在这一版里定义 script engine、编辑器 UX、版本化或调试模型
 
 主 LLM 调用稳定性（executor 级自愈）：
 

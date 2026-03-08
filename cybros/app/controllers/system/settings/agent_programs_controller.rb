@@ -39,9 +39,7 @@ module System
       end
 
       def show
-        base = @agent_program.local_path.to_s
-        @base_dir = Rails.root.join(base)
-        @loaded = AgentPrograms::Loader.new(base_dir: @base_dir).load
+        @loaded = @agent_program.loaded_program
       end
 
       private

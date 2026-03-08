@@ -201,6 +201,53 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
   end
 
+  test "activity output preview uses durable activity preview when projected result differs" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    task =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        metadata: {},
+        body_input: {
+          "name" => "shell_exec",
+          "requested_name" => "shell_exec",
+          "tool_call_id" => "tc_1",
+          "arguments" => {},
+          "arguments_summary" => "{}",
+        },
+        body_output: {
+          "raw_result" => AgentCore::Resources::Tools::ToolResult.success(text: "raw operator detail").to_h,
+          "result" => AgentCore::Resources::Tools::ToolResult.success(text: "projected summary").to_h,
+          "activity_preview" => "operator-visible activity preview",
+        },
+      )
+
+    stream = DAG::NodeEventStream.new(node: task)
+    stream.activity_started!(
+      activity_id: "task:#{task.id}",
+      activity_kind: "tool_call",
+      phase: "execution",
+    )
+    stream.activity_finished!(
+      activity_id: "task:#{task.id}",
+      activity_kind: "tool_call",
+      phase: "execution",
+    )
+
+    execution = conversation.turn_execution_for_turn_id(agent.turn_id)
+    activity = execution.fetch("activities").sole
+
+    assert_equal "operator-visible activity preview", activity.fetch("output_preview")
+  end
+
   private
 
     def create_task!(graph:, lane_id:, turn_id:, state:, name:, tool_call_id: nil)

@@ -266,4 +266,122 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
 
     assert_equal "cybros.agent_runtime_resolver.context_turns_must_be_an_integer", err.code
   end
+
+  test "agent_profile runtime_surface config builds runner and normalized execution context attributes" do
+    node =
+      build_pending_agent_node(
+        metadata: {
+          "routing" => { "channel" => "web" },
+          "agent" => {
+            "agent_profile" => {
+              "base" => "coding",
+              "runtime_surface" => {
+                "type" => "noop",
+                "helpers" => { "estimate_tokens" => true },
+                "stage_limits" => {
+                  "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 2048 },
+                },
+              },
+            },
+          },
+        },
+      )
+
+    runtime = build_runtime_for(node)
+
+    assert_instance_of AgentCore::RuntimeSurface::Base, runtime.runtime_surface
+    assert_instance_of AgentCore::RuntimeSurface::Runner, runtime.runtime_surface_runner
+    assert_equal(
+      {
+        type: :noop,
+        helpers: [:estimate_tokens],
+        stage_limits: {
+          prepare_turn: { timeout_s: 0.5, max_output_bytes: 2048 },
+        },
+      },
+      runtime.execution_context_attributes.fetch(:runtime_surface),
+    )
+  end
+
+  test "missing or invalid runtime_surface config falls back to safe no-op defaults" do
+    missing_node =
+      build_pending_agent_node(
+        metadata: {
+          "agent" => {
+            "agent_profile" => {
+              "base" => "coding",
+            },
+          },
+        },
+      )
+    invalid_node =
+      build_pending_agent_node(
+        metadata: {
+          "agent" => {
+            "agent_profile" => {
+              "base" => "coding",
+              "runtime_surface" => {
+                "type" => "wat",
+                "helpers" => { "estimate_tokens" => "yes" },
+              },
+            },
+          },
+        },
+      )
+
+    [missing_node, invalid_node].each do |node|
+      runtime = build_runtime_for(node)
+
+      assert_instance_of AgentCore::RuntimeSurface::Base, runtime.runtime_surface
+      assert_instance_of AgentCore::RuntimeSurface::Runner, runtime.runtime_surface_runner
+      assert_equal(
+        {
+          type: :noop,
+          helpers: [],
+          stage_limits: {},
+        },
+        runtime.execution_context_attributes.fetch(:runtime_surface),
+      )
+    end
+  end
+
+  private
+
+    def build_pending_agent_node(metadata:)
+      conversation = create_conversation!(metadata: metadata)
+      graph = conversation.dag_graph
+      turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+      node = nil
+
+      graph.mutate!(turn_id: turn_id) do |m|
+        user =
+          m.create_node(
+            node_type: Messages::UserMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "Hello",
+            metadata: {},
+          )
+
+        node =
+          m.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            metadata: {},
+          )
+
+        m.create_edge(from_node: user, to_node: node, edge_type: DAG::Edge::SEQUENCE)
+      end
+
+      node
+    end
+
+    def build_runtime_for(node)
+      Cybros::AgentRuntimeResolver.runtime_for(
+        node: node,
+        provider: AgentCore::Resources::Provider::SimpleInferenceProvider.new(base_url: nil, api_key: nil),
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+    end
 end

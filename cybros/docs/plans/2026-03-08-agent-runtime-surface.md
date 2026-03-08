@@ -75,6 +75,35 @@ This plan is complete only when all of the following are true:
 - the focused tests added across the tasks are green.
 - broader regression checks across `test/lib/agent_core`, `test/lib/cybros`, `test/models/conversation`, and the relevant integration/channel tests are green.
 
+## Progress
+
+- [x] Task 1: surface core contract
+  Verified with `bin/rails test test/lib/agent_core/runtime_surface_contract_test.rb test/lib/agent_core/dag/runtime_token_counter_default_test.rb`
+- [x] Task 2: surface runner and helper sandbox
+  Verified with `bin/rails test test/lib/agent_core/runtime_surface_runner_test.rb`
+- [x] Task 3: runtime + resolver plumbing
+  Verified with `bin/rails test test/lib/cybros/agent_runtime_resolver_test.rb test/lib/cybros/agent_profile_config_test.rb`
+- [x] Task 4: prepare_turn + compact_context integration
+  Verified with `bin/rails test test/lib/agent_core/dag/context_budget_manager_runtime_surface_test.rb test/models/conversation/context_compaction_plan_test.rb`
+  Regression checks: `bin/rails test test/lib/agent_core/dag/context_budget_manager_prompt_sections_test.rb` and `bin/rails test test/models/conversation/turn_execution_projection_visibility_test.rb`
+- [x] Task 5: review_tool_call merge path
+  Verified with `bin/rails test test/lib/agent_core/dag/agent_message_executor_runtime_surface_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb`
+- [x] Task 6: raw vs projected tool result
+  Verified with `bin/rails test test/lib/agent_core/dag/task_executor_runtime_surface_test.rb test/lib/agent_core/dag/context_adapter_projected_tool_result_test.rb`
+  Regression checks: `bin/rails test test/models/conversation/turn_execution_projector_test.rb test/integration/conversation_messages_refresh_execution_test.rb test/lib/agent_core/dag/task_executor_activity_events_test.rb test/models/conversation/turn_execution_subagent_activity_test.rb` and `bin/rails test test/lib/agent_core/resources/tools/tool_result_test.rb`
+- [x] Task 7: finalize_output + handle_error
+  Verified with `bin/rails test test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb`
+  Regression checks: `bin/rails test test/lib/agent_core/dag/agent_message_executor_runtime_surface_test.rb test/lib/agent_core/dag/agent_message_executor_activity_events_test.rb` and `bin/rails test test/scenarios/dag/agent_core_dag_integration_flow_test.rb -i '/retryable provider failure exhausts recovery attempts and leaves the node errored|non-retryable validation error does not retry the primary call|streaming: non-retryable provider error before output does not retry|streaming: validation error subclasses before output do not retry/'`
+- [x] Task 8: audit and observability
+  Verified with `bin/rails test test/lib/agent_core/runtime_surface_audit_test.rb`
+  Regression checks: `bin/rails test test/lib/agent_core/runtime_surface_runner_test.rb test/lib/agent_core/dag/context_budget_manager_runtime_surface_test.rb test/models/conversation/context_compaction_plan_test.rb test/lib/agent_core/dag/agent_message_executor_runtime_surface_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb`
+- [x] Task 9: programmable-agent opt-in plumbing
+  Verified with `bin/rails test test/integration/agent_programs_test.rb test/integration/system_settings_agent_programs_test.rb`
+  Regression checks: `bin/rails test test/lib/cybros/agent_profile_config_test.rb`
+- [x] Task 10: docs and final verification
+  Focused verification: `bin/rails test test/lib/agent_core/runtime_surface_contract_test.rb test/lib/agent_core/dag/runtime_token_counter_default_test.rb test/lib/agent_core/runtime_surface_runner_test.rb test/lib/cybros/agent_runtime_resolver_test.rb test/lib/cybros/agent_profile_config_test.rb test/lib/agent_core/dag/context_budget_manager_runtime_surface_test.rb test/models/conversation/context_compaction_plan_test.rb test/lib/agent_core/dag/agent_message_executor_runtime_surface_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb test/lib/agent_core/dag/context_adapter_projected_tool_result_test.rb test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb test/lib/agent_core/runtime_surface_audit_test.rb test/integration/agent_programs_test.rb test/integration/system_settings_agent_programs_test.rb`
+  Broader regression: `bin/rails test test/lib/agent_core test/lib/cybros test/models/conversation test/integration/agent_programs_test.rb test/integration/system_settings_agent_programs_test.rb`
+
 ---
 
 ## Task 1: Add the core `AgentRuntimeSurface` contract and safe no-op defaults

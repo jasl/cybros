@@ -4,14 +4,7 @@ module AgentPrograms
   class Loader
     DEFAULT_TIMEOUT_S = 5
 
-    Loaded =
-      Data.define(
-        :agent_yml,
-        :agent_md,
-        :soul_md,
-        :user_md,
-        :system_md_liquid,
-      )
+    Loaded = Data.define(:runtime_surface_config, :runtime_surface_status)
 
     def initialize(base_dir:, timeout_s: DEFAULT_TIMEOUT_S)
       @base_dir = Pathname.new(base_dir.to_s)
@@ -20,22 +13,41 @@ module AgentPrograms
 
     def load
       Timeout.timeout(@timeout_s) do
+        agent_yml = safe_yaml("agent.yml")
+        runtime_surface = resolve_runtime_surface(agent_yml)
+
         Loaded.new(
-          agent_yml: safe_yaml("agent.yml"),
-          agent_md: safe_text("AGENT.md"),
-          soul_md: safe_text("SOUL.md"),
-          user_md: safe_text("USER.md"),
-          system_md_liquid: safe_text("prompts/system.md.liquid"),
+          runtime_surface_config: runtime_surface.fetch(:config),
+          runtime_surface_status: runtime_surface.fetch(:status),
         )
       end
     rescue StandardError
-      Loaded.new(agent_yml: {}, agent_md: "", soul_md: "", user_md: "", system_md_liquid: "")
+      Loaded.new(
+        runtime_surface_config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
+        runtime_surface_status: "missing",
+      )
     end
 
     private
 
+      def resolve_runtime_surface(agent_yml)
+        data = agent_yml.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(agent_yml) : {}
+        present = data.key?("runtime_surface")
+        raw = present ? data.fetch("runtime_surface", nil) : nil
+
+        {
+          config: Cybros::AgentProfileConfig.normalize_runtime_surface_metadata(raw),
+          status: Cybros::AgentProfileConfig.runtime_surface_status(raw, present: present),
+        }
+      rescue StandardError
+        {
+          config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
+          status: "missing",
+        }
+      end
+
       def safe_yaml(rel)
-        raw = safe_text(rel)
+        raw = safe_file_text(rel)
         return {} if raw.strip.empty?
 
         parsed = YAML.safe_load(raw, permitted_classes: [], permitted_symbols: [], aliases: false)
@@ -44,7 +56,7 @@ module AgentPrograms
         {}
       end
 
-      def safe_text(rel)
+      def safe_file_text(rel)
         path = safe_join(@base_dir, rel)
         return "" unless path&.file?
 

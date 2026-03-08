@@ -35,6 +35,8 @@ module AgentCore
         :tool_name_repair_max_candidates,
         :tool_name_repair_max_visible_tool_names,
         :instrumenter,
+        :runtime_surface,
+        :runtime_surface_runner,
         :execution_context_attributes,
         :max_tool_calls_per_turn,
         :max_steps_per_turn,
@@ -82,6 +84,8 @@ module AgentCore
           tool_name_repair_max_candidates: 10,
           tool_name_repair_max_visible_tool_names: 200,
           instrumenter: nil,
+          runtime_surface: nil,
+          runtime_surface_runner: nil,
           execution_context_attributes: {},
           max_tool_calls_per_turn: DEFAULT_MAX_TOOL_CALLS_PER_TURN,
           max_steps_per_turn: DEFAULT_MAX_STEPS_PER_TURN,
@@ -366,6 +370,16 @@ module AgentCore
           ) if tool_name_repair_max_visible_tool_names <= 0
 
           instrumenter ||= AgentCore::Observability::NullInstrumenter.new
+          runtime_surface = AgentCore::RuntimeSurface.validate!(runtime_surface)
+          runtime_surface_runner ||= AgentCore::RuntimeSurface::Runner.new
+
+          unless runtime_surface_runner.respond_to?(:run)
+            ValidationError.raise!(
+              "runtime_surface_runner must respond to #run",
+              code: "agent_core.dag.runtime.runtime_surface_runner_must_respond_to_run",
+              details: { runtime_surface_runner_class: runtime_surface_runner.class.name },
+            )
+          end
 
           execution_context_attributes =
             if execution_context_attributes.nil?
@@ -519,6 +533,8 @@ module AgentCore
             tool_name_repair_max_candidates: tool_name_repair_max_candidates,
             tool_name_repair_max_visible_tool_names: tool_name_repair_max_visible_tool_names,
             instrumenter: instrumenter,
+            runtime_surface: runtime_surface,
+            runtime_surface_runner: runtime_surface_runner,
             execution_context_attributes: execution_context_attributes,
             max_tool_calls_per_turn: max_tool_calls_per_turn,
             max_steps_per_turn: max_steps_per_turn,

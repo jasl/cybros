@@ -7,8 +7,6 @@ module AgentCore
         DEFAULT_MAX_RESULT_BYTES = AgentCore::Utils::DEFAULT_MAX_TOOL_OUTPUT_BYTES
 
         def execute(node:, context:, stream:)
-          _ = context
-
           runtime = AgentCore::DAG.runtime_for(node: node)
           execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
 
@@ -40,7 +38,18 @@ module AgentCore
               )
             end
 
-          result = truncate_result(result)
+          result = truncate_raw_result(result)
+          projection =
+            AgentCore::RuntimeSurface::ToolResultProjection.new(
+              runtime: runtime,
+              execution_context: execution_context,
+              tool_call: {
+                id: node.body_input["tool_call_id"],
+                name: tool_name,
+                arguments: arguments,
+              },
+              context: context,
+            ).call(raw_result: result)
 
           if result.error?
             stream&.activity_failed!(
@@ -49,7 +58,7 @@ module AgentCore
               phase: activity_phase,
               source_node_id: node.id,
               diagnostic_level: diagnostic_level_for(node),
-              data: { "error" => result.text.to_s },
+              data: { "error" => projection.activity_preview.to_s },
             )
           else
             stream&.activity_finished!(
@@ -62,7 +71,7 @@ module AgentCore
           end
 
           ::DAG::ExecutionResult.finished(
-            content: result.to_h,
+            payload: projection.payload,
             metadata: {
               "tool" => { "name" => tool_name },
               "agent" => AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:agent, {})),
@@ -141,7 +150,7 @@ module AgentCore
             [tool_name, AgentCore::Utils.deep_stringify_keys(args)]
           end
 
-          def truncate_result(result)
+          def truncate_raw_result(result)
             max_bytes = DEFAULT_MAX_RESULT_BYTES
 
             json =

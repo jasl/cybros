@@ -13,6 +13,14 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
           "directives_enabled" => true,
           "repo_docs_enabled" => false,
           "repo_docs_max_total_bytes" => 10_000,
+          "runtime_surface" => {
+            "type" => "noop",
+            "helpers" => { "estimate_tokens" => true },
+            "stage_limits" => {
+              "prepare_turn" => { "timeout_s" => 0.75, "max_output_bytes" => 2048 },
+              "finalize_output" => { "max_output_bytes" => 1024 },
+            },
+          },
           "system_prompt_sections" => {
             "tooling" => { "enabled" => false, "order" => 100, "prompt_modes" => ["full"], "stability" => "prefix" },
             "time" => { "enabled" => true },
@@ -28,6 +36,17 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
     assert_equal true, cfg.directives_enabled
     assert_equal false, cfg.repo_docs_enabled
     assert_equal 10_000, cfg.repo_docs_max_total_bytes
+    assert_equal(
+      {
+        type: :noop,
+        helpers: { estimate_tokens: true },
+        stage_limits: {
+          prepare_turn: { timeout_s: 0.75, max_output_bytes: 2048 },
+          finalize_output: { max_output_bytes: 1024 },
+        },
+      },
+      cfg.runtime_surface,
+    )
     assert_equal(
       {
         "tooling" => { enabled: false, order: 100, prompt_modes: [:full], stability: :prefix },
@@ -46,6 +65,14 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
         "directives_enabled" => true,
         "repo_docs_enabled" => false,
         "repo_docs_max_total_bytes" => 10_000,
+        "runtime_surface" => {
+          "type" => "noop",
+          "helpers" => { "estimate_tokens" => true },
+          "stage_limits" => {
+            "prepare_turn" => { "timeout_s" => 0.75, "max_output_bytes" => 2048 },
+            "finalize_output" => { "max_output_bytes" => 1024 },
+          },
+        },
         "system_prompt_sections" => {
           "tooling" => { "enabled" => false, "order" => 100, "prompt_modes" => ["full"], "stability" => "prefix" },
           "time" => { "enabled" => true },

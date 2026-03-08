@@ -29,6 +29,12 @@ module Messages
       def preview_from_output(output_hash)
         return {} unless output_hash.is_a?(Hash)
 
+        if output_hash.key?("activity_preview")
+          preview = { "activity_preview" => truncate_preview_string(output_hash["activity_preview"]) }
+          preview["result"] = summarize_result_preview(output_hash["result"]) if output_hash.key?("result")
+          return preview
+        end
+
         if output_hash.key?("result")
           { "result" => summarize_result_preview(output_hash["result"]) }
         else

@@ -15,6 +15,7 @@ module Cybros
       :directives_enabled,
       :repo_docs_enabled,
       :repo_docs_max_total_bytes,
+      :runtime_surface,
       :system_prompt_sections,
     ) do
       MAX_CONTEXT_TURNS = 1000
@@ -23,6 +24,9 @@ module Cybros
       MAX_TOOL_PATTERNS = 200
       MAX_TOOL_PATTERN_BYTES = 128
       MAX_SYSTEM_PROMPT_SECTIONS = 50
+      RUNTIME_SURFACE_TYPES = %w[noop].freeze
+      RUNTIME_SURFACE_HELPER_IDS = %w[estimate_tokens].freeze
+      RUNTIME_SURFACE_STAGE_IDS = AgentCore::RuntimeSurface::LIFECYCLE_METHODS.map(&:to_s).freeze
       SYSTEM_PROMPT_SECTION_IDS = %w[
         safety
         tooling
@@ -96,6 +100,7 @@ module Cybros
         directives_enabled = parse_directives_enabled(h)
         repo_docs_enabled = parse_repo_docs_enabled(h)
         repo_docs_max_total_bytes = parse_repo_docs_max_total_bytes(h)
+        runtime_surface = parse_runtime_surface(h)
         system_prompt_sections = parse_system_prompt_sections(h)
 
         new(
@@ -107,6 +112,7 @@ module Cybros
           directives_enabled: directives_enabled,
           repo_docs_enabled: repo_docs_enabled,
           repo_docs_max_total_bytes: repo_docs_max_total_bytes,
+          runtime_surface: runtime_surface,
           system_prompt_sections: system_prompt_sections,
         )
       end
@@ -120,6 +126,7 @@ module Cybros
         out["directives_enabled"] = directives_enabled unless directives_enabled.nil?
         out["repo_docs_enabled"] = repo_docs_enabled unless repo_docs_enabled.nil?
         out["repo_docs_max_total_bytes"] = repo_docs_max_total_bytes if repo_docs_max_total_bytes
+        out["runtime_surface"] = self.class.send(:runtime_surface_to_metadata, runtime_surface) if runtime_surface
         out["system_prompt_sections"] = self.class.send(:system_prompt_sections_to_metadata, system_prompt_sections) if system_prompt_sections
         out
       end
@@ -179,7 +186,25 @@ module Cybros
           out[:system_prompt_section_overrides] = merged
         end
 
+        out[:runtime_surface] = self.class.send(:runtime_surface_to_definition, runtime_surface) if runtime_surface
+
         out
+      end
+
+      def self.default_runtime_surface_metadata
+        runtime_surface_to_metadata(type: :noop, helpers: {}, stage_limits: {})
+      end
+
+      def self.normalize_runtime_surface_metadata(value)
+        parsed = send(:parse_runtime_surface, { "runtime_surface" => value })
+        runtime_surface_to_metadata(parsed || { type: :noop, helpers: {}, stage_limits: {} })
+      end
+
+      def self.runtime_surface_status(value, present:)
+        return "missing" unless present
+
+        parsed = send(:parse_runtime_surface, { "runtime_surface" => value })
+        parsed ? "configured" : "invalid"
       end
 
       private_class_method def self.allowed_keys
@@ -191,6 +216,7 @@ module Cybros
           tools_allowed
           repo_docs_enabled
           repo_docs_max_total_bytes
+          runtime_surface
           directives_enabled
           system_prompt_sections
         ]
@@ -370,6 +396,82 @@ module Cybros
         value
       end
 
+      private_class_method def self.parse_runtime_surface(h)
+        return nil unless h.key?("runtime_surface")
+
+        raw = h.fetch("runtime_surface", nil)
+        return nil if raw.nil?
+        return nil unless raw.is_a?(Hash)
+
+        cfg = AgentCore::Utils.deep_stringify_keys(raw)
+        return nil unless (cfg.keys - %w[type helpers stage_limits]).empty?
+
+        type = cfg.fetch("type", "noop").to_s.strip.downcase.tr("-", "_")
+        return nil unless RUNTIME_SURFACE_TYPES.include?(type)
+
+        helpers = parse_runtime_surface_helpers(cfg.fetch("helpers", {}))
+        return nil if helpers.nil?
+
+        stage_limits = parse_runtime_surface_stage_limits(cfg.fetch("stage_limits", {}))
+        return nil if stage_limits.nil?
+
+        {
+          type: type.to_sym,
+          helpers: helpers.freeze,
+          stage_limits: stage_limits.freeze,
+        }.freeze
+      rescue StandardError
+        nil
+      end
+
+      private_class_method def self.parse_runtime_surface_helpers(raw)
+        value = raw.nil? ? {} : raw
+        return nil unless value.is_a?(Hash)
+
+        cfg = AgentCore::Utils.deep_stringify_keys(value)
+        return nil unless (cfg.keys - RUNTIME_SURFACE_HELPER_IDS).empty?
+
+        cfg.each_with_object({}) do |(helper_name, enabled), out|
+          return nil unless enabled == true || enabled == false
+
+          out[helper_name.to_sym] = enabled
+        end
+      end
+
+      private_class_method def self.parse_runtime_surface_stage_limits(raw)
+        value = raw.nil? ? {} : raw
+        return nil unless value.is_a?(Hash)
+
+        cfg = AgentCore::Utils.deep_stringify_keys(value)
+        normalized_stage_ids = cfg.keys.map { |key| key.to_s.strip.downcase.tr("-", "_") }
+        return nil unless (normalized_stage_ids - RUNTIME_SURFACE_STAGE_IDS).empty?
+
+        cfg.each_with_object({}) do |(stage_name, stage_cfg), out|
+          return nil unless stage_cfg.is_a?(Hash)
+
+          normalized = AgentCore::Utils.deep_stringify_keys(stage_cfg)
+          return nil unless (normalized.keys - %w[timeout_s max_output_bytes]).empty?
+
+          entry = {}
+
+          if normalized.key?("timeout_s")
+            timeout_s = Float(normalized.fetch("timeout_s", nil), exception: false)
+            return nil unless timeout_s && timeout_s.positive? && timeout_s.finite?
+
+            entry[:timeout_s] = timeout_s
+          end
+
+          if normalized.key?("max_output_bytes")
+            max_output_bytes = Integer(normalized.fetch("max_output_bytes", nil), exception: false)
+            return nil unless max_output_bytes && max_output_bytes.positive?
+
+            entry[:max_output_bytes] = max_output_bytes
+          end
+
+          out[stage_name.to_s.strip.downcase.tr("-", "_").to_sym] = entry.freeze
+        end
+      end
+
       private_class_method def self.parse_system_prompt_sections(h)
         return nil unless h.key?("system_prompt_sections")
 
@@ -526,6 +628,51 @@ module Cybros
 
           out[section_id.to_s] = entry
         end
+      rescue StandardError
+        {}
+      end
+
+      private_class_method def self.runtime_surface_to_definition(runtime_surface)
+        AgentCore::Utils.deep_symbolize_keys(runtime_surface)
+      rescue StandardError
+        nil
+      end
+
+      private_class_method def self.runtime_surface_to_metadata(runtime_surface)
+        raw = AgentCore::Utils.deep_stringify_keys(runtime_surface)
+        return {} unless raw.is_a?(Hash)
+
+        out = {}
+        out["type"] = raw.fetch("type", "noop").to_s
+
+        helpers = raw.fetch("helpers", {})
+        helpers = {} unless helpers.is_a?(Hash)
+        out["helpers"] =
+          helpers.each_with_object({}) do |(helper_name, enabled), helper_out|
+            helper_out[helper_name.to_s] = enabled == true
+          end
+
+        stage_limits = raw.fetch("stage_limits", {})
+        stage_limits = {} unless stage_limits.is_a?(Hash)
+        out["stage_limits"] =
+          stage_limits.each_with_object({}) do |(stage_name, stage_cfg), stage_out|
+            stage_cfg = stage_cfg.is_a?(Hash) ? stage_cfg : {}
+            entry = {}
+            if stage_cfg.key?("timeout_s") || stage_cfg.key?(:timeout_s)
+              entry["timeout_s"] = stage_cfg.key?("timeout_s") ? stage_cfg.fetch("timeout_s") : stage_cfg.fetch(:timeout_s)
+            end
+            if stage_cfg.key?("max_output_bytes") || stage_cfg.key?(:max_output_bytes)
+              entry["max_output_bytes"] =
+                if stage_cfg.key?("max_output_bytes")
+                  stage_cfg.fetch("max_output_bytes")
+                else
+                  stage_cfg.fetch(:max_output_bytes)
+                end
+            end
+            stage_out[stage_name.to_s] = entry
+          end
+
+        out
       rescue StandardError
         {}
       end

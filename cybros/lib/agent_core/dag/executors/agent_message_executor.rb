@@ -58,6 +58,17 @@ module AgentCore
 
               output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn, model: used_model)
               output_payload["tool_calls"] = message.tool_calls.map(&:to_h)
+              output_payload =
+                apply_finalize_output(
+                  output_payload: output_payload,
+                  message: override_message,
+                  runtime: runtime,
+                  execution_context: execution_context,
+                  context: context,
+                  stop_reason: :end_turn,
+                  model: used_model,
+                  streamed_output: false,
+                )
 
               metadata =
                 deep_merge_metadata(
@@ -93,6 +104,17 @@ module AgentCore
                   )
                 )
               metadata = deep_merge_metadata(metadata, agent_metadata)
+              output_payload =
+                apply_finalize_output(
+                  output_payload: output_payload,
+                  message: message,
+                  runtime: runtime,
+                  execution_context: execution_context,
+                  context: context,
+                  stop_reason: stop_reason,
+                  model: used_model,
+                  streamed_output: streamed_output,
+                )
 
               if streamed_output
                 ::DAG::ExecutionResult.finished(payload: output_payload, metadata: metadata, usage: usage, streamed_output: true)
@@ -117,7 +139,15 @@ module AgentCore
             "agent" => agent,
           }
           metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          ::DAG::ExecutionResult.errored(error: "ContextWindowExceededError: #{e.message}", metadata: metadata)
+          handle_runtime_error(
+            error: e,
+            stage: :prepare_turn,
+            default_error: "ContextWindowExceededError: #{e.message}",
+            default_metadata: metadata,
+            runtime: runtime,
+            execution_context: execution_context,
+            context: context,
+          )
         rescue AgentCore::ProviderError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
           metadata = {
@@ -126,9 +156,14 @@ module AgentCore
             agent: agent,
           }.compact
           metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          ::DAG::ExecutionResult.errored(
-            error: "ProviderError: #{e.message}",
-            metadata: metadata,
+          handle_runtime_error(
+            error: e,
+            stage: :provider,
+            default_error: "ProviderError: #{e.message}",
+            default_metadata: metadata,
+            runtime: runtime,
+            execution_context: execution_context,
+            context: context,
           )
         rescue AgentCore::StreamError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
@@ -142,15 +177,262 @@ module AgentCore
             metadata["provider_error_body"] = body_safe
           end
           metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: metadata)
+          handle_runtime_error(
+            error: e,
+            stage: :provider_stream,
+            default_error: "#{e.class}: #{e.message}",
+            default_metadata: metadata,
+            runtime: runtime,
+            execution_context: execution_context,
+            context: context,
+          )
         rescue StandardError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
           metadata = { agent: agent }.compact
           metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          ::DAG::ExecutionResult.errored(error: "#{e.class}: #{e.message}", metadata: metadata)
+          handle_runtime_error(
+            error: e,
+            stage: :runtime,
+            default_error: "#{e.class}: #{e.message}",
+            default_metadata: metadata,
+            runtime: runtime,
+            execution_context: execution_context,
+            context: context,
+          )
         end
 
         private
+
+          def apply_finalize_output(output_payload:, message:, runtime:, execution_context:, context:, stop_reason:, model:, streamed_output:)
+            return output_payload if streamed_output
+            return output_payload if message.has_tool_calls?
+
+            result =
+              runtime.runtime_surface_runner.run(
+                surface: runtime.runtime_surface,
+                stage: :finalize_output,
+                input:
+                  AgentCore::RuntimeSurface::Inputs::FinalizeOutput.new(
+                    draft_output: AgentCore::Utils.deep_stringify_keys(output_payload),
+                    context: Array(context),
+                    budget: {
+                      runtime_surface: AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:runtime_surface, {})),
+                      context_window_tokens: runtime.context_window_tokens,
+                      reserved_output_tokens: runtime.reserved_output_tokens,
+                    },
+                    helpers: {},
+                  ),
+                execution_context: execution_context,
+              )
+
+            decision = result.decision
+            unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::FinalOutput)
+              AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+                execution_context: execution_context,
+                stage: :finalize_output,
+                surface: runtime.runtime_surface,
+                outcome: {
+                  applied: false,
+                  fallback: result.fallback?,
+                  final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(output_payload),
+                },
+              )
+              return output_payload
+            end
+
+            normalized =
+              normalize_final_output_payload(
+                decision.output,
+                fallback: output_payload,
+                runtime: runtime,
+                stop_reason: stop_reason,
+                model: model,
+              )
+
+            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+              execution_context: execution_context,
+              stage: :finalize_output,
+              surface: runtime.runtime_surface,
+              outcome: {
+                applied: true,
+                fallback: result.fallback?,
+                final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(normalized),
+              },
+            )
+
+            normalized
+          rescue StandardError
+            output_payload
+          end
+
+          def handle_runtime_error(error:, stage:, default_error:, default_metadata:, runtime:, execution_context:, context:)
+            return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless runtime && execution_context
+            return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless handleable_error?(error)
+
+            result =
+              runtime.runtime_surface_runner.run(
+                surface: runtime.runtime_surface,
+                stage: :handle_error,
+                input:
+                  AgentCore::RuntimeSurface::Inputs::HandleError.new(
+                    error: error_view_for(error),
+                    stage: stage,
+                    context: Array(context),
+                    budget: {
+                      runtime_surface: AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:runtime_surface, {})),
+                      context_window_tokens: runtime.context_window_tokens,
+                      reserved_output_tokens: runtime.reserved_output_tokens,
+                    },
+                    helpers: {},
+                  ),
+                execution_context: execution_context,
+              )
+
+            decision = result.decision
+            action = handled_error_action_for(decision)
+            if action == :pass
+              AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+                execution_context: execution_context,
+                stage: :handle_error,
+                surface: runtime.runtime_surface,
+                outcome: {
+                  action: "pass",
+                  result_state: ::DAG::Node::ERRORED,
+                },
+              )
+              return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
+            end
+
+            payload =
+              normalize_final_output_payload(
+                decision.output,
+                fallback: { "content" => default_error_message_for(action) },
+                runtime: runtime,
+                stop_reason: :end_turn,
+                model: runtime.model,
+              )
+
+            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+              execution_context: execution_context,
+              stage: :handle_error,
+              surface: runtime.runtime_surface,
+                outcome: {
+                  action: action,
+                  fallback: result.fallback?,
+                  result_state: ::DAG::Node::FINISHED,
+                  final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(payload),
+                },
+              )
+
+            ::DAG::ExecutionResult.finished(
+              content: payload.fetch("content"),
+              payload: payload,
+              metadata: default_metadata,
+            )
+          rescue StandardError
+            ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
+          end
+
+          def normalize_final_output_payload(value, fallback:, runtime:, stop_reason:, model:)
+            fallback = fallback.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(fallback) : {}
+            message = normalize_assistant_message(value, fallback: fallback)
+            directives = extract_output_directives(value, fallback: fallback)
+            build_agent_output_payload(message, runtime: runtime, stop_reason: stop_reason, model: model, directives: directives)
+          rescue StandardError
+            fallback
+          end
+
+          def normalize_assistant_message(value, fallback:)
+            message =
+              case value
+              when AgentCore::Message
+                value
+              when Hash
+                value = AgentCore::Utils.deep_stringify_keys(value)
+                if value["message"].is_a?(Hash)
+                  Message.from_h(value["message"])
+                elsif value.key?("content")
+                  Message.new(role: :assistant, content: value["content"].to_s)
+                end
+              else
+                text = value.to_s
+                Message.new(role: :assistant, content: text) unless text.empty?
+              end
+
+            return message if message.is_a?(Message) && message.role == :assistant
+
+            fallback_content = fallback.fetch("content", fallback.dig("message", "content")).to_s
+            Message.new(role: :assistant, content: fallback_content)
+          rescue StandardError
+            Message.new(role: :assistant, content: fallback.fetch("content", "").to_s)
+          end
+
+          def extract_output_directives(value, fallback:)
+            hash = value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(value) : {}
+            hash.fetch("directives", fallback["directives"])
+          rescue StandardError
+            fallback["directives"]
+          end
+
+          def handleable_error?(error)
+            return false if error.is_a?(AgentCore::StreamError) && error.output_committed == true
+
+            true
+          rescue StandardError
+            true
+          end
+
+          def error_view_for(error)
+            {
+              "class" => error.class.name,
+              "message" => AgentCore::Utils.truncate_utf8_bytes(error.message.to_s, max_bytes: 1_000),
+              "status" => (error.respond_to?(:status) ? error.status : nil),
+              "validation_error" => error.is_a?(AgentCore::ValidationError),
+              "recoverable" => (error.respond_to?(:recoverable) ? error.recoverable : nil),
+              "code" => (error.respond_to?(:code) ? error.code : nil),
+            }.compact
+          rescue StandardError
+            { "class" => error.class.name }
+          end
+
+          def handled_error_action_for(decision)
+            return :pass unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::ErrorHandling)
+
+            action = decision.action.to_s.strip.downcase.tr("-", "_").to_sym
+            return action if %i[pass user_safe_message ask_human retryable_mask].include?(action)
+
+            :pass
+          rescue StandardError
+            :pass
+          end
+
+          def default_error_message_for(action)
+            case action
+            when :ask_human
+              "I couldn't complete that safely. Human review is required."
+            when :retryable_mask
+              "Temporary upstream failure. Please retry."
+            else
+              "Something went wrong. Please try again."
+            end
+          end
+
+          def publish_review_tool_call_outcome(execution_context:, runtime:, static_decision:, reviewed_tool_call:)
+            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+              execution_context: execution_context,
+              stage: :review_tool_call,
+              surface: runtime.runtime_surface,
+              outcome: {
+                static_policy_outcome: static_decision.outcome.to_s,
+                final_policy_outcome: reviewed_tool_call.fetch(:decision).outcome.to_s,
+                required_confirmation: reviewed_tool_call.fetch(:decision).required == true,
+                requested_name: reviewed_tool_call.fetch(:requested_name).to_s,
+                resolved_name: reviewed_tool_call.fetch(:resolved_name).to_s,
+              },
+            )
+          rescue StandardError
+            nil
+          end
 
           def agent_attributes_from(execution_context:, runtime:)
             agent = execution_context&.attributes&.fetch(:agent, nil)
@@ -506,7 +788,7 @@ module AgentCore
           end
 
           def build_agent_output_payload(message, runtime:, stop_reason:, model:, directives: nil)
-            tool_calls = message.has_tool_calls? ? message.tool_calls.map(&:to_h) : []
+            tool_calls = message.has_tool_calls? ? AgentCore::Utils.deep_stringify_keys(message.tool_calls.map(&:to_h)) : []
 
             provider_key = runtime.provider.respond_to?(:provider_key) ? runtime.provider.provider_key.to_s : runtime_name(runtime)
             model_ref = runtime.provider.respond_to?(:model_ref) ? runtime.provider.model_ref.to_s : ""
@@ -514,7 +796,7 @@ module AgentCore
 
             out = {
               "content" => message.text.to_s,
-              "message" => message.to_h,
+              "message" => AgentCore::Utils.deep_stringify_keys(message.to_h),
               "tool_calls" => tool_calls,
               "stop_reason" => stop_reason.to_s,
               "model" => (model_ref.to_s.strip != "" ? model_ref : model.to_s),
@@ -745,7 +1027,70 @@ module AgentCore
                     AgentCore::Resources::Tools::Policy::Decision.deny(reason: "policy_error=#{e.class}")
                   end
 
+                reviewed_tool_call =
+                  apply_runtime_surface_review(
+                    runtime: runtime,
+                    execution_context: execution_context,
+                    tool_call_id: tool_call_id,
+                    requested_name: requested_name,
+                    resolved: resolved,
+                    name_resolution: name_resolution,
+                    arguments: arguments,
+                    static_decision: decision,
+                    tool_name_aliases: tool_name_aliases,
+                    normalize_index: normalize_index,
+                  )
+
+                requested_name = reviewed_tool_call.fetch(:requested_name)
+                resolved = reviewed_tool_call.fetch(:resolved)
+                resolved_name = reviewed_tool_call.fetch(:resolved_name)
+                source = reviewed_tool_call.fetch(:source)
+                name_resolution = reviewed_tool_call.fetch(:name_resolution)
+                arguments = reviewed_tool_call.fetch(:arguments)
+                decision = reviewed_tool_call.fetch(:decision)
+
                 instrument_authorization(execution_context, resolved_name, decision)
+
+                unless resolved.exists
+                  denied += 1
+
+                  tool_error =
+                    AgentCore::Resources::Tools::ToolResult.error(
+                      text: "Tool not found: #{requested_name}"
+                    )
+
+                  task =
+                    m.create_node(
+                      node_type: "task",
+                      state: ::DAG::Node::FINISHED,
+                      idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
+                      lane_id: node.lane_id,
+                      metadata: { "generated_by" => "agent_core", "source" => "policy" },
+                      body_input: task_input_hash(
+                        tool_call_id: tool_call_id,
+                        requested_name: requested_name,
+                        name: resolved_name,
+                        name_resolution: name_resolution,
+                        arguments: arguments,
+                        source: "policy",
+                      ),
+                      body_output: { "result" => tool_error.to_h },
+                    )
+
+                  m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                  m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                  emit_failed_activity!(
+                    task: task,
+                    phase: planned_phase_for(task),
+                    diagnostic_level: diagnostic_level,
+                    data: {
+                      "reason" => "tool_not_found",
+                      "error" => tool_error.text.to_s,
+                    },
+                  )
+                  next
+                end
 
                 case decision.outcome
                 when :allow
@@ -1151,6 +1496,160 @@ module AgentCore
             ResolvedTool.new(name: resolved_name, source: source, exists: !tool_info.nil?, resolution_method: resolution.method)
           rescue StandardError
             ResolvedTool.new(name: requested_name.to_s, source: "policy", exists: false, resolution_method: :unknown)
+          end
+
+          def apply_runtime_surface_review(
+            runtime:,
+            execution_context:,
+            tool_call_id:,
+            requested_name:,
+            resolved:,
+            name_resolution:,
+            arguments:,
+            static_decision:,
+            tool_name_aliases:,
+            normalize_index:
+          )
+            reviewed =
+              {
+                requested_name: requested_name,
+                resolved: resolved,
+                resolved_name: resolved.name,
+                source: resolved.source,
+                name_resolution: name_resolution,
+                arguments: arguments,
+                decision: static_decision,
+              }
+
+            return reviewed if static_decision.denied?
+
+            outcome =
+              runtime.runtime_surface_runner.run(
+                surface: runtime.runtime_surface,
+                stage: :review_tool_call,
+                input:
+                  AgentCore::RuntimeSurface::Inputs::ReviewToolCall.new(
+                    tool_call: {
+                      id: tool_call_id.to_s,
+                      name: requested_name.to_s,
+                      resolved_name: resolved.name.to_s,
+                      arguments: AgentCore::Utils.deep_stringify_keys(arguments),
+                      source: resolved.source.to_s,
+                      name_resolution: name_resolution.to_s,
+                    },
+                    context: [],
+                    capabilities: {
+                      prompt_mode: runtime.prompt_mode,
+                    },
+                    risk_hints: {
+                      static_policy_outcome: static_decision.outcome.to_s,
+                      required_confirmation: static_decision.required == true,
+                    },
+                    helpers: nil,
+                  ),
+                execution_context: execution_context,
+              )
+
+            suggestion = outcome.decision
+            return reviewed unless suggestion.is_a?(AgentCore::RuntimeSurface::Decisions::ToolCallSuggestion)
+
+            action = suggestion.action.to_s.strip.downcase.tr("-", "_").to_sym
+
+            reviewed =
+              case action
+              when :pass, :allow
+                reviewed.merge(decision: static_decision)
+              when :deny
+                reviewed.merge(
+                  decision: AgentCore::Resources::Tools::Policy::Decision.deny(reason: suggestion.reason.to_s.presence || "runtime_surface_denied"),
+                )
+              when :ask_human
+                reviewed.merge(
+                  decision: merge_surface_confirmation(static_decision: static_decision, reason: suggestion.reason),
+                )
+              when :rewrite_args
+                rewritten = normalize_reviewed_tool_call_rewrite(suggestion.patched_tool_call, fallback_name: requested_name, fallback_arguments: arguments)
+                rewritten_name = rewritten.fetch(:name)
+                rewritten_arguments = rewritten.fetch(:arguments)
+                rewritten_resolved =
+                  resolve_tool(
+                    runtime.tools_registry,
+                    rewritten_name,
+                    aliases: tool_name_aliases,
+                    enable_normalize_fallback: runtime.tool_name_normalize_fallback,
+                    normalize_index: normalize_index,
+                  )
+                rewritten_name_resolution = :runtime_surface_rewrite
+                rewritten_decision =
+                  if rewritten_resolved.exists
+                    begin
+                      runtime.tool_policy.authorize(name: rewritten_resolved.name, arguments: rewritten_arguments, context: execution_context)
+                    rescue StandardError => e
+                      AgentCore::Resources::Tools::Policy::Decision.deny(reason: "policy_error=#{e.class}")
+                    end
+                  else
+                    AgentCore::Resources::Tools::Policy::Decision.deny(reason: "tool_not_found")
+                  end
+
+                final_decision =
+                  if static_decision.requires_confirmation? && rewritten_decision.allowed?
+                    static_decision
+                  else
+                    rewritten_decision
+                  end
+
+                {
+                  requested_name: rewritten_name,
+                  resolved: rewritten_resolved,
+                  resolved_name: rewritten_resolved.name,
+                  source: rewritten_resolved.source,
+                  name_resolution: rewritten_name_resolution,
+                  arguments: rewritten_arguments,
+                  decision: final_decision,
+                }
+              else
+                reviewed
+              end
+
+            publish_review_tool_call_outcome(
+              execution_context: execution_context,
+              runtime: runtime,
+              static_decision: static_decision,
+              reviewed_tool_call: reviewed,
+            )
+
+            reviewed
+          rescue StandardError
+            reviewed
+          end
+
+          def merge_surface_confirmation(static_decision:, reason:)
+            return static_decision if static_decision.requires_confirmation?
+
+            AgentCore::Resources::Tools::Policy::Decision.confirm(
+              reason: reason.to_s.presence || "runtime_surface_review",
+              required: static_decision.required == true,
+              deny_effect: static_decision.deny_effect,
+            )
+          end
+
+          def normalize_reviewed_tool_call_rewrite(value, fallback_name:, fallback_arguments:)
+            raw = value.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(value) : {}
+            name = raw.fetch(:name, raw.fetch(:resolved_name, fallback_name)).to_s.strip
+            name = fallback_name.to_s if name.empty?
+
+            arguments = raw.fetch(:arguments, fallback_arguments)
+            arguments = {} unless arguments.is_a?(Hash)
+
+            {
+              name: name,
+              arguments: AgentCore::Utils.deep_stringify_keys(arguments),
+            }
+          rescue StandardError
+            {
+              name: fallback_name.to_s,
+              arguments: AgentCore::Utils.deep_stringify_keys(fallback_arguments.is_a?(Hash) ? fallback_arguments : {}),
+            }
           end
 
           def task_input_hash(tool_call_id:, requested_name:, name:, name_resolution:, arguments:, source:)

@@ -16,13 +16,17 @@ module AgentPrograms
 
       FileUtils.mkdir_p(abs_dir)
       FileUtils.cp_r(Dir.glob(profile_dir.join("*")), abs_dir)
+      loaded = Loader.new(base_dir: abs_dir).load
 
       AgentProgram.create!(
         name: name,
         description: nil,
         profile_source: profile_source,
         local_path: rel_dir,
-        args: {},
+        args: {
+          "runtime_surface" => loaded.runtime_surface_config,
+          "runtime_surface_status" => loaded.runtime_surface_status,
+        },
         active_persona: nil,
       )
     end

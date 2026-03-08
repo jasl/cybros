@@ -12,6 +12,20 @@
           <div class="text-xs opacity-60">Local path</div>
           <div class="font-mono text-sm"><%= @agent_program.local_path %></div>
         </div>
+        <div>
+          <div class="text-xs opacity-60">Runtime surface</div>
+          <div class="font-mono text-sm"><%= @loaded.runtime_surface_config.fetch("type", "noop") %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Runtime status</div>
+          <div class="text-sm">
+            <% if @loaded.runtime_surface_status == "configured" %>
+              Configured
+            <% else %>
+              Fallback to safe no-op
+            <% end %>
+          </div>
+        </div>
       </div>
     </div>
   </div>

@@ -6,6 +6,16 @@ module AgentCore
       # Contains content blocks (text, images, etc.) and error status.
       # Normalized across all tool sources (native, MCP, skills).
       class ToolResult
+        DEFAULT_PROJECTION_PREVIEW_BYTES = 512
+        DEFAULT_PROJECTED_TEXT_BYTES = 4_096
+        TRUNCATED_NOTICE = "[tool output truncated]"
+        NON_TEXT_NOTICE = "[non-text tool output omitted]"
+        REDACTION_PATTERNS = [
+          [/(api[_-]?key\s*[=:]\s*)([^\s]+)/i, "\\1[redacted]"],
+          [/(token\s*[=:]\s*)([^\s]+)/i, "\\1[redacted]"],
+          [/(bearer\s+)([^\s]+)/i, "\\1[redacted]"],
+        ].freeze
+
         attr_reader :content, :error, :metadata
 
         # @param content [Array<Hash>] Content blocks
@@ -58,6 +68,52 @@ module AgentCore
           { content: content, error: error, metadata: metadata }
         end
 
+        def artifact_refs
+          refs = metadata["artifact_refs"]
+          refs.is_a?(Array) ? AgentCore::Utils.deep_stringify_keys(refs) : []
+        rescue StandardError
+          []
+        end
+
+        def projection_meta
+          {
+            "error" => error?,
+            "content_block_count" => content.length,
+            "has_non_text_content" => has_non_text_content?,
+            "text_bytes" => text.to_s.bytesize,
+            "line_count" => text.to_s.lines.count,
+            "metadata" => metadata.except("artifact_refs"),
+          }
+        end
+
+        def projection_preview(max_text_bytes: DEFAULT_PROJECTION_PREVIEW_BYTES)
+          sanitized = self.class.sanitize_text_for_projection(text, max_bytes: max_text_bytes)
+
+          {
+            "text" => projection_text_with_non_text_notice(sanitized.fetch(:text)),
+            "error" => error?,
+            "truncated" => sanitized.fetch(:truncated),
+            "redacted" => sanitized.fetch(:redacted),
+            "non_text_content" => has_non_text_content?,
+          }
+        end
+
+        def projected_copy(max_text_bytes: DEFAULT_PROJECTED_TEXT_BYTES)
+          sanitized = self.class.sanitize_text_for_projection(text, max_bytes: max_text_bytes)
+
+          ToolResult.new(
+            content: projected_content(sanitized.fetch(:text)),
+            error: error?,
+            metadata: metadata.merge(
+              "projection" => {
+                "truncated" => sanitized.fetch(:truncated),
+                "redacted" => sanitized.fetch(:redacted),
+                "non_text_content" => has_non_text_content?,
+              },
+            ),
+          )
+        end
+
         # Build a ToolResult from a Hash (symbol or string keys) or JSON String.
         #
         # Intended for app-side persistence round-trips and job queues.
@@ -67,6 +123,8 @@ module AgentCore
         def self.from_h(value)
           h =
             case value
+            when self
+              return value
             when String
               begin
                 require "json"
@@ -115,6 +173,21 @@ module AgentCore
             error: !!error,
             metadata: metadata,
           )
+        end
+
+        def self.coerce(value, error: false, metadata: {})
+          case value
+          when self
+            value
+          when Hash, String
+            from_h(value)
+          else
+            new(
+              content: [{ type: :text, text: value.to_s }],
+              error: error,
+              metadata: metadata,
+            )
+          end
         end
 
         # Build a successful text result.
@@ -172,6 +245,48 @@ module AgentCore
 
           sym = st.is_a?(Symbol) ? st : st.to_s.to_sym
           sym == st ? hash : hash.merge(source_type: sym)
+        end
+
+        def projected_content(text)
+          blocks = []
+          text = text.to_s
+          blocks << { type: :text, text: text } unless text.empty?
+          blocks << { type: :text, text: NON_TEXT_NOTICE } if has_non_text_content?
+          blocks << { type: :text, text: error? ? "[tool result omitted]" : "[tool output omitted]" } if blocks.empty?
+          blocks
+        end
+
+        def projection_text_with_non_text_notice(text)
+          base = text.to_s
+          return NON_TEXT_NOTICE if base.empty? && has_non_text_content?
+          return base unless has_non_text_content?
+          return "#{base}\n\n#{NON_TEXT_NOTICE}" unless base.empty?
+
+          NON_TEXT_NOTICE
+        end
+
+        class << self
+          def sanitize_text_for_projection(text, max_bytes:)
+            sanitized = text.to_s
+            redacted = false
+
+            REDACTION_PATTERNS.each do |pattern, replacement|
+              updated = sanitized.gsub(pattern, replacement)
+              redacted ||= updated != sanitized
+              sanitized = updated
+            end
+
+            truncated = sanitized.bytesize > max_bytes
+            body_max_bytes = truncated ? [max_bytes - ("\n\n#{TRUNCATED_NOTICE}").bytesize, 0].max : max_bytes
+            body = AgentCore::Utils.truncate_utf8_bytes(sanitized, max_bytes: body_max_bytes)
+            body = "#{body}\n\n#{TRUNCATED_NOTICE}" if truncated
+
+            {
+              text: body,
+              redacted: redacted,
+              truncated: truncated,
+            }
+          end
         end
       end
     end

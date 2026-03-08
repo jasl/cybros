@@ -1,6 +1,6 @@
-# AgentCore（DAG-first）上下文管理与自动压缩
+# AgentCore（DAG-first）上下文管理、runtime-surface prompt shaping 与自动压缩
 
-本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 token budget 行为、tool outputs pruning，以及 auto_compact 如何把历史 turns 压缩为 DAG `summary` 节点。
+本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 token budget 行为、runtime-surface `prepare_turn` / `compact_context` 接线、tool outputs pruning，以及 auto_compact 如何把历史 turns 压缩为 DAG `summary` 节点。
 
 实现落点：`lib/agent_core/dag/context_budget_manager.rb`。
 
@@ -22,7 +22,7 @@
 - `ContextAdapter`：
   - 将 `user_message/agent_message/task/summary` 映射为 `AgentCore::Message`
   - 将 `system_message/developer_message` 合并为 base system prompt
-  - 将 `task` 映射为 `tool_result`（或 error tool_result）
+  - 将 `task` 映射为 projected `tool_result`（或 error tool_result）；raw result 不直接回灌模型
 - `PromptAssembly` / `PromptBuilder::SimplePipeline`：
   - system prompt 由 `PromptBuilder::SystemPromptSectionsBuilder` 章节化组装，并显式区分：
     - **prefix（尽量跨 turn 稳定）**：`base_system_prompt` + `<safety>` + `<tooling>` + `<workspace>` + `<available_skills>` + `system_section` injections（默认）
@@ -33,6 +33,14 @@
   - 注入 memory：`<relevant_context> ... </relevant_context>`（条数由 `runtime.memory_search_limit` 控制；强制进入 tail）
   - 注入 skills fragment：`<available_skills ... />`（默认仅 full mode）
   - 过滤 tools：`tool_policy.filter`
+
+### 1.3 `prepare_turn`
+
+当 built prompt 已经 fit 到 token budget 后，`ContextBudgetManager` 会执行 `runtime_surface.prepare_turn(input:)`：
+
+- 只能改写 prompt view，不改变 DAG durable history
+- 改写后的 prompt 必须再次通过同一 token budget 校验
+- surface runner 超时、超输出或抛错时，会回退到 runtime 原始 prompt
 
 ---
 
@@ -73,6 +81,14 @@
 ---
 
 ## 3) auto_compact（DAG summary 节点）
+
+在 Cybros app 层，context compaction 还会经过 `Conversation::ContextCompactionPlan` + `runtime_surface.compact_context(input:)`：
+
+- app/runtime 先生成默认 compaction 候选（要压缩的 turns、默认 summary text、预算）
+- surface 可以建议保留部分 items、替换 summary text，或直接 pass
+- 若 surface 产物超预算、格式非法或 runner 失败，则回退默认 compaction plan
+- durable preflight activity 仍由 runtime/app materialize；surface 只决定 execution view，不直接 author DAG summary nodes
+- `TurnExecutionProjector` 继续把这些 preflight 活动作为 durable truth 投影，并保持 `composer_only` 可见性语义
 
 当 `auto_compact=true` 且预算迫使 `limit_turns` 下降时：
 

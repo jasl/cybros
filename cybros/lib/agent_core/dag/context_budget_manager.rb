@@ -43,6 +43,7 @@ module AgentCore
             prepared: prepared,
             context_nodes: context_nodes,
           )
+        build = apply_prepare_turn(build, limit: effective_token_limit)
 
         metadata = budget_metadata(build, prepared: prepared)
 
@@ -312,6 +313,120 @@ module AgentCore
           }
         rescue StandardError
           {}
+        end
+
+        def apply_prepare_turn(build, limit:)
+          runner = @runtime.runtime_surface_runner
+          surface = @runtime.runtime_surface
+          return build if runner.nil? || surface.nil?
+
+          outcome =
+            runner.run(
+              surface: surface,
+              stage: :prepare_turn,
+              input: prepare_turn_input(build: build, limit: limit),
+              execution_context: @execution_context,
+            )
+
+          decision = outcome.decision
+          unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::TurnRewrite)
+            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+              execution_context: @execution_context,
+              stage: :prepare_turn,
+              surface: surface,
+              outcome: {
+                applied: false,
+                reason: "pass",
+                estimated_tokens: build.estimate,
+              },
+            )
+            return build
+          end
+
+          rewritten_prompt = build_prompt_from_runtime_surface(decision.prompt)
+          rewritten_estimate = rewritten_prompt.estimate_tokens(token_counter: @runtime.token_counter)
+
+          if !limit.nil? && !within_budget?(rewritten_estimate, limit: limit)
+            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+              execution_context: @execution_context,
+              stage: :prepare_turn,
+              surface: surface,
+              outcome: {
+                applied: false,
+                reason: "budget_exceeded",
+                estimated_tokens: rewritten_estimate,
+                fallback: outcome.fallback?,
+              },
+            )
+            return rebuild_build(
+              build,
+              decisions: Array(build.decisions) + [{ "type" => "prepare_turn_rewrite", "applied" => false, "reason" => "budget_exceeded", "fallback" => outcome.fallback? }],
+            )
+          end
+
+          AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+            execution_context: @execution_context,
+            stage: :prepare_turn,
+            surface: surface,
+            outcome: {
+              applied: true,
+              fallback: outcome.fallback?,
+              estimated_tokens: rewritten_estimate,
+            },
+          )
+
+          rebuild_build(
+            build,
+            built_prompt: rewritten_prompt,
+            estimate: rewritten_estimate,
+            decisions: Array(build.decisions) + [{ "type" => "prepare_turn_rewrite", "applied" => true, "fallback" => outcome.fallback? }],
+          )
+        rescue StandardError
+          build
+        end
+
+        def prepare_turn_input(build:, limit:)
+          AgentCore::RuntimeSurface::Inputs::PrepareTurn.new(
+            prompt: build.built_prompt.to_h,
+            context: build.context_nodes,
+            budget: {
+              context_window_tokens: @runtime.context_window_tokens,
+              reserved_output_tokens: @runtime.reserved_output_tokens,
+              limit: limit,
+              estimated_tokens: build.estimate,
+            }.compact,
+            capabilities: {
+              prompt_mode: @runtime.prompt_mode,
+              auto_compact: @runtime.auto_compact,
+            },
+            helpers: nil,
+          )
+        end
+
+        def build_prompt_from_runtime_surface(value)
+          return value if value.is_a?(PromptBuilder::BuiltPrompt)
+
+          hash = value.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(value) : {}
+          messages = Array(hash.fetch(:messages, [])).map { |message| message.is_a?(Message) ? message : Message.from_h(message) }
+
+          PromptBuilder::BuiltPrompt.new(
+            system_prompt: hash.fetch(:system_prompt, "").to_s,
+            messages: messages,
+            tools: Array(hash.fetch(:tools, [])),
+            options: hash.fetch(:options, {}).is_a?(Hash) ? hash.fetch(:options, {}) : {},
+          )
+        end
+
+        def rebuild_build(build, built_prompt: build.built_prompt, estimate: build.estimate, decisions: build.decisions)
+          Build.new(
+            built_prompt: built_prompt,
+            context_nodes: build.context_nodes,
+            estimate: estimate,
+            memory_dropped: build.memory_dropped,
+            decisions: decisions,
+            limit_turns: build.limit_turns,
+            auto_compacted: build.auto_compacted,
+          )
         end
 
         def context_cost_report(build, prepared:, limit:)

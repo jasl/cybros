@@ -51,6 +51,19 @@ module Cybros
       { provider: nil, model: nil, preferred_models: [], matched_preference: false, provider_name: nil }
     end
 
+    def runtime_surface_resolution_for(conversation:, token_counter:)
+      profile_resolution = resolve_profile(agent_metadata_for(conversation))
+      build_runtime_surface_resolution(
+        definition: profile_resolution.fetch(:definition),
+        token_counter: token_counter,
+      )
+    rescue StandardError
+      build_runtime_surface_resolution(
+        definition: {},
+        token_counter: token_counter,
+      )
+    end
+
     def validate_model_ref!(model_ref:)
       ref = normalize_model_ref(model_ref: model_ref)
       provider_key, model_key = ref.split("/", 2).map(&:to_s)
@@ -318,6 +331,11 @@ module Cybros
           specs: definition.fetch(:prompt_injections, []),
           text_store: nil,
         )
+      runtime_surface_resolution =
+        build_runtime_surface_resolution(
+          definition: definition,
+          token_counter: llm_selection.fetch(:token_counter, nil),
+        )
 
       runtime_kwargs = {
         provider: provider,
@@ -331,6 +349,8 @@ module Cybros
         include_skill_locations: definition.fetch(:include_skill_locations, false),
         directives_config: definition.fetch(:directives_config, nil),
         system_prompt_section_overrides: definition.fetch(:system_prompt_section_overrides, {}),
+        runtime_surface: runtime_surface_resolution.fetch(:runtime_surface),
+        runtime_surface_runner: runtime_surface_resolution.fetch(:runtime_surface_runner),
       }
 
       runtime_kwargs[:token_counter] = llm_selection.fetch(:token_counter, nil) if llm_selection.key?(:token_counter)
@@ -360,6 +380,7 @@ module Cybros
       if (channel = channel_for(node: node))
         ctx_attrs[:channel] = channel
       end
+      ctx_attrs[:runtime_surface] = runtime_surface_resolution.fetch(:execution_context_attributes)
       runtime_kwargs[:execution_context_attributes] = ctx_attrs
 
       AgentCore::DAG::Runtime.new(**runtime_kwargs)
@@ -780,6 +801,104 @@ module Cybros
       { profile_name: profile_name, definition: definition, profile_config: profile_config }
     end
     private_class_method :resolve_profile
+
+    def build_runtime_surface_resolution(definition:, token_counter:)
+      config = normalize_runtime_surface_config(definition.fetch(:runtime_surface, nil))
+
+      helpers = {}
+      if config.dig(:helpers, :estimate_tokens) == true
+        helpers[:estimate_tokens] =
+          lambda do |text, **|
+            if token_counter.respond_to?(:count_text)
+              token_counter.count_text(text.to_s)
+            else
+              text.to_s.bytesize
+            end
+          end
+      end
+
+      {
+        runtime_surface: build_runtime_surface(config),
+        runtime_surface_runner: AgentCore::RuntimeSurface::Runner.new(
+          helpers: helpers,
+          stage_limits: config.fetch(:stage_limits),
+        ),
+        execution_context_attributes: {
+          type: config.fetch(:type),
+          helpers: helpers.keys.sort,
+          stage_limits: config.fetch(:stage_limits),
+        }.freeze,
+      }
+    end
+    private_class_method :build_runtime_surface_resolution
+
+    def normalize_runtime_surface_config(value)
+      raw = value.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(value) : {}
+
+      type = raw.fetch(:type, :noop).to_s.strip.downcase.tr("-", "_").to_sym
+      return noop_runtime_surface_config unless type == :noop
+
+      helpers = raw.fetch(:helpers, {})
+      helpers = {} unless helpers.is_a?(Hash)
+      normalized_helpers =
+        helpers.each_with_object({}) do |(helper_name, enabled), out|
+          key = helper_name.to_s.strip.downcase.tr("-", "_").to_sym
+          next unless key == :estimate_tokens
+          next unless enabled == true
+
+          out[key] = true
+        end.freeze
+
+      stage_limits = raw.fetch(:stage_limits, {})
+      stage_limits = {} unless stage_limits.is_a?(Hash)
+      normalized_stage_limits =
+        stage_limits.each_with_object({}) do |(stage_name, stage_cfg), out|
+          key = stage_name.to_s.strip.downcase.tr("-", "_").to_sym
+          next unless AgentCore::RuntimeSurface::LIFECYCLE_METHODS.include?(key)
+          next unless stage_cfg.is_a?(Hash)
+
+          cfg = AgentCore::Utils.deep_symbolize_keys(stage_cfg)
+          entry = {}
+
+          timeout_s = Float(cfg.fetch(:timeout_s, nil), exception: false)
+          entry[:timeout_s] = timeout_s if timeout_s && timeout_s.positive? && timeout_s.finite?
+
+          max_output_bytes = Integer(cfg.fetch(:max_output_bytes, nil), exception: false)
+          entry[:max_output_bytes] = max_output_bytes if max_output_bytes && max_output_bytes.positive?
+
+          out[key] = entry.freeze if entry.any?
+        end.freeze
+
+      {
+        type: :noop,
+        helpers: normalized_helpers,
+        stage_limits: normalized_stage_limits,
+      }.freeze
+    rescue StandardError
+      noop_runtime_surface_config
+    end
+    private_class_method :normalize_runtime_surface_config
+
+    def noop_runtime_surface_config
+      {
+        type: :noop,
+        helpers: {}.freeze,
+        stage_limits: {}.freeze,
+      }.freeze
+    end
+    private_class_method :noop_runtime_surface_config
+
+    def build_runtime_surface(config)
+      case config.fetch(:type)
+      when :noop
+        AgentCore::RuntimeSurface.default
+      else
+        AgentCore::RuntimeSurface.default
+      end
+    rescue StandardError
+      AgentCore::RuntimeSurface.default
+    end
+    private_class_method :build_runtime_surface
 
     def normalize_profile_name!(value)
       return Cybros::AgentProfiles::DEFAULT_PROFILE if value.nil?

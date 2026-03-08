@@ -34,6 +34,23 @@ AgentCore 内建的 policy 组合（可选）：
 - `ConfirmAll`：工具定义可见 + 默认需要审批（未命中 allow/deny 时进入 `awaiting_approval`）
 - `DenyAllVisible`：工具定义可见 + 默认拒绝执行（未命中 allow 时直接拒绝）
 
+### 1.2 Runtime surface 是 advisory，不是 authority
+
+`runtime_surface` 可以参与：
+
+- `prepare_turn`
+- `compact_context`
+- `review_tool_call`
+- `project_tool_result`
+- `finalize_output`
+- `handle_error`
+
+但它始终运行在硬边界之下：
+
+- 静态 tool policy、schema 校验、审批状态机、DAG invariants、sandbox ceilings 仍决定最终结果
+- surface runner 只暴露显式白名单 helpers，并统一执行 timeout / output-size limit / fallback
+- runner 或 surface 出错时，必须退回 runtime-owned default path；不能把整个 turn 带崩
+
 ### 1.1 Subagent tools（Cybros app 扩展）
 
 Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于跨图子会话模式），但仍遵循 **deny-by-default**：
@@ -72,7 +89,8 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 当前实现的默认约束：
 
 - `Messages::Task` 节点的 `arguments_summary` 是 **截断后的 JSON 预览**（避免落库/日志中出现超大参数）
-- `TaskExecutor` 对 tool result 做 bytesize 限制（默认约 200KB），超限会截断并在 result.metadata 标记 `truncated=true`
+- `TaskExecutor` 会先保存 durable `raw_result`，再生成 projected `result`、`activity_preview` 与 `artifact_refs`
+- provider prompt history / `ContextAdapter` 只消费 projected `result`
 - `ContextBudgetManager` 在超预算路径下可对“旧 tool outputs”做 prompt-view 裁剪（`ToolOutputPruner`），不写回 DAG 历史
 - `tool_error_mode`：
   - `:safe`（默认）：不包含堆栈；非校验类异常默认不包含 message（仅类型）。`AgentCore::ValidationError` 会包含 message（约定为可安全暴露，便于 LLM 自愈）。
@@ -119,3 +137,5 @@ Skills tools（`skills_read_file`）在任何异常时返回 `ToolResult.error`�
 
 - 只在 debug/受控环境记录更详细 payload
 - 对可观测事件做 redaction（尤其是 tokens、API keys、文件内容）
+- runtime surface audit 只记录 safe summarized input snapshot、decision、fallback、merged outcome
+- 不要把 `raw_result` / `raw_result_body` / 原始 program source 放进 trace payload

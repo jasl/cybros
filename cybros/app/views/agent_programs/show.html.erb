@@ -8,40 +8,18 @@
     <%= link_to "Back", agent_programs_path, class: "btn btn-ghost" %>
   </div>
 
-  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-    <div class="card bg-base-100 border border-base-300 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title">agent.yml</h2>
-        <pre class="bg-base-200 rounded-box p-3 overflow-auto text-xs"><code><%= YAML.dump(@loaded.agent_yml || {}).strip %></code></pre>
+  <div class="card bg-base-100 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <h2 class="card-title">Runtime surface</h2>
+      <div class="flex items-center gap-3">
+        <span class="badge badge-outline font-mono"><%= @loaded.runtime_surface_config.fetch("type", "noop") %></span>
+        <% if @loaded.runtime_surface_status != "configured" %>
+          <span class="text-sm opacity-70">Fallback to safe no-op</span>
+        <% end %>
       </div>
-    </div>
-
-    <div class="card bg-base-100 border border-base-300 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title">AGENT.md</h2>
-        <pre class="bg-base-200 rounded-box p-3 overflow-auto text-xs"><code><%= @loaded.agent_md.to_s %></code></pre>
-      </div>
-    </div>
-
-    <div class="card bg-base-100 border border-base-300 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title">SOUL.md</h2>
-        <pre class="bg-base-200 rounded-box p-3 overflow-auto text-xs"><code><%= @loaded.soul_md.to_s %></code></pre>
-      </div>
-    </div>
-
-    <div class="card bg-base-100 border border-base-300 shadow-sm">
-      <div class="card-body">
-        <h2 class="card-title">USER.md</h2>
-        <pre class="bg-base-200 rounded-box p-3 overflow-auto text-xs"><code><%= @loaded.user_md.to_s %></code></pre>
-      </div>
-    </div>
-
-    <div class="card bg-base-100 border border-base-300 shadow-sm lg:col-span-2">
-      <div class="card-body">
-        <h2 class="card-title">prompts/system.md.liquid</h2>
-        <pre class="bg-base-200 rounded-box p-3 overflow-auto text-xs"><code><%= @loaded.system_md_liquid.to_s %></code></pre>
-      </div>
+      <p class="text-sm opacity-70">
+        This view only shows the safe runtime summary. Raw agent source files stay out of the standard agent UI.
+      </p>
     </div>
   </div>
 </div>

@@ -127,7 +127,7 @@ class Conversation::TurnExecutionProjector
         "source_node_id" => last_payload["source_node_id"].to_s.presence || task.id,
         "tool_call_id" => task.body_input["tool_call_id"].to_s.presence,
         "input_preview" => subagent_activity ? nil : task.body_input["arguments_summary"].to_s.presence,
-        "output_preview" => subagent_activity ? subagent_output_preview(subagent_snapshot) : task.body_output_preview["result"].presence,
+        "output_preview" => subagent_activity ? subagent_output_preview(subagent_snapshot) : activity_output_preview_for(task),
         "error" => subagent_activity ? subagent_error_for(task, status: status, snapshot: subagent_snapshot, last_payload: last_payload) : activity_error_for(task, status: status, last_payload: last_payload),
         "last_event_id" => last_event&.id,
         "diagnostics" => diagnostics,
@@ -220,7 +220,7 @@ class Conversation::TurnExecutionProjector
     end
 
     def subagent_snapshot_for(task)
-      [task.body_output["result"], task.body_output_preview["result"]].compact.each do |candidate|
+      [task.body_output["raw_result"], task.body_output["result"], task.body_output_preview["result"]].compact.each do |candidate|
         tool_result = AgentCore::Resources::Tools::ToolResult.from_h(candidate)
         snapshot = tool_result.metadata["subagent"]
         return snapshot if snapshot.is_a?(Hash)
@@ -308,10 +308,18 @@ class Conversation::TurnExecutionProjector
       event_error = last_payload.fetch("data", {}).is_a?(Hash) ? last_payload.fetch("data", {}).fetch("error", nil) : nil
       return { "summary" => event_error.to_s } if event_error.present?
 
-      preview = task.body_output_preview["result"].presence || task.body_output["result"]
+      preview = activity_output_preview_for(task).presence || task.body_output_preview["result"].presence || task.body_output["result"]
       return { "summary" => preview.to_s } if preview.present?
 
       { "summary" => "task failed" }
+    end
+
+    def activity_output_preview_for(task)
+      task.body_output_preview["activity_preview"].presence ||
+        task.body_output["activity_preview"].to_s.presence ||
+        task.body_output_preview["result"].presence
+    rescue StandardError
+      task.body_output_preview["result"].presence
     end
 
     def subagent_error_for(task, status:, snapshot:, last_payload:)

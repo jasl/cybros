@@ -127,3 +127,5 @@ module AgentCore
     end
   end
 end
+
+require_relative "agent_core/runtime_surface"

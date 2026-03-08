@@ -1,4 +1,5 @@
 require "test_helper"
+require "fileutils"
 
 class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
   def sign_in_owner!
@@ -36,5 +37,65 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     post system_settings_agent_programs_path, params: { agent_program: { name: "", profile_source: "" } }
     assert_response :unprocessable_entity
     assert_includes response.body, "Name and profile are required"
+  end
+
+  test "show falls back to noop runtime surface for invalid config" do
+    sign_in_owner!
+
+    rel_dir = File.join("storage", "agent_programs", "test-invalid-runtime-surface")
+    abs_dir = Rails.root.join(rel_dir)
+    FileUtils.mkdir_p(abs_dir)
+    File.write(abs_dir.join("agent.yml"), <<~YAML)
+      name: invalid-runtime-surface
+      runtime_surface:
+        type: script
+        helpers:
+          exec: true
+    YAML
+
+    program = AgentProgram.create!(name: "Invalid runtime surface", profile_source: "custom", local_path: rel_dir)
+
+    assert_equal(
+      {
+        "type" => "noop",
+        "helpers" => {},
+        "stage_limits" => {},
+      },
+      program.runtime_surface_config,
+    )
+    assert_equal "invalid", program.runtime_surface_status
+
+    get system_settings_agent_program_path(program)
+    assert_response :success
+    assert_includes response.body, "Runtime surface"
+    assert_includes response.body, "noop"
+    assert_includes response.body, "Fallback to safe no-op"
+  ensure
+    FileUtils.rm_rf(abs_dir)
+  end
+
+  test "show falls back to noop runtime surface when config is missing" do
+    sign_in_owner!
+
+    rel_dir = File.join("storage", "agent_programs", "test-missing-runtime-surface")
+    abs_dir = Rails.root.join(rel_dir)
+    FileUtils.mkdir_p(abs_dir)
+    File.write(abs_dir.join("agent.yml"), <<~YAML)
+      name: missing-runtime-surface
+    YAML
+
+    program = AgentProgram.create!(name: "Missing runtime surface", profile_source: "custom", local_path: rel_dir)
+
+    assert_equal(
+      {
+        "type" => "noop",
+        "helpers" => {},
+        "stage_limits" => {},
+      },
+      program.runtime_surface_config,
+    )
+    assert_equal "missing", program.runtime_surface_status
+  ensure
+    FileUtils.rm_rf(abs_dir)
   end
 end

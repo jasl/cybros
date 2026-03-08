@@ -59,5 +59,36 @@ class AgentProgramsTest < ActionDispatch::IntegrationTest
     assert (abs / "SOUL.md").file?
     assert (abs / "USER.md").file?
     assert (abs / "prompts" / "system.md.liquid").file?
+
+    assert_equal(
+      {
+        "type" => "noop",
+        "helpers" => {},
+        "stage_limits" => {},
+      },
+      program.args.fetch("runtime_surface"),
+    )
+    assert_equal "configured", program.args.fetch("runtime_surface_status")
+  end
+
+  test "show exposes runtime-surface summary without raw program source" do
+    sign_in_owner!
+
+    program = AgentPrograms::Creator.create_from_profile!(
+      name: "Default assistant",
+      profile_source: "default-assistant",
+    )
+
+    get agent_program_path(program)
+    assert_response :success
+
+    assert_includes response.body, "Runtime surface"
+    assert_includes response.body, "noop"
+    assert_not_includes response.body, "agent.yml"
+    assert_not_includes response.body, "AGENT.md"
+    assert_not_includes response.body, "SOUL.md"
+    assert_not_includes response.body, "USER.md"
+    assert_not_includes response.body, "prompts/system.md.liquid"
+    assert_not_includes response.body, "You are the default Cybros assistant."
   end
 end

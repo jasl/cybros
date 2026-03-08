@@ -7,6 +7,9 @@
 - `lib/agent_core/dag/executors/agent_message_executor.rb`
 - `lib/agent_core/dag/executors/task_executor.rb`
 - `lib/agent_core/dag/context_budget_manager.rb`
+- `lib/agent_core/runtime_surface/base.rb`
+- `lib/agent_core/runtime_surface/runner.rb`
+- `lib/agent_core/runtime_surface/tool_result_projection.rb`
 - `lib/agent_core/context_management/tool_output_pruner.rb`
 - `lib/agent_core/prompt_builder/simple_pipeline.rb`
 - `lib/agent_core/resources/tools/tool_name_resolver.rb`
@@ -126,16 +129,40 @@ normalize fallback 的安全约束（hard fail）：
 
 > 说明：RepairLoop 只影响本次 tool loop 的“执行视图”（用于创建 task），不会回写/覆盖本次 `agent_message.body.output.tool_calls`（后者保留原始模型输出，便于审计）。
 
-### 2.4 policy 决策映射
+### 2.4 policy 决策映射与 runtime surface merge
 
 对每个 tool_call，按以下顺序处理：
 
 1) 参数解析错误（arguments_parse_error）→ 直接创建 `task(state=finished)`，output 为 `ToolResult.error`
 2) 工具不存在 → 创建 `task(state=finished)`，output 为 `ToolResult.error`
-3) 调用 `tool_policy.authorize(...)`：
+3) 调用 `tool_policy.authorize(...)`
+4) 若静态策略未直接拒绝，则调用 `runtime_surface.review_tool_call(input:)`（经统一 runner 执行）
+5) executor 按以下 hard merge 规则翻译为 DAG 状态：
    - `allow` →（若启用 schema 校验且仍不满足 schema，则创建 `task(state=finished, source=invalid_args)`；否则）`task(state=pending)`，等待执行
    - `deny` → `task(state=finished)`，output 为 `ToolResult.error`
    - `confirm` →（若启用 schema 校验且仍不满足 schema，则创建 `task(state=finished, source=invalid_args)`；否则）`task(state=awaiting_approval)`，等待人工审批（见第 3 节）
+
+合并约束：
+
+- static `deny` 永远优先；runtime surface 不能放宽
+- static `confirm` 不能被 surface 改成直接 `allow`
+- surface 可以把 static `allow` 收紧为 `deny` 或 `ask_human`
+- surface 的 `rewrite_args` 会重新做工具存在性、schema 与静态授权校验；重跑失败则回退原静态决策
+- runner / surface 失败不会打断 turn；会回退到静态策略路径
+
+### 2.5 tool result durable/prompt split
+
+`TaskExecutor` 不再把“工具原始结果”和“模型可见结果”视为同一份数据。
+
+- durable payload 会分别保存：
+  - `raw_result`
+  - `result`（projected result）
+  - `activity_preview`
+  - `artifact_refs`
+  - `projection`
+- `ContextAdapter` 只把 projected `result` 回灌给模型
+- `Conversation::TurnExecutionProjector` 可以优先展示 durable `activity_preview`；因此 activity preview 可以与模型可见 projection 不同
+- replay / refresh / export 依赖 durable truth，而不是瞬时 runtime 内存态
 
 ---
 
@@ -197,6 +224,17 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 - LLM provider / stream 异常在未被上述恢复成功兜住时：`AgentMessageExecutor` 返回 `ExecutionResult.errored`，节点进入 `errored`（可 retry）
   - 不做 provider/model failover：错误会原样传播，要求调用方修正配置、能力或上游状态后再试
 
+成功输出与用户可见错误在落到最终 `assistant` payload 前，还会经过 runtime surface：
+
+- `finalize_output(input:)`
+  - 仅用于“非 streaming、且本轮没有继续发 tool_calls”的最终输出
+  - 可重写最终 assistant message / directives
+  - 失败或超限时回退原始输出
+- `handle_error(input:)`
+  - 可把内部错误映射成安全的用户消息、`ask_human` 提示或 retry mask
+  - 已经写出可见 streaming delta 的错误不会再让 surface 改写已提交内容
+  - 失败时回退 runtime 默认错误路径，保证 turn correctness 优先
+
 ---
 
 ## 6) max_steps_per_turn（防止无限 tool loop）
@@ -244,6 +282,9 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 
 - Tool profiles / visibility：`tool_policy.filter` 决定“哪些 tool schema 对模型可见”（见 `AgentCore::Resources::Tools::Policy::Profiled`）
 - Strict schema：发送给模型前，对 tool schema 做保守 strict 化（缺失时补 `additionalProperties:false` 等），降低参数漂移（见 `StrictJsonSchema`）
+- Runtime surface：
+  - `prepare_turn` 在预算 fit 后、真正调用 provider 前对 prompt view 做最后一次受限重写
+  - `compact_context` 通过 app 层 compaction plan 参与摘要/保留项决策，但 durable preflight activity 仍由 runtime/app 持有
 - Token budget：当启用 `context_window_tokens` 时，超预算会按顺序 drop memory / prune tool outputs / shrink turns / auto_compact，并写入 `context_cost` 便于回放审计（详见 `docs/agent_core/context_management.md`）
 - Memory：
   - 注入：`runtime.memory_store` + `runtime.memory_search_limit` 控制 `<relevant_context>` 注入

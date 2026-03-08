@@ -18,6 +18,8 @@ module AgentCore
         arguments
         result
         raw
+        raw_result
+        raw_result_body
         request
         response
       ].freeze

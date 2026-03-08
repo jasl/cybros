@@ -12,14 +12,20 @@ class Conversation::ContextCompactionPlan
       end
     end
 
-  def self.plan(conversation:, content:, input_policy:)
-    new(conversation: conversation, content: content, input_policy: input_policy).plan
+  def self.plan(conversation:, content:, input_policy:, runtime_surface_resolution: nil)
+    new(
+      conversation: conversation,
+      content: content,
+      input_policy: input_policy,
+      runtime_surface_resolution: runtime_surface_resolution,
+    ).plan
   end
 
-  def initialize(conversation:, content:, input_policy:)
+  def initialize(conversation:, content:, input_policy:, runtime_surface_resolution: nil)
     @conversation = conversation
     @content = content.to_s
     @input_policy = input_policy.is_a?(Hash) ? input_policy : {}
+    @runtime_surface_resolution = runtime_surface_resolution
   end
 
   def plan
@@ -33,13 +39,21 @@ class Conversation::ContextCompactionPlan
     return build_result(required: false, estimated: estimated, budget: budget) if compacted_turn_ids.empty?
 
     compacted_nodes = transcript_nodes.select { |node| compacted_turn_ids.include?(node.fetch("turn_id").to_s) }
+    summary_text = summary_text_for(compacted_nodes: compacted_nodes, budget: budget)
+    compacted_turn_ids, summary_text =
+      apply_runtime_surface_compaction(
+        compacted_turn_ids: compacted_turn_ids,
+        summary_text: summary_text,
+        estimated: estimated,
+        budget: budget,
+      )
 
     build_result(
       required: true,
       estimated: estimated,
       budget: budget,
       compacted_turn_ids: compacted_turn_ids,
-      summary_text: summary_text_for(compacted_nodes: compacted_nodes, budget: budget),
+      summary_text: summary_text,
     )
   end
 
@@ -91,6 +105,131 @@ class Conversation::ContextCompactionPlan
       end
 
       truncate_to_token_limit(text, token_limit: [[budget / 4, 128].max, budget].min)
+    end
+
+    def apply_runtime_surface_compaction(compacted_turn_ids:, summary_text:, estimated:, budget:)
+      resolution = runtime_surface_resolution
+      return [compacted_turn_ids, summary_text] unless resolution.is_a?(Hash)
+
+      runner = resolution.fetch(:runtime_surface_runner, nil)
+      surface = resolution.fetch(:runtime_surface, nil)
+      return [compacted_turn_ids, summary_text] if runner.nil? || surface.nil?
+
+      execution_context =
+        AgentCore::ExecutionContext.new(
+          attributes: {
+            conversation_id: @conversation.id,
+          },
+        )
+
+      outcome =
+        runner.run(
+          surface: surface,
+          stage: :compact_context,
+          input: compact_context_input(estimated: estimated, budget: budget),
+          execution_context: execution_context,
+        )
+
+      decision = outcome.decision
+      unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::ContextCompaction)
+        AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+          execution_context: execution_context,
+          stage: :compact_context,
+          surface: surface,
+          outcome: {
+            kept_count: 0,
+            summary_changed: false,
+            fallback: outcome.fallback?,
+          },
+        )
+        return [compacted_turn_ids, summary_text]
+      end
+
+      adjusted_turn_ids, keep_applied =
+        apply_kept_items(
+          decision: decision,
+          compacted_turn_ids: compacted_turn_ids,
+          budget: budget,
+        )
+      adjusted_summary_text =
+        if keep_applied == false
+          summary_text
+        else
+          summary_text_from_decision(decision) || summary_text
+        end
+
+      AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+        execution_context: execution_context,
+        stage: :compact_context,
+        surface: surface,
+        outcome: {
+          kept_count: Array(decision.kept_items).length,
+          keep_applied: keep_applied,
+          summary_changed: adjusted_summary_text != summary_text,
+          fallback: outcome.fallback?,
+        },
+      )
+
+      [adjusted_turn_ids, adjusted_summary_text]
+    rescue StandardError
+      [compacted_turn_ids, summary_text]
+    end
+
+    def compact_context_input(estimated:, budget:)
+      AgentCore::RuntimeSurface::Inputs::CompactContext.new(
+        context_window: transcript_nodes,
+        budget: {
+          estimated_tokens: estimated,
+          limit: budget,
+        },
+        capabilities: {
+          strategy: strategy,
+        },
+        helpers: nil,
+      )
+    end
+
+    def apply_kept_items(decision:, compacted_turn_ids:, budget:)
+      kept_turn_ids =
+        Array(decision.kept_items).filter_map do |item|
+          if item.is_a?(Hash)
+            item.fetch("turn_id", item.fetch(:turn_id, nil)).to_s.presence
+          else
+            item.to_s.presence
+          end
+        end.uniq
+
+      return [compacted_turn_ids, nil] if kept_turn_ids.empty?
+
+      adjusted_turn_ids = compacted_turn_ids - kept_turn_ids
+      return [compacted_turn_ids, false] if adjusted_turn_ids.empty?
+
+      estimate =
+        estimated_tokens_for(
+          context_nodes:
+            transcript_nodes.reject { |node| adjusted_turn_ids.include?(node.fetch("turn_id").to_s) } + [synthetic_user_node],
+        )
+
+      estimate <= budget ? [adjusted_turn_ids, true] : [compacted_turn_ids, false]
+    rescue StandardError
+      [compacted_turn_ids, false]
+    end
+
+    def summary_text_from_decision(decision)
+      Array(decision.summaries).each do |summary|
+        text =
+          if summary.is_a?(Hash)
+            summary.fetch("content", summary.fetch(:content, nil)).to_s
+          else
+            summary.to_s
+          end
+
+        return text if text.present?
+      end
+
+      nil
+    rescue StandardError
+      nil
     end
 
     def compacted_line_for(node)
@@ -202,6 +341,16 @@ class Conversation::ContextCompactionPlan
           token_estimator: Cybros::TokenEstimation.estimator(tokenizer_root_path: Cybros::TokenEstimation.tokenizer_root, strict: false),
           model_hint: model_spec.fetch("tokenizer_hint", model_spec.fetch("api_model")).to_s,
         )
+    end
+
+    def runtime_surface_resolution
+      @runtime_surface_resolution ||=
+        Cybros::AgentRuntimeResolver.runtime_surface_resolution_for(
+          conversation: @conversation,
+          token_counter: token_counter,
+        )
+    rescue StandardError
+      nil
     end
 
     def model_spec

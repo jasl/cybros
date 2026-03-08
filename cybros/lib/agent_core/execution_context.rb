@@ -82,5 +82,24 @@ module AgentCore
           )
         end
       end
+
+      def runtime_surface_attributes
+        value = attributes.fetch(:runtime_surface, {})
+        value.is_a?(Hash) ? value : {}
+      rescue StandardError
+        {}
+      end
+
+      def runtime_surface_identity
+        attrs = runtime_surface_attributes
+
+        {
+          "type" => attrs[:type].to_s.presence,
+          "helper_count" => Array(attrs[:helpers]).length,
+          "stage_limit_keys" => attrs[:stage_limits].is_a?(Hash) ? attrs[:stage_limits].keys.map(&:to_s).first(20) : [],
+        }.compact
+      rescue StandardError
+        {}
+      end
     end
 end
