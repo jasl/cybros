@@ -570,10 +570,14 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         )
 
         tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
-        assert_equal 2, tasks.length
+      assert_equal 2, tasks.length
 
       names = tasks.map { |task| task.body_input.fetch("name") }.sort
       assert_equal ["echo", "math_add"], names
+      tasks.each do |task|
+        assert_equal "original", task.body_input.fetch("arguments_resolution")
+        assert_nil task.body_input["repair"]
+      end
 
       next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
 
@@ -722,6 +726,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       assert_equal "math_add", task.body_input.fetch("requested_name")
       assert_equal "math_add_safe", task.body_input.fetch("name")
       assert_equal "repaired", task.body_input.fetch("name_resolution")
+      assert_equal "original", task.body_input.fetch("arguments_resolution")
+      assert_equal({ "tool_name" => true }, task.body_input.fetch("repair"))
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [task.id], claimed.map(&:id)
@@ -851,6 +857,114 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       assert_equal 3, tool_result_msgs.length
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "tool loop stores both name and args repair attribution on the final task row" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d121"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Do tools", metadata: {})
+      agent = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Call tool",
+                tool_calls: [
+                  AgentCore::ToolCall.new(
+                    id: "tc_1",
+                    name: "echo_unsafe",
+                    arguments: {},
+                    arguments_parse_error: :invalid_json,
+                    arguments_raw: "{\"text\":",
+                  ),
+                ],
+              ),
+            stop_reason: :tool_use,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"name\":\"echo_safe\"}]}"),
+            stop_reason: :end_turn,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"arguments\":{\"text\":\"hi\"}}]}"),
+            stop_reason: :end_turn,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "Ok."),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    %w[echo_unsafe echo_safe].each do |tool_name|
+      tools_registry.register(
+        AgentCore::Resources::Tools::Tool.new(
+          name: tool_name,
+          description: "Echo",
+          parameters: {
+            type: "object",
+            additionalProperties: false,
+            properties: { "text" => { "type" => "string" } },
+            required: ["text"],
+          },
+        ) do |args, **|
+          AgentCore::Resources::Tools::ToolResult.success(text: "echo=#{args.fetch("text")}")
+        end
+      )
+    end
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["echo_safe"],
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
+        tool_name_repair_attempts: 1,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
+      assert_equal "echo_unsafe", task.body_input.fetch("requested_name")
+      assert_equal "echo_safe", task.body_input.fetch("name")
+      assert_equal "repaired", task.body_input.fetch("name_resolution")
+      assert_equal "repaired", task.body_input.fetch("arguments_resolution")
+      assert_equal({ "tool_name" => true, "arguments" => true }, task.body_input.fetch("repair"))
     ensure
       AgentCore::DAG.runtime_resolver = original_runtime_resolver
       DAG.executor_registry = original_registry
@@ -2177,6 +2291,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal({ "text" => "hi" }, task.body_input.fetch("arguments"))
+      assert_equal "repaired", task.body_input.fetch("arguments_resolution")
+      assert_equal({ "arguments" => true }, task.body_input.fetch("repair"))
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [task.id], claimed.map(&:id)
@@ -2293,6 +2409,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal({ "text" => "hi" }, task.body_input.fetch("arguments"))
+      assert_equal "repaired", task.body_input.fetch("arguments_resolution")
+      assert_equal({ "arguments" => true }, task.body_input.fetch("repair"))
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [task.id], claimed.map(&:id)
@@ -2407,6 +2525,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       assert_equal DAG::Node::FINISHED, task.state
       assert_equal "invalid_args", task.metadata.fetch("source")
       assert_equal true, task.body_output.dig("result", "error")
+      assert_equal "invalid", task.body_input.fetch("arguments_resolution")
+      assert_nil task.body_input["repair"]
 
       next_agent =
         graph.nodes.active

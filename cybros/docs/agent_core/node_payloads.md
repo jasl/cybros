@@ -240,8 +240,13 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
   "requested_name": "llm_output_name",
   "name": "resolved_tool_name",
   "name_resolution": "exact|alias|normalized|repaired|unknown|missing",
+  "arguments_resolution": "original|repaired|invalid",
   "arguments": { "string": "keys" },
   "arguments_summary": "safe json preview",
+  "repair": {
+    "tool_name": true,
+    "arguments": false
+  },
   "source": "native|mcp|skills|policy|invalid_args"
 }
 ```
@@ -253,6 +258,13 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 - `name_resolution`：工具名解析方式（用于审计/定位模型偏差）
   - `normalized` 覆盖大小写 / 驼峰 / 分隔符漂移（并映射回 registry 中的 canonical tool name）
   - `repaired` 表示发生了 ToolNameRepairLoop（只允许修到本轮可见工具名列表）
+- `arguments_resolution`：参数落库时的可执行性归因
+  - `original`：首轮参数可直接使用
+  - `repaired`：参数经过 ToolCallRepairLoop 自动修复后才可执行
+  - `invalid`：最终仍不可执行（parse/schema invalid）
+- `repair`：按 task 持久化的自动 repair 归因
+  - `tool_name=true`：发生过 ToolNameRepairLoop
+  - `arguments=true`：发生过 ToolCallRepairLoop
 - `source`：来源分类（用于可观测/安全策略）
 
 ### 2.2 output（`body.output`）

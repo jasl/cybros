@@ -841,6 +841,7 @@ module AgentCore
             normalize_index = runtime.tool_name_normalize_index
 
             visible_tool_schemas = index_visible_tool_schemas(visible_tools)
+            arguments_repairs = {}
 
             if runtime.tool_name_repair_attempts.to_i.positive? && Array(visible_tools).any? && Array(tool_calls).any?
               name_repair_result =
@@ -866,6 +867,7 @@ module AgentCore
             end
 
             if should_repair_tool_calls?(tool_calls, runtime: runtime)
+              original_tool_calls = Array(tool_calls)
               repair_result =
                 AgentCore::Resources::Tools::ToolCallRepairLoop.call(
                   provider: runtime.provider,
@@ -886,7 +888,13 @@ module AgentCore
                   run_id: execution_context.run_id,
                 )
 
-              tool_calls = repair_result.fetch(:tool_calls, tool_calls)
+              repaired_tool_calls = repair_result.fetch(:tool_calls, tool_calls)
+              arguments_repairs =
+                repaired_argument_repairs_by_tool_call_id(
+                  original_tool_calls: original_tool_calls,
+                  repaired_tool_calls: repaired_tool_calls,
+                )
+              tool_calls = repaired_tool_calls
               tool_loop_metadata = deep_merge_metadata(tool_loop_metadata, repair_result.fetch(:metadata, {}))
             end
 
@@ -910,6 +918,7 @@ module AgentCore
                 tool_call_id = tool_call.id.to_s
                 requested_name = tool_call.name.to_s
                 name_repaired = tool_name_repairs.is_a?(Hash) && tool_name_repairs.key?(tool_call_id)
+                arguments_repaired = arguments_repairs[tool_call_id] == true
                 effective_name =
                   if name_repaired
                     tool_name_repairs.fetch(tool_call_id).to_s
@@ -941,6 +950,8 @@ module AgentCore
 
                 arguments = tool_call.arguments || {}
                 parse_error = tool_call.arguments_parse_error
+                repair = task_repair_flags(name_repaired: name_repaired, arguments_repaired: arguments_repaired)
+                arguments_resolution = arguments_repaired ? "repaired" : "original"
 
                 if parse_error
                   invalid += 1
@@ -959,6 +970,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: "invalid",
+                        repair: repair,
                         source: "invalid_args",
                       ),
                       body_output: { "result" => tool_error.to_h },
@@ -1000,6 +1013,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: arguments_resolution,
+                        repair: repair,
                         source: "policy",
                       ),
                       body_output: { "result" => tool_error.to_h },
@@ -1072,6 +1087,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: arguments_resolution,
+                        repair: repair,
                         source: "policy",
                       ),
                       body_output: { "result" => tool_error.to_h },
@@ -1136,6 +1153,8 @@ module AgentCore
                             name: resolved_name,
                             name_resolution: name_resolution,
                             arguments: arguments,
+                            arguments_resolution: "invalid",
+                            repair: repair,
                             source: "invalid_args",
                           ),
                           body_output: { "result" => tool_error.to_h },
@@ -1170,6 +1189,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: arguments_resolution,
+                        repair: repair,
                         source: source,
                       ),
                     )
@@ -1222,6 +1243,8 @@ module AgentCore
                             name: resolved_name,
                             name_resolution: name_resolution,
                             arguments: arguments,
+                            arguments_resolution: "invalid",
+                            repair: repair,
                             source: "invalid_args",
                           ),
                           body_output: { "result" => tool_error.to_h },
@@ -1266,6 +1289,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: arguments_resolution,
+                        repair: repair,
                         source: source,
                       ),
                     )
@@ -1299,6 +1324,8 @@ module AgentCore
                         name: resolved_name,
                         name_resolution: name_resolution,
                         arguments: arguments,
+                        arguments_resolution: arguments_resolution,
+                        repair: repair,
                         source: "policy",
                       ),
                       body_output: { "result" => tool_error.to_h },
@@ -1652,18 +1679,55 @@ module AgentCore
             }
           end
 
-          def task_input_hash(tool_call_id:, requested_name:, name:, name_resolution:, arguments:, source:)
+          def task_input_hash(tool_call_id:, requested_name:, name:, name_resolution:, arguments:, source:, arguments_resolution: "original", repair: nil)
             arguments = arguments.is_a?(Hash) ? arguments : {}
+            repair = AgentCore::Utils.deep_stringify_keys(repair) if repair.is_a?(Hash)
 
             {
               "tool_call_id" => tool_call_id.to_s,
               "requested_name" => requested_name.to_s,
               "name" => name.to_s,
               "name_resolution" => name_resolution.to_s,
+              "arguments_resolution" => arguments_resolution.to_s,
               "arguments" => AgentCore::Utils.deep_stringify_keys(arguments),
               "arguments_summary" => summarize_arguments(arguments),
               "source" => source.to_s,
-            }
+            }.tap do |input|
+              input["repair"] = repair if repair.present?
+            end
+          end
+
+          def repaired_argument_repairs_by_tool_call_id(original_tool_calls:, repaired_tool_calls:)
+            original_by_id =
+              Array(original_tool_calls).each_with_object({}) do |tool_call, memo|
+                memo[tool_call_identity(tool_call)] = tool_call
+              end
+
+            Array(repaired_tool_calls).each_with_object({}) do |tool_call, memo|
+              original = original_by_id[tool_call_identity(tool_call)]
+              next if original.nil?
+
+              original_arguments =
+                AgentCore::Utils.deep_stringify_keys(original.respond_to?(:arguments) && original.arguments.is_a?(Hash) ? original.arguments : {})
+              repaired_arguments =
+                AgentCore::Utils.deep_stringify_keys(tool_call.respond_to?(:arguments) && tool_call.arguments.is_a?(Hash) ? tool_call.arguments : {})
+              original_parse_error = original.respond_to?(:arguments_parse_error) ? original.arguments_parse_error.to_s.presence : nil
+              repaired_parse_error = tool_call.respond_to?(:arguments_parse_error) ? tool_call.arguments_parse_error.to_s.presence : nil
+
+              memo[tool_call_identity(tool_call)] =
+                original_parse_error.present? || original_arguments != repaired_arguments || repaired_parse_error.present?
+            end
+          end
+
+          def task_repair_flags(name_repaired:, arguments_repaired:)
+            flags = {}
+            flags["tool_name"] = true if name_repaired
+            flags["arguments"] = true if arguments_repaired
+            flags.presence
+          end
+
+          def tool_call_identity(tool_call)
+            tool_call.respond_to?(:id) ? tool_call.id.to_s : ""
           end
 
           def emit_planned_activity!(task:, diagnostic_level:)
