@@ -325,7 +325,7 @@ module AgentCore
               end
 
               if auth_error?(error)
-                return {
+                {
                   failure_class: "auth",
                   failure_code: default_failure_code_for(error, source: source),
                   retryable: false,
