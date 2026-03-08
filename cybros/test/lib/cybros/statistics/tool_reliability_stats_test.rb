@@ -1,6 +1,14 @@
 require "test_helper"
 
 class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
+  setup do
+    Statistics::ToolCallFact.delete_all
+  end
+
+  teardown do
+    Statistics::ToolCallFact.delete_all
+  end
+
   test "aggregates runtime-only reliability metrics and page-ready slices" do
     create_fact!(
       task_node_id: uuidv7,

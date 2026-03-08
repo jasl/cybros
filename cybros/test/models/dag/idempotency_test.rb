@@ -29,7 +29,8 @@ class DAG::IdempotencyTest < ActiveSupport::TestCase
 
     assert_equal node_1.id, node_2.id
     assert_equal 1, graph.nodes.count
-    assert_equal 1, DAG::NodeBody.count
+    assert_equal node_1.body_id, node_2.body_id
+    assert_equal 1, DAG::NodeBody.where(id: [node_1.body_id, node_2.body_id]).distinct.count
   end
 
   test "create_node raises when idempotency_key collides with different body I/O" do
