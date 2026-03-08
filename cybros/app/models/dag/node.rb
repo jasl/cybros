@@ -57,6 +57,7 @@ module DAG
     before_validation :ensure_lane
     before_validation :ensure_body
     after_create :ensure_turn_record!
+    after_commit :project_tool_call_fact_after_commit, on: %i[create update]
 
     def terminal?
       TERMINAL_STATES.include?(state)
@@ -267,6 +268,7 @@ module DAG
           metadata: self.metadata.merge("output_stats" => stats),
           updated_at: Time.current
         )
+        project_tool_call_fact_if_needed
       end
 
       transitioned
@@ -1015,6 +1017,16 @@ module DAG
         end
       end
 
+      def project_tool_call_fact_after_commit
+        project_tool_call_fact_if_needed
+      end
+
+      def project_tool_call_fact_if_needed
+        return unless node_type.to_s == Messages::Task.node_type_key
+
+        Statistics::ToolCallFactProjector.project!(self)
+      end
+
       def transition_to!(to_state, from_states:, **attributes)
         now = Time.current
         updates = attributes.merge(state: to_state, updated_at: now)
@@ -1022,6 +1034,7 @@ module DAG
 
         if affected_rows == 1
           reload
+          project_tool_call_fact_if_needed
           true
         else
           false
