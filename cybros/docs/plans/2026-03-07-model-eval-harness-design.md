@@ -11,6 +11,8 @@ The target shape is:
 - Tier A provides deterministic regression suites that are stable in local development and CI
 - Tier B provides real-provider smoke coverage over the current model catalog
 - Tier C is explicitly recorded as future work, not part of the first implementation
+- the default product truth for tool reliability remains runtime statistics on `/statistics`, not eval output
+- eval may reuse the runtime failure taxonomy later, but eval/debug samples are not part of default product metrics
 
 The goal is not to build a research lab in one step. The goal is to make model updates, provider changes, and catalog refreshes auditable, repeatable, and comparable inside the Cybros repo.
 
@@ -24,6 +26,7 @@ The goal is not to build a research lab in one step. The goal is to make model u
 - Allow filtering by provider, model, tier, suite, and case so evaluation runs can be narrowed when needed.
 - Produce durable structured reports that can be compared across runs.
 - Reuse current DAG/runtime/provider abstractions rather than introducing a parallel execution stack.
+- Keep eval outputs separate from the default runtime-only product statistics surface.
 
 ## Non-goals
 
@@ -32,6 +35,7 @@ The goal is not to build a research lab in one step. The goal is to make model u
 - Turn the first version into a permanent scheduled service or UI dashboard.
 - Support every possible experimental matrix dimension from the legacy harness on day one.
 - Introduce a second hand-maintained model list outside `config/llm/providers.yml`.
+- Feed eval/debug samples into the default `/statistics` runtime dataset.
 
 ## Existing Context
 
@@ -241,6 +245,25 @@ Future directions:
 - longitudinal score tracking and dashboards
 
 Tier C should only be discussed after Tier A and Tier B are stable enough to trust their raw execution outputs and artifacts.
+
+## Relationship To Runtime Statistics
+
+The eval harness complements runtime statistics, but it does not replace them.
+
+The canonical product-facing reliability view is now:
+
+- durable fact rows in `Statistics::ToolCallFact`
+- product aggregations under `Cybros::Statistics::*`
+- the default `/statistics` page filtered to `sample_origin = "runtime"`
+
+That is the real-world truth for tool reliability because it reflects actual user traffic, actual approval paths, actual retries, and real dependency failures.
+
+Eval remains a curated comparison tool:
+
+- its outputs live in report directories under `tmp/`
+- it may reuse the same failure taxonomy later for comparability
+- any future fact writes from eval must be explicitly tagged `sample_origin = "eval"`
+- eval/debug samples must stay out of the default product metrics unless a caller explicitly asks for them
 
 ## Decision 4: Execution should reuse the current Cybros runtime path
 

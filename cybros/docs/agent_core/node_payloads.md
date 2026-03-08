@@ -265,7 +265,10 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 - `repair`：按 task 持久化的自动 repair 归因
   - `tool_name=true`：发生过 ToolNameRepairLoop
   - `arguments=true`：发生过 ToolCallRepairLoop
+  - 这里只记录 **自动** repair loop 的归因；手动 rerun/retry 不写进 `repair`，而是生成新的 `task` 节点并由统计层作为新的尝试处理
 - `source`：来源分类（用于可观测/安全策略）
+
+这些字段是 runtime 统计的 durable per-task 归因基础，后续 `Statistics::ToolCallFact` / `Cybros::Statistics::ToolReliabilityStats` 会基于它们区分 first-pass success 与 repair-assisted success。
 
 ### 2.2 output（`body.output`）
 
@@ -282,6 +285,33 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 ```
 
 其中 `result` 等价于 `AgentCore::Resources::Tools::ToolResult#to_h`。
+
+### 2.2.1 工具执行失败分类（`result.metadata["tool_execution"]`）
+
+当 task 已进入真实工具执行阶段时，`ToolResult` 可在 `metadata` 中附带稳定的失败分类：
+
+```json
+{
+  "result": {
+    "content": [ { "type": "text", "text": "..." } ],
+    "error": true,
+    "metadata": {
+      "tool_execution": {
+        "failure_class": "validation_error|implementation_error|remote_api_error|timeout|rate_limit|auth|unknown",
+        "failure_code": "optional_stable_code",
+        "retryable": false
+      }
+    }
+  }
+}
+```
+
+说明：
+
+- `failure_class`：runtime 侧 canonical taxonomy，供 `Statistics::ToolCallFact.failure_class` 与 `Cybros::Statistics::ToolReliabilityStats` 聚合使用
+- `failure_code`：更细粒度的稳定错误码（可选）；provider/body 原文仍可作为调试细节，但不应替代这个一级分类
+- `retryable`：工具侧失败是否可自动重试（可选）
+- 成功结果可以没有 `tool_execution` 元数据；只有进入执行并失败时才要求稳定分类
 
 ### 2.3 审批元数据（`task.metadata["approval"]`）
 

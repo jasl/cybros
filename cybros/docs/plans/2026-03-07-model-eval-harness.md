@@ -4,7 +4,7 @@
 
 **Goal:** Add a Cybros-native `eval` harness that lives under `Cybros::CLI`, supports deterministic regression suites plus live provider smoke suites, and writes durable reports that can be rerun after model or provider updates.
 
-**Architecture:** Keep the user-facing entrypoint as a thin `script/eval` wrapper and put the main orchestration in `Cybros::CLI`. Tier A should run deterministic regression cases using stable fixtures/mocks and current DAG/runtime plumbing. Tier B should run real-provider smoke cases against all enabled models from `config/llm/providers.yml` by default, with optional filters for narrower runs. Tier C should be documented as future work only and must not be implemented in this plan.
+**Architecture:** Keep the user-facing entrypoint as a thin `script/eval` wrapper and put the main orchestration in `Cybros::CLI`. Tier A should run deterministic regression cases using stable fixtures/mocks and current DAG/runtime plumbing. Tier B should run real-provider smoke cases against all enabled models from `config/llm/providers.yml` by default, with optional filters for narrower runs. Tier C should be documented as future work only and must not be implemented in this plan. This harness complements, but does not replace, product runtime statistics: the default `/statistics` view remains runtime-only and product-facing statistics services live under the `Cybros::Statistics::*` boundary.
 
 **Tech Stack:** Ruby 4.0, Rails 8 alpha, ActiveSupport tests, `Conversation` facade, DAG engine (`DAG::Runner`, `DAG::Scheduler`, `AgentCore::DAG::Session`), `Cybros::AgentRuntimeResolver`, `Cybros::CLI::DAGDebug`, `config/llm/providers.yml`, filesystem report output under `tmp/`.
 
@@ -23,6 +23,7 @@ This plan explicitly does **not** implement:
 - Tier C LLM-as-judge evaluation
 - dashboards, scheduling, or hosted result storage
 - broad statistical sampling-profile matrices from the legacy harness
+- wiring eval/debug samples into the default `/statistics` runtime dataset
 
 ## Execution order and dependency constraints
 
@@ -310,6 +311,8 @@ Keep this bounded:
 - do not auto-capture on skip statuses
 - do not force capture for Tier A
 
+If eval later needs to emit shared reliability facts for offline comparison, those facts must be tagged with a non-runtime sample origin such as `eval` and must remain excluded from default product metrics.
+
 ### Task 6 / Step 4: Run test to verify it passes
 
 Run: `bin/rails test test/lib/cybros/cli/eval/live_runner_test.rb`
@@ -427,6 +430,7 @@ Manual verification:
 - run Tier B against one model
 - run Tier B against one provider
 - run Tier B with no filter and confirm the report includes all enabled current-environment models, including explicit skip rows where credentials or environment gating prevent execution
+- confirm the eval workflow remains separate from the runtime-only `/statistics` dataset by default
 
 ## Future work (not in this plan)
 
