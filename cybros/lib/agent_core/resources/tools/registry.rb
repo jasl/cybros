@@ -221,7 +221,7 @@ module AgentCore
                   "MCP tool '#{original_name}' failed (#{e.class})."
                 end
 
-              ToolResult.error(text: text)
+              ToolResult.error_with_tool_execution(text: text, error: e, source: :mcp)
             end
           end
         end

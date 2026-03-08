@@ -59,13 +59,17 @@ module AgentCore
 
           ToolResult.error(
             text: text,
-            metadata: {
-              validation_error: {
-                class: e.class.name,
-                code: e.code,
-                details: e.details,
-              }.compact,
-            },
+            metadata:
+              ToolResult.with_tool_execution_metadata(
+                {
+                  validation_error: {
+                    class: e.class.name,
+                    code: e.code,
+                    details: e.details,
+                  }.compact,
+                },
+                **ToolResult.tool_execution_failure_for(e, source: :native),
+              ),
           )
         rescue AgentCore::Error
           raise
@@ -78,7 +82,7 @@ module AgentCore
               "Tool '#{name}' failed (#{e.class})."
             end
 
-          ToolResult.error(text: text)
+          ToolResult.error_with_tool_execution(text: text, error: e, source: :native)
         end
 
         # Convert to the format expected by LLM APIs.
