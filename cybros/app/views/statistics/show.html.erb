@@ -324,6 +324,44 @@
           <% end %>
         </div>
       </div>
+
+      <div class="card bg-base-100 border border-base-300 shadow-sm">
+        <div class="card-body">
+          <h2 class="card-title">By execution scope</h2>
+
+          <% rows = reliability.fetch("by_execution_scope", []) %>
+          <% if rows.empty? %>
+            <p class="opacity-70">No runtime tool facts yet.</p>
+          <% else %>
+            <div class="overflow-x-auto">
+              <table class="table table-sm">
+                <thead>
+                  <tr>
+                    <th>Scope</th>
+                    <th class="text-right">Calls</th>
+                    <th class="text-right">Executable</th>
+                    <th class="text-right">First-pass</th>
+                    <th class="text-right">Repair</th>
+                    <th class="text-right">Tool success</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <% rows.each do |row| %>
+                    <tr>
+                      <td class="font-mono text-xs"><%= row.fetch("execution_scope") %></td>
+                      <td class="text-right"><%= row.fetch("total_calls") %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("executable_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("first_pass_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("repair_assisted_success_rate", {})) %></td>
+                      <td class="text-right"><%= format_rate.call(row.fetch("tool_success_rate", {})) %></td>
+                    </tr>
+                  <% end %>
+                </tbody>
+              </table>
+            </div>
+          <% end %>
+        </div>
+      </div>
     </div>
   </div>
 </div>

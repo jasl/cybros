@@ -248,6 +248,134 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     assert_equal "not_executed", retry_fact.tool_outcome
   end
 
+  test "ordinary child conversations are not mislabeled as subagent_child" do
+    parent = create_conversation!
+    child =
+      Conversation.create!(
+        user: parent.user,
+        parent_conversation: parent,
+        title: "Ordinary child",
+        metadata: { "agent" => { "agent_profile" => "coding" } },
+      )
+
+    graph = child.dag_graph
+    lane_id = graph.main_lane.id
+    turn_id = uuidv7
+
+    agent =
+      create_agent_node!(
+        graph: graph,
+        lane_id: lane_id,
+        turn_id: turn_id,
+        provider_key: "openai",
+        model_ref: "openai/gpt-5.4",
+      )
+
+    task =
+      create_connected_task!(
+        graph: graph,
+        from_node: agent,
+        lane_id: lane_id,
+        turn_id: turn_id,
+        state: DAG::Node::FINISHED,
+        name: "shell_exec",
+        tool_call_id: "tc_child",
+        source: "shell",
+        result: AgentCore::Resources::Tools::ToolResult.success(text: "ok"),
+      )
+
+    fact = Statistics::ToolCallFact.find_by!(task_node_id: task.id)
+
+    assert_equal "parent", fact.execution_scope
+    assert_equal parent.root_conversation_id, fact.root_conversation_id
+  end
+
+  test "real subagent child conversations are labeled subagent_child while parent wrapper tasks stay parent" do
+    parent = create_conversation!
+
+    child =
+      Conversation.create!(
+        user: parent.user,
+        parent_conversation: parent,
+        title: "Subagent child",
+        metadata: {
+          "agent" => {
+            "key" => "subagent:child",
+            "agent_profile" => "subagent",
+            "context_turns" => 50,
+          },
+          "subagent" => {
+            "name" => "child",
+            "parent_conversation_id" => parent.id.to_s,
+            "parent_graph_id" => parent.dag_graph.id.to_s,
+            "spawned_from_node_id" => uuidv7,
+          },
+          "statistics" => {
+            "sample_origin" => "runtime",
+          },
+        },
+      )
+
+    parent_graph = parent.dag_graph
+    parent_lane_id = parent_graph.main_lane.id
+    parent_turn_id = uuidv7
+
+    parent_agent =
+      create_agent_node!(
+        graph: parent_graph,
+        lane_id: parent_lane_id,
+        turn_id: parent_turn_id,
+        provider_key: "openai",
+        model_ref: "openai/gpt-5.4",
+      )
+
+    parent_task =
+      create_connected_task!(
+        graph: parent_graph,
+        from_node: parent_agent,
+        lane_id: parent_lane_id,
+        turn_id: parent_turn_id,
+        state: DAG::Node::FINISHED,
+        name: "subagent_run",
+        tool_call_id: "tc_parent_subagent",
+        source: "cybros",
+        result: AgentCore::Resources::Tools::ToolResult.success(text: "spawned"),
+      )
+
+    child_graph = child.dag_graph
+    child_lane_id = child_graph.main_lane.id
+    child_turn_id = uuidv7
+
+    child_agent =
+      create_agent_node!(
+        graph: child_graph,
+        lane_id: child_lane_id,
+        turn_id: child_turn_id,
+        provider_key: "openai",
+        model_ref: "openai/gpt-5.4",
+      )
+
+    child_task =
+      create_connected_task!(
+        graph: child_graph,
+        from_node: child_agent,
+        lane_id: child_lane_id,
+        turn_id: child_turn_id,
+        state: DAG::Node::FINISHED,
+        name: "shell_exec",
+        tool_call_id: "tc_child_internal",
+        source: "shell",
+        result: AgentCore::Resources::Tools::ToolResult.success(text: "ok"),
+      )
+
+    parent_fact = Statistics::ToolCallFact.find_by!(task_node_id: parent_task.id)
+    child_fact = Statistics::ToolCallFact.find_by!(task_node_id: child_task.id)
+
+    assert_equal "parent", parent_fact.execution_scope
+    assert_equal "subagent_child", child_fact.execution_scope
+    assert_equal parent.root_conversation_id, child_fact.root_conversation_id
+  end
+
   private
 
     def create_agent_node!(graph:, lane_id:, turn_id:, provider_key:, model_ref:)

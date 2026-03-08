@@ -142,4 +142,116 @@ class DAG::SubagentChildConversationFlowTest < ActiveSupport::TestCase
       DAG.executor_registry = original_registry
     end
   end
+
+  test "statistics facts classify child internal tool calls as subagent_child when provenance comes from subagent_run" do
+    parent = create_conversation!
+    ctx = parent_context(parent)
+    run_tool = Cybros::Subagent::Tools.build.find { |tool| tool.name == "subagent_run" }
+
+    run =
+      run_tool.call(
+        {
+          "name" => "child",
+          "prompt" => "child: hello",
+          "agent_profile" => "subagent",
+        },
+        context: ctx,
+      )
+
+    refute run.error?, run.text
+
+    child = Conversation.find(JSON.parse(run.text).fetch("child_conversation_id"))
+    child_graph = child.dag_graph
+    child_turn_id = ActiveRecord::Base.with_connection { |connection| connection.select_value("select uuidv7()") }
+
+    agent =
+      child_graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: child_graph.main_lane.id,
+        turn_id: child_turn_id,
+        metadata: {},
+        body_output: {
+          "content" => "child tool caller",
+          "provider_key" => "openai",
+          "model_ref" => "openai/gpt-5.4",
+        },
+      )
+
+    task = nil
+
+    ApplicationRecord.transaction do
+      task =
+        child_graph.nodes.create!(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: child_graph.main_lane.id,
+          turn_id: child_turn_id,
+          metadata: {},
+          body_input: {
+            "name" => "shell_exec",
+            "requested_name" => "shell_exec",
+            "tool_call_id" => "tc_child_scope",
+            "arguments" => {},
+            "arguments_summary" => "{}",
+            "name_resolution" => "exact",
+            "arguments_resolution" => "original",
+            "source" => "shell",
+          },
+          body_output: {
+            "result" => AgentCore::Resources::Tools::ToolResult.success(text: "ok").to_h,
+          },
+        )
+
+      child_graph.edges.create!(
+        graph_id: child_graph.id,
+        from_node_id: agent.id,
+        to_node_id: task.id,
+        edge_type: DAG::Edge::SEQUENCE,
+        metadata: {},
+      )
+    end
+
+    Statistics::ToolCallFactProjector.project!(task)
+    fact = Statistics::ToolCallFact.find_by!(task_node_id: task.id)
+
+    assert_equal "subagent_child", fact.execution_scope
+    assert_equal parent.root_conversation_id, fact.root_conversation_id
+  end
+
+  private
+
+    def parent_context(parent, agent_key: "main", agent_profile: "coding", context_turns: 50)
+      graph = parent.dag_graph
+      turn_id = ActiveRecord::Base.with_connection { |connection| connection.select_value("select uuidv7()") }
+      from_node = nil
+
+      graph.mutate!(turn_id: turn_id) do |m|
+        from_node =
+          m.create_node(
+            node_type: Messages::UserMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "parent",
+            metadata: {},
+          )
+      end
+
+      AgentCore::ExecutionContext.new(
+        run_id: turn_id,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        attributes: {
+          dag: {
+            graph_id: graph.id.to_s,
+            node_id: from_node.id.to_s,
+            lane_id: from_node.lane_id.to_s,
+            turn_id: from_node.turn_id.to_s,
+          },
+          agent: {
+            key: agent_key,
+            agent_profile: agent_profile,
+            context_turns: context_turns,
+          },
+        },
+      )
+    end
 end

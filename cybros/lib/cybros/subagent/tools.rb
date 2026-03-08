@@ -91,6 +91,7 @@ module Cybros
             child =
               Conversation.create!(
                 user: parent.user,
+                parent_conversation: parent,
                 title: title,
                 metadata: build_child_metadata(
                   agent_key: agent_key,
@@ -248,6 +249,7 @@ module Cybros
             child =
               Conversation.create!(
                 user: parent.user,
+                parent_conversation: parent,
                 title: title,
                 metadata: build_child_metadata(
                   agent_key: agent_key,

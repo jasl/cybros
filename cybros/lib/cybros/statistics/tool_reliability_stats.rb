@@ -24,7 +24,7 @@ module Cybros
           "by_tool_name" => grouped_rows(filtered_scope, group_key: :resolved_name, label_key: "resolved_name"),
           "by_failure_class" => failure_class_rows(filtered_scope),
           "by_day" => day_rows(filtered_scope),
-          "by_execution_scope" => grouped_rows(filtered_scope, group_key: :execution_scope, label_key: "execution_scope"),
+          "by_execution_scope" => execution_scope_rows(filtered_scope),
         }
       end
 
@@ -82,6 +82,16 @@ module Cybros
               }
             end
             .sort_by { |row| [-row.fetch("count"), row.fetch("failure_class")] }
+        end
+
+        def execution_scope_rows(base_scope)
+          order = {
+            "parent" => 0,
+            "subagent_child" => 1,
+          }
+
+          grouped_rows(base_scope, group_key: :execution_scope, label_key: "execution_scope")
+            .sort_by { |row| [order.fetch(row.fetch("execution_scope"), 99), row.fetch("execution_scope")] }
         end
 
         def build_summary(base_scope)
