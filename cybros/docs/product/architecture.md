@@ -11,6 +11,7 @@ Cybros is the control plane and runtime kernel. It owns:
 - provider-credential rate limiting
 - job concurrency governance
 - policy and approval
+- permission-preset compilation
 - memory and knowledge services
 - scheduling and automation
 - UI and surface adapters
@@ -22,7 +23,7 @@ An agent program is a standalone application that contains programmable agent lo
 
 It is responsible for:
 
-- prompt assembly logic
+- prompt-planning logic
 - persona and workflow logic
 - hooks
 - calling Cybros RPCs
@@ -43,7 +44,7 @@ It owns:
 
 - transport binding
 - endpoint or local invocation details
-- auth or secret reference
+- deployment bearer secret reference
 - healthcheck and inspection snapshots
 - manifest and schema discovery snapshots
 - activation state
@@ -71,6 +72,7 @@ User / Automation / Channel
   -> Cybros Conversation API
   -> Cybros Run Planning / Draft Finalization
   -> AgentDeployment `agent_rpc` session to programmable agent
+     -> scoped agent requests back into Cybros public APIs
   -> Cybros LLM / Tool orchestration
   -> Nexus directive execution against an execution target
   -> Cybros events / transcript / audit
@@ -83,7 +85,6 @@ Programmable agents return high-level intent, not direct runtime mutations.
 Agent-owned outputs include:
 
 - prompt fragments and workflow decisions
-- hook results
 - staged public API requests for settings, agent config, and KV
 - execution-target proposals
 
@@ -91,6 +92,7 @@ Kernel-owned final authority includes:
 
 - final prompt assembly
 - draft mutation commit or discard
+- approval resume from persisted prepared state
 - DAG node and edge mutation
 - tool-loop orchestration
 - tool-policy merge
@@ -104,9 +106,13 @@ The kernel may merge, defer, reject, or require approval for agent intent when p
 
 - Product code uses `Conversation` public APIs, not raw DAG internals.
 - Agent control is high-level and policy-gated.
+- Cybros owns the business control flow; agent callbacks are scoped API requests inside that flow.
+- Conversation-level runtime defaults choose the top-level agent program, permission preset, and execution target for future turns.
 - `turn.prepare` is planning-only; draft-time public mutations are not durably committed until finalization.
+- approval resume continues from persisted draft state instead of reopening planning.
 - Execution routing is explicit and auditable.
 - A finalized run pins one deployment binding for execution instead of silently drifting to a new active deployment.
+- Subagents remain turn-local to the top-level agent that launched them and are not retroactively redirected by later conversation-default changes.
 - Provider limits, job concurrency, and execution quotas are separate governors.
 - The system snapshots run-time decisions per run instead of mutating history.
 - Compatibility layers are optional, not required.

@@ -15,7 +15,7 @@ Its scope is:
 Its scope is not:
 
 - programmable-agent deployment registration, run planning, or control-plane ownership
-- prompt assembly
+- prompt planning or final prompt assembly
 - conversation logic
 - LLM loop ownership
 

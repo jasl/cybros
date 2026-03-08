@@ -157,10 +157,35 @@ Target:
 - the LLM domain separates `ProviderSpec` and `ProviderCredential`
 - v1 keeps one active credential per `provider_key`
 - provider rate limiting is attached to each provider credential
-- job throughput is operator-tunable in dedicated deployment-scoped runtime settings
+- job throughput is operator-tunable in dedicated instance-scoped runtime settings
 - execution quotas are modeled on `ExecutionLocation` with optional `ExecutionTarget` override
 
+### 9. Permission Behavior Is Still Hidden In Resolver Defaults
+
+Current state:
+
+- approval behavior is largely implied by runtime resolver defaults such as `ConfirmAll`
+- there is no first-class conversation-scoped top-level agent selector
+- there is no first-class conversation-scoped permission preset
+- automation does not yet carry an explicit non-interactive permission default
+
+Relevant files:
+
+- `lib/cybros/agent_runtime_resolver.rb`
+- `app/views/conversations/show.html.erb`
+- `app/controllers/conversations_controller.rb`
+
+Target:
+
+- `Conversation` stores an explicit `agent_program_id` used by future turns
+- `Conversation` stores an explicit `permission_mode`
+- `Automation` stores an explicit `permission_mode` and defaults to `full_access`
+- conversation `agent_config` remains namespaced store instead of being cleared on agent changes
+- Cybros compiles that preset into a runtime policy bundle and snapshots the effective result per draft and run
+
 ## Recommended Implementation Sequence
+
+Use `docs/plans/README.md` as the task-level execution order. The sequence below is only a repository-level cutover grouping for code ownership, not a compatibility-preserving migration recipe.
 
 1. Add new product docs and freeze old product docs.
 2. Add `AgentDeployment` as a first-class connectable model and define explicit registration flow.
@@ -171,9 +196,10 @@ Target:
 7. Rework `AgentProgram` into a source-package model and keep runtime connectivity, inspection, and health on `AgentDeployment`.
 8. Rebaseline runtime resolver and execution context assembly on top of first-class execution targets.
 9. Add automation domain primitives bound to agent and execution target.
-10. Add runtime governance primitives for provider limits, job throughput, and execution quotas.
-11. Re-align Conduits and Nexus protocol semantics.
-12. Update UI and tests after the domain model is stable, including Playwright E2E coverage for create -> run -> audit business flows.
+10. Add explicit conversation-level agent selection, permission presets, and execution-target selection before the composer runtime-selection UI becomes user-facing.
+11. Add runtime governance primitives for provider limits, job throughput, and execution quotas.
+12. Re-align Conduits and Nexus protocol semantics.
+13. Update UI and tests after the domain model is stable, including Playwright E2E coverage for composer runtime selectors, settings-management flows, and create -> run -> audit business flows.
 
 ## Destructive Refactor Rule
 

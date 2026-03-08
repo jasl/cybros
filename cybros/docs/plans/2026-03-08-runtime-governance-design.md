@@ -70,6 +70,8 @@ The base execution quota should live on `ExecutionLocation`.
 
 This preserves host-level protection while allowing workspace-level tuning.
 
+The same execution models may also carry explicit policy fields and tag arrays used by execution-target visibility and target-switch policy resolution, but those concerns must stay separate from quota admission itself.
+
 ## 6. V1 Configuration Lives In System Settings
 
 V1 does not need end-user product UI for these controls.
@@ -78,10 +80,12 @@ The operator-facing system settings layer is enough.
 
 Recommended storage direction:
 
-- provider limiter config on the provider credential record
-- execution quota config on `ExecutionLocation`
-- execution quota override on `ExecutionTarget`
-- job concurrency config in dedicated deployment-scoped runtime settings
+- provider limiter fields on the provider credential record
+- execution-quota fields on `ExecutionLocation`
+- execution-quota override fields on `ExecutionTarget`
+- job-throughput fields in dedicated instance-scoped runtime settings
+
+The operator-facing settings layer should expose execution-location and workspace records as the source surfaces that later execution-target management builds on.
 
 ## 7. Dashboard Can Be Deferred, But Data Collection Cannot
 
@@ -104,7 +108,7 @@ At minimum the kernel should produce enough data to visualize:
 - `max_concurrent_requests`
 - `requests_per_minute`
 - `tokens_per_minute`
-- `burst`
+- `burst_limit`
 - `backoff_policy`
 
 ### JobConcurrencySettings
@@ -117,9 +121,9 @@ At minimum the kernel should produce enough data to visualize:
 
 - `max_concurrent_tasks`
 - `max_queued_tasks`
-- `default_timeout`
-- optional `cpu_limit`
-- optional `memory_limit`
+- `default_timeout_s`
+- optional `cpu_limit_millicores`
+- optional `memory_limit_mb`
 
 ## Admission And Parking Rules
 
@@ -153,6 +157,8 @@ Blocked work should use a durable wait state with explicit reasons:
 - `execution_quota`
 - `deployment_backoff`
 
+`deployment_backoff` is not a fourth governor. It is the scheduler's durable retry wait for unreachable or unhealthy programmable-agent deployments.
+
 ## Run-Time Flow
 
 At execution time:
@@ -164,6 +170,8 @@ At execution time:
 5. denied work parks durably instead of monopolizing scheduler throughput
 
 If one of these governors blocks progress, the reason should be durable and observable.
+
+Deployment transport failures may also park work through `deployment_backoff`, but Cybros does not supervise or repair the deployment.
 
 ## Phase Placement
 

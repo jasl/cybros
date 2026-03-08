@@ -22,6 +22,7 @@ They must not be collapsed into one global "concurrency" setting.
 - Dangerous or heavy execution is protected by execution quotas.
 - Job throughput is tunable separately from remote API limits and host resource limits.
 - Blocked work must park durably instead of monopolizing worker throughput.
+- Deployment failures use durable scheduler backoff, but Cybros does not self-heal deployments.
 - V1 configuration should live in system settings, not yet in end-user product UI.
 - Observability must be collected before the final dashboard exists.
 
@@ -34,7 +35,7 @@ The LLM domain should distinguish:
 
 `ProviderSpec` describes catalog capabilities.
 
-`ProviderCredential` carries operator-managed secret material, status, and limiter configuration.
+`ProviderCredential` carries operator-managed secret material, status, and explicit limiter fields.
 
 V1 product rule:
 
@@ -68,7 +69,7 @@ Protect remote LLM APIs from:
 - `max_concurrent_requests`
 - `requests_per_minute`
 - `tokens_per_minute`
-- `burst`
+- `burst_limit`
 - `backoff_policy`
 
 ### Rules
@@ -129,9 +130,9 @@ Protect local or remote machines from resource exhaustion caused by:
 
 - `max_concurrent_tasks`
 - `max_queued_tasks`
-- `default_timeout`
-- optional `cpu_limit`
-- optional `memory_limit`
+- `default_timeout_s`
+- optional `cpu_limit_millicores`
+- optional `memory_limit_mb`
 
 ### Rules
 
@@ -144,12 +145,18 @@ Protect local or remote machines from resource exhaustion caused by:
 
 V1 should expose configuration through system settings.
 
+Field-shape rule for this rebaseline:
+
+- use explicit columns for stable limiter and quota values
+- use `text[]` for policy or capability tag sets
+- keep `jsonb` only for bounded settings payloads such as `queue_overrides` and `alert_thresholds`
+
 Recommended ownership:
 
-- provider-credential limiter config on the provider credential record
-- execution quota config on `ExecutionLocation`
-- execution quota override on `ExecutionTarget`
-- job concurrency config in a dedicated deployment-scoped runtime settings store
+- provider-credential limiter fields on the provider credential record
+- execution-quota fields on `ExecutionLocation`
+- execution-quota override fields on `ExecutionTarget`
+- job-throughput fields in a dedicated instance-scoped runtime settings store
 
 Product-grade user-facing controls may come later.
 
@@ -214,6 +221,8 @@ V1 wait reasons include:
 
 Parked waits are not the same thing as admitted queue occupancy.
 
+`deployment_backoff` is a durable retry wait for unreachable or unhealthy programmable-agent deployments. It is adjacent to runtime governance, but it is not a fourth governor.
+
 For execution quotas, `max_queued_tasks` should count execution work already admitted into the location or target queue, not globally parked waits.
 
 Resume ordering should be stable and FIFO within one governed subject and wait reason.
@@ -230,6 +239,8 @@ At execution time:
 6. If work is denied or delayed, the node should park durably rather than spin inside the worker pool.
 
 If a governor blocks work, the reason should be durable and observable.
+
+If the deployment itself is down, Cybros parks through `deployment_backoff` and later retries or fails the node. It does not attempt deployment remediation.
 
 Governor snapshots versus live state:
 

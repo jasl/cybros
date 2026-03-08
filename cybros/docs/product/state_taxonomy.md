@@ -4,16 +4,39 @@ This document defines the storage classes in the product model.
 
 The goal is to stop product state from collapsing back into generic `metadata`.
 
+## Conversation Runtime Defaults
+
+Purpose:
+
+- durable conversation-scoped runtime selection that defines how future turns start
+
+Examples:
+
+- top-level `agent_program_id`
+- `permission_mode`
+- `default_execution_target_id`
+
+Rules:
+
+- stored as first-class conversation fields, not public settings entries
+- writable through dedicated conversation-setting surfaces
+- affect future drafts and runs only
+- snapshotted into `RunDraft` and `ConversationRun`
+- do not retroactively rewrite an already running or parked turn
+
 ## Public Conversation Settings
 
 Purpose:
 
 - durable product-facing conversation configuration
 
+Important boundary:
+
+- conversation-scoped runtime defaults such as `agent_program_id`, `default_execution_target_id`, and `permission_mode` are first-class conversation fields, not entries inside public settings
+
 Examples:
 
 - title
-- default execution target
 - default model preference
 - active persona or mode
 
@@ -45,6 +68,7 @@ Rules:
 - durable
 - audited
 - not a general runtime-state bucket
+- interpreted as namespaced by agent-program contract so switching the top-level conversation agent does not require clearing unrelated config
 
 The agent may publish a schema for authoring help or future validation, but Cybros does not strongly enforce that schema in v1.
 

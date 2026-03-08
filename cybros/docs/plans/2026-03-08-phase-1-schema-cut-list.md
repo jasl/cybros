@@ -8,7 +8,22 @@ It is intentionally product-first. Conduits and Nexus should adapt later.
 
 - prefer new first-class tables over extending generic metadata
 - prefer explicit foreign keys over encoded ids inside JSON
+- prefer explicit typed columns for stable identity, policy, and governance fields
+- prefer `text[]` for unordered tags, capability sets, and allowed-method sets
+- reserve `jsonb` for versioned snapshots, structured config blobs, patches, payload envelopes, and bounded diagnostic details
+- avoid new generic `metadata` columns on runtime tables unless the payload has a clearly named bounded purpose
 - prefer immutable run snapshots over mutable pointers
+- v1 is single-tenant; use explicit user foreign keys only where they carry business meaning such as owner, creator, or initiating actor
+- keep deployment, execution, provider, and other system runtime records as global product state unless they are directly user-owned
+
+## Destructive Cut Rule
+
+This schema cut assumes a destructive database reset for the programmable-agent rebaseline.
+
+- update create-migration files in place when that is cleaner than layering compatibility migrations
+- regenerate `db/schema.rb` from the new first-cut schema
+- reset local and test databases instead of preserving transitional column compatibility
+- do not keep generic legacy fields just to ease migration if they conflict with the target product model
 
 ## New Tables
 
@@ -22,7 +37,9 @@ Suggested fields:
 
 - `id`
 - `conversation_id`
+- `initiated_by_user_id` nullable
 - `status`
+- `permission_mode`
 - `trigger_snapshot` jsonb
 - `agent_program_id`
 - `agent_deployment_id`
@@ -32,6 +49,8 @@ Suggested fields:
 - `proposed_execution_target_id`
 - `selected_model_ref`
 - `runtime_governors` jsonb
+- `prepare_invocation_id`
+- `prepared_plan` jsonb
 - `staged_public_settings_patch` jsonb
 - `staged_agent_config_patch` jsonb
 - `staged_kv_ops` jsonb
@@ -44,6 +63,7 @@ Suggested v1 rule:
 
 - a draft may terminate without materializing a `ConversationRun`
 - `ConversationRun` must not carry draft-only states such as `awaiting_approval`, `stale`, or `expired`
+- if approval parks the draft, Cybros resumes finalization from the persisted prepared plan instead of re-running `turn.prepare`
 
 ### `agent_deployments`
 
@@ -56,15 +76,21 @@ Suggested fields:
 - `id`
 - `agent_program_id`
 - `transport_kind`
-- `endpoint` or transport config jsonb
-- auth or secret reference
-- `revision` or deployment fingerprint
+- `endpoint_url` nullable
+- `transport_config` jsonb nullable
+- `deployment_bearer_secret_ref`
+- `deployment_fingerprint`
 - `status`
 - `health_status`
+- `protocol_version`
+- `agent_sdk_version`
+- `supported_methods` `text[]`
 - `manifest_snapshot` jsonb
 - `schema_snapshot` jsonb
 - `capability_snapshot` jsonb
-- `runtime_metadata` jsonb
+- `inspection_details` jsonb
+- `last_inspected_at`
+- `last_health_checked_at`
 - `activated_at`
 - `deactivated_at`
 - timestamps
@@ -86,10 +112,20 @@ Suggested fields:
 - `kind`
 - `platform`
 - `status`
-- `quota_config` jsonb
-- `labels` jsonb
-- `metadata` jsonb
+- `trust_group`
+- `environment`
+- `tags` `text[]`
+- `max_concurrent_tasks`
+- `max_queued_tasks`
+- `default_timeout_s`
+- `cpu_limit_millicores` nullable
+- `memory_limit_mb` nullable
 - timestamps
+
+Suggested v1 rule:
+
+- `trust_group`, `environment`, and `tags` are discovery and policy inputs, not free-form metadata
+- execution-quota settings should use explicit columns instead of a generic quota blob
 
 ### `workspaces`
 
@@ -105,8 +141,8 @@ Suggested fields:
 - `root_path`
 - `workspace_type`
 - `status`
-- `capabilities` jsonb
-- `metadata` jsonb
+- `capability_tags` `text[]`
+- `tags` `text[]`
 - timestamps
 
 Suggested v1 constraint:
@@ -126,13 +162,23 @@ Suggested fields:
 - `workspace_id`
 - `name`
 - `status`
-- `quota_override` jsonb
-- `metadata` jsonb
+- `sandboxed`
+- `max_concurrent_tasks_override` nullable
+- `max_queued_tasks_override` nullable
+- `default_timeout_s_override` nullable
+- `cpu_limit_millicores_override` nullable
+- `memory_limit_mb_override` nullable
 - timestamps
 
 Suggested v1 constraint:
 
 - `workspace.execution_location_id` must match `execution_location_id`
+
+Suggested v1 rule:
+
+- discovery summaries may derive from `execution_location.trust_group`, `execution_location.environment`, `execution_location.tags`, `execution_target.sandboxed`, `workspace.capability_tags`, and `workspace.tags`
+- target-switch policy should reuse the shared `allow` / `confirm` / `deny` decision semantics instead of inventing a new approval vocabulary
+- execution-quota overrides should use explicit nullable override columns instead of a generic JSON blob
 
 ### `automations`
 
@@ -147,11 +193,18 @@ Suggested fields:
 - `conversation_id` nullable
 - `agent_program_id`
 - `execution_target_id`
+- `permission_mode`
 - `status`
 - `schedule_kind`
-- `schedule_payload` jsonb
+- `schedule_rrule`
+- `schedule_timezone`
 - `task_payload` jsonb
 - timestamps
+
+Suggested v1 rule:
+
+- `Automation` is its own product aggregate; `conversation_id`, if present, is an optional dispatch or transcript binding rather than the automation's primary identity
+- stable schedule fields should be explicit columns; keep `task_payload` as a versioned envelope only if task shapes are still intentionally open-ended
 
 ### `automation_runs`
 
@@ -163,6 +216,7 @@ Suggested fields:
 
 - `id`
 - `automation_id`
+- `initiated_by_user_id` nullable
 - `conversation_run_id` nullable
 - `status`
 - `scheduled_for`
@@ -179,16 +233,22 @@ Add:
 
 - `agent_program_id`
 - `default_execution_target_id`
+- `permission_mode`
 - `public_settings` jsonb
 - `agent_config` jsonb
 - `agent_config_schema_fingerprint`
 
 V1 rule:
 
+- keep the existing direct `user_id` ownership on `Conversation`
+- `agent_program_id` is a first-class conversation-scoped runtime setting updated by the composer agent picker and used for future drafts and runs
+- `default_execution_target_id` is a first-class conversation-scoped runtime setting updated by both the composer target picker and accepted agent target proposals
+- `permission_mode` is a first-class conversation-scoped runtime preset, not metadata or public-settings state
 - `public_settings` is the canonical mutable store for conversation-level public settings
 - storage may be `jsonb` in v1, but the public API must remain typed and policy-gated
 - `agent_config` is the canonical per-conversation agent-config store
 - Cybros stores it as opaque JSON in v1
+- `agent_config` should be interpreted as a namespaced store keyed by a stable selected-`AgentProgram` contract namespace, not cleared wholesale when the conversation switches agents
 - mutate it through explicit public APIs, not metadata patches
 
 Remove from product ownership over time:
@@ -210,6 +270,7 @@ Target shape:
 Add:
 
 - `manifest_snapshot` jsonb
+- `config_namespace`
 - `global_config_schema` jsonb
 - `conversation_config_schema` jsonb
 - `config_schema_fingerprint`
@@ -217,6 +278,7 @@ Add:
 Purpose:
 
 - preserve one canonical program contract even when deployments are replaced or re-inspected
+- provide one stable namespace key for conversation `agent_config` storage across top-level agent switches
 
 ### `llm_provider_credentials`
 
@@ -230,7 +292,11 @@ Add:
 - `provider_key`
 - `credential_type`
 - `status`
-- `rate_limit_config` jsonb
+- `max_concurrent_requests`
+- `requests_per_minute`
+- `tokens_per_minute`
+- `burst_limit`
+- `backoff_policy`
 
 Purpose:
 
@@ -244,24 +310,27 @@ Suggested v1 constraint:
 
 Purpose:
 
-- deployment-scoped operator runtime settings
+- instance-scoped operator runtime settings
 
 Suggested fields:
 
 - `id`
-- `job_config` jsonb
-- `metadata` jsonb
+- `default_worker_concurrency`
+- `queue_overrides` jsonb
+- `alert_thresholds` jsonb
 - timestamps
 
 Suggested v1 constraint:
 
-- singleton or otherwise deployment-scoped uniqueness
+- singleton or otherwise instance-scoped uniqueness
 
 ### `conversation_runs`
 
 Add immutable snapshot fields:
 
 - `snapshot_version`
+- `initiated_by_user_id` nullable
+- `effective_permission_mode`
 - `agent_program_id`
 - `agent_deployment_id`
 - `deployment_fingerprint`
@@ -279,6 +348,7 @@ Add immutable snapshot fields:
 Recommended v1 snapshot sections:
 
 - `trigger`
+- `permission_mode`
 - `agent`
 - `deployment`
 - `provider_credential`
@@ -338,12 +408,14 @@ Suggested fields:
 - `id`
 - `agent_deployment_id`
 - `agent_program_id`
+- `agent_rpc_invocation_id`
 - `conversation_id`
 - `scope_type`
 - `scope_id`
 - `deployment_fingerprint`
 - `deployment_activated_at`
-- `allowed_methods` jsonb
+- `session_token_digest`
+- `allowed_methods` `text[]`
 - `expires_at`
 - `status`
 - timestamps
@@ -364,6 +436,7 @@ Suggested fields:
 - `method`
 - `invocation_id`
 - `binding_fingerprint`
+- `deployment_activated_at`
 - `request_payload_hash`
 - `status`
 - `result_snapshot` jsonb
@@ -373,7 +446,7 @@ Suggested fields:
 
 Suggested v1 constraint:
 
-- uniqueness on `(binding_fingerprint, scope_type, scope_id, method, invocation_id)`
+- uniqueness on `(binding_fingerprint, deployment_activated_at, scope_type, scope_id, method, invocation_id)`
 
 ### `agent_rpc_operation_receipts`
 
@@ -468,11 +541,13 @@ Suggested v1 rule:
 
 - use this for `provider_limit`, `execution_quota`, and `deployment_backoff`
 - parked waits do not count as admitted execution queue occupancy
+- `deployment_backoff` is a scheduler retry wait for unreachable or unhealthy deployments, not a Cybros-owned self-healing mechanism
 
-## Open Questions To Resolve During Implementation
+## V1 Implementation Decisions
 
-- whether `agent_config` should stay on `conversations` or move to a dedicated table later
-- whether `execution_targets` should allow soft-deleted workspaces
-- how much of `effective_policy` belongs in top-level columns vs `snapshot`
-- how far to carry the rename from legacy `llm_providers` to `llm_provider_credentials` in the first cut
-- how much of `provider_budget_reservations` should be explicit rows versus a specialized limiter backend with equivalent durability guarantees
+- keep `agent_config` on `conversations` in v1; revisit a dedicated table only after programmable-agent product surfaces stabilize
+- require `execution_targets` to reference active workspaces in v1; do not support soft-deleted workspace bindings
+- keep `effective_policy` as one top-level immutable `jsonb` column on `conversation_runs`; do not split it into additional policy-specific columns in the first cut
+- carry the domain rename to `llm_provider_credentials` through schema, model, and service code in the first cut; legacy operator-facing `/system/settings/llm_providers` route and UI names may stay until the settings surface is cleaned up
+- model `provider_budget_reservations` as explicit durable rows in v1
+- do not introduce new catch-all `metadata` columns on execution-domain tables in this cut; if a future payload needs storage, name it after its bounded purpose

@@ -23,16 +23,17 @@ This document locks the minimum semantics needed for Cybros to support real prog
 
 ### 1. `RunDraft` Must Be Durable While Open
 
-`RunDraft` is not just a semantic distinction. It must survive approval parks, retries, stale detection, and finalization races as durable runtime state.
+`RunDraft` is not just a semantic distinction. It must survive approval parks, retries, binding-level stale detection, and finalization races as durable runtime state.
 
 At minimum, the durable draft state must carry:
 
 - staged public-state mutations
+- prepared plan output from `turn.prepare`
 - pinned deployment binding
 - approval state
 - runtime-governor facts
 - invocation bookkeeping linkage
-- expiry or staleness markers
+- expiry or explicit invalidation markers
 
 `ConversationRun` must not absorb these responsibilities by carrying draft-only states.
 
@@ -40,16 +41,30 @@ At minimum, the durable draft state must carry:
 
 `turn.prepare` may:
 
-- read conversation state
 - return prompt fragments
-- propose public settings/config/KV mutations
-- propose a different execution target
+- return workflow decisions for the current draft
+
+During the same bounded planning session, the agent may:
+
+- read approved conversation state through Cybros public APIs
+- request public settings/config/KV mutations through Cybros public APIs
+- request a different execution target through Cybros public APIs
 
 `turn.prepare` must not directly commit durable public state.
 
 All draft-time mutations are staged on the `RunDraft` and remain draft-local until Cybros finalizes the draft.
 
 If the draft is rejected, expires, is canceled, or becomes stale, Cybros discards the staged mutations.
+
+V1 does not need strong causal conflict detection for concurrent public settings, config, KV, or target reads that happened during planning.
+
+Those remain soft races handled by normal product flow and policy.
+
+Hard stale handling is required only when Cybros can prove that the pinned deployment or runtime binding is no longer safe to finalize, or when the draft has expired or been explicitly invalidated.
+
+If approval parks the draft, Cybros persists the prepared plan and resumes local draft finalization after approval.
+
+Approval resume must not open a second planning pass for the same prepared draft.
 
 Durable public-state mutation may happen only:
 
@@ -80,6 +95,14 @@ Cybros must reject callbacks that are:
 - outside the active session lifetime
 - outside the intended conversation or run scope
 
+V1 may use a lightweight bearer-token model:
+
+- Cybros opens the pinned deployment endpoint and presents the deployment bearer secret
+- the deployment proves its identity by successfully answering `initialize` on that pinned endpoint with matching deployment identity claims
+- one short-lived session bearer is then minted by Cybros for each bounded session
+
+Callbacks must present the session bearer, and Cybros must validate it against the durable session record.
+
 Each bounded session should be represented as durable runtime state, not only implicit transport context.
 
 ### 4. Re-entry Requires Explicit Idempotency On Both Sides
@@ -102,6 +125,8 @@ Cybros must de-duplicate those operations across replayed sessions for the same 
 If Cybros loses the reply after sending a request, it may re-issue the same `invocation_id` only against the same pinned deployment binding.
 
 If the binding changed, or the prior outcome cannot be proven safely, Cybros must fail with a structured stale-or-unknown outcome error and require explicit re-planning instead of guessing.
+
+Approval resume is not such a replay. Once `turn.prepare` returned a prepared draft and parked for approval, Cybros resumes finalization locally without sending a second planning call for that draft.
 
 ### 5. Draft Finalization Pins The Deployment Binding
 
@@ -126,6 +151,15 @@ Examples:
 If the pinned deployment becomes stale before queueing, finalization must fail with a structured stale-draft error.
 
 Silent failover to a different active deployment is not allowed for the same draft.
+
+Draft finalization must be one atomic kernel transition, or an equivalent durable handoff, for:
+
+- committing staged draft operations
+- materializing the immutable `ConversationRun`
+- recording the final run snapshot
+- handing the run off for execution
+
+If that transition cannot complete safely, Cybros must fail or retry before exposing partial finalization.
 
 ### 6. Runtime Governance Needs Durable Admission, Not Just Config
 
@@ -154,12 +188,15 @@ The scheduler must not keep a worker occupied just because the node is waiting o
 
 Rate-budget recovery and execution recovery also require durable request identifiers so retries can reconcile rather than blindly replay remote side effects.
 
+`deployment_backoff` is only a durable retry path for unreachable or unhealthy deployments. Cybros does not supervise or repair the deployment itself.
+
 ## Required Failure-Path Coverage
 
 Before implementation is considered architecture-complete, the active plans must cover:
 
 - approval park and resume with no leaked draft mutations
-- repeated `turn.prepare` delivery with the same `invocation_id`
+- repeated `turn.prepare` delivery with the same `invocation_id` after transport retry or lost reply
+- approval resume with no second `turn.prepare` call for the same prepared draft
 - lost reply after remote execution begins
 - deployment fingerprint drift between inspection and invocation
 - deployment activation cutover while a draft is parked
@@ -174,6 +211,7 @@ Implementation should stop and return to docs if any item below is still unanswe
 
 - Are draft-time mutations staged instead of durably committed?
 - Is `RunDraft` durable while it is open, parked, or stale?
+- Does approval resume continue from a persisted prepared plan instead of reopening planning?
 - Does every bounded session prove deployment identity and callback scope?
 - Are `invocation_id` and `operation_id` durable and de-duplicated?
 - Does finalization pin one deployment binding and fail cleanly on drift?
@@ -191,5 +229,6 @@ Read it together with:
 - `docs/product/execution_model.md`
 - `docs/product/agent_rpc.md`
 - `docs/product/runtime_governance.md`
+- `docs/plans/2026-03-09-execution-target-discovery-design.md`
 - `docs/plans/2026-03-09-agent-deployment-connection-design.md`
 - `docs/plans/2026-03-08-runtime-governance-design.md`

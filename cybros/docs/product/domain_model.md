@@ -10,6 +10,7 @@ Expected responsibilities:
 
 - source location and revision
 - manifest snapshot
+- stable config namespace
 - global config contract
 - per-conversation config contract
 - config-schema fingerprint or version
@@ -18,7 +19,7 @@ Expected responsibilities:
 Important boundary:
 
 - this is the canonical owner of agent configuration semantics
-- deployment inspection may cache compatible schema snapshots, but does not replace the program contract
+- deployment inspection may cache debug and audit snapshots, but does not replace the program contract
 
 ### AgentDeployment
 
@@ -28,7 +29,7 @@ Expected responsibilities:
 
 - transport kind
 - endpoint or local invocation config
-- auth or secret reference
+- deployment bearer secret reference
 - resolved revision or fingerprint
 - health status
 - capability and inspection snapshots
@@ -45,6 +46,7 @@ V1 recommendation:
 - one `AgentProgram` has one active `AgentDeployment`
 - registration is explicit and operator-managed
 - the environment that runs the deployment is not a separate canonical product model in v1
+- activation is a simple gate on exact v1 protocol version, required methods, and healthy inspection state
 
 ### ExecutionLocation
 
@@ -56,6 +58,19 @@ Examples:
 - home workstation
 - cloud VM
 
+V1 should carry explicit policy fields and tag arrays here for:
+
+- target visibility filtering
+- trust-boundary grouping
+- target-switch policy evaluation
+
+Recommended stable fields:
+
+- `trust_group`
+- `environment`
+- `tags`
+- explicit execution-quota columns
+
 ### Workspace
 
 A working directory under an execution location.
@@ -64,8 +79,9 @@ Expected responsibilities:
 
 - root path or handle
 - workspace type
-- capability tags
+- `capability_tags`
 - availability state
+- optional discovery tags
 
 ### ExecutionTarget
 
@@ -80,6 +96,23 @@ V1 invariant:
 
 - the selected `workspace` must belong to the selected `execution_location`
 
+V1 may expose a curated discovery summary for target selection that combines:
+
+- `ExecutionLocation.trust_group`
+- `ExecutionLocation.environment`
+- `ExecutionLocation.tags`
+- `Workspace.capability_tags`
+- `ExecutionTarget.sandboxed`
+- `Workspace.tags`
+
+Target-switch policy should reuse the shared decision vocabulary:
+
+- `allow`
+- `confirm`
+- `deny`
+
+`rejected` remains a runtime outcome after approval denial, not a separate policy result.
+
 ### Conversation
 
 The user-facing 1:1 chat/session aggregate.
@@ -89,6 +122,7 @@ V1 requirements:
 - belongs to user
 - has a default `agent_program`
 - has a default `execution_target`
+- has a persistent `permission_mode`
 - exposes public settings for user and agent mutation
 - exposes a public per-conversation agent-config surface
 - does not expose storage-level mutation
@@ -97,6 +131,13 @@ V1 recommendation:
 
 - conversation selects an `agent_program`
 - the runnable deployment is resolved from that program's active deployment
+- user agent changes in the composer write back to the same canonical `agent_program`
+- user target changes in the composer and accepted agent target proposals both write back to the same canonical `default_execution_target`
+
+Ownership rule in the current reset:
+
+- user-facing records use explicit business user fields such as owner or initiating actor
+- system runtime records stay global unless a direct user relationship is required
 
 ### RunDraft
 
@@ -105,13 +146,16 @@ A durable planning record used to assemble at most one concrete `ConversationRun
 Expected responsibilities:
 
 - draft status and expiry
+- initiating actor when one exists
+- effective permission preset for the draft
 - proposed execution target
 - staged public-settings patch
 - staged `agent_config` patch
 - staged KV operations
 - resolved active deployment
 - pinned deployment binding for the draft
-- provisional prompt inputs
+- prepare invocation linkage
+- prepared plan snapshot
 - invocation idempotency context
 - policy and approval decisions before queueing
 - optional link to the materialized `ConversationRun`
@@ -121,6 +165,7 @@ V1 rule:
 - `turn.prepare` operates on the draft
 - draft-time public mutations stay staged until finalization
 - approval may block draft finalization
+- approval resume continues from the persisted prepared plan and does not reopen planning for the same draft
 - a draft may end as `materialized`, `rejected`, `expired`, `stale`, or `canceled`
 - draft finalization materializes immutable `ConversationRun`
 - `ConversationRun` must not carry draft-only lifecycle states
@@ -132,6 +177,8 @@ Tracks one execution attempt and snapshots the context it ran under.
 V1 snapshot fields should include:
 
 - snapshot version
+- initiating actor when one exists
+- effective permission mode
 - agent program id
 - agent deployment id
 - deployment revision or fingerprint
@@ -186,11 +233,14 @@ Scheduled or event-triggered work bound to:
 - an agent program
 - an execution target
 - an optional conversation
+- a persistent permission preset
 
 V1 recommendation:
 
 - land the automation domain model and execution binding in Phase 1
 - resolve the active deployment at execution time and snapshot the resolved deployment facts per automation run
+- treat `Automation` as its own product aggregate even when it dispatches work into an existing conversation
+- default automation permission mode to `full_access` for non-interactive execution
 - UI may come later
 - conversation templates are deferred
 
@@ -202,8 +252,10 @@ A bounded authorization record for one lifecycle request or one turn-hook invoca
 
 Expected responsibilities:
 
+- parent invocation
 - pinned deployment binding
 - conversation and run scope
+- session bearer digest
 - allowed callback methods
 - expiry
 - session status
@@ -211,7 +263,7 @@ Expected responsibilities:
 Important boundary:
 
 - this is an internal runtime-state artifact, not a user-facing product selector
-- replay or resume opens a new session instead of reviving an old one
+- transport replay or interrupted remote retry opens a new session instead of reviving an old one
 
 ### AgentRpcInvocation
 
@@ -275,7 +327,7 @@ Expected responsibilities:
 - secret material
 - credential type
 - status and health
-- rate-limit configuration
+- explicit limiter settings
 
 V1 product constraint:
 
@@ -298,7 +350,7 @@ Expected responsibilities:
 - request concurrency ceiling
 - request rate ceiling
 - token rate ceiling
-- burst allowance
+- burst limit
 - backoff policy
 
 V1 mapping:
@@ -324,13 +376,13 @@ Important boundary:
 
 ### RuntimeSettings
 
-Deployment-scoped operator settings for the Cybros runtime.
+Instance-scoped operator settings for the Cybros runtime.
 
 Expected responsibilities:
 
-- job throughput settings
+- explicit job-throughput settings
 - default runtime governance knobs
-- future deployment-scoped runtime controls
+- future instance-scoped runtime controls
 
 ### JobConcurrencySettings
 
@@ -344,7 +396,7 @@ Expected responsibilities:
 
 V1 recommendation:
 
-- store in dedicated deployment-scoped runtime settings
+- store in dedicated instance-scoped runtime settings
 - do not model this as an account/user preference
 
 ### ExecutionQuota
@@ -408,6 +460,22 @@ V1 reason types:
 
 ## Conversation State Layers
 
+### Runtime Defaults
+
+Conversation-scoped runtime selection used to open future drafts.
+
+Examples:
+
+- top-level `agent_program_id`
+- `permission_mode`
+- `default_execution_target_id`
+
+Important boundary:
+
+- these are first-class conversation fields, not public settings entries
+- they affect future drafts and runs only
+- they are snapshotted onto `RunDraft` and `ConversationRun`
+
 ### Public Settings
 
 Policy-gated and intended for user or agent mutation.
@@ -415,13 +483,13 @@ Policy-gated and intended for user or agent mutation.
 Examples:
 
 - title
-- default execution target
 - model preference
 - mode or persona selection
 
 Important boundary:
 
 - this is distinct from `agent_config`
+- first-class conversation runtime defaults such as `agent_program_id`, `default_execution_target_id`, and `permission_mode` do not live inside public settings
 - this is the source for effective public settings snapshotted into `ConversationRun`
 
 ### Agent Config
@@ -438,6 +506,7 @@ Important boundary:
 
 - this is not operational KV
 - the canonical schema contract lives on `AgentProgram`
+- the store should be interpreted as namespaced by a stable agent-program contract namespace so switching the top-level conversation agent does not require clearing unrelated agent config
 
 ### Agent KV
 

@@ -18,7 +18,7 @@ Future Python or Rust implementations should use the same contract.
 
 ## What The Agent Owns
 
-- prompt assembly
+- prompt-planning logic
 - persona and workflow selection
 - hook logic
 - conversation-level control through public APIs
@@ -67,11 +67,19 @@ Cybros records:
 Important boundary:
 
 - `AgentProgram` remains the canonical owner of manifest and config-contract semantics
-- deployment inspection snapshots are compatibility and audit facts, not a replacement source of truth
+- deployment inspection snapshots are debug and audit facts, not a replacement source of truth
 
 ### Activate
 
 The agent becomes selectable for conversations and automations.
+
+V1 activation gate:
+
+- exact supported `protocol_version`
+- required methods present
+- healthy inspection state
+
+If activation fails, Cybros records the metadata for debugging and leaves the deployment inactive.
 
 ### Upgrade
 
@@ -94,7 +102,7 @@ The transport and method boundary for those capabilities is defined by `agent_rp
 Contract ownership rule:
 
 - `AgentProgram` owns the canonical manifest and config-contract versions or fingerprints
-- `AgentDeployment` caches inspected runtime claims and compatibility snapshots for the deployed instance
+- `AgentDeployment` caches inspected runtime claims and debug snapshots for the deployed instance
 - `ConversationRun` snapshots the effective contract fingerprint used for one execution attempt
 
 ## Deployment Model
@@ -118,22 +126,61 @@ This includes:
 - public settings
 - agent per-conversation config
 - shared per-conversation KV
+- execution-target discovery
 - requests to change execution target
 
 This control is declarative and policy-gated.
 
-The agent requests changes through public APIs, and the Cybros kernel remains authoritative for prompt assembly, DAG mutation, approvals, retries, and audit.
+The agent requests reads or changes through public APIs, and the Cybros kernel remains authoritative for final prompt assembly, DAG mutation, approvals, retries, and audit.
 
 During `turn.prepare`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
 
+Execution-target discovery is read-only and separate from target switching.
+
+V1 should let the agent inspect visible targets and capability summaries through formal public APIs, then request a switch through a separate proposal path.
+
+Target switching defaults to confirmation unless policy explicitly allows auto-switch within trusted boundaries.
+
+Conversation and automation permission presets may tighten or relax those defaults, but they still compile into Cybros-owned policy semantics instead of becoming a second approval system.
+
+If approval is required, Cybros persists the prepared draft result, ends the planning session, and resumes finalization locally after approval instead of reopening planning.
+
 This does not include direct writes to system state.
+
+## Permission Presets
+
+Cybros should expose three runtime permission presets:
+
+- `conservative`
+- `default`
+- `full_access`
+
+These presets are selected at the product layer and compiled into runtime policy bundles.
+
+They are not raw sandbox flags and they are not direct host-security guarantees.
+
+Recommended ownership:
+
+- `Conversation` stores the interactive top-level `AgentProgram` used by future turns
+- `Conversation` stores the interactive preset used by future turns
+- `Automation` stores the non-interactive preset and should default to `full_access`
+- `ConversationRun` snapshots the effective preset it actually ran under
+
+The composer UI should surface the active conversation agent, preset, and target next to model selection.
+
+Conversation-level agent selection controls only the top-level programmable agent used for future turns.
+
+Subagents remain owned by the active top-level agent for the turn that launched them and are not redirected by later conversation-level agent changes.
 
 ## Session Rule
 
 - registration does not grant ambient write authority
+- deployment bearer auth may stay lightweight in v1
 - each bounded session is scoped to one deployment binding plus one conversation/run context
+- callbacks use a short-lived session bearer tied to that scope
+- callbacks do not reverse workflow ownership; they are scoped requests inside a Cybros-owned session
 - callback authorization must expire with the session
-- each replay or resume attempt opens a fresh bounded session
+- each transport replay or interrupted remote retry attempt opens a fresh bounded session
 - callback de-duplication must survive session replay for the same logical invocation
 
 ## KV Rules

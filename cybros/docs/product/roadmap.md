@@ -36,6 +36,7 @@ Deliverables:
 - `RunDraft` semantics for pre-run planning
 - explicit ownership of `ExecutionLocation`, `Workspace`, and `ExecutionTarget` by Cybros
 - explicit target-switch confirm behavior
+- execution-target discovery through formal public APIs
 
 Acceptance:
 
@@ -43,6 +44,7 @@ Acceptance:
 - the connectable deployment model is documented
 - Cybros product models are the canonical source for execution-target semantics
 - target-switch confirmation semantics are blocking and auditable
+- execution-target discovery is documented separately from target-switch mutation semantics
 
 ## Phase 0.95: Implementation Preflight
 
@@ -69,40 +71,47 @@ Goal: move the product model from metadata-driven conversations to first-class r
 Deliverables:
 
 - `AgentDeployment`
+- `AgentProgram` manifest snapshot, stable config namespace, and config-contract storage
 - `ExecutionLocation`
 - `Workspace`
 - `ExecutionTarget`
 - `RunDraft`
 - agent RPC session/invocation/operation runtime state
-- provider-credential limiter configuration
-- job concurrency configuration
-- execution quota configuration
+- provider-credential limiter fields
+- job-throughput settings
+- execution-quota fields
 - provider budget reservation and execution capacity lease primitives
 - `Conversation` default agent program relation
 - `Conversation` default execution target relation
+- `Conversation` permission-mode preset
 - `Conversation` public settings store
 - `ConversationKV`
 - `ConversationRun` execution snapshot
 - `ConversationRun` materialization contract
-- bootstrap default runtime bindings for fresh and migrated environments
+- bootstrap default runtime bindings for fresh and reset environments
 - public conversation settings mutation surface
 - public agent-config mutation surface
 - automation target binding in the domain model
+- automation permission-mode preset with `full_access` default
 - automation domain model without requiring full UI
 
 Acceptance:
 
 - a conversation can be created with an explicit agent program and execution target
+- a conversation can persist top-level agent selection, permission preset, and execution target as runtime defaults for future turns
 - a run records the actual target, deployment, and agent snapshot it used
 - a run is materialized only after draft finalization and then remains immutable
-- fresh and migrated environments bootstrap a usable default agent deployment, execution target, and runtime settings before conversation creation flips to first-class relations
+- the schema cut lands as a destructive reset with regenerated first-cut migrations and no legacy compatibility columns kept for the old runtime model
+- freshly reset environments bootstrap a usable default agent deployment, execution target, and runtime settings before conversation creation flips to first-class relations
 - `ConversationRun` snapshot data is versioned and remains immutable across approval, resume, retry, and completion flows
 - agent-config has an explicit public mutation surface and audit trail before programmable-agent schema validation is tightened in later phases
+- conversation agent-config remains namespaced across top-level agent switches instead of being cleared wholesale
 - agent-visible conversation KV exists as current-state operational storage
 - replay-safe session, invocation, and callback de-duplication state exists for `agent_rpc`
 - automation records can bind to agent and execution target primitives
-- provider credentials can carry independent runtime limits
-- execution locations and targets can carry execution quotas
+- conversation and automation permission presets compile into durable runtime policy bundles and are snapshotted per run
+- provider credentials can carry independent runtime limiter fields
+- execution locations and targets can carry explicit execution-quota fields
 - job throughput is operator-tunable through system settings
 
 ## Phase 2: Programmable Agent Deployment + Contract
@@ -115,18 +124,19 @@ Deliverables:
 - `agent_rpc` v1 baseline
 - network transport binding
 - stdio debug adapter
-- agent manifest
+- agent manifest inspection flow
 - deployment inspection and healthcheck lifecycle
-- global config schema
-- per-conversation config schema
+- global config schema publication over the programmable-agent contract
+- per-conversation config schema publication over the programmable-agent contract
 - Ruby reference implementation
 - bundled default template agent
 
 Acceptance:
 
-- a reachable deployment can be registered, inspected, and selected in the UI
+- a reachable deployment can be registered, inspected, and activated in the UI
+- a conversation can then select the corresponding agent program and resolve that active deployment at run time
 - deployment health failures and connectivity failures are visible and recoverable
-- a Ruby agent can drive a real conversation turn end-to-end through `turn.prepare` and `turn.compose` while the kernel remains authoritative for prompt assembly, policy, approvals, and run audit
+- a Ruby agent can drive a real conversation turn end-to-end through `turn.prepare` and `turn.compose` while the kernel remains authoritative for final prompt assembly, policy, approvals, and run audit
 - integration, reference-agent, and Playwright coverage prove external start -> registration -> inspection -> invocation works through the public API boundary
 
 ## Phase 3: Nexus Re-alignment
@@ -153,7 +163,10 @@ Goal: expose the new model in the product.
 Deliverables:
 
 - agent picker
+- permission preset picker
 - execution target picker
+- execution target management settings
+- agent deployment management settings
 - run audit view
 - conversation settings controls
 - automation target binding
@@ -162,8 +175,9 @@ Deliverables:
 
 Acceptance:
 
-- the user can choose an agent and target per conversation
-- the agent can propose target changes through managed APIs
+- the user can choose an agent, permission preset, and target per conversation
+- operators can manage execution targets and agent deployments through settings surfaces
+- the agent can discover visible targets and propose target changes through managed APIs
 - run history clearly shows what happened and where
 - runtime views expose limiter and quota pressure clearly enough for operators
 

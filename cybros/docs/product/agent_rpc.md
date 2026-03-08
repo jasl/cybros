@@ -75,6 +75,14 @@ Recommended first network binding:
 
 All bindings should carry the same message model.
 
+V1 authentication may stay lightweight:
+
+- Cybros opens the registered deployment endpoint
+- Cybros presents the deployment bearer secret for that `AgentDeployment`
+- the deployment must answer `initialize` over that pinned endpoint with matching deployment identity claims
+- after that succeeds, Cybros mints a short-lived session bearer for the bounded session
+- callbacks must present that session bearer
+
 ## Session Model
 
 V1 should use bounded bidirectional sessions.
@@ -128,6 +136,8 @@ The handshake should surface at least:
 
 Version or capability mismatch should fail fast with structured protocol errors instead of relying on best-effort compatibility.
 
+V1 does not build a compatibility layer on top of that handshake. Exact protocol-version match plus required-method presence is enough to decide activation.
+
 ## Bidirectional Model
 
 The protocol should allow both sides to make requests.
@@ -138,6 +148,10 @@ That means:
 - the agent can call back into Cybros public APIs over the same logical protocol
 
 This is required because the agent is passive in the product model but still needs a controlled way to operate on the conversation.
+
+The business control flow still remains Cybros-driven.
+
+Agent-to-Cybros requests are subordinate data-access or policy-gated state requests inside a Cybros-owned session, not a second workflow owner.
 
 Bidirectional does not mean permanent connection ownership by Rails.
 
@@ -174,6 +188,8 @@ V1 should stay small and semantic.
 - `conversation.kv.set`
 - `conversation.kv.delete`
 - `conversation.kv.list`
+- `execution_target.list`
+- `execution_target.get`
 - `execution_target.propose`
 
 ## Method Direction
@@ -200,6 +216,8 @@ Agent-to-Cybros methods:
 - `conversation.kv.set`
 - `conversation.kv.delete`
 - `conversation.kv.list`
+- `execution_target.list`
+- `execution_target.get`
 - `execution_target.propose`
 
 ## Turn Control Boundary
@@ -209,8 +227,10 @@ Turn hooks must stay declarative.
 The agent may:
 
 - return prompt fragments or workflow decisions
+- read approved conversation state through public APIs
 - request settings/config/KV mutations through public APIs
-- propose an execution target
+- inspect visible execution targets through public APIs
+- request an execution target proposal through public APIs
 
 The agent must not:
 
@@ -225,11 +245,20 @@ Cybros remains authoritative for final prompt assembly, DAG mutation, tool-loop 
 
 `turn.prepare` is a planning hook, not a direct-write hook.
 
-When the agent requests settings/config/KV changes during `turn.prepare`, Cybros stages those operations on the `RunDraft`.
+When the agent calls public APIs during `turn.prepare`, Cybros handles them through the draft boundary:
+
+- read requests return current approved state
+- execution-target discovery reads return visible inventory summaries and policy previews
+- settings/config/KV mutations are staged on the `RunDraft`
+- execution-target proposals update the draft selection state
+
+If a target proposal is later accepted during finalization, Cybros commits that decision back into `Conversation.default_execution_target_id` for future turns.
 
 Those staged operations commit only when draft finalization succeeds.
 
 If the draft parks for approval, is rejected, expires, or becomes stale, Cybros must discard the staged operations instead of leaving orphaned durable side effects behind.
+
+If the draft parks for approval, Cybros also persists the prepared draft result so finalization can resume locally after approval.
 
 Run-scoped methods that operate on a materialized `ConversationRun` may perform durable public-state mutations under the normal policy boundary.
 
@@ -246,7 +275,7 @@ Each turn-scoped request should carry stable identifiers such as:
 
 `invocation_id` should act as the request idempotency key for that call attempt.
 
-If Cybros retries or resumes work:
+If Cybros replays delivery or retries interrupted remote work:
 
 - it opens a fresh bounded session
 - it sends a new request instead of reviving an old suspended one
@@ -257,6 +286,8 @@ The agent must not rely on transport continuity for correctness.
 Cybros must persist invocation bookkeeping keyed by the pinned deployment binding, method, scope, and `invocation_id`.
 
 If a reply is lost after request delivery, Cybros may re-issue the same `invocation_id` only to the same pinned deployment binding.
+
+Approval resume is not such a replay. Once `turn.prepare` produced a prepared draft and parked for approval, Cybros resumes finalization without issuing another planning call for that draft.
 
 If that binding changed, or the prior outcome cannot be established safely, Cybros should fail with a structured stale-or-unknown outcome error instead of guessing.
 
@@ -283,15 +314,20 @@ At minimum, the scoped session context must bind:
 
 Cybros must reject callbacks that fall outside that scoped session.
 
+Each scoped session should have a short-lived session bearer recorded as a digest on the session row. The deployment bearer opens the session; the session bearer authorizes the callbacks inside it.
+
 Recommended scope split:
 
-- `RunDraft` sessions may call `conversation.settings.*`, `conversation.config.*`, `conversation.kv.*`, and `execution_target.propose`
+- `RunDraft` sessions may call `conversation.settings.*`, `conversation.config.*`, `conversation.kv.*`, `execution_target.list`, `execution_target.get`, and `execution_target.propose`
 - `ConversationRun` sessions may call `conversation.settings.*`, `conversation.config.*`, and `conversation.kv.*`
+- `execution_target.list` and `execution_target.get` are draft-only in v1 because target discovery is part of pre-run planning
 - `execution_target.propose` is draft-only because execution-target choice must freeze before `ConversationRun` materialization
 
 ## Mutation Rules
 
 The protocol should not expose `conversation.metadata.patch`.
+
+The protocol also should not expose top-level conversation runtime-default switching for the primary agent or permission preset in v1. Those remain conversation-setting product surfaces rather than agent callbacks.
 
 The writable surfaces are:
 
@@ -299,6 +335,12 @@ The writable surfaces are:
 - agent per-conversation config through dedicated config methods
 - shared conversation KV
 - execution target proposals
+
+The read-side execution-target surfaces are:
+
+- visible target inventory
+- visible target detail
+- policy decision preview for target switching
 
 The protocol must never expose direct writes to:
 
@@ -314,15 +356,23 @@ That blocking must happen in runtime state, not by keeping an RPC request hangin
 
 The protocol should return a typed decision:
 
-- `approved`
-- `rejected`
-- `awaiting_approval`
+- `allow`
+- `confirm`
+- `deny`
 
-Then Cybros can park and later resume draft finalization through its own approval and retry mechanics.
+Then Cybros can map that decision into its own draft runtime state:
+
+- `allow` updates the draft target immediately
+- `confirm` parks the draft as `awaiting_approval`
+- `deny` leaves the target unchanged and returns a structured refusal
 
 This also means an approval wait should end the current protocol session cleanly before `ConversationRun` is materialized.
 
-Resume should happen through a new invocation, not by reviving an old hanging request.
+Approval resume continues locally from the persisted prepared draft and does not open a second planning invocation.
+
+If a target-switch confirmation is denied, Cybros should reject the draft instead of silently continuing with a target-dependent prepared plan built for a different target.
+
+Only transport retry or interrupted remote work should reopen through a new invocation instead of reviving an old hanging request.
 
 ## Error Model
 
@@ -354,6 +404,14 @@ V1 uses explicit operator-managed registration of `AgentDeployment` connection d
 Once registered, Cybros uses `initialize`, `agent.describe`, `agent.health`, and `agent.schemas.get` to inspect and validate that deployment.
 
 Inspection and invocation should pin the same normalized deployment identity inputs that Cybros later snapshots into the run record.
+
+Activation stays simple in v1:
+
+- exact `protocol_version`
+- required methods present
+- healthy inspection result
+
+If any of those checks fail, the deployment remains inactive and Cybros records the inspection metadata for debugging.
 
 ## Schema Conventions
 
