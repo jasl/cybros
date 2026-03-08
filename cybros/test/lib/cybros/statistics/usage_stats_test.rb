@@ -1,6 +1,6 @@
 require "test_helper"
 
-class Cybros::LLM::UsageStatsTest < ActiveSupport::TestCase
+class Cybros::Statistics::UsageStatsTest < ActiveSupport::TestCase
   def create_finished_agent_node!(conversation:, provider_key:, model_ref:, input_tokens:, output_tokens:, finished_at: Time.current)
     graph = conversation.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -45,7 +45,7 @@ class Cybros::LLM::UsageStatsTest < ActiveSupport::TestCase
     create_finished_agent_node!(conversation: c1, provider_key: "openai", model_ref: "openai/gpt-5.4", input_tokens: 2, output_tokens: 1)
     create_finished_agent_node!(conversation: c2, provider_key: "openrouter", model_ref: "openrouter/openai-gpt-5.4", input_tokens: 10, output_tokens: 5)
 
-    u1_stats = Cybros::LLM::UsageStats.for_user(user: u1)
+    u1_stats = Cybros::Statistics::UsageStats.for_user(user: u1)
     assert_equal 2, u1_stats.dig("totals", "calls")
     assert_equal 5, u1_stats.dig("totals", "input_tokens")
     assert_equal 8, u1_stats.dig("totals", "output_tokens")
@@ -55,8 +55,8 @@ class Cybros::LLM::UsageStatsTest < ActiveSupport::TestCase
     assert_equal "openai/gpt-5.4", by_model.first.fetch("model_ref")
     assert_equal 13, by_model.first.fetch("total_tokens")
 
-    global = Cybros::LLM::UsageStats.global_by_provider_key
-    keys = global.map { |r| r.fetch("provider_key") }
+    global = Cybros::Statistics::UsageStats.global_by_provider_key
+    keys = global.map { |row| row.fetch("provider_key") }
     assert_includes keys, "openai"
     assert_includes keys, "openrouter"
 

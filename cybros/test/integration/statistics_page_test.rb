@@ -125,4 +125,45 @@ class StatisticsPageTest < ActionDispatch::IntegrationTest
     assert_not_includes response.body, "Global by provider"
     assert_not_includes response.body, "openrouter"
   end
+
+  test "statistics page reads token usage through Cybros::Statistics::UsageStats" do
+    user = sign_in!(email: "stats@example.com")
+    stats = {
+      "totals" => { "calls" => 4, "input_tokens" => 6, "output_tokens" => 9, "total_tokens" => 15 },
+      "by_model_ref" => [{ "model_ref" => "openai/gpt-5.4", "calls" => 4, "total_tokens" => 15 }],
+      "by_day" => [{ "date" => "2026-03-08", "calls" => 4, "total_tokens" => 15 }],
+    }
+
+    usage_stats_singleton = Cybros::Statistics::UsageStats.singleton_class
+    usage_stats_singleton.alias_method :__task_1_original_for_user, :for_user
+    usage_stats_singleton.alias_method :__task_1_original_global_by_provider_key, :global_by_provider_key
+
+    begin
+      usage_stats_singleton.define_method(:for_user) do |user:, since: nil, until_time: nil|
+        _ = since
+        _ = until_time
+
+        raise "unexpected user" unless user.id == Current.user.id
+
+        stats
+      end
+
+      usage_stats_singleton.define_method(:global_by_provider_key) do |since: nil, until_time: nil|
+        _ = since
+        _ = until_time
+        []
+      end
+
+      get statistics_path
+    ensure
+      usage_stats_singleton.alias_method :for_user, :__task_1_original_for_user
+      usage_stats_singleton.alias_method :global_by_provider_key, :__task_1_original_global_by_provider_key
+      usage_stats_singleton.remove_method :__task_1_original_for_user
+      usage_stats_singleton.remove_method :__task_1_original_global_by_provider_key
+    end
+
+    assert_response :success
+    assert_includes response.body, "15"
+    assert_includes response.body, "2026-03-08"
+  end
 end

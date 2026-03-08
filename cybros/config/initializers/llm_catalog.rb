@@ -1,7 +1,7 @@
 require Rails.root.join("lib/cybros/llm/catalog")
 require Rails.root.join("lib/cybros/llm/codex_oauth")
 require Rails.root.join("lib/cybros/llm/capability_gated_provider")
-require Rails.root.join("lib/cybros/llm/usage_stats")
+require Rails.root.join("lib/cybros/statistics/usage_stats")
 
 begin
   Cybros::LLM::Catalog.effective
