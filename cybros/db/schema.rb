@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_08_020000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -312,6 +312,55 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_08_020000) do
     t.string "user_agent"
     t.index ["identity_id", "created_at"], name: "index_sessions_on_identity_id_and_created_at"
     t.index ["identity_id"], name: "index_sessions_on_identity_id"
+  end
+
+  create_table "statistics_tool_call_facts", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.string "arguments_resolution"
+    t.uuid "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.integer "duration_ms"
+    t.date "effective_on"
+    t.boolean "entered_execution", default: false, null: false
+    t.string "execution_readiness", null: false
+    t.string "execution_scope", null: false
+    t.string "failure_class"
+    t.string "failure_code"
+    t.datetime "finished_at"
+    t.uuid "graph_id", null: false
+    t.boolean "manual_retry", default: false, null: false
+    t.string "model_attempt_class", null: false
+    t.string "model_ref"
+    t.string "name_resolution"
+    t.string "provider_key"
+    t.string "requested_name"
+    t.string "resolved_name"
+    t.uuid "retry_of_task_node_id"
+    t.boolean "retryable"
+    t.uuid "root_conversation_id", null: false
+    t.string "sample_origin", null: false
+    t.string "source"
+    t.datetime "started_at"
+    t.uuid "task_node_id", null: false
+    t.string "tool_call_id"
+    t.string "tool_outcome", null: false
+    t.uuid "turn_id", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "user_id"
+    t.index ["sample_origin", "effective_on"], name: "idx_on_sample_origin_effective_on_225d0d9a0c"
+    t.index ["sample_origin", "execution_scope"], name: "idx_on_sample_origin_execution_scope_4e168d667a"
+    t.index ["sample_origin", "finished_at"], name: "idx_on_sample_origin_finished_at_f04efb09f2"
+    t.index ["sample_origin", "model_ref"], name: "idx_on_sample_origin_model_ref_82ffc5e2b6"
+    t.index ["sample_origin", "resolved_name"], name: "idx_on_sample_origin_resolved_name_fb102ebc1f"
+    t.index ["sample_origin", "started_at"], name: "idx_on_sample_origin_started_at_e983eab176"
+    t.index ["sample_origin", "user_id"], name: "index_statistics_tool_call_facts_on_sample_origin_and_user_id"
+    t.index ["task_node_id"], name: "index_statistics_tool_call_facts_on_task_node_id", unique: true
+    t.check_constraint "duration_ms IS NULL OR duration_ms >= 0", name: "check_statistics_tool_call_facts_duration_ms_non_negative"
+    t.check_constraint "execution_readiness::text = ANY (ARRAY['executable'::character varying::text, 'invalid_args'::character varying::text, 'tool_not_found'::character varying::text, 'policy_denied'::character varying::text, 'awaiting_approval'::character varying::text, 'approval_rejected'::character varying::text])", name: "check_statistics_tool_call_facts_execution_readiness_enum"
+    t.check_constraint "execution_scope::text = ANY (ARRAY['parent'::character varying::text, 'subagent_child'::character varying::text])", name: "check_statistics_tool_call_facts_execution_scope_enum"
+    t.check_constraint "failure_class IS NULL OR (failure_class::text = ANY (ARRAY['validation_error'::character varying::text, 'implementation_error'::character varying::text, 'remote_api_error'::character varying::text, 'timeout'::character varying::text, 'rate_limit'::character varying::text, 'auth'::character varying::text, 'unknown'::character varying::text]))", name: "check_statistics_tool_call_facts_failure_class_enum"
+    t.check_constraint "model_attempt_class::text = ANY (ARRAY['first_pass'::character varying::text, 'repaired_name'::character varying::text, 'repaired_args'::character varying::text, 'repaired_both'::character varying::text])", name: "check_statistics_tool_call_facts_model_attempt_class_enum"
+    t.check_constraint "sample_origin::text = ANY (ARRAY['runtime'::character varying::text, 'eval'::character varying::text, 'debug'::character varying::text, 'replay'::character varying::text])", name: "check_statistics_tool_call_facts_sample_origin_enum"
+    t.check_constraint "tool_outcome::text = ANY (ARRAY['success'::character varying::text, 'failed'::character varying::text, 'not_executed'::character varying::text])", name: "check_statistics_tool_call_facts_tool_outcome_enum"
   end
 
   create_table "users", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
