@@ -1,5 +1,7 @@
 # Conversation Input Policies Implementation Plan
 
+> **Update 2026-03-09:** References in this plan to `agent_profile` or `agent_profile_config` describe legacy internal plumbing in the current codebase. They are not the v1 external programmable-agent architecture.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Implement conversation input policies covering unlimited manual retry, all-entrypoint user-message coalescing, formal `queue` / `interrupt_new_turn` / `steer_current_turn` handling, action-level interrupted-output overrides, and oversize input guards.

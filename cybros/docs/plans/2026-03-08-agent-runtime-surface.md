@@ -1,18 +1,22 @@
 # Agent Runtime Surface Implementation Plan
 
+> **Update 2026-03-09:** Any programmable-agent integration language in this plan predates the deployment-registration model in `docs/plans/2026-03-09-agent-deployment-connection-design.md`. Do not use bundled agent profiles or `agent_profile_config` as the v1 integration path for external programmable agents.
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** Introduce a typed `AgentRuntimeSurface` so Cybros can act as an agent OS: hiding DAG internals from agent logic while making turn preparation, context compaction, tool-call review, tool-result projection, output finalization, and error shaping programmable under hard platform safety bounds.
 
 **Architecture:** Add a no-op `AgentRuntimeSurface` contract to `AgentCore`, then thread it through `AgentCore::DAG::Runtime` and `Cybros::AgentRuntimeResolver`. Keep DAG, static tool policy, approvals, and sandbox ceilings authoritative; treat the surface as advisory middleware over execution views. Reuse existing budgeting, pruning, summarization, and compaction machinery as built-in fallback strategies while progressively moving decision-making behind the surface.
 
-**Tech Stack:** Ruby 4.0, Rails 8 alpha, ActiveSupport tests, AgentCore DAG runtime/executors, `Conversation` facade and compaction helpers, Cybros runtime resolver, bundled agent profiles, programmable agent metadata.
+**Tech Stack:** Ruby 4.0, Rails 8 alpha, ActiveSupport tests, AgentCore DAG runtime/executors, `Conversation` facade and compaction helpers, Cybros runtime resolver, internal runtime-surface plumbing, programmable agent metadata.
 
 ## Coordination Note
 
 This plan intentionally stops at the **runtime layer**.
 
 It may introduce enough loader/config plumbing for programmable agents to opt into runtime surfaces, but it should not redesign programmable-agent authoring, editing, or UX in the same implementation pass.
+
+Any references below to bundled profiles or `agent_profile_config` are legacy internal plumbing references for the current codebase, not the recommended external programmable-agent architecture.
 
 Also important: turn-execution activity projection is already landed in the current codebase. This plan should reuse:
 
@@ -207,6 +211,8 @@ Expected: PASS
 ## Task 3: Thread `runtime_surface` through runtime resolution
 
 ### Task 3 Files
+
+These file references describe legacy internal plumbing only. They are not the registration or deployment model for external programmable agents.
 
 - Modify: `cybros/lib/cybros/agent_runtime_resolver.rb`
 - Modify: `cybros/lib/cybros/agent_profile_config.rb`
