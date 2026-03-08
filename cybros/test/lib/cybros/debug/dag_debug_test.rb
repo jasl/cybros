@@ -530,5 +530,6 @@ class Cybros::CLI::DAGDebugTest < ActiveSupport::TestCase
     assert_equal "Smoke succeeded", result.dig("agent_node", "body_output", "content")
     assert_equal "Smoke hello", result.dig("user_node", "body_input", "content")
     assert_equal true, result.dig("conversation", "ephemeral")
+    assert_equal "debug", result.dig("conversation", "sample_origin")
   end
 end

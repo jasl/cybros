@@ -2,6 +2,8 @@ class Conversation < ApplicationRecord
   KINDS = %w[root branch thread checkpoint].freeze
   TERMINAL_NODE_STATES = %w[finished errored stopped rejected skipped].freeze
   IN_FLIGHT_NODE_STATES = %w[pending awaiting_approval running].freeze
+  STATISTICS_SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
+  DEFAULT_STATISTICS_SAMPLE_ORIGIN = "runtime"
 
   belongs_to :user
 
@@ -32,6 +34,7 @@ class Conversation < ApplicationRecord
   enum :kind, KINDS.index_by(&:itself), default: "root"
 
   before_validation :assign_root_conversation, on: :create
+  before_validation :ensure_statistics_sample_origin, on: :create
   after_create :set_root_conversation_to_self, if: :root?
 
   def dag_node_body_namespace
@@ -173,6 +176,18 @@ class Conversation < ApplicationRecord
 
   def composer_state(now: Time.current)
     Conversation::ComposerState.build(conversation: self, now: now)
+  end
+
+  def statistics_sample_origin
+    self.class.normalize_statistics_sample_origin(metadata.is_a?(Hash) ? metadata.dig("statistics", "sample_origin") : nil)
+  end
+
+  def self.normalize_statistics_sample_origin(value)
+    normalized = value.to_s.strip
+    return DEFAULT_STATISTICS_SAMPLE_ORIGIN if normalized.blank?
+    return normalized if STATISTICS_SAMPLE_ORIGINS.include?(normalized)
+
+    DEFAULT_STATISTICS_SAMPLE_ORIGIN
   end
 
   def append_user_message_and_project!(content:, mode: :preview, model_ref: nil, input_policy_override: nil, diagnostic_level: nil)
@@ -1261,6 +1276,13 @@ class Conversation < ApplicationRecord
       return if root_conversation_id.present?
 
       update_column(:root_conversation_id, id)
+    end
+
+    def ensure_statistics_sample_origin
+      base_metadata = metadata.is_a?(Hash) ? metadata.deep_stringify_keys : {}
+      statistics = base_metadata["statistics"].is_a?(Hash) ? base_metadata["statistics"].deep_stringify_keys : {}
+      statistics["sample_origin"] = self.class.normalize_statistics_sample_origin(statistics["sample_origin"])
+      self.metadata = base_metadata.merge("statistics" => statistics)
     end
 
     def cancel_runs_for_node!(node)

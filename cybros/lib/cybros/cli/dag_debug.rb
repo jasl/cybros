@@ -162,6 +162,9 @@ module Cybros
                 title: "Debug smoke #{Time.current.to_i}",
                 metadata:
                   source_conversation.metadata.deep_dup.deep_merge(
+                    "statistics" => {
+                      "sample_origin" => "debug",
+                    },
                     "input_policy" => {
                       "input_coalescing" => { "enabled" => false },
                     },
@@ -178,6 +181,7 @@ module Cybros
                   "title" => conversation.title,
                   "model_ref" => model_ref,
                   "ephemeral" => true,
+                  "sample_origin" => conversation.statistics_sample_origin,
                 },
                 "user_node" => node_summary(result.fetch(:user_node).reload),
                 "agent_node" => node_summary(agent),

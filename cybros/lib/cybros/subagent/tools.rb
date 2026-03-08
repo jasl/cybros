@@ -97,6 +97,7 @@ module Cybros
                   profile: profile,
                   context_turns: context_turns,
                   name: name,
+                  sample_origin: parent.statistics_sample_origin,
                   parent_conversation_id: parent.id.to_s,
                   parent_graph_id: parent_graph_id,
                   spawned_from_node_id: spawned_from_node_id,
@@ -253,6 +254,7 @@ module Cybros
                   profile: profile,
                   context_turns: context_turns,
                   name: name,
+                  sample_origin: parent.statistics_sample_origin,
                   parent_conversation_id: parent.id.to_s,
                   parent_graph_id: parent_graph_id,
                   spawned_from_node_id: spawned_from_node_id,
@@ -606,6 +608,7 @@ module Cybros
         profile:,
         context_turns:,
         name:,
+        sample_origin:,
         parent_conversation_id:,
         parent_graph_id:,
         spawned_from_node_id:
@@ -621,6 +624,9 @@ module Cybros
             "parent_conversation_id" => parent_conversation_id,
             "parent_graph_id" => parent_graph_id,
             "spawned_from_node_id" => spawned_from_node_id,
+          },
+          "statistics" => {
+            "sample_origin" => sample_origin,
           },
         }
       end
