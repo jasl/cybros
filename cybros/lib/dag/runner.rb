@@ -130,6 +130,8 @@ module DAG
 
         transitioned =
           case result.state
+          when DAG::Node::PENDING
+            node.park_pending!(reason: result.reason || "pending", claim_after_at: result.retry_at || Time.current, metadata: metadata)
           when DAG::Node::FINISHED
             if result.streamed_output?
               if result.content.present?

@@ -126,6 +126,18 @@ module AgentCore
       super(message)
     end
   end
+
+  class RuntimeWaitError < Error
+    attr_reader :reason_type, :retry_at, :runtime_wait_id, :details
+
+    def initialize(message = nil, reason_type:, retry_at:, runtime_wait_id:, details: {})
+      @reason_type = reason_type.to_s
+      @retry_at = retry_at
+      @runtime_wait_id = runtime_wait_id
+      @details = details || {}
+      super(message)
+    end
+  end
 end
 
 require_relative "agent_core/runtime_surface"

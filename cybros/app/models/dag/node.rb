@@ -245,6 +245,22 @@ module DAG
       transition_to!(RUNNING, from_states: [PENDING], started_at: Time.current)
     end
 
+    def park_pending!(reason:, claim_after_at:, metadata: {})
+      reason_metadata = reason ? { "reason" => reason.to_s } : {}
+      transition_to!(
+        PENDING,
+        from_states: [RUNNING],
+        started_at: nil,
+        finished_at: nil,
+        claimed_at: nil,
+        claimed_by: nil,
+        lease_expires_at: nil,
+        heartbeat_at: nil,
+        claim_after_at: claim_after_at,
+        metadata: self.metadata.merge(metadata).merge(reason_metadata),
+      )
+    end
+
     def mark_finished!(content: nil, payload: nil, metadata: {})
       updates = {
         finished_at: Time.current,

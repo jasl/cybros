@@ -33,6 +33,8 @@ module AgentCore
           @stream_include_usage = stream_include_usage == true
           @request_defaults = normalize_request_defaults(request_defaults)
           @last_call_metadata = {}
+          @provider_request_sequences = Hash.new(0)
+          @provider_request_sequences_mutex = Mutex.new
         end
 
         def name = "simple_inference"
@@ -50,74 +52,78 @@ module AgentCore
             code: "agent_core.resources.provider.simple_inference_provider.model_is_required",
           ) if model_name.empty?
 
+          runtime_governance = extract_runtime_governance(options)
           client = ensure_client!
 
-          case @wire_api
-          when :chat_completions
-            request_messages = build_openai_messages(messages)
-            request_tools = tools.nil? || tools.empty? ? nil : build_openai_tools(tools)
+          with_provider_budget_reservation(runtime_governance: runtime_governance) do
+            case @wire_api
+            when :chat_completions
+              request_messages = build_openai_messages(messages)
+              request_tools = tools.nil? || tools.empty? ? nil : build_openai_tools(tools)
 
-            request = { model: model_name, messages: request_messages }
-            request[:tools] = request_tools if request_tools
+              request = { model: model_name, messages: request_messages }
+              request[:tools] = request_tools if request_tools
 
-            request_options = @request_defaults.merge(sanitize_options(options))
+              request_options = @request_defaults.merge(sanitize_options(options))
 
-            if request_tools && !request_options.key?(:parallel_tool_calls)
-              request_options[:parallel_tool_calls] = false
-            end
+              if request_tools && !request_options.key?(:parallel_tool_calls)
+                request_options[:parallel_tool_calls] = false
+              end
 
-            if stream
-              stream_chat(client: client, request: request, options: request_options)
+              if stream
+                stream_chat(client: client, request: request, options: request_options)
+              else
+                sync_chat(client: client, request: request, options: request_options)
+              end
+            when :responses
+              request_tools = tools.nil? || tools.empty? ? nil : build_responses_tools(tools)
+
+              transport = normalize_transport(@transport)
+              if transport == :websocket
+                ValidationError.raise!(
+                  "websocket transport is not supported yet for wire_api=responses",
+                  code: "agent_core.resources.provider.simple_inference_provider.responses_websocket_transport_not_supported_yet",
+                )
+              end
+              if transport == :auto
+                @last_call_metadata =
+                  @last_call_metadata.merge(
+                    "llm_transport" => {
+                      "configured" => "auto",
+                      "effective" => "http_sse",
+                      "fallback" => "websocket_not_supported",
+                    },
+                  )
+              end
+
+              request_options = @request_defaults.merge(sanitize_options(options))
+              request_options = normalize_responses_request_options(request_options)
+              instructions, response_messages = extract_responses_instructions(messages)
+              explicit_instructions = request_options.delete(:instructions).to_s
+              combined_instructions = [instructions, explicit_instructions].filter_map { |value| value.presence }.join("\n\n")
+              request_options[:store] = false unless request_options.key?(:store)
+
+              request_messages = build_responses_input(response_messages)
+              request = { model: model_name, input: request_messages }
+              request[:instructions] = combined_instructions if combined_instructions.present?
+              request[:tools] = request_tools if request_tools
+
+              if request_tools && !request_options.key?(:parallel_tool_calls)
+                request_options[:parallel_tool_calls] = false
+              end
+
+              if stream
+                stream_responses(client: client, request: request, options: request_options)
+              else
+                sync_responses(client: client, request: request, options: request_options)
+              end
             else
-              sync_chat(client: client, request: request, options: request_options)
-            end
-          when :responses
-            request_tools = tools.nil? || tools.empty? ? nil : build_responses_tools(tools)
-
-            transport = normalize_transport(@transport)
-            if transport == :websocket
               ValidationError.raise!(
-                "websocket transport is not supported yet for wire_api=responses",
-                code: "agent_core.resources.provider.simple_inference_provider.responses_websocket_transport_not_supported_yet",
+                "wire_api must be :chat_completions or :responses",
+                code: "agent_core.resources.provider.simple_inference_provider.wire_api_must_be_chat_completions_or_responses",
+                details: { wire_api: @wire_api.to_s },
               )
             end
-            if transport == :auto
-              @last_call_metadata = {
-                "llm_transport" => {
-                  "configured" => "auto",
-                  "effective" => "http_sse",
-                  "fallback" => "websocket_not_supported",
-                },
-              }
-            end
-
-            request_options = @request_defaults.merge(sanitize_options(options))
-            request_options = normalize_responses_request_options(request_options)
-            instructions, response_messages = extract_responses_instructions(messages)
-            explicit_instructions = request_options.delete(:instructions).to_s
-            combined_instructions = [instructions, explicit_instructions].filter_map { |value| value.presence }.join("\n\n")
-            request_options[:store] = false unless request_options.key?(:store)
-
-            request_messages = build_responses_input(response_messages)
-            request = { model: model_name, input: request_messages }
-            request[:instructions] = combined_instructions if combined_instructions.present?
-            request[:tools] = request_tools if request_tools
-
-            if request_tools && !request_options.key?(:parallel_tool_calls)
-              request_options[:parallel_tool_calls] = false
-            end
-
-            if stream
-              stream_responses(client: client, request: request, options: request_options)
-            else
-              sync_responses(client: client, request: request, options: request_options)
-            end
-          else
-            ValidationError.raise!(
-              "wire_api must be :chat_completions or :responses",
-              code: "agent_core.resources.provider.simple_inference_provider.wire_api_must_be_chat_completions_or_responses",
-              details: { wire_api: @wire_api.to_s },
-            )
           end
         end
 
@@ -152,7 +158,217 @@ module AgentCore
         def sanitize_options(options)
           out = Utils.symbolize_keys(options)
           out.delete(:stream)
+          out.delete(:runtime_governance)
           out
+        end
+
+        def extract_runtime_governance(options)
+          value = options.is_a?(Hash) ? options[:runtime_governance] || options["runtime_governance"] : nil
+          value.is_a?(Hash) ? Utils.deep_symbolize_keys(value) : nil
+        end
+
+        def with_provider_budget_reservation(runtime_governance:)
+          context = normalize_provider_budget_context(runtime_governance)
+          return yield if context.nil?
+
+          provider_credential = context.fetch(:provider_credential)
+          provider_request_id = context.fetch(:provider_request_id)
+
+          @last_call_metadata =
+            @last_call_metadata.merge(
+              "runtime_governance" => {
+                "provider_credential_id" => provider_credential.id,
+                "provider_key" => provider_credential.provider_key,
+                "provider_request_id" => provider_request_id,
+              },
+            )
+
+          acquisition =
+            RuntimeGovernance::ProviderBudgetReservations.acquire!(
+              provider_credential: provider_credential,
+              provider_request_id: provider_request_id,
+              request_units: context.fetch(:request_units),
+              estimated_tokens: context.fetch(:estimated_tokens),
+              owner_type: context.fetch(:owner_type),
+              owner_id: context.fetch(:owner_id),
+            )
+
+          if acquisition.fetch(:decision) == "parked"
+            runtime_wait = acquisition.fetch(:runtime_wait)
+            publish_provider_limit_event(
+              instrumenter: context[:instrumenter],
+              provider_credential: provider_credential,
+              provider_request_id: provider_request_id,
+              runtime_wait: runtime_wait,
+            )
+
+            raise AgentCore::RuntimeWaitError.new(
+              "Provider admission blocked",
+              reason_type: runtime_wait.reason_type,
+              retry_at: runtime_wait.retry_at,
+              runtime_wait_id: runtime_wait.id,
+              details: runtime_wait.details,
+            )
+          end
+
+          response = yield
+
+          if response.is_a?(Enumerator)
+            wrap_stream_with_provider_budget_reservation(
+              enum: response,
+              provider_credential: provider_credential,
+              provider_request_id: provider_request_id,
+            )
+          else
+            settle_provider_budget_reservation(
+              provider_credential: provider_credential,
+              provider_request_id: provider_request_id,
+              usage: response.respond_to?(:usage) ? response.usage : nil,
+            )
+            response
+          end
+        rescue StandardError
+          release_provider_budget_reservation(
+            provider_credential: provider_credential,
+            provider_request_id: provider_request_id,
+          ) if provider_credential && provider_request_id
+          raise
+        end
+
+        def normalize_provider_budget_context(runtime_governance)
+          raw = runtime_governance.is_a?(Hash) ? runtime_governance : {}
+          provider_credential_id = raw[:provider_credential_id]
+          provider_key = raw[:provider_key].to_s.strip
+
+          provider_credential =
+            if provider_credential_id.present?
+              LLMProviderCredential.find_by(id: provider_credential_id, status: "active")
+            elsif provider_key.present?
+              LLMProviderCredential.find_by(provider_key: provider_key, status: "active")
+            end
+
+          return nil unless provider_credential
+
+          namespace = raw[:request_namespace].to_s.strip
+          namespace = provider_credential.provider_key if namespace.empty?
+
+          owner_type = raw[:owner_type].to_s.strip
+          owner_id = raw[:owner_id].to_s.strip
+          owner_type = "ProviderCall" if owner_type.empty?
+          owner_id = next_provider_request_id(namespace) if owner_id.empty?
+
+          {
+            provider_credential: provider_credential,
+            provider_request_id: raw[:provider_request_id].to_s.strip.presence || next_provider_request_id(namespace),
+            owner_type: owner_type,
+            owner_id: owner_id,
+            request_units: positive_integer_or_default(raw[:request_units], 1),
+            estimated_tokens: non_negative_integer_or_default(raw[:estimated_tokens], 0),
+            instrumenter: raw[:instrumenter],
+          }
+        end
+
+        def next_provider_request_id(namespace)
+          @provider_request_sequences_mutex.synchronize do
+            @provider_request_sequences[namespace] += 1
+            "#{namespace}:#{@provider_request_sequences[namespace]}"
+          end
+        end
+
+        def positive_integer_or_default(value, default)
+          integer = Integer(value, exception: false)
+          integer && integer.positive? ? integer : default
+        end
+
+        def non_negative_integer_or_default(value, default)
+          integer = Integer(value, exception: false)
+          integer && integer >= 0 ? integer : default
+        end
+
+        def publish_provider_limit_event(instrumenter:, provider_credential:, provider_request_id:, runtime_wait:)
+          return unless instrumenter.respond_to?(:publish)
+
+          instrumenter.publish(
+            "agent_core.llm.rate_limit",
+            {
+              provider_credential_id: provider_credential.id,
+              provider_key: provider_credential.provider_key,
+              provider_request_id: provider_request_id,
+              reason_type: runtime_wait.reason_type,
+              runtime_wait_id: runtime_wait.id,
+              retry_at: runtime_wait.retry_at,
+            },
+          )
+        end
+
+        def wrap_stream_with_provider_budget_reservation(enum:, provider_credential:, provider_request_id:)
+          Enumerator.new do |y|
+            finalized = false
+
+            enum.each do |event|
+              case event
+              when StreamEvent::Done
+                settle_provider_budget_reservation(
+                  provider_credential: provider_credential,
+                  provider_request_id: provider_request_id,
+                  usage: event.usage,
+                )
+                finalized = true
+              when StreamEvent::ErrorEvent
+                release_provider_budget_reservation(
+                  provider_credential: provider_credential,
+                  provider_request_id: provider_request_id,
+                )
+                finalized = true
+              end
+
+              y << event
+            end
+          rescue StandardError
+            release_provider_budget_reservation(
+              provider_credential: provider_credential,
+              provider_request_id: provider_request_id,
+            )
+            raise
+          ensure
+            unless finalized
+              release_provider_budget_reservation(
+                provider_credential: provider_credential,
+                provider_request_id: provider_request_id,
+              )
+            end
+          end
+        end
+
+        def settle_provider_budget_reservation(provider_credential:, provider_request_id:, usage:)
+          RuntimeGovernance::ProviderBudgetReservations.settle!(
+            provider_credential: provider_credential,
+            provider_request_id: provider_request_id,
+            actual_tokens: total_tokens_for(usage),
+          )
+        rescue ActiveRecord::RecordNotFound
+          nil
+        end
+
+        def release_provider_budget_reservation(provider_credential:, provider_request_id:)
+          RuntimeGovernance::ProviderBudgetReservations.release!(
+            provider_credential: provider_credential,
+            provider_request_id: provider_request_id,
+          )
+        rescue ActiveRecord::RecordNotFound
+          nil
+        end
+
+        def total_tokens_for(usage)
+          return 0 if usage.nil?
+
+          if usage.respond_to?(:total_tokens)
+            Integer(usage.total_tokens, exception: false) || 0
+          elsif usage.is_a?(Hash)
+            Integer(usage[:total_tokens] || usage["total_tokens"], exception: false) || 0
+          else
+            0
+          end
         end
 
         def normalize_transport(value)

@@ -148,6 +148,23 @@ module AgentCore
             execution_context: execution_context,
             context: context,
           )
+        rescue AgentCore::RuntimeWaitError => e
+          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+          publish_runtime_wait(
+            execution_context: execution_context,
+            runtime: runtime,
+            runtime_wait_error: e,
+          )
+          metadata = {
+            "runtime_wait" => runtime_wait_metadata(e),
+            "agent" => agent,
+          }
+          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+          ::DAG::ExecutionResult.pending(
+            reason: e.reason_type,
+            retry_at: e.retry_at,
+            metadata: metadata,
+          )
         rescue AgentCore::ProviderError => e
           agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
           metadata = {
@@ -450,6 +467,97 @@ module AgentCore
             ).build_prompt(context_nodes: context_nodes)
           end
 
+          def llm_options_with_runtime_governance(base_options:, runtime:, execution_context:, purpose:, estimated_tokens: nil)
+            options = base_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base_options) : {}
+            runtime_governance =
+              runtime_governance_options(
+                runtime: runtime,
+                execution_context: execution_context,
+                purpose: purpose,
+                estimated_tokens: estimated_tokens,
+              )
+
+            return options if runtime_governance.empty?
+
+            existing = options[:runtime_governance]
+            existing = AgentCore::Utils.deep_symbolize_keys(existing) if existing.is_a?(Hash)
+            options[:runtime_governance] = runtime_governance.merge(existing || {})
+            options
+          end
+
+          def runtime_governance_options(runtime:, execution_context:, purpose:, estimated_tokens:)
+            sources = []
+            sources << runtime.execution_context_attributes[:runtime_governance] if runtime&.execution_context_attributes.is_a?(Hash)
+            sources << execution_context.attributes[:runtime_governance] if execution_context&.attributes.is_a?(Hash)
+
+            raw =
+              sources.each_with_object({}) do |source, merged|
+                next unless source.is_a?(Hash)
+
+                merged.merge!(AgentCore::Utils.deep_symbolize_keys(source))
+              end
+
+            return {} if raw.empty?
+
+            owner_id = execution_context&.attributes&.dig(:dag, :node_id).to_s.strip
+            owner_id = execution_context&.run_id.to_s.strip if owner_id.empty?
+
+            request_namespace = provider_request_namespace(execution_context: execution_context, purpose: purpose)
+            instrumenter = execution_context&.instrumenter
+
+            raw.merge(
+              owner_type: raw[:owner_type].to_s.strip.presence || "DAG::Node",
+              owner_id: raw[:owner_id].to_s.strip.presence || owner_id,
+              request_namespace: raw[:request_namespace].to_s.strip.presence || request_namespace,
+              instrumenter: raw[:instrumenter] || instrumenter,
+              estimated_tokens: raw.key?(:estimated_tokens) ? raw[:estimated_tokens] : estimated_tokens,
+            ).compact
+          end
+
+          def provider_request_namespace(execution_context:, purpose:)
+            parts = [
+              execution_context&.run_id.to_s.strip.presence,
+              execution_context&.attributes&.dig(:dag, :node_id).to_s.strip.presence,
+              purpose.to_s.strip.presence,
+            ].compact
+            parts.join(":")
+          end
+
+          def estimated_tokens_for(built_prompt, runtime:)
+            return nil unless built_prompt.respond_to?(:estimate_tokens)
+            return nil unless runtime&.token_counter
+
+            estimate = built_prompt.estimate_tokens(token_counter: runtime.token_counter)
+            Integer(estimate[:total] || estimate["total"], exception: false)
+          rescue StandardError
+            nil
+          end
+
+          def runtime_wait_metadata(runtime_wait_error)
+            {
+              "reason_type" => runtime_wait_error.reason_type.to_s,
+              "runtime_wait_id" => runtime_wait_error.runtime_wait_id,
+              "retry_at" => runtime_wait_error.retry_at&.iso8601(6),
+              "details" => runtime_wait_error.details,
+            }.compact
+          end
+
+          def publish_runtime_wait(execution_context:, runtime:, runtime_wait_error:)
+            instrumenter = execution_context&.instrumenter
+            return unless instrumenter.respond_to?(:publish)
+
+            instrumenter.publish(
+              "agent_core.runtime_wait",
+              {
+                run_id: execution_context&.run_id,
+                provider: runtime ? runtime_name(runtime) : nil,
+                reason_type: runtime_wait_error.reason_type,
+                runtime_wait_id: runtime_wait_error.runtime_wait_id,
+                retry_at: runtime_wait_error.retry_at,
+              }.compact,
+            )
+          end
+
           def call_llm_with_recovery(runtime, built_prompt, stream:, execution_context:, recovery_metadata_out:)
             max_attempts = runtime.agent_call_recovery_attempts.to_i
             attempts = 0
@@ -530,6 +638,14 @@ module AgentCore
 
             use_stream = options.fetch(:stream, true) != false
             options.delete(:stream)
+            options =
+              llm_options_with_runtime_governance(
+                base_options: options,
+                runtime: runtime,
+                execution_context: execution_context,
+                purpose: "llm",
+                estimated_tokens: estimated_tokens_for(built_prompt, runtime: runtime),
+              )
 
             instrumenter = execution_context.instrumenter
 
@@ -637,6 +753,22 @@ module AgentCore
 
             llm_options_defaults = built_prompt.options.is_a?(Hash) ? built_prompt.options.dup : {}
             llm_options_defaults = AgentCore::Utils.deep_symbolize_keys(llm_options_defaults)
+            llm_options_defaults =
+              llm_options_with_runtime_governance(
+                base_options: llm_options_defaults,
+                runtime: runtime,
+                execution_context: execution_context,
+                purpose: "directives",
+                estimated_tokens: estimated_tokens_for(
+                  AgentCore::PromptBuilder::BuiltPrompt.new(
+                    system_prompt: system_prompt,
+                    messages: history,
+                    tools: [],
+                    options: llm_options_defaults,
+                  ),
+                  runtime: runtime,
+                ),
+              )
 
             reserved_keys = AgentCore::Directives::Runner::RESERVED_LLM_OPTIONS_KEYS
             reserved_keys.each { |k| llm_options_defaults.delete(k) }
@@ -857,7 +989,13 @@ module AgentCore
                   max_visible_tool_names: runtime.tool_name_repair_max_visible_tool_names,
                   tool_name_aliases: runtime.tool_name_aliases,
                   tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
-                  options: runtime.llm_options,
+                  options:
+                    llm_options_with_runtime_governance(
+                      base_options: runtime.llm_options,
+                      runtime: runtime,
+                      execution_context: execution_context,
+                      purpose: "tool_name_repair",
+                    ),
                   instrumenter: execution_context.instrumenter,
                   run_id: execution_context.run_id,
                 )
@@ -883,7 +1021,13 @@ module AgentCore
                   tool_name_repairs: tool_name_repairs,
                   tool_name_aliases: runtime.tool_name_aliases,
                   tool_name_normalize_fallback: runtime.tool_name_normalize_fallback,
-                  options: runtime.llm_options,
+                  options:
+                    llm_options_with_runtime_governance(
+                      base_options: runtime.llm_options,
+                      runtime: runtime,
+                      execution_context: execution_context,
+                      purpose: "tool_call_repair",
+                    ),
                   instrumenter: execution_context.instrumenter,
                   run_id: execution_context.run_id,
                 )

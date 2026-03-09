@@ -355,6 +355,9 @@ module Cybros
 
       runtime_kwargs[:token_counter] = llm_selection.fetch(:token_counter, nil) if llm_selection.key?(:token_counter)
       runtime_kwargs[:context_window_tokens] = llm_selection.fetch(:context_window_tokens, nil) if llm_selection.key?(:context_window_tokens)
+      if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
+        runtime_kwargs[:llm_options] = { runtime_governance: runtime_governance }
+      end
 
       runtime_kwargs[:context_turns] = context_turns if context_turns
 
@@ -379,6 +382,9 @@ module Cybros
       }
       if (channel = channel_for(node: node))
         ctx_attrs[:channel] = channel
+      end
+      if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
+        ctx_attrs[:runtime_governance] = runtime_governance
       end
       ctx_attrs[:runtime_surface] = runtime_surface_resolution.fetch(:execution_context_attributes)
       runtime_kwargs[:execution_context_attributes] = ctx_attrs
@@ -458,7 +464,7 @@ module Cybros
       return true unless requires
 
       credential_type = provider_spec.fetch("credential_type", "api_key").to_s
-      credential = LLMProvider.find_by(provider_key: provider_key)
+      credential = active_provider_credential_for(provider_key: provider_key)
 
       if credential_type == "oauth_codex"
         refresh_token = credential&.refresh_token.to_s
@@ -541,7 +547,7 @@ module Cybros
 
       requires_credential = provider_spec.fetch("requires_credential") == true
       credential_type = provider_spec.fetch("credential_type", "api_key").to_s
-      credential = LLMProvider.find_by(provider_key: provider_key)
+      credential = active_provider_credential_for(provider_key: provider_key)
       transport = provider_spec.fetch("transport", nil).to_s.strip
 
       if requires_credential && credential_type == "oauth_codex" && credential
@@ -622,8 +628,13 @@ module Cybros
         provider: gated_provider,
         api_model: api_model,
         provider_key: provider_key,
+        provider_credential_id: credential&.id,
         model_key: model_key,
         model_ref: model_ref,
+        runtime_governance: {
+          provider_credential_id: credential&.id,
+          provider_key: provider_key,
+        }.compact,
         token_counter: token_counter,
         context_window_tokens: model_spec.fetch("context_window_tokens"),
       }
@@ -647,6 +658,11 @@ module Cybros
       )
     end
     private_class_method :ensure_safe_header_value!
+
+    def active_provider_credential_for(provider_key:)
+      LLMProviderCredential.find_by(provider_key: provider_key, status: "active")
+    end
+    private_class_method :active_provider_credential_for
 
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
