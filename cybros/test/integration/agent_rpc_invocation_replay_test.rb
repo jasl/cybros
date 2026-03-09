@@ -93,9 +93,41 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
     assert_equal({ "ok" => true }, replay.fetch(:receipt).response_snapshot)
   end
 
+  test "lifecycle caller binds the open callback session to the invocation before the remote call starts" do
+    server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
+    runtime = create_runtime!(endpoint_url: server.rpc_url)
+    observed_session_invocation_ids = []
+
+    AgentRpc::LifecycleCaller.call!(
+      deployment: runtime.fetch(:deployment),
+      conversation: runtime.fetch(:conversation),
+      scope_type: "run_draft",
+      scope_id: "draft-123",
+      method_name: "turn.prepare",
+      invocation_id: "invoke-123",
+      request_payload: { "user_input" => "Hello" },
+      allowed_callback_methods: %w[conversation.settings.update],
+      rpc_client_factory: lambda do |deployment:, session:, invocation:, **_kwargs|
+        Object.new.tap do |client|
+          client.define_singleton_method(:call) do |_method_name, _params|
+            observed_session_invocation_ids << session.reload.agent_rpc_invocation_id
+            { "prepared_plan" => { "fixture" => true, "invocation_id" => invocation.id } }
+          end
+        end
+      end,
+    )
+
+    invocation = AgentRpcInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
+
+    assert_equal [invocation.id], observed_session_invocation_ids
+    assert_equal "closed", invocation.last_session.reload.status
+  ensure
+    server&.shutdown
+  end
+
   private
 
-    def create_runtime!
+    def create_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc", deployment_fingerprint: "fixture-deployment-v1")
       conversation = create_conversation!
       program =
         AgentProgram.create!(
@@ -112,10 +144,10 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
         AgentDeployment.create!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
-          endpoint_url: "http://127.0.0.1:4319/rpc",
+          endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
           contract_fingerprint: "contract:v1",
-          deployment_fingerprint: "deployment:v1",
+          deployment_fingerprint: deployment_fingerprint,
           status: "active",
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",

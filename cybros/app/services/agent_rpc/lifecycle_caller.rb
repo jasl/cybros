@@ -79,6 +79,7 @@ module AgentRpc
           )
         session = opened.fetch(:session)
         session_bearer = opened.fetch(:session_bearer)
+        session.update!(agent_rpc_invocation: invocation)
         invoke_remote!(invocation: invocation, session: session, session_bearer: session_bearer)
       end
     rescue AgentCore::ValidationError => e
