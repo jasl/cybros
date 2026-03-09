@@ -19,6 +19,7 @@ module RunDrafts
         )
       RunDrafts::DiscardService.discard!(draft: draft, status: "expired", approval_state: approval_state)
       agent_node_for(draft)&.deny_approval!(reason: "approval_expired")
+      Automations::RunStateRecorder.canceled!(draft: draft.reload)
       draft.reload
     end
 

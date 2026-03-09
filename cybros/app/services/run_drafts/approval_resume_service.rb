@@ -37,10 +37,20 @@ module RunDrafts
 
         RunDrafts::DiscardService.discard!(draft: draft, status: "discarded")
         agent_node_for(draft)&.deny_approval!(reason: terminal_reason(approval_status))
+        sync_terminal_automation_run!(approval_status)
       end
 
       def finalize_approved_draft!
-        RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error)
+        run = RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error)
+        if automation_run.present?
+          reloaded_draft = draft.reload
+          if run.present?
+            Automations::RunStateRecorder.running!(automation_run: automation_run, draft: reloaded_draft)
+          else
+            Automations::RunStateRecorder.completed!(automation_run: automation_run, draft: reloaded_draft)
+          end
+        end
+        run
       rescue AgentCore::ValidationError => e
         handle_finalize_failure!(e)
         raise
@@ -51,9 +61,11 @@ module RunDrafts
         when "cybros.run_drafts.stale"
           terminalize_approval!(status: "stale", reason: "binding_stale", timestamp_key: "stale_at")
           agent_node_for(draft)&.deny_approval!(reason: "binding_stale")
+          Automations::RunStateRecorder.failed!(automation_run: automation_run, draft: draft.reload, error: error)
         when "cybros.run_drafts.expired"
           terminalize_approval!(status: "expired", reason: "approval_expired", timestamp_key: "expired_at")
           agent_node_for(draft)&.deny_approval!(reason: "approval_expired")
+          Automations::RunStateRecorder.canceled!(draft: draft.reload)
         end
       end
 
@@ -87,6 +99,23 @@ module RunDrafts
         return nil if node_id.blank?
 
         draft.conversation.root_graph.nodes.find_by(id: node_id)
+      end
+
+      def automation_run
+        return @automation_run if defined?(@automation_run)
+
+        @automation_run = Automations::RunStateRecorder.automation_run_for(draft)
+      end
+
+      def sync_terminal_automation_run!(approval_status)
+        return if automation_run.blank?
+
+        case approval_status
+        when "canceled"
+          Automations::RunStateRecorder.canceled!(draft: draft.reload)
+        else
+          Automations::RunStateRecorder.rejected!(draft: draft.reload)
+        end
       end
   end
 end

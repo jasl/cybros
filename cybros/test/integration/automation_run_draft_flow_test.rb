@@ -36,6 +36,7 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
     assert_nil draft.materialized_conversation_run_id
     assert_nil result.fetch(:conversation_run)
     assert_equal replacement.id, draft.agent_deployment_id
+    assert_equal "completed", automation_run.status
     assert_equal replacement.id, automation_run.snapshot.dig("runtime", "agent_deployment_id")
     assert_equal runtime.fetch(:target).id, automation_run.snapshot.dig("runtime", "execution_target_id")
     assert_equal "full_access", automation_run.snapshot.dig("runtime", "permission_mode")
