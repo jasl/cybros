@@ -279,7 +279,7 @@ export function programmableConversationState(conversationId: string) {
         .last
     invocation =
       if draft.present?
-        AgentRpcInvocation.where(scope_type: "run_draft", scope_id: draft.id).order(created_at: :desc).first
+        AgentRPCInvocation.where(scope_type: "run_draft", scope_id: draft.id).order(created_at: :desc).first
       end
 
     kv = conversation.conversation_kv_entries.order(:key).each_with_object({}) do |entry, out|

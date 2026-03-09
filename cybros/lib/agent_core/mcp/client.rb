@@ -3,7 +3,7 @@ module AgentCore
     # High-level MCP client.
     #
     # Handles the MCP lifecycle: initialize handshake, protocol version
-    # negotiation, and tool operations. Uses JsonRpcClient for the
+    # negotiation, and tool operations. Uses JsonRPCClient for the
     # JSON-RPC layer.
     #
     # Auto-reconnects (re-initializes) on MCP_SESSION_NOT_FOUND errors
@@ -57,7 +57,7 @@ module AgentCore
 
         @on_notification = on_notification.respond_to?(:call) ? on_notification : nil
 
-        @rpc = AgentCore::MCP::JsonRpcClient.new(
+        @rpc = AgentCore::MCP::JsonRPCClient.new(
           transport: @transport,
           timeout_s: @timeout_s,
           on_notification: @on_notification,
@@ -96,7 +96,7 @@ module AgentCore
           attempt += 1
           result = @rpc.request("tools/list", params.empty? ? {} : params, timeout_s: timeout_s)
           result.is_a?(Hash) ? result : {}
-        rescue AgentCore::MCP::JsonRpcError => e
+        rescue AgentCore::MCP::JsonRPCError => e
           raise unless e.code.to_s == "MCP_SESSION_NOT_FOUND"
           raise if attempt > 1
 
@@ -125,7 +125,7 @@ module AgentCore
           attempt += 1
           result = @rpc.request("tools/call", { "name" => tool_name, "arguments" => args }, timeout_s: timeout_s)
           result.is_a?(Hash) ? result : {}
-        rescue AgentCore::MCP::JsonRpcError => e
+        rescue AgentCore::MCP::JsonRPCError => e
           raise unless e.code.to_s == "MCP_SESSION_NOT_FOUND"
           raise if attempt > 1
 

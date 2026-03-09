@@ -1,4 +1,4 @@
-class AgentRpcOperationReceipt < ApplicationRecord
+class AgentRPCOperationReceipt < ApplicationRecord
   belongs_to :agent_rpc_invocation
 
   before_validation :normalize_response_snapshot

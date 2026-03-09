@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   module KernelServices
     class ConversationKV
       def self.get(draft:, key:)

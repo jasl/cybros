@@ -1,4 +1,4 @@
-class AgentRpcSession < ApplicationRecord
+class AgentRPCSession < ApplicationRecord
   belongs_to :agent_deployment
   belongs_to :agent_program
   belongs_to :agent_rpc_invocation, optional: true

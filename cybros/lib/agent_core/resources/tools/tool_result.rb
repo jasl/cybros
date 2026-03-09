@@ -368,7 +368,7 @@ module AgentCore
               return "mcp_closed" if error.is_a?(AgentCore::MCP::ClosedError)
               return "mcp_protocol_error" if error.is_a?(AgentCore::MCP::ProtocolError)
               return "mcp_server_error" if error.is_a?(AgentCore::MCP::ServerError)
-              return "mcp_json_rpc_error" if error.is_a?(AgentCore::MCP::JsonRpcError)
+              return "mcp_json_rpc_error" if error.is_a?(AgentCore::MCP::JsonRPCError)
               return "mcp_remote_api_error" if source.to_s == "mcp"
 
               nil

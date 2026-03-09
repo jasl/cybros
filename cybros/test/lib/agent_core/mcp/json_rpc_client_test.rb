@@ -1,7 +1,7 @@
 require "test_helper"
 require "timeout"
 
-class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
+class AgentCore::MCP::JsonRPCClientTest < Minitest::Test
   # A mock transport for testing JSON-RPC interactions.
   class MockTransport < AgentCore::MCP::Transport::Base
     attr_reader :sent_messages
@@ -73,32 +73,32 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
 
   def setup
     @transport = MockTransport.new
-    @client = AgentCore::MCP::JsonRpcClient.new(transport: @transport)
+    @client = AgentCore::MCP::JsonRPCClient.new(transport: @transport)
   end
 
   def test_initialize_requires_transport
     assert_raises(AgentCore::ValidationError) do
-      AgentCore::MCP::JsonRpcClient.new(transport: nil)
+      AgentCore::MCP::JsonRPCClient.new(transport: nil)
     end
   end
 
   def test_initialize_validates_timeout_s
     assert_raises(AgentCore::ValidationError) do
-      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: 0)
+      AgentCore::MCP::JsonRPCClient.new(transport: @transport, timeout_s: 0)
     end
 
     assert_raises(AgentCore::ValidationError) do
-      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: -1)
+      AgentCore::MCP::JsonRPCClient.new(transport: @transport, timeout_s: -1)
     end
   end
 
   def test_initialize_rejects_non_finite_timeout_s
     assert_raises(AgentCore::ValidationError) do
-      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: "NaN")
+      AgentCore::MCP::JsonRPCClient.new(transport: @transport, timeout_s: "NaN")
     end
 
     assert_raises(AgentCore::ValidationError) do
-      AgentCore::MCP::JsonRpcClient.new(transport: @transport, timeout_s: "Infinity")
+      AgentCore::MCP::JsonRPCClient.new(transport: @transport, timeout_s: "Infinity")
     end
   end
 
@@ -130,7 +130,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
       end
     end.new
 
-    client = AgentCore::MCP::JsonRpcClient.new(transport: transport)
+    client = AgentCore::MCP::JsonRPCClient.new(transport: transport)
 
     thread = Thread.new { client.start }
     refute_nil thread.join(1.0), "start should not deadlock"
@@ -183,7 +183,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
     @client.start
 
     thread = Thread.new do
-      assert_raises(AgentCore::MCP::JsonRpcError) do
+      assert_raises(AgentCore::MCP::JsonRPCError) do
         @client.request("test/method", {}, timeout_s: 1.0)
       end
     end
@@ -318,7 +318,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
 
   def test_on_notification_callback
     notifications = []
-    client = AgentCore::MCP::JsonRpcClient.new(
+    client = AgentCore::MCP::JsonRPCClient.new(
       transport: @transport,
       on_notification: ->(msg) { notifications << msg },
     )
@@ -337,7 +337,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
 
   def test_non_notification_methods_ignored
     notifications = []
-    client = AgentCore::MCP::JsonRpcClient.new(
+    client = AgentCore::MCP::JsonRPCClient.new(
       transport: @transport,
       on_notification: ->(msg) { notifications << msg },
     )
@@ -413,7 +413,7 @@ class AgentCore::MCP::JsonRpcClientTest < Minitest::Test
 
   def test_request_is_thread_safe_under_concurrent_load
     transport = QueueTransport.new
-    client = AgentCore::MCP::JsonRpcClient.new(transport: transport, timeout_s: 1.0)
+    client = AgentCore::MCP::JsonRPCClient.new(transport: transport, timeout_s: 1.0)
     client.start
 
     n = 50

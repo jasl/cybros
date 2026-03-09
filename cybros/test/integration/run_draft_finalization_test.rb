@@ -558,7 +558,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal({ "mode" => "alternate" }, live_conversation.selected_agent_config)
     assert_equal(
       { "config" => { "mode" => "review" } },
-      AgentRpc::KernelServices::ConversationConfig.get(draft: draft_for_read),
+      AgentRPC::KernelServices::ConversationConfig.get(draft: draft_for_read),
     )
   ensure
     server&.shutdown

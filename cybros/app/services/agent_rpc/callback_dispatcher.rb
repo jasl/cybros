@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   class CallbackDispatcher
     PUBLIC_STATE_MUTATION_METHODS = %w[
       conversation.settings.update
@@ -36,47 +36,47 @@ module AgentRpc
     def call!
       case method_name
       when "conversation.settings.get"
-        AgentRpc::KernelServices::ConversationSettings.get(draft: draft)
+        AgentRPC::KernelServices::ConversationSettings.get(draft: draft)
       when "conversation.settings.update"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRpc::KernelServices::ConversationSettings.update!(draft: draft, patch: payload.fetch("patch", {}))
+            AgentRPC::KernelServices::ConversationSettings.update!(draft: draft, patch: payload.fetch("patch", {}))
           end
         end
       when "conversation.config.get"
-        AgentRpc::KernelServices::ConversationConfig.get(draft: draft)
+        AgentRPC::KernelServices::ConversationConfig.get(draft: draft)
       when "conversation.config.update"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRpc::KernelServices::ConversationConfig.update!(draft: draft, patch: payload.fetch("patch", {}))
+            AgentRPC::KernelServices::ConversationConfig.update!(draft: draft, patch: payload.fetch("patch", {}))
           end
         end
       when "conversation.kv.get"
-        AgentRpc::KernelServices::ConversationKV.get(draft: draft, key: payload.fetch("key"))
+        AgentRPC::KernelServices::ConversationKV.get(draft: draft, key: payload.fetch("key"))
       when "conversation.kv.set"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRpc::KernelServices::ConversationKV.set!(draft: draft, key: payload.fetch("key"), value: payload["value"])
+            AgentRPC::KernelServices::ConversationKV.set!(draft: draft, key: payload.fetch("key"), value: payload["value"])
           end
         end
       when "conversation.kv.delete"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRpc::KernelServices::ConversationKV.delete!(draft: draft, key: payload.fetch("key"))
+            AgentRPC::KernelServices::ConversationKV.delete!(draft: draft, key: payload.fetch("key"))
           end
         end
       when "conversation.kv.list"
-        AgentRpc::KernelServices::ConversationKV.list(draft: draft, prefix: payload["prefix"])
+        AgentRPC::KernelServices::ConversationKV.list(draft: draft, prefix: payload["prefix"])
       when "execution_target.list"
-        AgentRpc::KernelServices::ExecutionTargets.list(entrypoint: draft.conversation, draft: draft)
+        AgentRPC::KernelServices::ExecutionTargets.list(entrypoint: draft.conversation, draft: draft)
       when "execution_target.get"
-        AgentRpc::KernelServices::ExecutionTargets.get(
+        AgentRPC::KernelServices::ExecutionTargets.get(
           entrypoint: draft.conversation,
           draft: draft,
           execution_target_id: payload.fetch("execution_target_id"),
         )
       when "execution_target.propose"
-        apply_mutation! { AgentRpc::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: payload.fetch("execution_target_id")) }
+        apply_mutation! { AgentRPC::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: payload.fetch("execution_target_id")) }
       else
         AgentCore::ValidationError.raise!(
           "Callback method is not implemented.",
@@ -94,13 +94,13 @@ module AgentRpc
         operation_id = payload.fetch("operation_id").to_s
         invocation = session.agent_rpc_invocation || missing_invocation!
         existing =
-          AgentRpcOperationReceipt.find_by(
+          AgentRPCOperationReceipt.find_by(
             agent_rpc_invocation: invocation,
             operation_id: operation_id,
           )
 
         if existing.present?
-          AgentRpc::OperationReceiptStore.record_or_replay!(
+          AgentRPC::OperationReceiptStore.record_or_replay!(
             invocation: invocation,
             session: session,
             operation_id: operation_id,
@@ -113,7 +113,7 @@ module AgentRpc
         end
 
         status, response_snapshot = normalize_mutation_effect(yield)
-        AgentRpc::OperationReceiptStore.record_or_replay!(
+        AgentRPC::OperationReceiptStore.record_or_replay!(
           invocation: invocation,
           session: session,
           operation_id: operation_id,

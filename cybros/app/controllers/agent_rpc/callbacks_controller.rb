@@ -1,11 +1,11 @@
-module AgentRpc
+module AgentRPC
   class CallbacksController < ActionController::API
     before_action :set_current_account
 
     def create
       payload = JSON.parse(request.raw_post.to_s)
       result =
-        AgentRpc::CallbackDispatcher.call!(
+        AgentRPC::CallbackDispatcher.call!(
           bearer: bearer_token,
           method_name: payload.fetch("method"),
           scope_type: params.fetch(:scope_type),

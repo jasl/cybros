@@ -1,10 +1,10 @@
 require "digest"
 
-module AgentRpc
+module AgentRPC
   class InvocationStore
     def self.replay_candidate_for(deployment:, scope_type:, scope_id:, method_name:, invocation_id:)
       scope =
-        AgentRpcInvocation.where(
+        AgentRPCInvocation.where(
           agent_deployment_id: deployment.id,
           binding_fingerprint: deployment.deployment_fingerprint,
           scope_type: scope_type.to_s,
@@ -21,7 +21,7 @@ module AgentRpc
     end
 
     def self.reply_unknown_candidate_for(scope_type:, scope_id:, method_name:, invocation_id:)
-      AgentRpcInvocation.where(
+      AgentRPCInvocation.where(
         scope_type: scope_type.to_s,
         scope_id: scope_id.to_s,
         method: method_name.to_s,
@@ -113,7 +113,7 @@ module AgentRpc
 
       {
         invocation:
-          AgentRpcInvocation.create!(
+          AgentRPCInvocation.create!(
             agent_deployment: deployment,
             conversation: conversation,
             scope_type: scope_type,

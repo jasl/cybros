@@ -22,4 +22,5 @@ ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "MCP"
   inflect.acronym "OAuth"
   inflect.acronym "OpenAI"
+  inflect.acronym "RPC"
 end

@@ -1,10 +1,10 @@
 require "test_helper"
 
-class AgentRpcOperationReceiptTest < ActiveSupport::TestCase
+class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
   test "deduplicates operation ids per invocation" do
     invocation = create_invocation!
 
-    AgentRpcOperationReceipt.create!(
+    AgentRPCOperationReceipt.create!(
       agent_rpc_invocation: invocation,
       operation_id: "operation-123",
       method: "conversation.kv.set",
@@ -14,7 +14,7 @@ class AgentRpcOperationReceiptTest < ActiveSupport::TestCase
     )
 
     duplicate =
-      AgentRpcOperationReceipt.new(
+      AgentRPCOperationReceipt.new(
         agent_rpc_invocation: invocation,
         operation_id: "operation-123",
         method: "conversation.kv.set",
@@ -56,7 +56,7 @@ class AgentRpcOperationReceiptTest < ActiveSupport::TestCase
           inspection_details: {},
         )
 
-      AgentRpcInvocation.create!(
+      AgentRPCInvocation.create!(
         agent_deployment: deployment,
         conversation: create_conversation!,
         scope_type: "run_draft",

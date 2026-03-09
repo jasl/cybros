@@ -1,6 +1,6 @@
 require "test_helper"
 
-class AgentRpcInvocationTest < ActiveSupport::TestCase
+class AgentRPCInvocationTest < ActiveSupport::TestCase
   FIXED_DEPLOYMENT_ACTIVATED_AT = Time.utc(2026, 3, 9, 12, 0, 0)
 
   test "defaults deployment_activated_at to the agent deployment activation time" do
@@ -86,7 +86,7 @@ class AgentRpcInvocationTest < ActiveSupport::TestCase
           program: attributes[:agent_program] || create_program!,
         )
 
-    AgentRpcInvocation.new(
+    AgentRPCInvocation.new(
       {
         agent_deployment: deployment,
         conversation: conversation,

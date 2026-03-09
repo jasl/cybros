@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   module KernelServices
     class ExecutionTargets
       def self.list(entrypoint:, draft: nil)

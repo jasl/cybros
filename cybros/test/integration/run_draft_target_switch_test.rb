@@ -24,7 +24,7 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
         },
       )
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: alternate_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: alternate_target.id)
     run = RunDrafts::FinalizeService.finalize!(draft: draft)
 
     assert_equal "allow", result.dig("switch_decision", "decision")
@@ -60,7 +60,7 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
         },
       )
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: alternate_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: alternate_target.id)
     draft.update!(status: "awaiting_approval", approval_state: { "status" => "approved", "reason" => "target_switch" })
     run = RunDrafts::ApprovalResumeService.resume!(draft: draft)
 

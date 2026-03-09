@@ -2,7 +2,7 @@ module AgentDeployments
   class InspectionService
     def initialize(deployment:)
       @deployment = deployment
-      @client = RpcClient.new(deployment: deployment)
+      @client = RPCClient.new(deployment: deployment)
     end
 
     def inspect!

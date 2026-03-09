@@ -35,7 +35,7 @@ module RunDrafts
     def open_and_prepare!
       draft = create_draft!
       response =
-        AgentRpc::LifecycleCaller.call!(
+        AgentRPC::LifecycleCaller.call!(
           deployment: draft.agent_deployment,
           conversation: conversation,
           scope_type: "run_draft",

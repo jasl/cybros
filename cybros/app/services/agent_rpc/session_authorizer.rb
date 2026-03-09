@@ -1,6 +1,6 @@
 require "digest"
 
-module AgentRpc
+module AgentRPC
   class SessionAuthorizer
     DEFAULT_EXPIRY = 5.minutes
 
@@ -49,7 +49,7 @@ module AgentRpc
       initialize_result = initialize_client!
       raw_bearer = "arpc_#{SecureRandom.hex(24)}"
       session =
-        AgentRpcSession.create!(
+        AgentRPCSession.create!(
           agent_deployment: deployment,
           agent_program: deployment.agent_program,
           conversation: conversation,
@@ -83,7 +83,7 @@ module AgentRpc
       attr_reader :deployment, :conversation, :scope_type, :scope_id, :allowed_methods, :expires_in, :bearer, :method_name
 
       def initialize_client!
-        result = AgentDeployments::RpcClient.new(deployment: deployment).call("initialize")
+        result = AgentDeployments::RPCClient.new(deployment: deployment).call("initialize")
         identity = result["identity"].is_a?(Hash) ? result["identity"].deep_stringify_keys : {}
         validate_identity!(identity)
         result
@@ -116,7 +116,7 @@ module AgentRpc
       end
 
       def find_session!
-        session = AgentRpcSession.find_by(session_token_digest: bearer_digest(bearer))
+        session = AgentRPCSession.find_by(session_token_digest: bearer_digest(bearer))
         return session if session.present?
 
         AgentCore::ValidationError.raise!(

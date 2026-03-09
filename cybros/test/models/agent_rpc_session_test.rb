@@ -1,6 +1,6 @@
 require "test_helper"
 
-class AgentRpcSessionTest < ActiveSupport::TestCase
+class AgentRPCSessionTest < ActiveSupport::TestCase
   test "requires scoped session identity" do
     session =
       build_session(
@@ -58,7 +58,7 @@ class AgentRpcSessionTest < ActiveSupport::TestCase
   def build_session(attributes = {})
     invocation = create_invocation!
 
-    AgentRpcSession.new(
+    AgentRPCSession.new(
       {
         agent_deployment: invocation.agent_deployment,
         agent_program: invocation.agent_deployment.agent_program,
@@ -106,7 +106,7 @@ class AgentRpcSessionTest < ActiveSupport::TestCase
       inspection_details: {},
     )
 
-    AgentRpcInvocation.create!(
+    AgentRPCInvocation.create!(
       agent_deployment: deployment,
       conversation: conversation,
       scope_type: "run_draft",

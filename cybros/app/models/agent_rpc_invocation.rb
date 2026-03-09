@@ -1,7 +1,7 @@
-class AgentRpcInvocation < ApplicationRecord
+class AgentRPCInvocation < ApplicationRecord
   belongs_to :agent_deployment
   belongs_to :conversation, optional: true
-  belongs_to :last_session, class_name: "AgentRpcSession", optional: true
+  belongs_to :last_session, class_name: "AgentRPCSession", optional: true
 
   has_many :agent_rpc_sessions, dependent: :nullify
   has_many :agent_rpc_operation_receipts, dependent: :destroy

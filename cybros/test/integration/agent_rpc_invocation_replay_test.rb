@@ -1,10 +1,10 @@
 require "test_helper"
 
-class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
+class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
   test "replays the same invocation id only against the same pinned deployment row" do
     runtime = create_runtime!
     first =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -14,13 +14,13 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
         request_payload: { "user_input" => "Hello" },
       )
 
-    AgentRpc::InvocationStore.mark_succeeded!(
+    AgentRPC::InvocationStore.mark_succeeded!(
       invocation: first.fetch(:invocation),
       result_snapshot: { "prepared_plan" => { "fixture" => true } },
     )
 
     replay =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -37,7 +37,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
   test "does not replay across a different deployment row with copied binding fields" do
     runtime = create_runtime!
     first =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -55,7 +55,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
       )
 
     second =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: replacement,
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -73,7 +73,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
   test "does not replay across a reactivation of the same deployment row" do
     runtime = create_runtime!
     first =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -82,7 +82,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
-    AgentRpc::InvocationStore.mark_succeeded!(
+    AgentRPC::InvocationStore.mark_succeeded!(
       invocation: first.fetch(:invocation),
       result_snapshot: { "prepared_plan" => { "fixture" => true } },
     )
@@ -91,7 +91,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
     runtime.fetch(:deployment).update!(activated_at: reactivated_at)
 
     replay =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment).reload,
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -109,7 +109,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
   test "deduplicates operation ids across replayed sessions for the same invocation" do
     runtime = create_runtime!
     invocation =
-      AgentRpc::InvocationStore.start_or_replay!(
+      AgentRPC::InvocationStore.start_or_replay!(
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -123,7 +123,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
     replay_session = create_session!(deployment: runtime.fetch(:deployment), conversation: runtime.fetch(:conversation), invocation: invocation)
 
     first =
-      AgentRpc::OperationReceiptStore.record_or_replay!(
+      AgentRPC::OperationReceiptStore.record_or_replay!(
         invocation: invocation,
         session: first_session,
         operation_id: "operation-123",
@@ -133,7 +133,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
         response_snapshot: { "ok" => true },
       )
     replay =
-      AgentRpc::OperationReceiptStore.record_or_replay!(
+      AgentRPC::OperationReceiptStore.record_or_replay!(
         invocation: invocation,
         session: replay_session,
         operation_id: "operation-123",
@@ -154,7 +154,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
     runtime = create_runtime!(endpoint_url: server.rpc_url)
     observed_session_invocation_ids = []
 
-    AgentRpc::LifecycleCaller.call!(
+    AgentRPC::LifecycleCaller.call!(
       deployment: runtime.fetch(:deployment),
       conversation: runtime.fetch(:conversation),
       scope_type: "run_draft",
@@ -173,7 +173,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
       end,
     )
 
-    invocation = AgentRpcInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
+    invocation = AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
 
     assert_equal [invocation.id], observed_session_invocation_ids
     assert_equal "closed", invocation.last_session.reload.status
@@ -241,7 +241,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
     end
 
     def create_session!(deployment:, conversation:, invocation:)
-      AgentRpcSession.create!(
+      AgentRPCSession.create!(
         agent_deployment: deployment,
         agent_program: deployment.agent_program,
         agent_rpc_invocation: invocation,

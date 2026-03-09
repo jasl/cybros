@@ -152,7 +152,7 @@ Owns:
 
 ## Agent RPC Runtime State
 
-### AgentRpcSession
+### AgentRPCSession
 
 The bounded authorization artifact for one invocation attempt.
 
@@ -164,7 +164,7 @@ Owns:
 - allowed callback methods
 - expiry and session status
 
-### AgentRpcInvocation
+### AgentRPCInvocation
 
 The durable logical record for one lifecycle or turn-hook call.
 
@@ -177,7 +177,7 @@ Owns:
 - result or error snapshot
 - replay-safe status
 
-### AgentRpcOperationReceipt
+### AgentRPCOperationReceipt
 
 The durable de-duplication record for agent-to-Cybros side effects.
 

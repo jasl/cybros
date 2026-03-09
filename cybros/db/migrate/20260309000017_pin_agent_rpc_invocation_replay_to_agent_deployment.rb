@@ -1,4 +1,4 @@
-class PinAgentRpcInvocationReplayToAgentDeployment < ActiveRecord::Migration[8.2]
+class PinAgentRPCInvocationReplayToAgentDeployment < ActiveRecord::Migration[8.2]
   def change
     remove_index :agent_rpc_invocations, name: "idx_agent_rpc_invocations_replay"
 

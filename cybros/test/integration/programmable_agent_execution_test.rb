@@ -32,7 +32,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
         .order(:id)
         .last
     run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
-    invocation = AgentRpcInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
+    invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
     session = invocation.last_session
 
     assert_equal DAG::Node::FINISHED, agent.reload.state
@@ -87,8 +87,8 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
         .order(:id)
         .last
     run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
-    compose_invocation = AgentRpcInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
-    handle_error_invocation = AgentRpcInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.handle_error")
+    compose_invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
+    handle_error_invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.handle_error")
 
     assert_equal DAG::Node::FINISHED, agent.reload.state
     assert_equal "fixture recovery response", agent.body_output.fetch("content")

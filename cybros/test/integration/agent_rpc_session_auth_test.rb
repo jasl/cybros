@@ -1,13 +1,13 @@
 require "test_helper"
 
-class AgentRpcSessionAuthTest < ActiveSupport::TestCase
+class AgentRPCSessionAuthTest < ActiveSupport::TestCase
   test "opening a callback session verifies initialize with the deployment bearer and mints a scoped callback bearer" do
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
     deployment = create_deployment!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://fixture")
     conversation = create_conversation!
 
     opened =
-      AgentRpc::SessionAuthorizer.open!(
+      AgentRPC::SessionAuthorizer.open!(
         deployment: deployment,
         conversation: conversation,
         scope_type: "run_draft",
@@ -18,7 +18,7 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
     session = opened.fetch(:session)
     callback_bearer = opened.fetch(:session_bearer)
     authorized =
-      AgentRpc::SessionAuthorizer.authorize_callback!(
+      AgentRPC::SessionAuthorizer.authorize_callback!(
         bearer: callback_bearer,
         method_name: "conversation.settings.get",
         scope_type: session.scope_type,
@@ -39,10 +39,10 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
     deployment = create_deployment!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://wrong")
 
     error = nil
-    assert_no_difference -> { AgentRpcSession.count } do
+    assert_no_difference -> { AgentRPCSession.count } do
       error =
         assert_raises(AgentCore::ValidationError) do
-          AgentRpc::SessionAuthorizer.open!(
+          AgentRPC::SessionAuthorizer.open!(
             deployment: deployment,
             conversation: create_conversation!,
             scope_type: "run_draft",
@@ -62,7 +62,7 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
 
     disallowed_error =
       assert_raises(AgentCore::ValidationError) do
-        AgentRpc::SessionAuthorizer.authorize_callback!(
+        AgentRPC::SessionAuthorizer.authorize_callback!(
           bearer: callback_bearer,
           method_name: "conversation.kv.delete",
           scope_type: session.scope_type,
@@ -76,7 +76,7 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
 
     expired_error =
       assert_raises(AgentCore::ValidationError) do
-        AgentRpc::SessionAuthorizer.authorize_callback!(
+        AgentRPC::SessionAuthorizer.authorize_callback!(
           bearer: callback_bearer,
           method_name: "conversation.settings.get",
           scope_type: session.scope_type,
@@ -93,7 +93,7 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
 
     error =
       assert_raises(AgentCore::ValidationError) do
-        AgentRpc::SessionAuthorizer.authorize_callback!(
+        AgentRPC::SessionAuthorizer.authorize_callback!(
           bearer: callback_bearer,
           method_name: "conversation.settings.get",
           scope_type: session.scope_type,
@@ -120,8 +120,8 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
         },
       )
 
-    invocation = AgentRpcInvocation.find_by!(invocation_id: draft.prepare_invocation_id)
-    session = AgentRpcSession.find_by!(agent_rpc_invocation: invocation)
+    invocation = AgentRPCInvocation.find_by!(invocation_id: draft.prepare_invocation_id)
+    session = AgentRPCSession.find_by!(agent_rpc_invocation: invocation)
 
     assert_equal runtime.fetch(:deployment).id, invocation.agent_deployment_id
     assert_equal draft.id, invocation.scope_id
@@ -167,7 +167,7 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
       conversation = create_conversation!
       raw_bearer = "arpc_#{SecureRandom.hex(24)}"
       session =
-        AgentRpcSession.create!(
+        AgentRPCSession.create!(
           agent_deployment: deployment,
           agent_program: program,
           conversation: conversation,

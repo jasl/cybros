@@ -66,7 +66,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       )
     captured_draft = nil
     service_singleton = class << service; self; end
-    lifecycle_singleton = class << AgentRpc::LifecycleCaller; self; end
+    lifecycle_singleton = class << AgentRPC::LifecycleCaller; self; end
 
     service_singleton.alias_method :__test_original_create_draft!, :create_draft!
     service_singleton.define_method(:create_draft!) do
@@ -75,7 +75,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
 
     lifecycle_singleton.alias_method :__test_original_call!, :call!
     lifecycle_singleton.define_method(:call!) do |**_kwargs|
-      AgentRpc::KernelServices::ExecutionTargets.propose!(
+      AgentRPC::KernelServices::ExecutionTargets.propose!(
         draft: captured_draft,
         execution_target_id: alternate_target.id,
       )

@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   class CallbackEndpoint
     def self.url(scope_type:, scope_id:)
       new(scope_type: scope_type, scope_id: scope_id).url

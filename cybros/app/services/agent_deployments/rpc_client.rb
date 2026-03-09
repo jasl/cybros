@@ -3,7 +3,7 @@ require "net/http"
 require "uri"
 
 module AgentDeployments
-  class RpcClient
+  class RPCClient
     def initialize(deployment:)
       @deployment = deployment
     end

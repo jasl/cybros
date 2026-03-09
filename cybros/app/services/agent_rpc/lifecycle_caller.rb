@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   class LifecycleCaller
     def self.call!(
       deployment:,
@@ -132,7 +132,7 @@ module AgentRpc
       end
 
       def rpc_client(session:, session_bearer:, invocation:)
-        return AgentDeployments::RpcClient.new(deployment: deployment) if rpc_client_factory.nil?
+        return AgentDeployments::RPCClient.new(deployment: deployment) if rpc_client_factory.nil?
 
         rpc_client_factory.call(
           deployment: deployment,
@@ -148,7 +148,7 @@ module AgentRpc
 
         payload.merge(
           "callback_session" => {
-            "endpoint" => AgentRpc::CallbackEndpoint.url(scope_type: scope_type, scope_id: scope_id),
+            "endpoint" => AgentRPC::CallbackEndpoint.url(scope_type: scope_type, scope_id: scope_id),
             "bearer" => session_bearer,
             "scope_type" => scope_type,
             "scope_id" => scope_id,

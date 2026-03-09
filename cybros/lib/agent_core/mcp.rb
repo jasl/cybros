@@ -16,7 +16,7 @@ module AgentCore
     class ProtocolVersionNotSupportedError < Error; end
 
     # JSON-RPC error returned by an MCP server.
-    class JsonRpcError < Error
+    class JsonRPCError < Error
       attr_reader :code, :data
 
       def initialize(code, message, data: nil)

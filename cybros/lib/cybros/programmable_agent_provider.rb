@@ -31,7 +31,7 @@ module Cybros
     private
 
       def invoke_turn_compose(messages:, model:, tools:, options:)
-        AgentRpc::LifecycleCaller.call!(
+        AgentRPC::LifecycleCaller.call!(
           deployment: conversation_run.agent_deployment,
           conversation: conversation_run.conversation,
           scope_type: "conversation_run",
@@ -44,7 +44,7 @@ module Cybros
       end
 
       def invoke_turn_handle_error(messages:, model:, tools:, options:, error:)
-        AgentRpc::LifecycleCaller.call!(
+        AgentRPC::LifecycleCaller.call!(
           deployment: conversation_run.agent_deployment,
           conversation: conversation_run.conversation,
           scope_type: "conversation_run",

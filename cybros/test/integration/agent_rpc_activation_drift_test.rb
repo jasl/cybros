@@ -1,6 +1,6 @@
 require "test_helper"
 
-class AgentRpcActivationDriftTest < ActiveSupport::TestCase
+class AgentRPCActivationDriftTest < ActiveSupport::TestCase
   test "activation cutover rejects replay against a replacement deployment without leaking a new callback session" do
     primary_server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture-v1").start
     replacement_prepare_calls = []
@@ -24,7 +24,7 @@ class AgentRpcActivationDriftTest < ActiveSupport::TestCase
 
     first_error =
       assert_raises(AgentCore::ValidationError) do
-        AgentRpc::LifecycleCaller.call!(
+        AgentRPC::LifecycleCaller.call!(
           deployment: runtime.fetch(:deployment),
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
@@ -36,7 +36,7 @@ class AgentRpcActivationDriftTest < ActiveSupport::TestCase
           rpc_client_factory: lambda do |**_kwargs|
             Object.new.tap do |client|
               client.define_singleton_method(:call) do |_method_name, _params|
-                raise AgentRpc::LostReplyError, "lost reply after dispatch"
+                raise AgentRPC::LostReplyError, "lost reply after dispatch"
               end
             end
           end,
@@ -45,7 +45,7 @@ class AgentRpcActivationDriftTest < ActiveSupport::TestCase
 
     assert_equal "cybros.agent_rpc.reply_unknown", first_error.code
 
-    invocation = AgentRpcInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
+    invocation = AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
     runtime.fetch(:deployment).update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
     replacement =
       replacement_deployment!(
@@ -57,7 +57,7 @@ class AgentRpcActivationDriftTest < ActiveSupport::TestCase
 
     drift_error =
       assert_raises(AgentCore::ValidationError) do
-        AgentRpc::LifecycleCaller.call!(
+        AgentRPC::LifecycleCaller.call!(
           deployment: replacement,
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
@@ -71,9 +71,9 @@ class AgentRpcActivationDriftTest < ActiveSupport::TestCase
 
     assert_equal "cybros.agent_rpc.invocation_binding_mismatch", drift_error.code
     assert_equal [], replacement_prepare_calls
-    assert_equal invocation.id, AgentRpcInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123").id
+    assert_equal invocation.id, AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123").id
     assert_equal "reply_unknown", invocation.reload.status
-    assert_equal 0, AgentRpcSession.where(agent_deployment: replacement, status: "open").count
+    assert_equal 0, AgentRPCSession.where(agent_deployment: replacement, status: "open").count
   ensure
     primary_server&.shutdown
     replacement_server&.shutdown

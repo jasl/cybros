@@ -1,4 +1,4 @@
-module AgentRpc
+module AgentRPC
   module KernelServices
     class ConversationSettings
       def self.get(draft:)

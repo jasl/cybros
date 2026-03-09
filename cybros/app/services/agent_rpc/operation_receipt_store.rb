@@ -1,6 +1,6 @@
 require "digest"
 
-module AgentRpc
+module AgentRPC
   class OperationReceiptStore
     def self.record_or_replay!(invocation:, session:, operation_id:, method_name:, payload:, status:, response_snapshot:)
       new(
@@ -27,7 +27,7 @@ module AgentRpc
     def record_or_replay!
       ensure_session_binding!
 
-      existing = AgentRpcOperationReceipt.find_by(agent_rpc_invocation: invocation, operation_id: operation_id)
+      existing = AgentRPCOperationReceipt.find_by(agent_rpc_invocation: invocation, operation_id: operation_id)
       if existing.present?
         ensure_same_effect!(existing)
         return { receipt: existing, replayed: true }
@@ -35,7 +35,7 @@ module AgentRpc
 
       {
         receipt:
-          AgentRpcOperationReceipt.create!(
+          AgentRPCOperationReceipt.create!(
             agent_rpc_invocation: invocation,
             operation_id: operation_id,
             method: method_name,

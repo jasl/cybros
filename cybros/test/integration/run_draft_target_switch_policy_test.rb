@@ -9,7 +9,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
     draft = build_draft(conversation:, proposed_execution_target: current_target, permission_mode: "default")
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
 
     assert_equal "confirm", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
@@ -34,7 +34,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
     draft = build_draft(conversation:, proposed_execution_target: current_target, permission_mode: "full_access")
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
 
     assert_equal "allow", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
@@ -51,7 +51,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
     draft = build_draft(conversation:, proposed_execution_target: current_target, permission_mode: "full_access")
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: inactive_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: inactive_target.id)
 
     assert_equal "deny", result.dig("switch_decision", "decision")
     assert_equal current_target.id, draft.reload.proposed_execution_target_id
@@ -72,7 +72,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
         permission_mode: "full_access",
       )
 
-    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
+    result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
 
     assert_equal "allow", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id

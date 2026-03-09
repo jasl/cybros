@@ -130,7 +130,7 @@ class AgentCore::ErrorsTest < Minitest::Test
   end
 
   def test_json_rpc_error
-    error = AgentCore::MCP::JsonRpcError.new(-32600, "Invalid request", data: { detail: "missing id" })
+    error = AgentCore::MCP::JsonRPCError.new(-32600, "Invalid request", data: { detail: "missing id" })
     assert_kind_of AgentCore::MCP::Error, error
     assert_equal(-32600, error.code)
     assert_equal "Invalid request", error.message
@@ -138,7 +138,7 @@ class AgentCore::ErrorsTest < Minitest::Test
   end
 
   def test_json_rpc_error_without_data
-    error = AgentCore::MCP::JsonRpcError.new(-32601, "Method not found")
+    error = AgentCore::MCP::JsonRPCError.new(-32601, "Method not found")
     assert_nil error.data
   end
 end

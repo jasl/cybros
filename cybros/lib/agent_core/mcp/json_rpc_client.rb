@@ -9,7 +9,7 @@ module AgentCore
     # timeouts with CLOCK_MONOTONIC deadlines.
     #
     # Thread-safe: all pending-request state is guarded by @pending_mutex.
-    class JsonRpcClient
+    class JsonRPCClient
       # Internal tracking object for an in-flight request.
       class PendingRequest
         attr_reader :mutex, :cv
@@ -123,7 +123,7 @@ module AgentCore
       # @param timeout_s [Float, nil] Override timeout for this request
       # @return [Object] The result field from the JSON-RPC response
       # @raise [AgentCore::MCP::TimeoutError] If the request times out
-      # @raise [AgentCore::MCP::JsonRpcError] If the server returns an error
+      # @raise [AgentCore::MCP::JsonRPCError] If the server returns an error
       def request(method, params = {}, timeout_s: nil)
         method_name = method.to_s
         ValidationError.raise!(
@@ -276,7 +276,7 @@ module AgentCore
             raise AgentCore::MCP::TransportError, message.to_s
           end
 
-          raise AgentCore::MCP::JsonRpcError.new(code, message, data: data)
+          raise AgentCore::MCP::JsonRPCError.new(code, message, data: data)
         end
 
         pending.result
