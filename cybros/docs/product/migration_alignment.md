@@ -27,6 +27,7 @@ Current state:
 
 - run records mostly track lifecycle and DAG linkage
 - they do not snapshot the full execution context
+- they do not yet carry the finalized contract, deployment, target, settings, and governor facts described by the new run model
 
 Target:
 
@@ -38,6 +39,7 @@ Current state:
 
 - it still reflects local-path and runtime-surface assumptions
 - it does not yet cleanly own published contract identity and global config
+- it still lags the documented separation between selectable program identity and reachable deployment binding
 
 Target:
 
@@ -70,6 +72,7 @@ Target:
 Current state:
 
 - the runtime resolver still falls back to `Rails.root` or `Dir.pwd`
+- conversation runtime resolution still carries Phase 0 assumptions about metadata-driven defaults
 
 Target:
 
@@ -82,6 +85,8 @@ Current state:
 - `AgentCore` has meaningful boundaries
 - product docs still under-specify memory, knowledge, and connector surfaces
 - default resolver wiring still reflects Phase 0 assumptions
+- default memory wiring is still overly global instead of following an explicit scope model
+- prompt-side memory and skills surfaces are not fully wired by default even though the engine supports them
 
 Target:
 
