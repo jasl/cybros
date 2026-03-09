@@ -1,7 +1,7 @@
 require "test_helper"
 
 class RunDraftApprovalResumeTest < ActiveSupport::TestCase
-  test "approval resume finalizes the persisted prepared draft without a second turn prepare" do
+  test "approval park marks the agent node awaiting approval and resume finalizes without a second turn prepare" do
     prepare_calls = []
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -19,22 +19,20 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       ).start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
-
-    draft =
-      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
-        conversation: conversation,
-        initiated_by_user: conversation.user,
-        selected_model_ref: "openai/gpt-5.4",
-        trigger_snapshot: {
-          "kind" => "user_turn",
-          "dag_node_id" => SecureRandom.uuid,
-          "user_input" => "Ship it",
-        },
-      )
+    result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
 
     assert_equal "awaiting_approval", draft.status
     assert_equal 1, prepare_calls.size
     assert_nil draft.materialized_conversation_run_id
+    assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
+
+    error =
+      assert_raises(Cybros::Error) do
+        conversation.start_pending_agent_node!(node_id: agent_node.id, claimed_by: "manual-start:test")
+      end
+    assert_equal "state_changed", error.message
 
     draft.update!(approval_state: draft.approval_state.merge("status" => "approved"))
     run = RunDrafts::ApprovalResumeService.resume!(draft: draft)
@@ -42,6 +40,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     assert_equal 1, prepare_calls.size
     assert_equal run.id, draft.reload.materialized_conversation_run_id
     assert_equal "finalized", draft.status
+    assert_equal DAG::Node::PENDING, agent_node.reload.state
   ensure
     server&.shutdown
   end

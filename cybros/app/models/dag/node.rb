@@ -356,6 +356,33 @@ module DAG
       transitioned
     end
 
+    def park_for_approval!(metadata: {})
+      metadata = normalize_hook_metadata(metadata)
+      transitioned = false
+
+      graph.with_graph_lock! do
+        from = state
+        transitioned =
+          transition_to!(
+            AWAITING_APPROVAL,
+            from_states: [PENDING],
+            metadata: self.metadata.merge(metadata)
+          )
+
+        if transitioned
+          graph.validate_leaf_invariant!
+
+          graph.emit_event(
+            event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
+            subject: self,
+            particulars: { "from" => from, "to" => AWAITING_APPROVAL }
+          )
+        end
+      end
+
+      transitioned
+    end
+
     def deny_approval!(reason: "approval_denied", metadata: {}, at: Time.current)
       at = Time.current if at.nil?
       reason = reason.to_s.presence || "approval_denied"

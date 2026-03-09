@@ -19,11 +19,22 @@ module RunDrafts
         )
       end
 
-      RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error)
+      run = RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error)
+      agent_node_for(draft)&.approve!
+      run
     end
 
     private
 
       attr_reader :draft, :debug, :error
+
+      def agent_node_for(draft)
+        return nil unless draft.conversation.present?
+
+        node_id = draft.trigger_snapshot["dag_node_id"].to_s.strip
+        return nil if node_id.blank?
+
+        draft.conversation.root_graph.nodes.find_by(id: node_id)
+      end
   end
 end

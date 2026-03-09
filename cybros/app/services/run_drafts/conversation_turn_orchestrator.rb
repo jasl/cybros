@@ -30,6 +30,7 @@ module RunDrafts
         )
 
       if draft.status.to_s == RunDrafts::ConversationTurnPlanningService::AWAITING_APPROVAL_STATUS
+        park_agent_node_for_approval!(draft)
         { draft: draft, conversation_run: nil }
       else
         {
@@ -42,5 +43,16 @@ module RunDrafts
     private
 
       attr_reader :conversation, :initiated_by_user, :selected_model_ref, :trigger_snapshot, :debug, :error
+
+      def park_agent_node_for_approval!(draft)
+        agent_node_for(draft)&.park_for_approval!
+      end
+
+      def agent_node_for(draft)
+        node_id = draft.trigger_snapshot["dag_node_id"].to_s.strip
+        return nil if node_id.blank?
+
+        conversation.root_graph.nodes.find_by(id: node_id)
+      end
   end
 end
