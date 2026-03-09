@@ -14,7 +14,8 @@ module Cybros
           "agent_program_key" => "fixture-program",
           "agent_deployment_key" => "fixture-deployment",
           "deployment_fingerprint" => "fixture-deployment-v1",
-          "protocol_version" => "2026-03-09",
+          "protocol_version" => "agent_rpc.v1",
+          "agent_sdk_version" => "fixture-ruby-sdk/1.0",
           "supported_methods" => %w[
             initialize
             agent.describe

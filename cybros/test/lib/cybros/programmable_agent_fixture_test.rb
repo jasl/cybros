@@ -10,6 +10,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     assert_equal "fixture-program", identity.fetch("agent_program_key")
     assert_equal "fixture-deployment", identity.fetch("agent_deployment_key")
     assert_equal "fixture-deployment-v1", identity.fetch("deployment_fingerprint")
+    assert_equal "fixture-ruby-sdk/1.0", identity.fetch("agent_sdk_version")
     assert_includes identity.fetch("supported_methods"), "turn.prepare"
     assert_includes identity.fetch("supported_methods"), "turn.compose"
   end
