@@ -1,6 +1,8 @@
 require "test_helper"
 
 class RunDraftTest < ActiveSupport::TestCase
+  AutomationEntrypoint = Struct.new(:id, :execution_target, :permission_mode, keyword_init: true)
+
   test "requires exactly one entrypoint scope" do
     missing_scope = build_draft(conversation: nil, automation_id: nil)
 
@@ -24,6 +26,8 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal({ "steps" => ["draft"] }, draft.prepared_plan)
     assert_equal({ "title" => "Updated" }, draft.staged_public_settings_patch)
     assert_equal([{ "op" => "set", "key" => "shared.stage" }], draft.staged_kv_ops)
+    assert_equal draft.provider_credential_id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
+    assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
   end
 
   test "enforces the entrypoint invariant at the database layer" do
@@ -95,18 +99,142 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_includes draft.errors[:contract_fingerprint], "must match the deployed contract"
   end
 
+  test "requires runtime governor snapshots to match the selected provider and target bindings" do
+    draft =
+      build_draft(
+        runtime_governors: {
+          "provider_limiter" => {
+            "provider_key" => "anthropic",
+            "provider_credential_id" => SecureRandom.uuid,
+          },
+          "execution_quota" => {
+            "execution_target_id" => SecureRandom.uuid,
+            "execution_location_id" => SecureRandom.uuid,
+          },
+        },
+      )
+
+    refute_predicate draft, :valid?
+    assert_includes draft.errors[:runtime_governors], "must snapshot the selected provider credential"
+    assert_includes draft.errors[:runtime_governors], "must snapshot the selected model provider"
+    assert_includes draft.errors[:runtime_governors], "must snapshot the selected execution target"
+    assert_includes draft.errors[:runtime_governors], "must snapshot the target execution location"
+  end
+
+  test "snapshots resolved governor facts from a conversation entrypoint" do
+    conversation = create_conversation!
+    target = create_execution_target!
+    conversation.update!(default_execution_target: target, permission_mode: "conservative")
+    credential =
+      LLMProviderCredential.create!(
+        provider_key: "openai",
+        credential_type: "api_key",
+        status: "active",
+        api_key: "sk-test",
+        max_concurrent_requests: 3,
+        requests_per_minute: 90,
+        tokens_per_minute: 180_000,
+        burst_limit: 6,
+        backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
+      )
+    draft = build_draft(conversation: conversation, proposed_execution_target: nil, provider_credential: nil, runtime_governors: {}, permission_mode: nil)
+
+    RuntimeGovernance::DraftGovernorResolver.apply!(
+      draft: draft,
+      entrypoint: conversation,
+      selected_model_ref: "openai/gpt-5.4",
+    )
+
+    assert_equal "conservative", draft.permission_mode
+    assert_equal credential, draft.provider_credential
+    assert_equal target, draft.proposed_execution_target
+    assert_equal "openai/gpt-5.4", draft.selected_model_ref
+    assert_equal credential.id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
+    assert_equal target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
+    assert_equal "execution_location", draft.runtime_governors.dig("execution_quota", "scope_type")
+  end
+
+  test "re-resolves governor facts after an accepted target change" do
+    conversation = create_conversation!
+    original_target = create_execution_target!
+    override_target =
+      create_execution_target!(
+        max_concurrent_tasks_override: 2,
+        max_queued_tasks_override: 5,
+        default_timeout_s_override: 600,
+      )
+    conversation.update!(default_execution_target: original_target)
+    LLMProviderCredential.create!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
+    draft = build_draft(conversation: conversation, proposed_execution_target: nil, provider_credential: nil, runtime_governors: {})
+
+    RuntimeGovernance::DraftGovernorResolver.apply!(
+      draft: draft,
+      entrypoint: conversation,
+      selected_model_ref: "openai/gpt-5.4",
+    )
+    RuntimeGovernance::DraftGovernorResolver.apply!(
+      draft: draft,
+      entrypoint: conversation,
+      selected_model_ref: "openai/gpt-5.4",
+      execution_target: override_target,
+    )
+
+    assert_equal override_target, draft.proposed_execution_target
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
+    assert_equal 2, draft.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
+    assert_equal 5, draft.runtime_governors.dig("execution_quota", "max_queued_tasks")
+    assert_equal 600, draft.runtime_governors.dig("execution_quota", "default_timeout_s")
+  end
+
+  test "uses the same governor resolver for automation entrypoints" do
+    target = create_execution_target!(max_concurrent_tasks_override: 2)
+    automation = AutomationEntrypoint.new(id: SecureRandom.uuid, execution_target: target, permission_mode: "full_access")
+    credential = LLMProviderCredential.create!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
+    draft = build_draft(conversation: nil, automation_id: automation.id, proposed_execution_target: nil, provider_credential: nil, runtime_governors: {}, permission_mode: nil)
+
+    RuntimeGovernance::DraftGovernorResolver.apply!(
+      draft: draft,
+      entrypoint: automation,
+      selected_model_ref: "openai/gpt-5.4",
+    )
+
+    assert_equal "full_access", draft.permission_mode
+    assert_equal credential, draft.provider_credential
+    assert_equal target, draft.proposed_execution_target
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
+  end
+
   private
 
   def build_draft(attributes = {})
     conversation = attributes.key?(:conversation) ? attributes[:conversation] : create_conversation!
     program = attributes[:agent_program] || create_program!
     deployment = attributes[:agent_deployment] || create_deployment!(program)
-    target = ExecutionTarget.first || create_execution_target!
+    target =
+      if attributes.key?(:proposed_execution_target)
+        attributes[:proposed_execution_target]
+      else
+        ExecutionTarget.first || create_execution_target!
+      end
     credential =
-      LLMProviderCredential.create!(
-        provider_key: "openai-#{SecureRandom.hex(4)}",
-        credential_type: "api_key",
-      )
+      if attributes.key?(:provider_credential)
+        attributes[:provider_credential]
+      else
+        ensure_llm_provider!(
+          provider_key: "openai",
+          credential_type: "api_key",
+          status: "active",
+          api_key: "sk-test",
+        )
+      end
+    runtime_governors =
+      if attributes.key?(:runtime_governors)
+        attributes[:runtime_governors]
+      elsif credential.present? && target.present?
+        resolved_governor_snapshot(provider_credential: credential, execution_target: target)
+      else
+        {}
+      end
 
     RunDraft.new(
       {
@@ -122,7 +250,7 @@ class RunDraftTest < ActiveSupport::TestCase
         provider_credential: credential,
         proposed_execution_target: target,
         selected_model_ref: "openai/gpt-5.4",
-        runtime_governors: { "provider_key" => "openai" },
+        runtime_governors: runtime_governors,
         prepare_invocation_id: "prepare-1",
         prepared_plan: { "steps" => ["draft"] },
         staged_public_settings_patch: { "title" => "Updated" },
@@ -168,7 +296,7 @@ class RunDraftTest < ActiveSupport::TestCase
     )
   end
 
-  def create_execution_target!
+  def create_execution_target!(attributes = {})
     location =
       ExecutionLocation.create!(
         name: "Fixture host",
@@ -194,11 +322,40 @@ class RunDraftTest < ActiveSupport::TestCase
       )
 
     ExecutionTarget.create!(
-      execution_location: location,
-      workspace: workspace,
-      name: "Fixture target",
-      status: "active",
-      sandboxed: true,
+      {
+        execution_location: location,
+        workspace: workspace,
+        name: "Fixture target",
+        status: "active",
+        sandboxed: true,
+      }.merge(attributes),
     )
+  end
+
+  def resolved_governor_snapshot(provider_credential:, execution_target:)
+    {
+      "provider_limiter" => {
+        "provider_key" => provider_credential.provider_key,
+        "provider_credential_id" => provider_credential.id,
+        "credential_type" => provider_credential.credential_type,
+        "max_concurrent_requests" => provider_credential.max_concurrent_requests,
+        "requests_per_minute" => provider_credential.requests_per_minute,
+        "tokens_per_minute" => provider_credential.tokens_per_minute,
+        "burst_limit" => provider_credential.burst_limit,
+        "backoff_policy" => provider_credential.backoff_policy.deep_stringify_keys,
+      },
+      "execution_quota" => {
+        "scope_type" => "execution_location",
+        "scope_id" => execution_target.execution_location_id,
+        "execution_location_id" => execution_target.execution_location_id,
+        "execution_target_id" => execution_target.id,
+        "override_applied" => false,
+        "max_concurrent_tasks" => execution_target.execution_location.max_concurrent_tasks,
+        "max_queued_tasks" => execution_target.execution_location.max_queued_tasks,
+        "default_timeout_s" => execution_target.execution_location.default_timeout_s,
+        "cpu_limit_millicores" => execution_target.execution_location.cpu_limit_millicores,
+        "memory_limit_mb" => execution_target.execution_location.memory_limit_mb,
+      },
+    }
   end
 end
