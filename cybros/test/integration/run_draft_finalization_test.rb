@@ -137,6 +137,33 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "finalization rejects reusing an already materialized draft" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    dag_node_id = SecureRandom.uuid
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => dag_node_id,
+          "user_input" => "Ship it",
+        },
+      )
+
+    first_run = RunDrafts::FinalizeService.finalize!(draft: draft)
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft.reload) }
+
+    assert_equal "cybros.run_drafts.already_finalized", error.code
+    assert_equal first_run.id, draft.reload.materialized_conversation_run_id
+    assert_equal 1, ConversationRun.where(conversation: conversation, dag_node_id: dag_node_id).count
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def create_programmable_runtime!(server:, permission_mode: "default")

@@ -43,9 +43,20 @@ module RunDrafts
       attr_reader :draft, :debug, :error
 
       def ensure_finalizable!
+        ensure_not_already_finalized!
         ensure_not_expired!
         ensure_approval_ready!
         ensure_fresh_binding!
+      end
+
+      def ensure_not_already_finalized!
+        return unless draft.status.to_s == "finalized" || draft.materialized_conversation_run_id.present?
+
+        AgentCore::ValidationError.raise!(
+          "Run draft has already been finalized.",
+          code: "cybros.run_drafts.already_finalized",
+          details: { run_draft_id: draft.id, conversation_run_id: draft.materialized_conversation_run_id },
+        )
       end
 
       def ensure_not_expired!
