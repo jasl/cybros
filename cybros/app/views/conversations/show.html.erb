@@ -32,6 +32,12 @@
             Agent Programs
           <% end %>
         </li>
+        <li>
+          <%= link_to system_settings_execution_targets_path, class: "gap-2" do %>
+            <span class="icon-[lucide--server-cog] size-4"></span>
+            Execution Targets
+          <% end %>
+        </li>
       <% end %>
     </ul>
   </div>
@@ -96,6 +102,7 @@
       <% message_form_id = dom_id(@conversation, :message_form) %>
       <% permission_form_id = dom_id(@conversation, :permission_mode_form) %>
       <% agent_program_form_id = dom_id(@conversation, :agent_program_form) %>
+      <% execution_target_form_id = dom_id(@conversation, :execution_target_form) %>
 
       <%= form_with url: conversation_messages_path(@conversation),
         method: :post,
@@ -224,6 +231,21 @@
                 </option>
               <% end %>
             </select>
+
+            <select
+              name="conversation[default_execution_target_id]"
+              form="<%= execution_target_form_id %>"
+              data-testid="conversation-composer-execution-target-picker"
+              aria-label="Execution target"
+              onchange="this.form.requestSubmit()"
+              class="select select-bordered select-xs max-w-full">
+              <option value="" <%= @selected_execution_target.nil? ? "selected" : nil %>>No target selected</option>
+              <% @execution_target_options.each do |target| %>
+                <option value="<%= target.fetch("id") %>" <%= @selected_execution_target&.id == target.fetch("id") ? "selected" : nil %>>
+                  <%= target.fetch("name") %>
+                </option>
+              <% end %>
+            </select>
           </div>
 
           <div class="flex items-center gap-1">
@@ -254,9 +276,18 @@
       <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: permission_form_id, class: "hidden" } do %>
       <% end %>
 
+      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: execution_target_form_id, class: "hidden" } do %>
+      <% end %>
+
       <% if @selected_agent_program_stale %>
         <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-agent-stale-warning">
           <span>Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment.</span>
+        </div>
+      <% end %>
+
+      <% if @selected_execution_target_stale %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-execution-target-stale-warning">
+          <span>Selected execution target is no longer available. Future runs will stay blocked until you choose another target or the operator restores this target.</span>
         </div>
       <% end %>
     </div>

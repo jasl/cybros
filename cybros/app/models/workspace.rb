@@ -4,6 +4,8 @@ class Workspace < ApplicationRecord
   belongs_to :execution_location
   has_many :execution_targets, dependent: :restrict_with_exception
 
+  scope :active, -> { where(status: "active") }
+
   validates :name, :root_path, :workspace_type, :status, presence: true
   validates :status, inclusion: { in: STATUSES }
   validate :root_path_unique_within_execution_location

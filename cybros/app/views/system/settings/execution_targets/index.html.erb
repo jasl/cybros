@@ -1,0 +1,34 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold">Execution Targets</h2>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body p-0 overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Location</th>
+            <th>Workspace</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @execution_targets.each do |target| %>
+            <tr class="hover:bg-base-200/50 transition-colors">
+              <td class="font-medium"><%= target.name %></td>
+              <td><%= target.execution_location.name %></td>
+              <td class="font-mono text-xs"><%= target.workspace.root_path %></td>
+              <td><%= target.status %></td>
+              <td class="text-right">
+                <%= link_to "View", system_settings_execution_target_path(target), class: "btn btn-ghost btn-sm" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

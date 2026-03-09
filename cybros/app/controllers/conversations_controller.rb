@@ -71,6 +71,10 @@ class ConversationsController < AgentController
     @selected_agent_program = @conversation.agent_program
     @agent_program_options = selectable_agent_programs_for(@conversation)
     @selected_agent_program_stale = @selected_agent_program.present? && @selected_agent_program.active_healthy_deployment.blank?
+    @selected_execution_target = @conversation.default_execution_target
+    @execution_target_options = selectable_execution_targets_for(@conversation)
+    @selected_execution_target_stale =
+      @selected_execution_target.present? && !RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(@selected_execution_target)
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
@@ -315,7 +319,27 @@ class ConversationsController < AgentController
       programs.sort_by { |program| program.name.to_s.downcase }
     end
 
+    def selectable_execution_targets_for(conversation)
+      targets =
+        RuntimeGovernance::ExecutionTargetInventory.list(
+          current_target: conversation.default_execution_target,
+          permission_mode: conversation.permission_mode,
+        )
+      selected = conversation.default_execution_target
+      if selected.present? && targets.none? { |target| target.fetch("id") == selected.id }
+        targets <<
+          RuntimeGovernance::ExecutionTargetInventory.get(
+            current_target: selected,
+            permission_mode: conversation.permission_mode,
+            execution_target_id: selected.id,
+            visible_only: false,
+          )
+      end
+
+      targets.sort_by { |target| target.fetch("name").to_s.downcase }
+    end
+
     def conversation_update_params
-      params.fetch(:conversation, {}).permit(:agent_program_id, :permission_mode)
+      params.fetch(:conversation, {}).permit(:agent_program_id, :default_execution_target_id, :permission_mode)
     end
 end

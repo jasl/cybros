@@ -12,6 +12,7 @@ module Conversations
     def update!
       conversation.transaction do
         apply_agent_program_selection! if attributes.key?(:agent_program_id)
+        apply_execution_target_selection! if attributes.key?(:default_execution_target_id)
         conversation.permission_mode = attributes.fetch(:permission_mode) if attributes.key?(:permission_mode)
 
         return conversation if conversation.save
@@ -34,6 +35,10 @@ module Conversations
         conversation.agent_config_schema_fingerprint = program&.config_schema_fingerprint
       end
 
+      def apply_execution_target_selection!
+        conversation.default_execution_target = resolve_execution_target(attributes.fetch(:default_execution_target_id))
+      end
+
       def resolve_agent_program(raw_id)
         id = raw_id.to_s.strip
         return nil if id.empty?
@@ -54,6 +59,29 @@ module Conversations
           "Selected agent is not currently active and healthy.",
           code: "cybros.conversations.agent_program_not_selectable",
           details: { agent_program_id: program.id },
+        )
+      end
+
+      def resolve_execution_target(raw_id)
+        id = raw_id.to_s.strip
+        return nil if id.empty?
+        return conversation.default_execution_target if conversation.default_execution_target_id.to_s == id
+
+        target = ExecutionTarget.includes(:execution_location, :workspace).find_by(id: id)
+        unless target
+          AgentCore::ValidationError.raise!(
+            "Selected execution target could not be found.",
+            code: "cybros.conversations.execution_target_not_found",
+            details: { execution_target_id: id },
+          )
+        end
+
+        return target if RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(target)
+
+        AgentCore::ValidationError.raise!(
+          "Selected execution target is not currently visible.",
+          code: "cybros.conversations.execution_target_not_selectable",
+          details: { execution_target_id: target.id },
         )
       end
   end

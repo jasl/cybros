@@ -769,6 +769,7 @@ class Conversation < ApplicationRecord
             title: title,
             metadata: metadata,
             agent_program: agent_program,
+            default_execution_target: default_execution_target,
             permission_mode: permission_mode,
             agent_config: agent_config,
             agent_config_schema_fingerprint: agent_config_schema_fingerprint,

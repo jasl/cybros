@@ -32,6 +32,12 @@
                 <span class="icon-[lucide--sparkles] size-4"></span>
                 Agents
               <% end %>
+
+              <%= link_to system_settings_execution_targets_path,
+                          class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:execution_targets) ? "tab-active" : ""}" do %>
+                <span class="icon-[lucide--server-cog] size-4"></span>
+                Targets
+              <% end %>
             <% end %>
           </div>
         </div>
@@ -72,6 +78,13 @@
                             class: "gap-3 transition-colors #{settings_section_active?(:agent_programs) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
                   <span class="icon-[lucide--sparkles] size-5"></span>
                   Agent Programs
+                <% end %>
+              </li>
+              <li>
+                <%= link_to system_settings_execution_targets_path,
+                            class: "gap-3 transition-colors #{settings_section_active?(:execution_targets) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                  <span class="icon-[lucide--server-cog] size-5"></span>
+                  Execution Targets
                 <% end %>
               </li>
             <% end %>

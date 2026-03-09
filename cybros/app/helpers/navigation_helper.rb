@@ -9,6 +9,8 @@ module NavigationHelper
       controller_path.start_with?("system/settings/llm_providers")
     when :agent_programs
       controller_path.start_with?("system/settings/agent_programs")
+    when :execution_targets
+      controller_path.start_with?("system/settings/execution_targets")
     else
       false
     end

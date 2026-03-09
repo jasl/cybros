@@ -24,6 +24,7 @@ Rails.application.routes.draw do
         post :inspect, on: :member
         post :activate, on: :member
       end
+      resources :execution_targets, only: %i[index show]
     end
   end
 

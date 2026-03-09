@@ -1,0 +1,43 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold"><%= @execution_target.name %></h2>
+    <%= link_to "Back", system_settings_execution_targets_path, class: "btn btn-ghost btn-sm" %>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs opacity-60">Status</div>
+          <div class="text-sm"><%= @execution_target.status %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Sandboxed</div>
+          <div class="text-sm"><%= @execution_target.sandboxed? ? "Yes" : "No" %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Execution location</div>
+          <div class="text-sm"><%= @execution_target.execution_location.name %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Workspace</div>
+          <div class="font-mono text-sm"><%= @execution_target.workspace.root_path %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Capabilities</div>
+          <div class="text-sm"><%= Array(@execution_target.workspace.capability_tags).join(", ").presence || "None" %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Quota overrides</div>
+          <div class="text-sm">
+            <%= [
+              ("concurrency=#{@execution_target.max_concurrent_tasks_override}" if @execution_target.max_concurrent_tasks_override.present?),
+              ("queue=#{@execution_target.max_queued_tasks_override}" if @execution_target.max_queued_tasks_override.present?),
+              ("timeout=#{@execution_target.default_timeout_s_override}s" if @execution_target.default_timeout_s_override.present?),
+            ].compact.join(", ").presence || "Inherited from location" %>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
