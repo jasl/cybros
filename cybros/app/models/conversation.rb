@@ -6,6 +6,8 @@ class Conversation < ApplicationRecord
   DEFAULT_STATISTICS_SAMPLE_ORIGIN = "runtime"
 
   belongs_to :user
+  belongs_to :agent_program, optional: true
+  belongs_to :default_execution_target, class_name: "ExecutionTarget", optional: true
 
   has_one :dag_graph,
           class_name: "DAG::Graph",
