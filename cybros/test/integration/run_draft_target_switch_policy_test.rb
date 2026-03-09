@@ -58,15 +58,21 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     assert_equal current_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
   end
 
-  test "execution_target propose supports automation-backed drafts" do
+  test "execution_target propose supports automation-owned execution conversations" do
     current_target = create_execution_target!(name: "Current target")
     alternate_target = create_execution_target!(name: "Alternate target", max_concurrent_tasks_override: 2)
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
     automation = create_automation!(execution_target: current_target)
+    conversation =
+      create_conversation!(
+        permission_mode: automation.permission_mode,
+        automation: automation,
+        agent_program: automation.agent_program,
+        default_execution_target: current_target,
+      )
     draft =
       build_draft(
-        conversation: nil,
-        automation_id: automation.id,
+        conversation: conversation,
         initiated_by_user: nil,
         proposed_execution_target: current_target,
         permission_mode: "full_access",
@@ -75,20 +81,20 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     result = AgentRPC::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
 
     assert_equal "allow", result.dig("switch_decision", "decision")
+    assert_equal automation.id, conversation.automation_id
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
     assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
   end
 
   private
 
-    def build_draft(conversation:, proposed_execution_target:, permission_mode:, automation_id: nil, initiated_by_user: conversation&.user)
+    def build_draft(conversation:, proposed_execution_target:, permission_mode:, initiated_by_user: conversation.user)
       program = create_program!
       deployment = create_deployment!(program)
       provider_credential = LLMProviderCredential.find_by(provider_key: "openai")
 
       RunDraft.create!(
         conversation: conversation,
-        automation_id: automation_id,
         status: "open",
         permission_mode: permission_mode,
         trigger_snapshot: { "kind" => "user_turn" },
@@ -112,7 +118,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
       )
     end
 
-    def create_conversation!(permission_mode:)
+    def create_conversation!(permission_mode:, automation: nil, agent_program: nil, default_execution_target: nil)
       identity =
         Identity.create!(
           email: "owner-#{SecureRandom.hex(4)}@example.com",
@@ -123,7 +129,10 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
 
       Conversation.create!(
         user: user,
+        automation: automation,
         title: "Chat",
+        agent_program: agent_program,
+        default_execution_target: default_execution_target,
         permission_mode: permission_mode,
         metadata: {},
       )
