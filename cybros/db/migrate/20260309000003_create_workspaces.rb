@@ -12,5 +12,6 @@ class CreateWorkspaces < ActiveRecord::Migration[8.2]
     end
 
     add_index :workspaces, %i[execution_location_id root_path], unique: true
+    add_index :workspaces, %i[id execution_location_id], unique: true
   end
 end

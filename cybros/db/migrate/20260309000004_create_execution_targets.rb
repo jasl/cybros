@@ -13,5 +13,12 @@ class CreateExecutionTargets < ActiveRecord::Migration[8.2]
       t.integer :memory_limit_mb_override
       t.timestamps
     end
+
+    add_index :execution_targets, %i[execution_location_id workspace_id], unique: true, name: "idx_execution_targets_on_location_workspace"
+    add_foreign_key :execution_targets,
+      :workspaces,
+      column: %i[workspace_id execution_location_id],
+      primary_key: %i[id execution_location_id],
+      name: "fk_execution_targets_workspace_location"
   end
 end
