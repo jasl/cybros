@@ -1,0 +1,47 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold"><%= @agent_deployment.agent_program.name %></h2>
+      <div class="text-sm opacity-70 font-mono"><%= @agent_deployment.deployment_fingerprint %></div>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <%= button_to "Inspect", inspect_system_settings_agent_deployment_path(@agent_deployment), method: :post, class: "btn btn-secondary btn-sm" %>
+      <%= button_to "Activate", activate_system_settings_agent_deployment_path(@agent_deployment), method: :post, class: "btn btn-primary btn-sm" %>
+    </div>
+  </div>
+
+  <% if flash[:alert].present? %>
+    <div role="alert" class="alert alert-error">
+      <span><%= flash[:alert] %></span>
+    </div>
+  <% end %>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs opacity-60">Status</div>
+          <div><%= @agent_deployment.status %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Health</div>
+          <div><%= @agent_deployment.health_status %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Endpoint</div>
+          <div class="font-mono text-sm"><%= @agent_deployment.endpoint_url %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Protocol</div>
+          <div class="font-mono text-sm"><%= @agent_deployment.protocol_version %></div>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <div class="text-xs opacity-60">Supported methods</div>
+        <div class="font-mono text-sm"><%= @agent_deployment.supported_methods.join(", ") %></div>
+      </div>
+    </div>
+  </div>
+</div>

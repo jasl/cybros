@@ -20,6 +20,10 @@ Rails.application.routes.draw do
         post :device_flow_poll, on: :member
       end
       resources :agent_programs, only: %i[index new create show]
+      resources :agent_deployments, only: %i[index new create show] do
+        post :inspect, on: :member
+        post :activate, on: :member
+      end
     end
   end
 

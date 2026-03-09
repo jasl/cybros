@@ -8,8 +8,8 @@ module Cybros
   module ProgrammableAgentFixture
     module_function
 
-    def identity
-      deep_copy(
+    def identity(overrides = nil)
+      base =
         {
           "agent_program_key" => "fixture-program",
           "agent_deployment_key" => "fixture-deployment",
@@ -24,15 +24,33 @@ module Cybros
             turn.prepare
             turn.compose
           ],
-        },
-      )
+        }
+
+      deep_merge(base, overrides || {})
     end
 
     def deep_copy(object)
       JSON.parse(JSON.generate(object))
     end
 
-    def rpc_result(method_name, params = {})
+    def deep_merge(base, override)
+      base_hash = deep_copy(base)
+      override_hash = deep_copy(override)
+
+      merge_values(base_hash, override_hash)
+    end
+
+    def merge_values(base_value, override_value)
+      return deep_copy(override_value) unless base_value.is_a?(Hash) && override_value.is_a?(Hash)
+
+      base_value.merge(override_value) do |_key, existing, replacement|
+        merge_values(existing, replacement)
+      end
+    end
+
+    def rpc_result(method_name, params = {}, identity: nil)
+      identity ||= self.identity
+
       case method_name.to_s
       when "initialize"
         {
@@ -106,9 +124,11 @@ module Cybros
 
       attr_reader :host, :port
 
-      def initialize(host: "127.0.0.1", port: 0)
+      def initialize(host: "127.0.0.1", port: 0, identity_overrides: {}, rpc_overrides: {})
         @host = host
         @port = Integer(port)
+        @identity_overrides = ProgrammableAgentFixture.deep_copy(identity_overrides)
+        @rpc_overrides = rpc_overrides
         @server = nil
         @thread = nil
       end
@@ -170,10 +190,10 @@ module Cybros
             {
               "ok" => true,
               "status" => "healthy",
-              "identity" => ProgrammableAgentFixture.identity,
+              "identity" => fixture_identity,
               "deployment" => {
                 "key" => "fixture-deployment",
-                "fingerprint" => "fixture-deployment-v1",
+                "fingerprint" => fixture_identity.fetch("deployment_fingerprint"),
               },
             },
           )
@@ -181,7 +201,7 @@ module Cybros
         end
 
         payload = JSON.parse(req.body.to_s)
-        result = ProgrammableAgentFixture.rpc_result(payload.fetch("method"), payload.fetch("params", {}))
+        result = fixture_rpc_result(payload.fetch("method"), payload.fetch("params", {}))
         write_json(
           res,
           {
@@ -222,6 +242,26 @@ module Cybros
           res.status = status
           res["Content-Type"] = "application/json"
           res.body = JSON.generate(body)
+        end
+
+        def fixture_identity
+          @fixture_identity ||= ProgrammableAgentFixture.identity(@identity_overrides)
+        end
+
+        def fixture_rpc_result(method_name, params)
+          base_result = ProgrammableAgentFixture.rpc_result(method_name, params, identity: fixture_identity)
+          override = @rpc_overrides[method_name.to_s]
+
+          case override
+          when Proc
+            override.call(params, base_result, fixture_identity)
+          when Hash
+            ProgrammableAgentFixture.deep_merge(base_result, override)
+          when nil
+            base_result
+          else
+            override
+          end
         end
     end
 

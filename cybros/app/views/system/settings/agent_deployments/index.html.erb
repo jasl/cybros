@@ -1,0 +1,35 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <h2 class="text-lg font-semibold">Agent Deployments</h2>
+    <%= link_to "Register deployment", new_system_settings_agent_deployment_path, class: "btn btn-primary btn-sm" %>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body p-0 overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Program</th>
+            <th>Status</th>
+            <th>Health</th>
+            <th>Endpoint</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @agent_deployments.each do |deployment| %>
+            <tr class="hover:bg-base-200/50 transition-colors">
+              <td class="font-medium"><%= deployment.agent_program.name %></td>
+              <td><%= deployment.status %></td>
+              <td><%= deployment.health_status %></td>
+              <td class="font-mono text-xs"><%= deployment.endpoint_url %></td>
+              <td class="text-right">
+                <%= link_to "View", system_settings_agent_deployment_path(deployment), class: "btn btn-ghost btn-sm" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

@@ -52,6 +52,32 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     end
   end
 
+  test "server supports identity and rpc overrides for failure-path coverage" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "protocol_version" => "agent_rpc.v2",
+          "supported_methods" => %w[initialize agent.describe],
+        },
+        rpc_overrides: {
+          "agent.health" => { "healthy" => false, "status" => "unhealthy" },
+        },
+      )
+    server.start
+
+    begin
+      initialize_result = server.rpc_call("initialize")
+      health_result = server.rpc_call("agent.health")
+
+      assert_equal "agent_rpc.v2", initialize_result.dig("identity", "protocol_version")
+      assert_equal %w[initialize agent.describe], initialize_result.dig("identity", "supported_methods")
+      assert_equal false, health_result.fetch("healthy")
+      assert_equal "unhealthy", health_result.fetch("status")
+    ensure
+      server.shutdown
+    end
+  end
+
   private
 
     def get_json(url)
