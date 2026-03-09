@@ -42,13 +42,16 @@ class ConversationRun < ApplicationRecord
 
   validate :binding_consistency
 
-  before_validation :normalize_snapshot_payloads
+  before_validation :normalize_snapshot_payloads, on: :create
 
   def queued? = state == "queued"
   def running? = state == "running"
   def succeeded? = state == "succeeded"
   def failed? = state == "failed"
   def canceled? = state == "canceled"
+  def programmable? = snapshot["draft"].is_a?(Hash)
+  def compose_invocation_id = "conversation_run:#{id}:turn.compose"
+  def handle_error_invocation_id = "conversation_run:#{id}:turn.handle_error"
 
   def mark_running!(at: Time.current)
     update!(state: "running", started_at: at) if queued?

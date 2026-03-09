@@ -37,9 +37,46 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "approval-resumed confirmed target switch finalizes the staged alternate target into the run snapshot" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:, permission_mode: "default")
+    conversation = runtime.fetch(:conversation)
+    alternate_target =
+      create_execution_target!(
+        name: "Alternate target",
+        max_concurrent_tasks_override: 2,
+        max_queued_tasks_override: 5,
+        default_timeout_s_override: 600,
+      )
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Switch target",
+        },
+      )
+
+    result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: alternate_target.id)
+    draft.update!(status: "awaiting_approval", approval_state: { "status" => "approved", "reason" => "target_switch" })
+    run = RunDrafts::ApprovalResumeService.resume!(draft: draft)
+
+    assert_equal "confirm", result.dig("switch_decision", "decision")
+    assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
+    assert_equal alternate_target.id, run.execution_target_id
+    assert_equal "execution_target", run.runtime_governors.dig("execution_quota", "scope_type")
+    assert_equal 2, run.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
+    assert_equal alternate_target.id, conversation.reload.default_execution_target_id
+  ensure
+    server&.shutdown
+  end
+
   private
 
-    def create_programmable_runtime!(server:)
+    def create_programmable_runtime!(server:, permission_mode: "full_access")
       user = create_user!
       program = AgentProgram.create!(
         name: "Fixture Program",
@@ -78,7 +115,7 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
       conversation.update!(
         agent_program: program,
         default_execution_target: target,
-        permission_mode: "full_access",
+        permission_mode: permission_mode,
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 

@@ -46,6 +46,39 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal "canceled", run.reload.state
   end
 
+  test "message_page keeps awaiting approval agent nodes visible in the transcript" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.dag_graph
+
+    user = nil
+    agent = nil
+
+    graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Needs approval",
+          metadata: {},
+        )
+
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::AWAITING_APPROVAL,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    page = conversation.message_page(limit: 20, mode: :full)
+    message = page.fetch("messages").find { |entry| entry.fetch("node_id") == agent.id }
+
+    assert message.present?
+    assert_equal DAG::Node::AWAITING_APPROVAL, message.fetch("state")
+  end
+
   test "message_for_node_id and stop_node! reject nodes from a different lane" do
     root = create_conversation!(title: "Root")
 

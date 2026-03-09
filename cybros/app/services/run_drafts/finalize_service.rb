@@ -44,6 +44,7 @@ module RunDrafts
 
       def ensure_finalizable!
         ensure_not_already_finalized!
+        ensure_not_terminal_status!
         ensure_not_expired!
         ensure_approval_ready!
         ensure_fresh_binding!
@@ -67,6 +68,21 @@ module RunDrafts
           code: "cybros.run_drafts.expired",
           details: { run_draft_id: draft.id },
         )
+      end
+
+      def ensure_not_terminal_status!
+        case draft.status.to_s
+        when "stale"
+          stale_validation_error!
+        when "expired"
+          expired_validation_error!
+        when "discarded"
+          AgentCore::ValidationError.raise!(
+            "Run draft has already been discarded.",
+            code: "cybros.run_drafts.discarded",
+            details: { run_draft_id: draft.id, approval_state: draft.approval_state },
+          )
+        end
       end
 
       def ensure_approval_ready!
@@ -94,15 +110,7 @@ module RunDrafts
 
         return if fresh
 
-        AgentCore::ValidationError.raise!(
-          "Run draft is stale and must be replanned.",
-          code: "cybros.run_drafts.stale",
-          details: {
-            run_draft_id: draft.id,
-            agent_deployment_id: draft.agent_deployment_id,
-            deployment_fingerprint: draft.deployment_fingerprint,
-          },
-        )
+        stale_validation_error!
       end
 
       def apply_staged_mutations!
@@ -227,12 +235,32 @@ module RunDrafts
       def persist_terminal_status_for!(error)
         case error.code
         when "cybros.run_drafts.expired"
-          draft.update_columns(status: "expired", updated_at: Time.current)
+          RunDrafts::DiscardService.discard!(draft: draft, status: "expired")
         when "cybros.run_drafts.stale"
-          draft.update_columns(status: "stale", updated_at: Time.current)
+          RunDrafts::DiscardService.discard!(draft: draft, status: "stale")
         end
       rescue StandardError
         nil
+      end
+
+      def expired_validation_error!
+        AgentCore::ValidationError.raise!(
+          "Run draft has expired.",
+          code: "cybros.run_drafts.expired",
+          details: { run_draft_id: draft.id },
+        )
+      end
+
+      def stale_validation_error!
+        AgentCore::ValidationError.raise!(
+          "Run draft is stale and must be replanned.",
+          code: "cybros.run_drafts.stale",
+          details: {
+            run_draft_id: draft.id,
+            agent_deployment_id: draft.agent_deployment_id,
+            deployment_fingerprint: draft.deployment_fingerprint,
+          },
+        )
       end
   end
 end

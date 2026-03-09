@@ -38,19 +38,21 @@ class AgentRpcSessionAuthTest < ActiveSupport::TestCase
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://expected").start
     deployment = create_deployment!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://wrong")
 
-    error =
-      assert_raises(AgentCore::ValidationError) do
-        AgentRpc::SessionAuthorizer.open!(
-          deployment: deployment,
-          conversation: create_conversation!,
-          scope_type: "run_draft",
-          scope_id: SecureRandom.uuid,
-          allowed_methods: %w[conversation.settings.get],
-        )
-      end
+    error = nil
+    assert_no_difference -> { AgentRpcSession.count } do
+      error =
+        assert_raises(AgentCore::ValidationError) do
+          AgentRpc::SessionAuthorizer.open!(
+            deployment: deployment,
+            conversation: create_conversation!,
+            scope_type: "run_draft",
+            scope_id: SecureRandom.uuid,
+            allowed_methods: %w[conversation.settings.get],
+          )
+        end
+    end
 
     assert_equal "cybros.agent_rpc.deployment_auth_failed", error.code
-    assert_equal 0, AgentRpcSession.count
   ensure
     server&.shutdown
   end

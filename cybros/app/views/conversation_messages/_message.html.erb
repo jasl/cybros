@@ -120,7 +120,15 @@
             Copy
           </button>
 
-          <% if start_action.fetch("available", false) %>
+          <% if state == DAG::Node::AWAITING_APPROVAL %>
+            <button type="button"
+                    class="btn btn-ghost btn-xs"
+                    data-message-actions-target="approveButton"
+                    data-action="message-actions#approve">
+              <span class="icon-[lucide--badge-check] size-3"></span>
+              Approve
+            </button>
+          <% elsif start_action.fetch("available", false) %>
             <button type="button"
                     class="btn btn-ghost btn-xs"
                     data-message-actions-target="startButton"

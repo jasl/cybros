@@ -28,6 +28,8 @@ Rails.application.routes.draw do
     end
   end
 
+  post "agent_rpc/callbacks/:scope_type/:scope_id", to: "agent_rpc/callbacks#create", as: :agent_rpc_callback
+
   resources :agent_programs, only: %i[index new create show]
   resources :conversations, only: %i[index show create update] do
     get :composer_status, on: :member
@@ -52,6 +54,7 @@ Rails.application.routes.draw do
     end
     post :stop, on: :member
     post :start, on: :member
+    post :approve, on: :member
     post :retry, on: :member
     post :steer_current_turn, on: :member
   end

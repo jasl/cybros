@@ -1,4 +1,6 @@
 require "test_helper"
+require "net/http"
+require "rackup/handler/webrick"
 
 class RunDraftFinalizationTest < ActiveSupport::TestCase
   test "conversation append_user_message materializes a run from a durable prepared draft" do
@@ -137,6 +139,167 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "planning stages callback mutations on the draft and commits them only at finalization" do
+    callback_server = CallbackAppServer.new.start
+    original_url_options = ActionMailer::Base.default_url_options.dup
+    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |params, base_result, _identity|
+            callback = params.fetch("callback_session")
+            fixture_callback!(
+              callback: callback,
+              method_name: "conversation.settings.update",
+              params: {
+                "operation_id" => "op-settings",
+                "patch" => { "tone" => "concise" },
+              },
+            )
+            fixture_callback!(
+              callback: callback,
+              method_name: "conversation.config.update",
+              params: {
+                "operation_id" => "op-config",
+                "patch" => { "mode" => "review" },
+              },
+            )
+            fixture_callback!(
+              callback: callback,
+              method_name: "conversation.kv.set",
+              params: {
+                "operation_id" => "op-kv",
+                "key" => "shared.stage",
+                "value" => { "status" => "planned" },
+              },
+            )
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal({ "tone" => "concise" }, draft.reload.staged_public_settings_patch)
+    assert_equal({ "mode" => "review" }, draft.staged_agent_config_patch)
+    assert_equal(
+      [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+      draft.staged_kv_ops,
+    )
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal({}, conversation.selected_agent_config)
+    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+
+    run = RunDrafts::FinalizeService.finalize!(draft: draft)
+
+    conversation.reload
+    assert_equal "concise", conversation.public_settings.fetch("tone")
+    assert_equal({ "mode" => "review" }, conversation.selected_agent_config)
+    assert_equal({ "status" => "planned" }, ConversationKVEntry.find_by!(conversation: conversation, key: "shared.stage").value)
+    assert_equal run.id, draft.reload.materialized_conversation_run_id
+  ensure
+    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
+    server&.shutdown
+    callback_server&.shutdown
+  end
+
+  test "planning ignores direct staged mutation payloads returned by turn prepare" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "staged_public_settings_patch" => { "tone" => "concise" },
+              "staged_agent_config_patch" => { "mode" => "review" },
+              "staged_kv_ops" => [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal({}, draft.reload.staged_public_settings_patch)
+    assert_equal({}, draft.staged_agent_config_patch)
+    assert_equal([], draft.staged_kv_ops)
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal({}, conversation.selected_agent_config)
+    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+  ensure
+    server&.shutdown
+  end
+
+  test "stale finalization discards staged mutations and remains terminal after bindings change again" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    program = runtime.fetch(:program)
+    pinned_deployment = runtime.fetch(:deployment)
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(
+      staged_public_settings_patch: { "tone" => "concise" },
+      staged_agent_config_patch: { "mode" => "review" },
+      staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+    )
+    pinned_deployment.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
+    replacement = replacement_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "deployment:v2")
+
+    first_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.stale", first_error.code
+    assert_equal "stale", draft.reload.status
+    assert_equal({}, draft.staged_public_settings_patch)
+    assert_equal({}, draft.staged_agent_config_patch)
+    assert_equal([], draft.staged_kv_ops)
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal({}, conversation.selected_agent_config)
+    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+
+    replacement.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
+    pinned_deployment.update!(status: "active", health_status: "healthy", deactivated_at: nil)
+
+    second_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft.reload) }
+
+    assert_equal "cybros.run_drafts.stale", second_error.code
+    assert_nil draft.reload.materialized_conversation_run_id
+  ensure
+    server&.shutdown
+  end
+
   test "finalization rejects reusing an already materialized draft" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
@@ -165,6 +328,77 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
   end
 
   private
+
+    class CallbackAppServer
+      attr_reader :host, :port
+
+      def initialize(host: "127.0.0.1", port: 0)
+        @host = host
+        @port = Integer(port)
+      end
+
+      def start
+        return self if @webrick_server
+
+        @webrick_server =
+          Rackup::Handler::WEBrick::Server.new(
+            Rails.application,
+            BindAddress: host,
+            Port: port,
+            AccessLog: [],
+            Logger: WEBrick::Log.new(File::NULL, WEBrick::Log::FATAL),
+            StartCallback: -> { @ready = true },
+          )
+        @thread = Thread.new { @webrick_server.start }
+        wait_until_ready!
+        @port = @webrick_server.config.fetch(:Port)
+        self
+      end
+
+      def shutdown
+        @webrick_server&.shutdown
+        @thread&.join(1.0)
+      ensure
+        @webrick_server = nil
+        @thread = nil
+        @ready = false
+      end
+
+      private
+
+        def wait_until_ready!
+          40.times do
+            return if @ready
+
+            sleep 0.05
+          end
+
+          raise "callback app server did not become ready"
+        end
+    end
+
+    def fixture_callback!(callback:, method_name:, params:)
+      uri = URI(callback.fetch("endpoint"))
+      request = Net::HTTP::Post.new(uri)
+      request["Content-Type"] = "application/json"
+      request["Authorization"] = "Bearer #{callback.fetch("bearer")}"
+      request.body = JSON.generate({
+        "jsonrpc" => "2.0",
+        "id" => SecureRandom.uuid,
+        "method" => method_name,
+        "params" => params,
+      })
+
+      response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+      raise "callback #{response.code}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
+
+      payload = JSON.parse(response.body)
+      if payload["error"].present?
+        raise "callback error: #{payload.fetch("error").inspect}"
+      end
+
+      payload.fetch("result")
+    end
 
     def create_programmable_runtime!(server:, permission_mode: "default")
       user = create_user!

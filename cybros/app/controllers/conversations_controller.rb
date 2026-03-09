@@ -9,8 +9,8 @@ class ConversationsController < AgentController
     end
   end
 
-  before_action :set_conversation, only: %i[show update composer_status start stop retry steer_current_turn branch regenerate swipe clear_translations]
-  before_action :throttle_conversation_actions!, only: %i[start stop retry steer_current_turn]
+  before_action :set_conversation, only: %i[show update composer_status start approve stop retry steer_current_turn branch regenerate swipe clear_translations]
+  before_action :throttle_conversation_actions!, only: %i[start approve stop retry steer_current_turn]
 
   def index
     before = params[:before].to_s.presence
@@ -204,6 +204,17 @@ class ConversationsController < AgentController
   def start
     node_id = params[:node_id].to_s
     @conversation.start_pending_agent_node!(node_id: node_id, claimed_by: "manual-start:web:#{Current.user.id}")
+    render json: { ok: true }
+  rescue ActiveRecord::RecordNotFound
+    render json: { ok: false, error: "node_not_found" }, status: :not_found
+  rescue Cybros::Error => e
+    status = e.message.to_s == "state_changed" ? :conflict : :unprocessable_entity
+    render json: { ok: false, error: e.message.to_s }, status: status
+  end
+
+  def approve
+    node_id = params[:node_id].to_s
+    @conversation.approve_parked_agent_node!(node_id: node_id, approved_by: "manual-approve:web:#{Current.user.id}")
     render json: { ok: true }
   rescue ActiveRecord::RecordNotFound
     render json: { ok: false, error: "node_not_found" }, status: :not_found

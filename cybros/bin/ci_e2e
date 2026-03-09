@@ -13,8 +13,28 @@ fi
 
 PORT="${E2E_PORT:-3000}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
+export CYBROS_BASE_URL="${CYBROS_BASE_URL:-${E2E_BASE_URL}}"
 DRY_RUN="${CI_E2E_DRY_RUN:-0}"
-FIXTURE_ENABLED="${CI_E2E_PROGRAMMABLE_AGENT_FIXTURE:-0}"
+
+auto_enable_programmable_agent_fixture() {
+  for arg in "$@"; do
+    case "${arg}" in
+      *programmable_agent_*.spec.ts)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+if [[ -n "${CI_E2E_PROGRAMMABLE_AGENT_FIXTURE:-}" ]]; then
+  FIXTURE_ENABLED="${CI_E2E_PROGRAMMABLE_AGENT_FIXTURE}"
+elif auto_enable_programmable_agent_fixture "$@"; then
+  FIXTURE_ENABLED="1"
+else
+  FIXTURE_ENABLED="0"
+fi
 
 echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"

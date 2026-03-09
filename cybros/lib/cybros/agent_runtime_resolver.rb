@@ -3,6 +3,7 @@ module Cybros
     require_relative "llm/catalog"
     require_relative "llm/capability_gated_provider"
     require_relative "llm/codex_oauth"
+    require_relative "programmable_agent_provider"
 
     MAX_CONTEXT_TURNS = 1000
 
@@ -278,9 +279,15 @@ module Cybros
 
     def runtime_for(node:, provider: nil, base_tool_policy: nil, tools_registry: nil, instrumenter: nil)
       conversation = conversation_for(node)
+      conversation_run = latest_conversation_run_for(node)
 
       agent_metadata = agent_metadata_for(conversation)
-      llm_selection = resolve_llm_selection(node: node, agent_metadata: agent_metadata)
+      llm_selection =
+        resolve_llm_selection(
+          node: node,
+          agent_metadata: agent_metadata,
+          selected_model_ref_override: conversation_run&.selected_model_ref,
+        )
       profile_resolution = resolve_profile(agent_metadata)
       profile_name = profile_resolution.fetch(:profile_name)
       definition = profile_resolution.fetch(:definition)
@@ -322,7 +329,7 @@ module Cybros
           end
         end
 
-      provider ||= llm_selection.fetch(:provider)
+      provider ||= programmable_provider_for(conversation_run) || llm_selection.fetch(:provider)
       tools_registry ||= build_tools_registry
       instrumenter ||= build_instrumenter
 
@@ -392,11 +399,13 @@ module Cybros
       AgentCore::DAG::Runtime.new(**runtime_kwargs)
     end
 
-    def resolve_llm_selection(node:, agent_metadata:)
+    def resolve_llm_selection(node:, agent_metadata:, selected_model_ref_override: nil)
       catalog = Cybros::LLM::Catalog.effective
 
       conversation = conversation_for(node)
       explicit_model_ref =
+        normalize_model_ref(model_ref: selected_model_ref_override) if selected_model_ref_override.present?
+      explicit_model_ref ||=
         parse_explicit_model_ref(node&.metadata)&.join("/") ||
           parse_explicit_model_ref(conversation&.metadata)&.join("/")
       selected_model_ref =
@@ -423,6 +432,22 @@ module Cybros
       built
     end
     private_class_method :resolve_llm_selection
+
+    def programmable_provider_for(conversation_run)
+      return nil unless conversation_run&.programmable?
+
+      Cybros::ProgrammableAgentProvider.new(conversation_run: conversation_run)
+    end
+    private_class_method :programmable_provider_for
+
+    def latest_conversation_run_for(node)
+      return nil if node.nil?
+
+      ConversationRun.where(dag_node_id: node.id).order(:id).last
+    rescue StandardError
+      nil
+    end
+    private_class_method :latest_conversation_run_for
 
     def parse_explicit_model_ref(metadata)
       return nil unless metadata.is_a?(Hash)

@@ -1,7 +1,7 @@
 require "test_helper"
 
 class AgentRpcSessionTest < ActiveSupport::TestCase
-  test "requires scoped session identity and callback methods" do
+  test "requires scoped session identity" do
     session =
       build_session(
         session_token_digest: nil,
@@ -15,8 +15,14 @@ class AgentRpcSessionTest < ActiveSupport::TestCase
     assert_includes session.errors[:session_token_digest], "can't be blank"
     assert_includes session.errors[:scope_type], "can't be blank"
     assert_includes session.errors[:scope_id], "can't be blank"
-    assert session.errors[:allowed_methods].any?
     assert_includes session.errors[:status], "can't be blank"
+  end
+
+  test "allows sessions with no callback methods" do
+    session = build_session(allowed_methods: [])
+
+    assert_predicate session, :valid?
+    assert_equal [], session.allowed_methods
   end
 
   test "requires invocation and deployment bindings to stay aligned" do
@@ -59,7 +65,7 @@ class AgentRpcSessionTest < ActiveSupport::TestCase
         agent_rpc_invocation: invocation,
         conversation: invocation.conversation,
         scope_type: "run_draft",
-        scope_id: SecureRandom.uuid,
+        scope_id: invocation.scope_id,
         deployment_fingerprint: invocation.binding_fingerprint,
         deployment_activated_at: invocation.deployment_activated_at,
         session_token_digest: SecureRandom.hex(16),

@@ -35,7 +35,7 @@ export default class extends Controller {
     actionPolicy: Object,
   }
 
-  static targets = ["copyButton", "editButton", "startButton", "retryButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeCount", "swipeRight", "branchButton"]
+  static targets = ["approveButton", "copyButton", "editButton", "startButton", "retryButton", "regenerateButton", "swipeNav", "swipeLeft", "swipeCount", "swipeRight", "branchButton"]
 
   connect() {
     this.updateVisibility()
@@ -166,6 +166,21 @@ export default class extends Controller {
     if (!actionAvailable(this.actionPolicyValue || {}, "start")) return
 
     const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/start`, { node_id: nodeId })
+    if (!response?.ok) {
+      await this.#handleStartFailure(response)
+      return
+    }
+
+    window.Turbo?.visit?.(window.location.href)
+  }
+
+  async approve(event) {
+    event.preventDefault()
+    const conversationId = this.conversationId()
+    const nodeId = String(this.nodeIdValue || "")
+    if (!conversationId || !nodeId) return
+
+    const response = await this.#postJson(`/conversations/${encodeURIComponent(conversationId)}/approve`, { node_id: nodeId })
     if (!response?.ok) {
       await this.#handleStartFailure(response)
       return

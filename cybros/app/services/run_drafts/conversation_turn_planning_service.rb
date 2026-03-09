@@ -47,14 +47,14 @@ module RunDrafts
         )
 
       draft.with_lock do
+        draft.reload
         draft.prepared_plan = normalize_hash(response["prepared_plan"])
-        draft.staged_public_settings_patch = normalize_hash(response["staged_public_settings_patch"])
-        draft.staged_agent_config_patch = normalize_hash(response["staged_agent_config_patch"])
-        draft.staged_kv_ops = normalize_array(response["staged_kv_ops"])
         draft.approval_state = normalize_approval_state(response["approval_state"])
         draft.status = approval_required?(draft.approval_state) ? AWAITING_APPROVAL_STATUS : PREPARED_STATUS
         draft.save!
       end
+
+      enqueue_expiry!(draft) if draft.status == AWAITING_APPROVAL_STATUS
 
       draft
     end
@@ -132,10 +132,6 @@ module RunDrafts
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
       end
 
-      def normalize_array(value)
-        Array(value).map { |item| item.is_a?(Hash) ? item.deep_stringify_keys : item }
-      end
-
       def normalize_approval_state(value)
         normalized = normalize_hash(value)
         normalized["status"] = normalized["status"].to_s.presence || "not_required"
@@ -145,6 +141,12 @@ module RunDrafts
       def approval_required?(approval_state)
         status = approval_state["status"].to_s
         status.present? && !%w[not_required approved].include?(status)
+      end
+
+      def enqueue_expiry!(draft)
+        return unless draft.expires_at.present?
+
+        RunDrafts::ExpireAwaitingApprovalJob.set(wait_until: draft.expires_at).perform_later(draft.id)
       end
   end
 end

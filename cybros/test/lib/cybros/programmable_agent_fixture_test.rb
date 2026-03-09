@@ -1,6 +1,8 @@
 require "test_helper"
 require "json"
 require "net/http"
+require "open3"
+require "timeout"
 require "uri"
 
 class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
@@ -75,6 +77,106 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
       assert_equal "unhealthy", health_result.fetch("status")
     ensure
       server.shutdown
+    end
+  end
+
+  test "standalone fixture cli serves rpc without requiring ActiveSupport core extensions" do
+    script = Rails.root.join("bin/programmable_agent_fixture")
+    port = 3919
+    pid = nil
+
+    Timeout.timeout(20) do
+      _stdin, _stdout, _stderr, wait_thread =
+        Open3.popen3(
+          script.to_s,
+          "--host",
+          "127.0.0.1",
+          "--port",
+          port.to_s,
+          chdir: Rails.root.to_s,
+        )
+      pid = wait_thread.pid
+
+      40.times do
+        break if Net::HTTP.get_response(URI("http://127.0.0.1:#{port}/health")).is_a?(Net::HTTPSuccess)
+
+        sleep 0.25
+      rescue StandardError
+        sleep 0.25
+      end
+
+      prepare =
+        rpc_json(
+          "http://127.0.0.1:#{port}/rpc",
+          id: 1,
+          method: "turn.prepare",
+          params: { "conversation_id" => "conv_cli" },
+        )
+
+      assert_equal true, prepare.dig("result", "prepared_plan", "fixture")
+      assert_equal "conv_cli", prepare.dig("result", "prepared_plan", "conversation_id")
+    end
+  ensure
+    if pid
+      begin
+        Process.kill("TERM", pid)
+        Process.wait(pid)
+      rescue Errno::ESRCH, Errno::ECHILD
+        nil
+      end
+    end
+  end
+
+  test "turn prepare switch-target proposes the paired alternate target when older visible targets exist" do
+    current_target_id = "target-current"
+    proposed_target_id = nil
+
+    callback_rpc =
+      lambda do |_session, method_name, params|
+        case method_name
+        when "execution_target.list"
+          {
+            "targets" => [
+              { "id" => "approval-old", "name" => "approval-1773037603066 Primary" },
+              { "id" => current_target_id, "name" => "target-switch-123 Primary" },
+              { "id" => "target-alternate", "name" => "target-switch-123 Alternate" },
+            ],
+          }
+        when "execution_target.propose"
+          proposed_target_id = params.fetch("execution_target_id")
+          {
+            "switch_decision" => {
+              "decision" => "confirm",
+            },
+          }
+        else
+          flunk("unexpected callback #{method_name}")
+        end
+      end
+
+    fixture = Cybros::ProgrammableAgentFixture
+    eigenclass = class << fixture; self end
+    original_callback_rpc = fixture.method(:callback_rpc)
+    eigenclass.send(:define_method, :callback_rpc) do |*args|
+      callback_rpc.call(*args)
+    end
+
+    begin
+      prepare =
+        fixture.rpc_result(
+          "turn.prepare",
+          {
+            "conversation_id" => "conv_switch",
+            "user_input" => "[fixture:switch-target]",
+            "execution_target_id" => current_target_id,
+            "callback_session" => { "endpoint" => "http://fixture.test/rpc", "bearer" => "secret" },
+          },
+        )
+
+      assert_equal "target-alternate", proposed_target_id
+      assert_equal "target-alternate", prepare.dig("approval_state", "proposed_execution_target_id")
+    ensure
+      eigenclass.send(:define_method, :callback_rpc, original_callback_rpc)
     end
   end
 

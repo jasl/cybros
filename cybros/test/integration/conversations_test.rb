@@ -145,6 +145,22 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_equal DAG::Node::RUNNING, root_agent.reload.state
   end
 
+  test "show renders awaiting approval agent bubbles in the transcript" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    result = conversation.append_user_message!(content: "Need approval")
+    agent = result.fetch(:agent_node)
+    agent.body.update!(output_preview: {})
+    agent.park_for_approval!
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_select %(#message_#{agent.id} [data-role="agent-bubble"][data-node-state="awaiting_approval"]), count: 1
+    assert_includes response.body, "Approve"
+  end
+
   test "show renders composer model picker below input without visible model label or provider prefix" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", refresh_token: "rt")

@@ -14,6 +14,7 @@ class ApplicationController < ActionController::Base
       Current.user_agent = request.user_agent
       Current.ip_address = request.remote_ip
       Current.referrer = request.referrer
+      Current.base_url = request.base_url
     end
 
     def ensure_account

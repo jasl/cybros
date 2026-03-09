@@ -3,12 +3,12 @@ module AgentRpc
     class ExecutionTargets
       AutomationEntrypoint = Struct.new(:id, :permission_mode, :execution_target, keyword_init: true)
 
-      def self.list(entrypoint:)
-        new(entrypoint: entrypoint).list
+      def self.list(entrypoint:, draft: nil)
+        new(entrypoint: entrypoint, draft: draft).list
       end
 
-      def self.get(entrypoint:, execution_target_id:)
-        new(entrypoint: entrypoint).get(execution_target_id:)
+      def self.get(entrypoint:, execution_target_id:, draft: nil)
+        new(entrypoint: entrypoint, draft: draft).get(execution_target_id:)
       end
 
       def self.propose!(draft:, execution_target_id:)
@@ -62,7 +62,7 @@ module AgentRpc
             permission_mode: permission_mode,
           )
 
-        apply_proposal!(proposed_target) if switch_decision.fetch("decision") == "allow"
+        apply_proposal!(proposed_target) if %w[allow confirm].include?(switch_decision.fetch("decision"))
 
         {
           "target" => target,

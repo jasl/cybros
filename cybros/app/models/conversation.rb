@@ -31,6 +31,7 @@ class Conversation < ApplicationRecord
 
   has_many :events, dependent: :destroy
   has_many :conversation_kv_entries, dependent: :destroy
+  has_many :run_drafts, dependent: :nullify
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil? && root?
@@ -305,11 +306,13 @@ class Conversation < ApplicationRecord
     with_dag_errors_wrapped do
       node = find_chat_lane_node!(node_id)
       raise Cybros::Error, "node_not_running" unless node_stoppable?(node)
+      parked_draft = parked_run_draft_for_node!(node.id) if node.state == DAG::Node::AWAITING_APPROVAL
 
       stopped = node.stop!(reason: reason.to_s)
       raise Cybros::Error, "node_not_running" unless stopped
 
       cancel_runs_for_node!(node)
+      cancel_parked_approval!(draft: parked_draft, reason: reason.to_s) if parked_draft.present?
       node
     end
   end
@@ -338,6 +341,27 @@ class Conversation < ApplicationRecord
 
       DAG::ExecuteNodeJob.perform_later(started_node.id) if enqueue_execution
       started_node
+    end
+  end
+
+  def approve_parked_agent_node!(node_id:, approved_by:)
+    with_dag_errors_wrapped do
+      node = find_chat_lane_node!(node_id)
+      raise Cybros::Error, "state_changed" unless node.state == DAG::Node::AWAITING_APPROVAL
+
+      draft = parked_run_draft_for_node!(node.id)
+      approved_at = Time.current
+      draft.update!(
+        approval_state:
+          draft.approval_state.merge(
+            "status" => "approved",
+            "approved_at" => approved_at.iso8601,
+            "approved_by" => approved_by.to_s,
+          ),
+      )
+
+      RunDrafts::ApprovalResumeService.resume!(draft: draft)
+      start_pending_agent_node!(node_id: node.id, claimed_by: approved_by.to_s)
     end
   end
 
@@ -1350,6 +1374,34 @@ class Conversation < ApplicationRecord
 
     def node_stoppable?(node)
       [DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING].include?(node.state)
+    end
+
+    def parked_run_draft_for_node!(node_id)
+      draft =
+        run_drafts
+          .where(status: RunDrafts::ConversationTurnPlanningService::AWAITING_APPROVAL_STATUS)
+          .where("trigger_snapshot ->> 'dag_node_id' = ?", node_id.to_s)
+          .order(created_at: :desc)
+          .first
+      if draft.present? && draft.expires_at.present? && draft.expires_at <= Time.current
+        RunDrafts::ApprovalExpiryService.expire!(draft: draft)
+        raise Cybros::Error, "state_changed"
+      end
+      return draft if draft.present?
+
+      raise Cybros::Error, "state_changed"
+    end
+
+    def cancel_parked_approval!(draft:, reason:)
+      draft.update!(
+        approval_state:
+          draft.approval_state.merge(
+            "status" => "canceled",
+            "reason" => reason.to_s,
+            "canceled_at" => Time.current.iso8601,
+          ),
+      )
+      RunDrafts::DiscardService.discard!(draft: draft, status: "discarded")
     end
 
     def startable_pending_agent?(node:)

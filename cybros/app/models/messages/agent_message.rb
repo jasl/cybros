@@ -29,7 +29,7 @@ module Messages
         terminal_reason = metadata["reason"].to_s.present?
         terminal_error = metadata["error"].to_s.present?
 
-        state.in?([DAG::Node::PENDING, DAG::Node::RUNNING]) ||
+        state.in?([DAG::Node::PENDING, DAG::Node::AWAITING_APPROVAL, DAG::Node::RUNNING]) ||
           preview_content.present? ||
           transcript_visible ||
           (state.in?(DAG::Node::TERMINAL_STATES) && (terminal_reason || terminal_error))

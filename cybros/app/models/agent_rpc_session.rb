@@ -11,7 +11,7 @@ class AgentRpcSession < ApplicationRecord
   validates :session_token_digest, presence: true
   validates :expires_at, presence: true
   validates :status, presence: true
-  validates :allowed_methods, presence: true
+  validate :allowed_methods_must_be_array
 
   validate :binding_consistency
 
@@ -43,5 +43,9 @@ class AgentRpcSession < ApplicationRecord
           agent_rpc_invocation.conversation_id != conversation_id
         errors.add(:conversation, "must match the invocation binding")
       end
+    end
+
+    def allowed_methods_must_be_array
+      errors.add(:allowed_methods, "must be an array") unless allowed_methods.is_a?(Array)
     end
 end

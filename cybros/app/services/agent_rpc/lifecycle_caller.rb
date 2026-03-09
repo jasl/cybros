@@ -143,10 +143,15 @@ module AgentRpc
       end
 
       def remote_params(session_bearer)
-        request_payload.merge(
-          "invocation_id" => invocation_id,
+        payload = request_payload.merge("invocation_id" => invocation_id)
+        return payload if allowed_callback_methods.empty?
+
+        payload.merge(
           "callback_session" => {
+            "endpoint" => AgentRpc::CallbackEndpoint.url(scope_type: scope_type, scope_id: scope_id),
             "bearer" => session_bearer,
+            "scope_type" => scope_type,
+            "scope_id" => scope_id,
             "allowed_methods" => allowed_callback_methods.map(&:to_s),
           },
         )

@@ -32,7 +32,9 @@ module AgentDeployments
         Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") do |http|
           http.request(request)
         end
-      raise InspectionError, "RPC request failed with #{response.code}" unless response.is_a?(Net::HTTPSuccess)
+      unless response.is_a?(Net::HTTPSuccess)
+        raise InspectionError, "RPC request failed with #{response.code}: #{response.body}"
+      end
 
       payload = JSON.parse(response.body)
       if payload["error"].is_a?(Hash)

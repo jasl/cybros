@@ -1,7 +1,7 @@
 require "test_helper"
 
 class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
-  test "execution_target propose confirms different visible targets under default mode without mutating the draft" do
+  test "execution_target propose confirms different visible targets under default mode and stages the requested target on the draft" do
     conversation = create_conversation!(permission_mode: "default")
     current_target = create_execution_target!(name: "Current target")
     alternate_target = create_execution_target!(name: "Alternate target")
@@ -12,8 +12,8 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     result = AgentRpc::KernelServices::ExecutionTargets.propose!(draft:, execution_target_id: alternate_target.id)
 
     assert_equal "confirm", result.dig("switch_decision", "decision")
-    assert_equal current_target.id, draft.reload.proposed_execution_target_id
-    assert_equal current_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
+    assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
+    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
   end
 
   test "execution_target propose allows validated target switches under full access and re-resolves governors" do

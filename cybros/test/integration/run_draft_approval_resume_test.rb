@@ -1,6 +1,8 @@
 require "test_helper"
 
 class RunDraftApprovalResumeTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
   test "approval park marks the agent node awaiting approval and resume finalizes without a second turn prepare" do
     prepare_calls = []
     server =
@@ -24,6 +26,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     draft = RunDraft.order(:created_at).last
 
     assert_equal "awaiting_approval", draft.status
+    assert_equal true, draft.prepared_plan.fetch("fixture")
     assert_equal 1, prepare_calls.size
     assert_nil draft.materialized_conversation_run_id
     assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
@@ -45,6 +48,277 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "rejected approval discards staged draft mutations and leaves the draft terminal" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(
+      status: "awaiting_approval",
+      approval_state: { "status" => "rejected", "reason" => "operator_denied" },
+      staged_public_settings_patch: { "tone" => "concise" },
+      staged_agent_config_patch: { "mode" => "review" },
+      staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+    )
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.approval_not_granted", error.code
+    assert_equal "discarded", draft.reload.status
+    assert_equal({}, draft.staged_public_settings_patch)
+    assert_equal({}, draft.staged_agent_config_patch)
+    assert_equal([], draft.staged_kv_ops)
+    assert_nil draft.materialized_conversation_run_id
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal({}, conversation.selected_agent_config)
+    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+
+    terminal_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft.reload) }
+
+    assert_equal "cybros.run_drafts.discarded", terminal_error.code
+  ensure
+    server&.shutdown
+  end
+
+  test "terminal non-approved approval outcomes discard staged draft mutations generically" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    alternate_target = create_execution_target!
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(
+      status: "awaiting_approval",
+      approval_state: { "status" => "denied", "reason" => "operator_denied" },
+      proposed_execution_target: alternate_target,
+      runtime_governors:
+        draft.runtime_governors.deep_merge(
+          "execution_quota" => {
+            "scope_type" => "execution_target",
+            "execution_target_id" => alternate_target.id,
+            "execution_location_id" => alternate_target.execution_location_id,
+          },
+        ),
+      staged_public_settings_patch: { "tone" => "concise" },
+      staged_agent_config_patch: { "mode" => "review" },
+      staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+    )
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.approval_not_granted", error.code
+    assert_equal "discarded", draft.reload.status
+    assert_nil draft.proposed_execution_target_id
+    assert_nil draft.runtime_governors["execution_quota"]
+    assert_equal({}, draft.staged_public_settings_patch)
+    assert_equal({}, draft.staged_agent_config_patch)
+    assert_equal([], draft.staged_kv_ops)
+  ensure
+    server&.shutdown
+  end
+
+  test "terminal non-approved approval outcomes reject the parked agent node" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+    draft.update!(approval_state: draft.approval_state.merge("status" => "rejected", "reason" => "operator_denied"))
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.approval_not_granted", error.code
+    assert_equal DAG::Node::REJECTED, agent_node.reload.state
+    assert_equal "operator_denied", agent_node.metadata.fetch("reason")
+  ensure
+    server&.shutdown
+  end
+
+  test "awaiting approval drafts enqueue expiry and expire parked nodes automatically" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    result = nil
+    assert_enqueued_with(job: RunDrafts::ExpireAwaitingApprovalJob) do
+      result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    end
+
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+
+    travel_to(draft.expires_at + 1.second) do
+      perform_enqueued_jobs only: RunDrafts::ExpireAwaitingApprovalJob
+    end
+
+    assert_equal "expired", draft.reload.status
+    assert_equal "expired", draft.approval_state.fetch("status")
+    assert_equal DAG::Node::REJECTED, agent_node.reload.state
+    assert_equal "approval_expired", agent_node.metadata.fetch("reason")
+  ensure
+    server&.shutdown
+  end
+
+  test "canceling a parked approval discards staged mutations and marks the approval outcome canceled" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+    draft.update!(
+      staged_public_settings_patch: { "tone" => "concise" },
+      staged_agent_config_patch: { "mode" => "review" },
+      staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+    )
+
+    conversation.stop_node!(node_id: agent_node.id, reason: "user_cancelled")
+
+    assert_equal DAG::Node::STOPPED, agent_node.reload.state
+    assert_equal "discarded", draft.reload.status
+    assert_equal "canceled", draft.approval_state.fetch("status")
+    assert_equal({}, draft.staged_public_settings_patch)
+    assert_equal({}, draft.staged_agent_config_patch)
+    assert_equal([], draft.staged_kv_ops)
+    assert_nil draft.materialized_conversation_run_id
+  ensure
+    server&.shutdown
+  end
+
+  test "conversation approval resumes a parked draft locally and enqueues execution without a second turn prepare" do
+    prepare_calls = []
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            prepare_calls << :called
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+
+    assert_equal "awaiting_approval", draft.status
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob) do
+      conversation.approve_parked_agent_node!(node_id: agent_node.id, approved_by: "manual-approval:test")
+    end
+
+    assert_equal 1, prepare_calls.size
+    assert_equal "finalized", draft.reload.status
+    assert_equal "approved", draft.approval_state.fetch("status")
+    assert draft.materialized_conversation_run_id.present?
+  ensure
+    server&.shutdown
+  end
+
+  test "conversation approval rejects a parked node when the pinned deployment binding has gone stale" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    deployment = runtime.fetch(:deployment)
+
+    result = conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node = result.fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+
+    deployment.update!(status: "inactive", health_status: "inactive", deactivated_at: Time.current)
+
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        conversation.approve_parked_agent_node!(node_id: agent_node.id, approved_by: "manual-approval:test")
+      end
+
+    assert_equal "cybros.run_drafts.stale", error.code
+    assert_equal "stale", draft.reload.status
+    assert_equal "stale", draft.approval_state.fetch("status")
+    assert_equal "binding_stale", draft.approval_state.fetch("reason")
+    assert_equal DAG::Node::REJECTED, agent_node.reload.state
+    assert_equal "binding_stale", agent_node.metadata.fetch("reason")
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def create_programmable_runtime!(server:)
@@ -62,7 +336,8 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:v1",
       )
-      AgentDeployment.create!(
+      deployment =
+        AgentDeployment.create!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -90,7 +365,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 
-      { conversation: conversation }
+      { conversation: conversation, deployment: deployment }
     end
 
     def create_execution_target!
