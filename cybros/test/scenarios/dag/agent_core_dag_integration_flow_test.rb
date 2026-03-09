@@ -1604,6 +1604,12 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         context_window_tokens: 350,
         reserved_output_tokens: 0,
         auto_compact: true,
+        execution_context_attributes: {
+          runtime_governance: {
+            provider_credential_id: "cred-auto-compact",
+            provider_key: "openai",
+          },
+        },
       )
 
     original_runtime_resolver = AgentCore::DAG.runtime_resolver
@@ -1619,6 +1625,15 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [a4.id], claimed.map(&:id)
       DAG::Runner.run_node!(a4.id)
+
+      summary_call_governance = provider.calls.fetch(0).dig(:options, :runtime_governance)
+      refute_nil summary_call_governance
+      assert_equal "cred-auto-compact", summary_call_governance[:provider_credential_id]
+      assert_equal "openai", summary_call_governance[:provider_key]
+      assert_equal "DAG::Node", summary_call_governance[:owner_type]
+      assert_equal a4.id, summary_call_governance[:owner_id]
+      assert_equal "#{t4}:#{a4.id}:summary", summary_call_governance[:request_namespace]
+      assert_equal "#{t4}:#{a4.id}:summary:attempt:1", summary_call_governance[:provider_request_id]
 
       summary = graph.nodes.active.where(node_type: "summary").sole
       assert_equal "auto_compact", summary.metadata.fetch("kind")

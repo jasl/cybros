@@ -128,6 +128,47 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
     assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
   end
 
+  def test_derives_attempt_scoped_provider_request_ids_from_request_namespace
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(message: AgentCore::Message.new(role: :assistant, content: "nope"), stop_reason: :end_turn),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "{\"repairs\":[{\"tool_call_id\":\"tc_1\",\"name\":\"echo\"}]}"),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tool_calls = [AgentCore::ToolCall.new(id: "tc_1", name: "no_such_tool", arguments: {})]
+    visible_tools = [{ name: "echo", description: "Echo", parameters: { type: "object", properties: {} } }]
+
+    registry = AgentCore::Resources::Tools::Registry.new
+    registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", description: "Echo", parameters: { type: "object", properties: {} }) { |_args, **_kw| })
+
+    result =
+      AgentCore::Resources::Tools::ToolNameRepairLoop.call(
+        provider: provider,
+        requested_model: "primary",
+        tool_calls: tool_calls,
+        visible_tools: visible_tools,
+        tools_registry: registry,
+        max_attempts: 2,
+        max_output_tokens: 200,
+        options: {
+          runtime_governance: {
+            request_namespace: "rid:tool-name",
+          },
+        },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        run_id: "rid",
+      )
+
+    assert_equal({ "tc_1" => "echo" }, result.fetch(:tool_name_repairs))
+    assert_equal "rid:tool-name:attempt:1", provider.calls.first.dig(:options, :runtime_governance, :provider_request_id)
+    assert_equal "rid:tool-name:attempt:2", provider.calls.second.dig(:options, :runtime_governance, :provider_request_id)
+  end
+
   def test_retries_provider_errors_on_the_same_requested_model
     provider =
       StubProvider.new(
@@ -164,6 +205,48 @@ class AgentCore::Resources::Tools::ToolNameRepairLoopTest < Minitest::Test
     assert_equal ["primary", "primary"], provider.calls.map { |c| c.fetch(:model) }
     failures = result.fetch(:metadata).dig("tool_loop", "tool_name_repair", "failures_sample")
     assert failures.any? { |h| h.fetch("reason").to_s.include?("provider_error=StandardError") }
+  end
+
+  def test_reraises_runtime_wait_error_without_retrying
+    runtime_wait_error =
+      AgentCore::RuntimeWaitError.new(
+        "Provider admission blocked",
+        reason_type: "provider_limit",
+        retry_at: Time.current + 15.seconds,
+        runtime_wait_id: "wait-123",
+        details: { "provider_request_id" => "rid:tool-name:1" },
+      )
+
+    provider = StubProvider.new(responses: [runtime_wait_error])
+    tool_calls = [AgentCore::ToolCall.new(id: "tc_1", name: "no_such_tool", arguments: {})]
+    visible_tools = [{ name: "echo", description: "Echo", parameters: { type: "object", properties: {} } }]
+
+    registry = AgentCore::Resources::Tools::Registry.new
+    registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", description: "Echo", parameters: { type: "object", properties: {} }) { |_args, **_kw| })
+
+    error =
+      assert_raises(AgentCore::RuntimeWaitError) do
+        AgentCore::Resources::Tools::ToolNameRepairLoop.call(
+          provider: provider,
+          requested_model: "primary",
+          tool_calls: tool_calls,
+          visible_tools: visible_tools,
+          tools_registry: registry,
+          max_attempts: 2,
+          max_output_tokens: 200,
+          options: {
+            runtime_governance: {
+              provider_request_id: "rid:tool-name:1",
+            },
+          },
+          instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          run_id: "rid",
+        )
+      end
+
+    assert_same runtime_wait_error, error
+    assert_equal 1, provider.calls.length
+    assert_equal "rid:tool-name:1", provider.calls.first.dig(:options, :runtime_governance, :provider_request_id)
   end
 
   def test_repair_name_must_be_in_visible_tools

@@ -17,7 +17,7 @@ module AgentCore
       # @param transcript [String] New transcript chunk to fold in
       # @param max_output_tokens [Integer]
       # @return [String] Summary text
-      def summarize(previous_summary:, transcript:, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS)
+      def summarize(previous_summary:, transcript:, max_output_tokens: DEFAULT_MAX_OUTPUT_TOKENS, runtime_governance: nil)
         max_output_tokens = Integer(max_output_tokens)
         ValidationError.raise!(
           "max_output_tokens must be positive",
@@ -52,15 +52,19 @@ module AgentCore
           Message.new(role: :user, content: user),
         ]
 
-        resp =
-          @provider.chat(
-            messages: messages,
-            model: @model,
-            tools: nil,
-            stream: false,
-            temperature: DEFAULT_TEMPERATURE,
-            max_tokens: max_output_tokens
-          )
+        chat_options = {
+          messages: messages,
+          model: @model,
+          tools: nil,
+          stream: false,
+          temperature: DEFAULT_TEMPERATURE,
+          max_tokens: max_output_tokens,
+        }
+        if runtime_governance.is_a?(Hash) && runtime_governance.any?
+          chat_options[:runtime_governance] = AgentCore::Utils.deep_symbolize_keys(runtime_governance)
+        end
+
+        resp = @provider.chat(**chat_options)
 
         text = resp&.message&.text.to_s
         raise ProviderError, "summary response was empty" if text.strip.empty?

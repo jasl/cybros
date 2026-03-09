@@ -95,6 +95,7 @@ module AgentCore
             llm_options[:response_format] = response_format if response_format
 
             validate_llm_options!(llm_options)
+            llm_options = llm_options_for_attempt(llm_options, mode: mode_sym, attempt_index: attempt_index)
 
             started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
             assistant_message, assistant_text =
@@ -234,6 +235,22 @@ module AgentCore
         when :prompt_only
           nil
         end
+      end
+
+      def llm_options_for_attempt(llm_options, mode:, attempt_index:)
+        out = llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(llm_options) : {}
+        runtime_governance = out[:runtime_governance]
+        return out unless runtime_governance.is_a?(Hash)
+
+        runtime_governance = AgentCore::Utils.deep_symbolize_keys(runtime_governance)
+        request_namespace = runtime_governance[:request_namespace].to_s.strip
+        return out if request_namespace.empty?
+
+        runtime_governance[:provider_request_id] = "#{request_namespace}:#{mode}:attempt:#{attempt_index + 1}"
+        out[:runtime_governance] = runtime_governance
+        out
+      rescue StandardError
+        llm_options
       end
 
       def structured_output_unsupported_error?(http_error)

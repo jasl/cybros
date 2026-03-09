@@ -250,9 +250,11 @@ module AgentCore
                     model: @requested_model,
                     tools: nil,
                     stream: false,
-                    **repair_options
+                    **repair_options(attempt_idx: attempt_idx)
                   )
                 resp.respond_to?(:message) ? resp.message&.text.to_s : resp.to_s
+              rescue AgentCore::RuntimeWaitError
+                raise
               rescue StandardError => e
                 failures_sample << { "tool_call_id" => "", "reason" => "provider_error=#{e.class}" }
                 next
@@ -299,6 +301,8 @@ module AgentCore
             )
 
           { tool_calls: repaired_tool_calls, metadata: metadata }
+        rescue AgentCore::RuntimeWaitError
+          raise
         rescue StandardError => e
           failures_sample = [{ "tool_call_id" => "", "reason" => "repair_loop_error=#{e.class}" }]
           metadata =
@@ -359,9 +363,18 @@ module AgentCore
           TEXT
         end
 
-        def repair_options
+        def repair_options(attempt_idx:)
           out = AgentCore::Utils.deep_symbolize_keys(@options)
           out.delete(:stream)
+          runtime_governance = out[:runtime_governance]
+          if runtime_governance.is_a?(Hash)
+            runtime_governance = AgentCore::Utils.deep_symbolize_keys(runtime_governance)
+            namespace = runtime_governance[:request_namespace].to_s.strip
+            if runtime_governance[:provider_request_id].to_s.strip.empty? && namespace.present?
+              runtime_governance[:provider_request_id] = "#{namespace}:attempt:#{attempt_idx + 1}"
+            end
+            out[:runtime_governance] = runtime_governance
+          end
           out[:max_tokens] = @max_output_tokens
           out[:temperature] = DEFAULT_TEMPERATURE unless out.key?(:temperature)
           out

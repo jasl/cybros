@@ -918,7 +918,41 @@ module AgentCore
         def summarize_transcript(transcript)
           model = @runtime.summary_model || @runtime.model
           summarizer = AgentCore::ContextManagement::Summarizer.new(provider: @runtime.provider, model: model)
-          summarizer.summarize(previous_summary: nil, transcript: transcript, max_output_tokens: @runtime.summary_max_tokens)
+          summarizer.summarize(
+            previous_summary: nil,
+            transcript: transcript,
+            max_output_tokens: @runtime.summary_max_tokens,
+            runtime_governance: summary_runtime_governance,
+          )
+        end
+
+        def summary_runtime_governance
+          raw = @execution_context&.attributes&.fetch(:runtime_governance, nil)
+          return nil unless raw.is_a?(Hash)
+
+          governance = AgentCore::Utils.deep_symbolize_keys(raw)
+          namespace = summary_request_namespace
+          owner_id = @execution_context&.attributes&.dig(:dag, :node_id).to_s.strip
+          owner_id = @execution_context&.run_id.to_s.strip if owner_id.empty?
+          governance[:request_namespace] = namespace if governance[:request_namespace].to_s.strip.empty? && namespace.present?
+          if governance[:provider_request_id].to_s.strip.empty? && namespace.present?
+            governance[:provider_request_id] = "#{namespace}:attempt:1"
+          end
+          governance[:owner_type] = "DAG::Node" if governance[:owner_type].to_s.strip.empty?
+          governance[:owner_id] = owner_id if governance[:owner_id].to_s.strip.empty? && owner_id.present?
+          governance[:instrumenter] ||= @execution_context&.instrumenter
+          governance[:estimated_tokens] = @runtime.summary_max_tokens unless governance.key?(:estimated_tokens)
+          governance
+        rescue StandardError
+          nil
+        end
+
+        def summary_request_namespace
+          [
+            @execution_context&.run_id.to_s.strip.presence,
+            @execution_context&.attributes&.dig(:dag, :node_id).to_s.strip.presence,
+            "summary",
+          ].compact.join(":")
         end
     end
   end

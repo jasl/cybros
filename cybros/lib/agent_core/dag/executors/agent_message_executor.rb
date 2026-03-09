@@ -467,7 +467,7 @@ module AgentCore
             ).build_prompt(context_nodes: context_nodes)
           end
 
-          def llm_options_with_runtime_governance(base_options:, runtime:, execution_context:, purpose:, estimated_tokens: nil)
+          def llm_options_with_runtime_governance(base_options:, runtime:, execution_context:, purpose:, estimated_tokens: nil, attempt: nil)
             options = base_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base_options) : {}
             runtime_governance =
               runtime_governance_options(
@@ -475,6 +475,7 @@ module AgentCore
                 execution_context: execution_context,
                 purpose: purpose,
                 estimated_tokens: estimated_tokens,
+                attempt: attempt,
               )
 
             return options if runtime_governance.empty?
@@ -485,7 +486,7 @@ module AgentCore
             options
           end
 
-          def runtime_governance_options(runtime:, execution_context:, purpose:, estimated_tokens:)
+          def runtime_governance_options(runtime:, execution_context:, purpose:, estimated_tokens:, attempt:)
             sources = []
             sources << runtime.execution_context_attributes[:runtime_governance] if runtime&.execution_context_attributes.is_a?(Hash)
             sources << execution_context.attributes[:runtime_governance] if execution_context&.attributes.is_a?(Hash)
@@ -504,11 +505,18 @@ module AgentCore
 
             request_namespace = provider_request_namespace(execution_context: execution_context, purpose: purpose)
             instrumenter = execution_context&.instrumenter
+            provider_request_id =
+              if raw[:provider_request_id].to_s.strip.present?
+                raw[:provider_request_id].to_s.strip
+              elsif attempt.present? && request_namespace.present?
+                "#{request_namespace}:attempt:#{attempt}"
+              end
 
             raw.merge(
               owner_type: raw[:owner_type].to_s.strip.presence || "DAG::Node",
               owner_id: raw[:owner_id].to_s.strip.presence || owner_id,
               request_namespace: raw[:request_namespace].to_s.strip.presence || request_namespace,
+              provider_request_id: provider_request_id,
               instrumenter: raw[:instrumenter] || instrumenter,
               estimated_tokens: raw.key?(:estimated_tokens) ? raw[:estimated_tokens] : estimated_tokens,
             ).compact
@@ -565,7 +573,7 @@ module AgentCore
 
             loop do
               begin
-                llm = call_llm(runtime, built_prompt, stream: stream, execution_context: execution_context)
+                llm = call_llm(runtime, built_prompt, stream: stream, execution_context: execution_context, attempt: attempts + 1)
                 if attempts.positive?
                   recovery_metadata_out.replace(
                     agent_call_recovery_metadata(
@@ -604,7 +612,7 @@ module AgentCore
             end
           end
 
-          def call_llm(runtime, built_prompt, stream:, execution_context:)
+          def call_llm(runtime, built_prompt, stream:, execution_context:, attempt:)
             directives_config = runtime.directives_config
             if directives_config.is_a?(Hash)
               return call_llm_with_directives(
@@ -645,6 +653,7 @@ module AgentCore
                 execution_context: execution_context,
                 purpose: "llm",
                 estimated_tokens: estimated_tokens_for(built_prompt, runtime: runtime),
+                attempt: attempt,
               )
 
             instrumenter = execution_context.instrumenter
@@ -768,6 +777,7 @@ module AgentCore
                   ),
                   runtime: runtime,
                 ),
+                attempt: nil,
               )
 
             reserved_keys = AgentCore::Directives::Runner::RESERVED_LLM_OPTIONS_KEYS

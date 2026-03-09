@@ -102,6 +102,87 @@ class ProviderCredentialLimiterFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "runner uses a durable explicit provider request id for top-level llm calls" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000f401"
+    credential = create_provider_credential!(max_concurrent_requests: 1)
+
+    user = nil
+    agent = nil
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    adapter =
+      StubAdapter.new do |_req|
+        body = {
+          "choices" => [
+            {
+              "message" => { "role" => "assistant", "content" => "Hi!" },
+              "finish_reason" => "stop",
+            },
+          ],
+          "usage" => { "prompt_tokens" => 3, "completion_tokens" => 2, "total_tokens" => 5 },
+        }
+
+        { status: 200, headers: { "content-type" => "application/json" }, body: JSON.generate(body) }
+      end
+    provider = build_provider(adapter: adapter)
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        execution_context_attributes: {
+          runtime_governance: {
+            provider_credential_id: credential.id,
+            provider_key: credential.provider_key,
+          },
+        },
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::FINISHED, agent.state
+      reservation = ProviderBudgetReservation.find_by!(provider_credential: credential)
+      assert_equal "settled", reservation.status
+      assert_equal "#{turn_id}:#{agent.id}:llm:attempt:1", reservation.provider_request_id
+      assert_equal "#{turn_id}:#{agent.id}:llm:attempt:1", agent.metadata.dig("runtime_governance", "provider_request_id")
+      assert_equal 1, adapter.calls.length
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
   private
 
   def build_provider(adapter:)

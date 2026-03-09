@@ -157,4 +157,53 @@ class AgentCoreDirectivesRunnerTest < ActiveSupport::TestCase
     skipped = result.fetch(:attempts).take(2)
     assert skipped.all? { |a| a[:skipped] == true }
   end
+
+  test "Runner derives explicit provider request ids for each directives attempt" do
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "not json"),
+            stop_reason: :end_turn,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "{\"assistant_text\":\"ok\",\"directives\":[]}",
+              ),
+            stop_reason: :end_turn,
+          ),
+        ],
+      )
+
+    runner =
+      AgentCore::Directives::Runner.new(
+        provider: provider,
+        model: "test-model",
+        llm_options_defaults: {
+          runtime_governance: {
+            request_namespace: "turn-1:node-1:directives",
+          },
+        },
+        directives_config: { repair_retry_count: 1, modes: [:json_schema] },
+      )
+
+    result =
+      runner.run(
+        history: [AgentCore::Message.new(role: :user, content: "hello")],
+        structured_output_options: { allowed_types: [] },
+      )
+
+    assert result[:ok]
+    assert_equal 2, provider.calls.length
+    assert_equal(
+      "turn-1:node-1:directives:json_schema:attempt:1",
+      provider.calls.first.dig(:options, :runtime_governance, :provider_request_id),
+    )
+    assert_equal(
+      "turn-1:node-1:directives:json_schema:attempt:2",
+      provider.calls.second.dig(:options, :runtime_governance, :provider_request_id),
+    )
+  end
 end
