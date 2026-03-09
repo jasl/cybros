@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000010) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000011) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -165,6 +165,20 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000010) do
     t.index ["agent_rpc_invocation_id"], name: "index_agent_rpc_sessions_on_agent_rpc_invocation_id"
     t.index ["conversation_id"], name: "index_agent_rpc_sessions_on_conversation_id"
     t.index ["session_token_digest"], name: "idx_agent_rpc_sessions_token", unique: true
+  end
+
+  create_table "conversation_kv_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "value", default: {}, null: false
+    t.uuid "written_by_id"
+    t.string "written_by_type"
+    t.index ["conversation_id", "key"], name: "index_conversation_kv_entries_on_conversation_id_and_key", unique: true
+    t.index ["conversation_id"], name: "index_conversation_kv_entries_on_conversation_id"
+    t.index ["written_by_type", "written_by_id"], name: "idx_on_written_by_type_written_by_id_425410460d"
+    t.check_constraint "btrim(key::text) <> ''::text", name: "check_conversation_kv_entries_key_present"
   end
 
   create_table "conversation_runs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -666,6 +680,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000010) do
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations"
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations", column: ["agent_rpc_invocation_id", "agent_deployment_id"], primary_key: ["id", "agent_deployment_id"], name: "fk_agent_rpc_sessions_invocation_deploy"
   add_foreign_key "agent_rpc_sessions", "conversations"
+  add_foreign_key "conversation_kv_entries", "conversations"
   add_foreign_key "conversation_runs", "agent_deployments"
   add_foreign_key "conversation_runs", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_conversation_runs_deploy_program"
   add_foreign_key "conversation_runs", "agent_programs"

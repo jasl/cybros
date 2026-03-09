@@ -30,6 +30,7 @@ class Conversation < ApplicationRecord
            inverse_of: :parent_conversation
 
   has_many :events, dependent: :destroy
+  has_many :conversation_kv_entries, dependent: :destroy
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil? && root?
@@ -279,16 +280,15 @@ class Conversation < ApplicationRecord
       end
 
       if created_new_run
-        ConversationRun.create!(
-          conversation: self,
-          dag_node_id: agent_node.id,
-          state: "queued",
-          queued_at: Time.current,
-          debug: {},
-          error: {},
-        )
-
-        graph.kick!
+        if enqueue_conversation_run!(
+             agent_node: agent_node,
+             selected_model_ref: model_ref,
+             user_input: content,
+             debug: {},
+             error: {},
+           )
+          graph.kick!
+        end
       end
 
       {
@@ -378,16 +378,15 @@ class Conversation < ApplicationRecord
       new_agent = failed_node.retry!
       apply_turn_execution_diagnostic_level!(new_agent, diagnostic_level: diagnostic_level)
 
-      ConversationRun.create!(
-        conversation: self,
-        dag_node_id: new_agent.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: turn_execution_debug_payload(diagnostic_level),
-        error: {},
-      )
-
-      graph.kick!
+      if enqueue_conversation_run!(
+           agent_node: new_agent,
+           selected_model_ref: new_agent.metadata.dig("llm", "model_ref"),
+           user_input: "",
+           debug: turn_execution_debug_payload(diagnostic_level),
+           error: {},
+         )
+        graph.kick!
+      end
 
       new_agent.id
     end
@@ -501,16 +500,15 @@ class Conversation < ApplicationRecord
       end
 
       if created_new_run
-        ConversationRun.create!(
-          conversation: self,
-          dag_node_id: agent_node.id,
-          state: "queued",
-          queued_at: Time.current,
-          debug: {},
-          error: {},
-        )
-
-        graph.kick!
+        if enqueue_conversation_run!(
+             agent_node: agent_node,
+             selected_model_ref: model_ref,
+             user_input: content,
+             debug: {},
+             error: {},
+           )
+          graph.kick!
+        end
       end
 
       {
@@ -721,16 +719,15 @@ class Conversation < ApplicationRecord
       if created_new_turn
         apply_turn_execution_diagnostic_level!(agent_node, diagnostic_level: diagnostic_level)
 
-        ConversationRun.create!(
-          conversation: self,
-          dag_node_id: agent_node.id,
-          state: "queued",
-          queued_at: Time.current,
-          debug: turn_execution_debug_payload(diagnostic_level),
-          error: {},
-        )
-
-        graph.kick!
+        if enqueue_conversation_run!(
+             agent_node: agent_node,
+             selected_model_ref: model_ref,
+             user_input: content,
+             debug: turn_execution_debug_payload(diagnostic_level),
+             error: {},
+           )
+          graph.kick!
+        end
       end
 
       {
@@ -814,16 +811,15 @@ class Conversation < ApplicationRecord
 
       new_agent = target.rerun!(metadata_patch: { "generated_by" => "regenerate" })
 
-      ConversationRun.create!(
-        conversation: self,
-        dag_node_id: new_agent.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: {},
-        error: {},
-      )
-
-      graph.kick!
+      if enqueue_conversation_run!(
+           agent_node: new_agent,
+           selected_model_ref: new_agent.metadata.dig("llm", "model_ref"),
+           user_input: "",
+           debug: {},
+           error: {},
+         )
+        graph.kick!
+      end
 
       { mode: :in_place, node: new_agent }
     end
@@ -1102,6 +1098,93 @@ class Conversation < ApplicationRecord
     def normalize_runtime_settings
       self.permission_mode = permission_mode.to_s.strip.presence || "default"
       self.agent_config = self[:agent_config].is_a?(Hash) ? self[:agent_config].deep_stringify_keys : {}
+    end
+
+    def enqueue_conversation_run!(agent_node:, selected_model_ref:, user_input:, debug:, error:)
+      if agent_program.present?
+        result =
+          RunDrafts::ConversationTurnOrchestrator.enqueue!(
+            conversation: self,
+            initiated_by_user: user,
+            selected_model_ref: selected_model_ref.to_s,
+            trigger_snapshot: {
+              "kind" => "user_turn",
+              "dag_node_id" => agent_node.id,
+              "user_input" => user_input.to_s,
+            },
+            debug: debug,
+            error: error,
+          )
+        return result.fetch(:conversation_run).present?
+      end
+
+      ConversationRun.create!(
+        conversation: self,
+        dag_node_id: agent_node.id,
+        state: "queued",
+        queued_at: Time.current,
+        snapshot_version: 1,
+        effective_permission_mode: permission_mode,
+        agent_program: builtin_agent_program,
+        contract_fingerprint: builtin_agent_program.published_contract_fingerprint,
+        agent_deployment: builtin_agent_deployment,
+        deployment_fingerprint: builtin_agent_deployment.deployment_fingerprint,
+        deployment_activated_at: builtin_agent_deployment.activated_at,
+        selected_model_ref: selected_model_ref.to_s.presence,
+        effective_public_settings: public_settings,
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: builtin_agent_program.config_schema_fingerprint,
+        effective_policy: builtin_effective_policy_summary,
+        runtime_governors: {},
+        snapshot: { "origin" => "builtin_fallback" },
+        debug: debug,
+        error: error,
+      )
+      true
+    end
+
+    def builtin_agent_program
+      @builtin_agent_program ||=
+        AgentProgram.find_or_create_by!(config_namespace: "cybros.builtin.agent") do |program|
+          program.name = "Built-in Agent"
+          program.published_contract_fingerprint = "contract:cybros:builtin:v1"
+          program.manifest_snapshot = { "name" => "Built-in Agent", "agent_program_key" => "cybros-builtin" }
+          program.global_config = {}
+          program.global_config_schema = { "type" => "object" }
+          program.conversation_config_schema = { "type" => "object" }
+          program.config_schema_fingerprint = "config:cybros:builtin:v1"
+        end
+    end
+
+    def builtin_agent_deployment
+      @builtin_agent_deployment ||=
+        AgentDeployment.find_or_initialize_by(
+          agent_program: builtin_agent_program,
+          deployment_fingerprint: "deployment:cybros:builtin:v1",
+        ).tap do |deployment|
+          deployment.transport_kind = "builtin"
+          deployment.endpoint_url = "builtin://local"
+          deployment.deployment_bearer_secret_ref = "builtin://local"
+          deployment.contract_fingerprint = builtin_agent_program.published_contract_fingerprint
+          deployment.status = "inactive"
+          deployment.health_status = "healthy"
+          deployment.protocol_version = AgentDeployments::SUPPORTED_PROTOCOL_VERSION
+          deployment.agent_sdk_version = "cybros-builtin/1.0"
+          deployment.supported_methods = ["local.execute"]
+          deployment.manifest_snapshot = builtin_agent_program.manifest_snapshot
+          deployment.schema_snapshot = {}
+          deployment.capability_snapshot = { "builtin" => true }
+          deployment.inspection_details = {}
+          deployment.activated_at ||= Time.current.change(usec: 0)
+          deployment.save! if deployment.changed?
+        end
+    end
+
+    def builtin_effective_policy_summary
+      Cybros::Permissions::BundleCompiler.compile(
+        permission_mode: permission_mode,
+        tools_registry: Cybros::AgentRuntimeResolver.build_tools_registry,
+      ).fetch(:summary)
     end
 
     def turn_execution_projector

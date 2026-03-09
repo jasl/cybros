@@ -15,6 +15,7 @@ ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "API"
   inflect.acronym "CLI"
   inflect.acronym "DAG"
+  inflect.acronym "KV"
   inflect.acronym "LLM"
   inflect.acronym "LRU"
   inflect.acronym "MCP"

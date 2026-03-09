@@ -69,6 +69,22 @@ class ConversationAgentProgramSelectionTest < ActionDispatch::IntegrationTest
     assert_equal healthy_program.id, conversation.reload.agent_program_id
   end
 
+  test "builtin fallback runs do not add a selectable programmable agent" do
+    user = sign_in_owner!
+    healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
+    activate_program!(healthy_program)
+    conversation = create_conversation!(user: user, title: "Chat")
+    ensure_active_openai_credential!
+
+    conversation.append_user_message!(content: "Hello", model_ref: "openai/gpt-5.4")
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_select 'select[name="conversation[agent_program_id]"] option', text: healthy_program.name
+    assert_select 'select[name="conversation[agent_program_id]"] option', text: "Built-in Agent", count: 0
+  end
+
   private
 
     def sign_in_owner!
@@ -122,5 +138,20 @@ class ConversationAgentProgramSelectionTest < ActionDispatch::IntegrationTest
         capability_snapshot: {},
         inspection_details: {},
       )
+    end
+
+    def ensure_active_openai_credential!
+      credential = LLMProviderCredential.find_or_initialize_by(provider_key: "openai", status: "active")
+      credential.assign_attributes(
+        credential_type: "api_key",
+        api_key: "sk-test",
+        max_concurrent_requests: 3,
+        requests_per_minute: 90,
+        tokens_per_minute: 180_000,
+        burst_limit: 6,
+        backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
+      )
+      credential.save!
+      credential
     end
 end
