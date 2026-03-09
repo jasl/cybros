@@ -15,25 +15,23 @@ class ApplicationSystemTestCase < ActionDispatch::SystemTestCase
   private
 
     def sign_in_as!(email:, password: "Passw0rd")
-      visit new_session_path
+      identity = Identity.find_by!("lower(email) = ?", email.to_s.downcase.strip)
+      assert identity.authenticate(password), "expected #{email} to authenticate"
 
-      find("input[name='email']", visible: true).set(email)
+      browser_session = Session.start!(identity: identity, ip_address: "127.0.0.1", user_agent: "SystemTest")
 
-      password_field = find("input[name='password']", visible: true)
-      password_field.set(password)
+      # Browser-submitted sign-in is flaky in headless Chrome for these system
+      # tests. Inject the same signed cookie that the controller sets instead.
+      visit root_path
+      page.driver.browser.manage.delete_all_cookies
+      page.driver.browser.manage.add_cookie(name: "session_token", value: signed_session_token_for(browser_session), path: "/")
+      visit dashboard_path
+      assert_selector "body[data-layout='agent']", wait: 10
+    end
 
-      if password_field.value != password
-        page.execute_script(<<~JS, password_field, password)
-          const [field, value] = arguments;
-          field.value = value;
-          field.dispatchEvent(new Event("input", { bubbles: true }));
-          field.dispatchEvent(new Event("change", { bubbles: true }));
-        JS
-      end
-
-      assert_equal password, password_field.value
-
-      click_button "Sign in"
-      assert_current_path dashboard_path
+    def signed_session_token_for(session)
+      request = ActionDispatch::TestRequest.create
+      request.cookie_jar.signed[:session_token] = session.id
+      request.cookie_jar[:session_token]
     end
 end

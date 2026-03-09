@@ -1,6 +1,35 @@
 require "test_helper"
 
 class AgentRpcInvocationTest < ActiveSupport::TestCase
+  FIXED_DEPLOYMENT_ACTIVATED_AT = Time.utc(2026, 3, 9, 12, 0, 0)
+
+  test "defaults deployment_activated_at to the agent deployment activation time" do
+    activated_at = FIXED_DEPLOYMENT_ACTIVATED_AT
+    deployment =
+      AgentDeployment.create!(
+        agent_program: create_program!,
+        transport_kind: "websocket",
+        endpoint_url: "http://127.0.0.1:4319/rpc",
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: "contract:v1",
+        deployment_fingerprint: "deployment:v1",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: %w[initialize turn.prepare turn.compose],
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: activated_at,
+      )
+
+    invocation = build_invocation(agent_deployment: deployment)
+
+    assert_equal activated_at, invocation.deployment_activated_at
+  end
+
   test "deduplicates replay-safe invocations within the same agent deployment" do
     invocation = build_invocation
     invocation.save!
@@ -66,7 +95,7 @@ class AgentRpcInvocationTest < ActiveSupport::TestCase
         method: "turn.prepare",
         invocation_id: "invoke-123",
         binding_fingerprint: "binding:v1",
-        deployment_activated_at: Time.current.change(usec: 0),
+        deployment_activated_at: deployment.activated_at || FIXED_DEPLOYMENT_ACTIVATED_AT,
         request_payload_hash: SecureRandom.hex(16),
         status: "succeeded",
         result_snapshot: { "ok" => true },
@@ -88,7 +117,7 @@ class AgentRpcInvocationTest < ActiveSupport::TestCase
     )
   end
 
-  def build_deployment!(program:, deployment_fingerprint: "deployment:v1", status: "active")
+  def build_deployment!(program:, deployment_fingerprint: "deployment:v1", status: "active", activated_at: nil)
     AgentDeployment.create!(
       agent_program: program,
       transport_kind: "websocket",
@@ -105,6 +134,7 @@ class AgentRpcInvocationTest < ActiveSupport::TestCase
       schema_snapshot: {},
       capability_snapshot: {},
       inspection_details: {},
+      activated_at: activated_at || (status == "active" ? FIXED_DEPLOYMENT_ACTIVATED_AT : nil),
     )
   end
 end
