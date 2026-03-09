@@ -4,6 +4,8 @@ class Conversation < ApplicationRecord
   IN_FLIGHT_NODE_STATES = %w[pending awaiting_approval running].freeze
   STATISTICS_SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
   DEFAULT_STATISTICS_SAMPLE_ORIGIN = "runtime"
+  PERMISSION_MODES = Cybros::Permissions::MODES
+  PERMISSION_MODE_LABELS = Cybros::Permissions::LABELS.freeze
 
   belongs_to :user
   belongs_to :agent_program, optional: true
@@ -37,7 +39,10 @@ class Conversation < ApplicationRecord
 
   before_validation :assign_root_conversation, on: :create
   before_validation :ensure_statistics_sample_origin, on: :create
+  before_validation :normalize_runtime_settings
   after_create :set_root_conversation_to_self, if: :root?
+
+  validates :permission_mode, presence: true, inclusion: { in: PERMISSION_MODES }
 
   def dag_node_body_namespace
     Messages
@@ -178,6 +183,16 @@ class Conversation < ApplicationRecord
 
   def composer_state(now: Time.current)
     Conversation::ComposerState.build(conversation: self, now: now)
+  end
+
+  def selected_agent_config
+    namespace = agent_program&.config_namespace.to_s.strip
+    return {} if namespace.empty?
+
+    value = agent_config.fetch(namespace, nil)
+    value.is_a?(Hash) ? value.deep_stringify_keys : {}
+  rescue StandardError
+    {}
   end
 
   def statistics_sample_origin
@@ -753,6 +768,10 @@ class Conversation < ApplicationRecord
             user: user,
             title: title,
             metadata: metadata,
+            agent_program: agent_program,
+            permission_mode: permission_mode,
+            agent_config: agent_config,
+            agent_config_schema_fingerprint: agent_config_schema_fingerprint,
             kind: kind,
             parent_conversation: self,
             forked_from_node_id: from_node.id,
@@ -1078,6 +1097,11 @@ class Conversation < ApplicationRecord
   end
 
   private
+
+    def normalize_runtime_settings
+      self.permission_mode = permission_mode.to_s.strip.presence || "default"
+      self.agent_config = self[:agent_config].is_a?(Hash) ? self[:agent_config].deep_stringify_keys : {}
+    end
 
     def turn_execution_projector
       @turn_execution_projector ||= Conversation::TurnExecutionProjector.new(conversation: self)

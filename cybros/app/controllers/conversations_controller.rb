@@ -9,7 +9,7 @@ class ConversationsController < AgentController
     end
   end
 
-  before_action :set_conversation, only: %i[show composer_status start stop retry steer_current_turn branch regenerate swipe clear_translations]
+  before_action :set_conversation, only: %i[show update composer_status start stop retry steer_current_turn branch regenerate swipe clear_translations]
   before_action :throttle_conversation_actions!, only: %i[start stop retry steer_current_turn]
 
   def index
@@ -67,6 +67,10 @@ class ConversationsController < AgentController
 
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
     @composer_state = @conversation.composer_state
+    @permission_mode_options = Conversation::PERMISSION_MODE_LABELS
+    @selected_agent_program = @conversation.agent_program
+    @agent_program_options = selectable_agent_programs_for(@conversation)
+    @selected_agent_program_stale = @selected_agent_program.present? && @selected_agent_program.active_healthy_deployment.blank?
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
@@ -109,6 +113,11 @@ class ConversationsController < AgentController
       @selected_model_ref = nil
       @stale_model_ref = nil
     end
+  end
+
+  def update
+    Conversations::RuntimeSettingsUpdater.update!(conversation: @conversation, attributes: conversation_update_params)
+    redirect_to conversation_path(@conversation)
   end
 
   def composer_status
@@ -295,5 +304,18 @@ class ConversationsController < AgentController
             options: grouped_options,
           }
         end
+    end
+
+    def selectable_agent_programs_for(conversation)
+      programs = AgentProgram.selectable_for_conversations.to_a
+      selected = conversation.agent_program
+      if selected.present? && programs.none? { |program| program.id == selected.id }
+        programs << selected
+      end
+      programs.sort_by { |program| program.name.to_s.downcase }
+    end
+
+    def conversation_update_params
+      params.fetch(:conversation, {}).permit(:agent_program_id, :permission_mode)
     end
 end

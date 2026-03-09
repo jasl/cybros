@@ -21,6 +21,8 @@ class AgentDeployment < ApplicationRecord
 
   validate :one_active_deployment_per_program, if: :active?
 
+  scope :active_healthy, -> { where(status: ACTIVE_STATUS, health_status: "healthy") }
+
   def active?
     status == ACTIVE_STATUS
   end

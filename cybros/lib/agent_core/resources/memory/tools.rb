@@ -41,7 +41,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}search",
             description: "Search memory for relevant entries.",
-            metadata: { source: :memory },
+            metadata: { source: :memory, permission_class: "read" },
             parameters: {
               type: "object",
               additionalProperties: false,
@@ -152,7 +152,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}store",
             description: "Store a new memory entry.",
-            metadata: { source: :memory },
+            metadata: { source: :memory, permission_class: "mutate" },
             parameters: {
               type: "object",
               additionalProperties: false,
@@ -223,7 +223,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}forget",
             description: "Forget (delete) a memory entry by id.",
-            metadata: { source: :memory },
+            metadata: { source: :memory, permission_class: "mutate" },
             parameters: {
               type: "object",
               additionalProperties: false,

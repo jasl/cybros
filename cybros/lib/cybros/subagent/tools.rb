@@ -38,7 +38,7 @@ module Cybros
             },
             required: ["name", "prompt"],
           },
-          metadata: { source: :cybros, category: :subagent },
+          metadata: { source: :cybros, category: :subagent, permission_class: "delegate" },
         ) do |args, context:|
           enforce_no_nested_spawn!(context)
 
@@ -135,7 +135,7 @@ module Cybros
             },
             required: ["child_conversation_id"],
           },
-          metadata: { source: :cybros, category: :subagent },
+          metadata: { source: :cybros, category: :subagent, permission_class: "read" },
         ) do |args, context:|
           child_id = parse_child_conversation_id!(args.fetch("child_conversation_id", nil), code_prefix: "cybros.subagent_poll")
           parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_poll")
@@ -182,7 +182,7 @@ module Cybros
             },
             required: ["name", "prompt"],
           },
-          metadata: { source: :cybros, category: :subagent },
+          metadata: { source: :cybros, category: :subagent, permission_class: "delegate" },
         ) do |args, context:|
           enforce_no_nested_spawn!(context, code_prefix: "cybros.subagent_run", tool_name: "subagent_run")
 
@@ -299,7 +299,7 @@ module Cybros
             },
             required: ["child_conversation_id"],
           },
-          metadata: { source: :cybros, category: :subagent },
+          metadata: { source: :cybros, category: :subagent, permission_class: "read" },
         ) do |args, context:|
           child_id = parse_child_conversation_id!(args.fetch("child_conversation_id", nil), code_prefix: "cybros.subagent_wait")
           parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_wait")

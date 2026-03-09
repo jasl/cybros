@@ -49,7 +49,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}list",
             description: "List available skills (metadata only).",
-            metadata: { source: :skills },
+            metadata: { source: :skills, permission_class: "read" },
             parameters: {
               type: "object",
               additionalProperties: false,
@@ -98,7 +98,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}load",
             description: "Load a skill by name (body markdown + files index).",
-            metadata: { source: :skills },
+            metadata: { source: :skills, permission_class: "read" },
             parameters: {
               type: "object",
               additionalProperties: false,
@@ -150,7 +150,7 @@ module AgentCore
           Resources::Tools::Tool.new(
             name: "#{prefix}read_file",
             description: "Read a file from within a skill directory (scripts/references/assets).",
-            metadata: { source: :skills },
+            metadata: { source: :skills, permission_class: "read" },
             parameters: {
               type: "object",
               additionalProperties: false,

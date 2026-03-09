@@ -28,7 +28,7 @@ Rails.application.routes.draw do
   end
 
   resources :agent_programs, only: %i[index new create show]
-  resources :conversations, only: %i[index show create] do
+  resources :conversations, only: %i[index show create update] do
     get :composer_status, on: :member
     post :branch, on: :member
     post :regenerate, on: :member

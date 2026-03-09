@@ -93,7 +93,14 @@
         <span>Streaming seems stuck. You can stop generation if it does not recover.</span>
       </div>
 
-      <%= form_with url: conversation_messages_path(@conversation), method: :post, data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
+      <% message_form_id = dom_id(@conversation, :message_form) %>
+      <% permission_form_id = dom_id(@conversation, :permission_mode_form) %>
+      <% agent_program_form_id = dom_id(@conversation, :agent_program_form) %>
+
+      <%= form_with url: conversation_messages_path(@conversation),
+        method: :post,
+        html: { id: message_form_id },
+        data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
         <% needs_model_reselection = @model_picker_alert_message.present? && @selected_model_ref.blank? %>
         <% if @model_picker_alert_message.present? %>
           <div role="alert" class="alert alert-warning alert-soft text-sm">
@@ -154,12 +161,13 @@
         <div
           data-testid="conversation-composer-footer"
           class="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-2 pt-1">
-          <div class="flex items-center gap-2">
+          <div class="flex flex-wrap items-center gap-2">
             <% if @llm_model_options.present? %>
               <select
                 name="model_ref"
                 data-testid="conversation-composer-model-picker"
                 aria-label="Model"
+                form="<%= message_form_id %>"
                 <%= needs_model_reselection ? "required" : nil %>
                 class="select select-bordered select-xs max-w-full">
                 <% if needs_model_reselection %>
@@ -187,6 +195,35 @@
                 <%= link_to "Configure", system_settings_llm_providers_path, class: "link link-primary text-xs" %>
               <% end %>
             <% end %>
+
+            <select
+              name="conversation[agent_program_id]"
+              form="<%= agent_program_form_id %>"
+              data-testid="conversation-composer-agent-picker"
+              aria-label="Agent"
+              onchange="this.form.requestSubmit()"
+              class="select select-bordered select-xs max-w-full">
+              <option value="" <%= @selected_agent_program.nil? ? "selected" : nil %>>Built-in</option>
+              <% @agent_program_options.each do |program| %>
+                <option value="<%= program.id %>" <%= @selected_agent_program&.id == program.id ? "selected" : nil %>>
+                  <%= program.name %>
+                </option>
+              <% end %>
+            </select>
+
+            <select
+              name="conversation[permission_mode]"
+              form="<%= permission_form_id %>"
+              data-testid="conversation-composer-permission-picker"
+              aria-label="Permissions"
+              onchange="this.form.requestSubmit()"
+              class="select select-bordered select-xs max-w-full">
+              <% @permission_mode_options.each do |value, label| %>
+                <option value="<%= value %>" <%= @conversation.permission_mode == value ? "selected" : nil %>>
+                  <%= label %>
+                </option>
+              <% end %>
+            </select>
           </div>
 
           <div class="flex items-center gap-1">
@@ -208,6 +245,18 @@
               Retry
             </button>
           </div>
+        </div>
+      <% end %>
+
+      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: agent_program_form_id, class: "hidden" } do %>
+      <% end %>
+
+      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: permission_form_id, class: "hidden" } do %>
+      <% end %>
+
+      <% if @selected_agent_program_stale %>
+        <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-agent-stale-warning">
+          <span>Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment.</span>
         </div>
       <% end %>
     </div>

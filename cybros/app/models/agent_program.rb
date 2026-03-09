@@ -3,6 +3,7 @@ class AgentProgram < ApplicationRecord
   has_many :conversations, dependent: :restrict_with_exception
   has_many :conversation_runs, dependent: :restrict_with_exception
   has_many :run_drafts, dependent: :restrict_with_exception
+  has_one :active_healthy_deployment, -> { active_healthy }, class_name: "AgentDeployment"
 
   before_validation :normalize_contract_fields
 
@@ -10,6 +11,8 @@ class AgentProgram < ApplicationRecord
   validates :config_namespace, presence: true, uniqueness: true
   validates :published_contract_fingerprint, presence: true
   validates :config_schema_fingerprint, presence: true
+
+  scope :selectable_for_conversations, -> { joins(:agent_deployments).merge(AgentDeployment.active_healthy).distinct.order(:name) }
 
   def global_config
     value = self[:global_config]
