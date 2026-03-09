@@ -334,6 +334,146 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     callback_server&.shutdown
   end
 
+  test "conservative mode parks for approval when a callback stages public settings mutation without agent approval_state" do
+    callback_server = CallbackAppServer.new.start
+    original_url_options = ActionMailer::Base.default_url_options.dup
+    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |params, base_result, _identity|
+            fixture_callback!(
+              callback: params.fetch("callback_session"),
+              method_name: "conversation.settings.update",
+              params: {
+                "operation_id" => "op-settings-confirm",
+                "patch" => { "tone" => "concise" },
+              },
+            )
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:, permission_mode: "conservative")
+    conversation = runtime.fetch(:conversation)
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal "awaiting_approval", draft.reload.status
+    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
+    assert_equal "public_state_mutation", draft.approval_state.fetch("reason")
+    assert_equal "conversation.settings.update", draft.approval_state.fetch("method_name")
+    assert_equal({ "tone" => "concise" }, draft.staged_public_settings_patch)
+    assert_equal({}, conversation.reload.public_settings)
+  ensure
+    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
+    server&.shutdown
+    callback_server&.shutdown
+  end
+
+  test "default mode allows staged public settings mutation without parking the draft" do
+    callback_server = CallbackAppServer.new.start
+    original_url_options = ActionMailer::Base.default_url_options.dup
+    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |params, base_result, _identity|
+            fixture_callback!(
+              callback: params.fetch("callback_session"),
+              method_name: "conversation.settings.update",
+              params: {
+                "operation_id" => "op-settings-allow",
+                "patch" => { "tone" => "concise" },
+              },
+            )
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:, permission_mode: "default")
+    conversation = runtime.fetch(:conversation)
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal "prepared", draft.reload.status
+    assert_equal({ "status" => "not_required" }, draft.approval_state)
+    assert_equal({ "tone" => "concise" }, draft.staged_public_settings_patch)
+    assert_equal({}, conversation.reload.public_settings)
+  ensure
+    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
+    server&.shutdown
+    callback_server&.shutdown
+  end
+
+  test "replayed conservative kv mutation callbacks do not append duplicate staged operations" do
+    callback_server = CallbackAppServer.new.start
+    original_url_options = ActionMailer::Base.default_url_options.dup
+    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |params, base_result, _identity|
+            callback = params.fetch("callback_session")
+            2.times do
+              fixture_callback!(
+                callback: callback,
+                method_name: "conversation.kv.set",
+                params: {
+                  "operation_id" => "op-kv-confirm",
+                  "key" => "shared.stage",
+                  "value" => { "status" => "planned" },
+                },
+              )
+            end
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:, permission_mode: "conservative")
+    conversation = runtime.fetch(:conversation)
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal "awaiting_approval", draft.reload.status
+    assert_equal "public_state_mutation", draft.approval_state.fetch("reason")
+    assert_equal [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }], draft.staged_kv_ops
+  ensure
+    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
+    server&.shutdown
+    callback_server&.shutdown
+  end
+
   test "planning params read the draft-selected program config after the live conversation selection changes" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)

@@ -5,6 +5,12 @@ module Cybros
         new(permission_mode: permission_mode, tools_registry: tools_registry).compile
       end
 
+      def self.summary_for(permission_mode:)
+        compiler = new(permission_mode: permission_mode, tools_registry: nil)
+        compiler.send(:validate_permission_mode!)
+        compiler.send(:summary)
+      end
+
       def initialize(permission_mode:, tools_registry:)
         @permission_mode = permission_mode.to_s.strip
         @tools_registry = tools_registry

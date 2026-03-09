@@ -6,13 +6,13 @@ Environment note:
 
 - Audit verification was rerun from a clean `test` database after an initial false failure caused by stale `rails runner` data left in `cybros_test`.
 - Fresh evidence below comes from rerun Rails batches, Playwright E2E, current source inspection, and explicit file-existence checks.
+- During this repair pass, progress and closure state are recorded here. Product docs and plan docs remain the semantic baseline until the final full re-review reconciles any true documentation drift.
 
 ## Repair Status
 
-- Closed on 2026-03-09: `PA-001`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-013`
-- Still open: `PA-002`, `PA-006`, `PA-011`, `PA-012`
+- Closed on 2026-03-09: `PA-001`, `PA-002`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-013`
+- Still open: `PA-006`, `PA-011`, `PA-012`
 - Explicitly excluded from implementation in this repair session: `PA-006`, `PA-011`, `PA-012`
-- `PA-002` was not silently dropped; it remains open because public-state mutation policy enforcement spans callback dispatch and permission-bundle evaluation and was not isolated into a dedicated repair batch in this session.
 
 ## PA-001
 
@@ -42,8 +42,12 @@ Environment note:
 
 ## PA-002
 
-- Status: Open, deferred from the 2026-03-09 repair session.
-- Reason this remains open: public-state mutation callbacks still need a dedicated enforcement pass that evaluates `allow` / `confirm` / `deny` through the permission bundle before staged state mutations are accepted.
+- Status: Closed on 2026-03-09.
+- Repair summary: callback dispatch now evaluates public-state mutation policy through the compiled permission preset summary, stages kernel-owned approval for `confirm`, and keeps replayed callback mutations idempotent under the parked draft state.
+- Verification:
+  - `bin/rails test test/services/runtime_governance/public_state_mutation_policy_test.rb test/integration/run_draft_finalization_test.rb`
+  - `bin/rails test test/services/runtime_governance/public_state_mutation_policy_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb`
+- Historical finding retained below for traceability; it no longer describes current behavior.
 
 - Severity: P1
 - Conclusion: conversation settings/config/KV mutation callbacks are staged without any permission-policy decision. The compiled preset summary mentions public-state mutation behavior, but the callback path never consults it.
