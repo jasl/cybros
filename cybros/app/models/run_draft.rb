@@ -1,5 +1,6 @@
 class RunDraft < ApplicationRecord
   belongs_to :conversation, optional: true
+  belongs_to :automation, optional: true
   belongs_to :initiated_by_user, class_name: "User", optional: true
   belongs_to :agent_program
   belongs_to :agent_deployment

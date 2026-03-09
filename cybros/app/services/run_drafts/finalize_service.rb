@@ -17,9 +17,10 @@ module RunDrafts
         ensure_finalizable!
 
         run = nil
-        Conversation.transaction do
+        ApplicationRecord.transaction do
           apply_staged_mutations!
-          run = materialize_run!
+          run = materialize_conversation_run!
+          finalize_automation_run!(conversation_run: run)
           draft.update!(
             status: "finalized",
             materialized_conversation_run: run,
@@ -135,6 +136,7 @@ module RunDrafts
       end
 
       def apply_public_settings_patch!
+        return if conversation.blank?
         return if draft.staged_public_settings_patch.blank?
 
         conversation.public_settings = conversation.public_settings.deep_merge(draft.staged_public_settings_patch)
@@ -142,6 +144,7 @@ module RunDrafts
       end
 
       def apply_agent_config_patch!
+        return if conversation.blank?
         return if draft.staged_agent_config_patch.blank?
 
         namespace = draft.agent_program.config_namespace.to_s
@@ -154,6 +157,8 @@ module RunDrafts
       end
 
       def apply_kv_ops!
+        return if conversation.blank?
+
         Array(draft.staged_kv_ops).each do |operation|
           next unless operation.is_a?(Hash)
 
@@ -175,13 +180,16 @@ module RunDrafts
       end
 
       def apply_execution_target_selection!
+        return if conversation.blank?
         return unless draft.proposed_execution_target.present?
         return if conversation.default_execution_target_id.to_s == draft.proposed_execution_target_id.to_s
 
         conversation.update!(default_execution_target: draft.proposed_execution_target)
       end
 
-      def materialize_run!
+      def materialize_conversation_run!
+        return nil if conversation.blank?
+
         ConversationRun.create!(
           conversation: conversation,
           dag_node_id: dag_node_id!,
@@ -199,7 +207,7 @@ module RunDrafts
           execution_target: draft.proposed_execution_target,
           selected_model_ref: draft.selected_model_ref,
           effective_public_settings: conversation.public_settings,
-          effective_agent_config: conversation.selected_agent_config,
+          effective_agent_config: conversation.selected_agent_config_for(draft.agent_program),
           agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint,
           effective_policy: effective_policy_summary,
           runtime_governors: draft.runtime_governors,
@@ -216,6 +224,36 @@ module RunDrafts
         )
       end
 
+      def finalize_automation_run!(conversation_run:)
+        return if automation_run.blank?
+
+        automation_run.update!(
+          conversation_run: conversation_run,
+          snapshot: automation_run.snapshot.deep_merge(
+            "draft" => {
+              "id" => draft.id,
+              "trigger_snapshot" => draft.trigger_snapshot,
+              "prepared_plan" => draft.prepared_plan,
+              "approval_state" => draft.approval_state,
+            },
+            "runtime" => {
+              "conversation_id" => conversation&.id,
+              "conversation_run_id" => conversation_run&.id,
+              "selected_model_ref" => draft.selected_model_ref,
+              "permission_mode" => draft.permission_mode,
+              "agent_program_id" => draft.agent_program_id,
+              "contract_fingerprint" => draft.contract_fingerprint,
+              "agent_deployment_id" => draft.agent_deployment_id,
+              "deployment_fingerprint" => draft.deployment_fingerprint,
+              "deployment_activated_at" => draft.deployment_activated_at&.iso8601,
+              "provider_credential_id" => draft.provider_credential_id,
+              "execution_target_id" => draft.proposed_execution_target_id,
+              "runtime_governors" => draft.runtime_governors,
+            }.compact,
+          ),
+        )
+      end
+
       def effective_policy_summary
         Cybros::Permissions::BundleCompiler.compile(
           permission_mode: draft.permission_mode,
@@ -225,6 +263,7 @@ module RunDrafts
 
       def dag_node_id!
         id = draft.trigger_snapshot["dag_node_id"].to_s.strip
+        return ensure_automation_agent_node!(id) if draft.automation_id.present? && conversation.present?
         return id if id.present?
 
         AgentCore::ValidationError.raise!(
@@ -234,12 +273,37 @@ module RunDrafts
         )
       end
 
+      def ensure_automation_agent_node!(requested_id)
+        existing_id = requested_id.to_s.strip
+        return existing_id if existing_id.present? && conversation.root_graph.nodes.exists?(id: existing_id)
+
+        node =
+          conversation.root_graph.nodes.create!(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            metadata: {
+              "source" => "automation",
+              "automation_id" => draft.automation_id,
+              "automation_run_id" => automation_run&.id,
+            }.compact,
+          )
+        draft.update!(trigger_snapshot: draft.trigger_snapshot.merge("dag_node_id" => node.id))
+        node.id
+      end
+
       def conversation
-        @conversation ||= draft.conversation || AgentCore::ValidationError.raise!(
-          "Conversation-backed finalization is required.",
-          code: "cybros.run_drafts.conversation_missing",
-          details: { run_draft_id: draft.id },
-        )
+        return @conversation if defined?(@conversation)
+
+        @conversation =
+          if draft.conversation.present?
+            draft.conversation
+          elsif draft.trigger_snapshot["conversation_id"].present?
+            Conversation.find_by(id: draft.trigger_snapshot["conversation_id"]) || AgentCore::ValidationError.raise!(
+              "Conversation-backed finalization is missing the bound conversation.",
+              code: "cybros.run_drafts.conversation_missing",
+              details: { run_draft_id: draft.id, conversation_id: draft.trigger_snapshot["conversation_id"] },
+            )
+          end
       end
 
       def normalize_hash(value)
@@ -264,10 +328,31 @@ module RunDrafts
 
       def resolve_current_binding!(target:)
         RuntimeGovernance::DraftGovernorResolver.resolve!(
-          entrypoint: conversation,
+          entrypoint: runtime_entrypoint,
           selected_model_ref: draft.selected_model_ref,
           execution_target: target,
         )
+      end
+
+      def runtime_entrypoint
+        return conversation if draft.conversation.present?
+        return AgentRpc::KernelServices::ExecutionTargets.resolve_entrypoint_for(draft) if draft.automation_id.present?
+
+        AgentCore::ValidationError.raise!(
+          "Run draft is missing an execution entrypoint.",
+          code: "cybros.run_drafts.entrypoint_missing",
+          details: { run_draft_id: draft.id },
+        )
+      end
+
+      def automation_run
+        return @automation_run if defined?(@automation_run)
+
+        automation_run_id = draft.trigger_snapshot["automation_run_id"].to_s.strip
+        @automation_run =
+          if automation_run_id.present?
+            AutomationRun.find_by(id: automation_run_id)
+          end
       end
 
       def persist_terminal_status_for!(error)

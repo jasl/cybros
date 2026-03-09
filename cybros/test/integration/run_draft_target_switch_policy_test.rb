@@ -58,10 +58,11 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     current_target = create_execution_target!(name: "Current target")
     alternate_target = create_execution_target!(name: "Alternate target", max_concurrent_tasks_override: 2)
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
+    automation = create_automation!(execution_target: current_target)
     draft =
       build_draft(
         conversation: nil,
-        automation_id: SecureRandom.uuid,
+        automation_id: automation.id,
         initiated_by_user: nil,
         proposed_execution_target: current_target,
         permission_mode: "full_access",
@@ -191,6 +192,33 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
         max_concurrent_tasks_override: max_concurrent_tasks_override,
         max_queued_tasks_override: max_queued_tasks_override,
         default_timeout_s_override: default_timeout_s_override,
+      )
+    end
+
+    def create_automation!(execution_target:)
+      user = User.create!(
+        identity: Identity.create!(
+          email: "automation-#{SecureRandom.hex(4)}@example.com",
+          password: "Passw0rd",
+          password_confirmation: "Passw0rd",
+        ),
+        role: :owner,
+      )
+
+      Automation.create!(
+        user: user,
+        agent_program: create_program!,
+        execution_target: execution_target,
+        permission_mode: "full_access",
+        status: "active",
+        schedule_kind: "rrule",
+        schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+        schedule_timezone: "UTC",
+        task_payload: {
+          "kind" => "scheduled_prompt",
+          "prompt" => "Ship it",
+          "selected_model_ref" => "openai/gpt-5.4",
+        },
       )
     end
 

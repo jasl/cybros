@@ -188,7 +188,11 @@ class Conversation < ApplicationRecord
   end
 
   def selected_agent_config
-    namespace = agent_program&.config_namespace.to_s.strip
+    selected_agent_config_for(agent_program)
+  end
+
+  def selected_agent_config_for(program)
+    namespace = program&.config_namespace.to_s.strip
     return {} if namespace.empty?
 
     value = agent_config.fetch(namespace, nil)
