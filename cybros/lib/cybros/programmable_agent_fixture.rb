@@ -23,6 +23,7 @@ module Cybros
             agent.schemas.get
             turn.prepare
             turn.compose
+            turn.handle_error
           ],
         }
 
@@ -105,6 +106,13 @@ module Cybros
           "output" => {
             "role" => "assistant",
             "content" => "fixture compose response",
+          },
+        }
+      when "turn.handle_error"
+        {
+          "output" => {
+            "role" => "assistant",
+            "content" => "fixture handle error response",
           },
         }
       else

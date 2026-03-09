@@ -7,6 +7,7 @@ module AgentDeployments
     agent.schemas.get
     turn.prepare
     turn.compose
+    turn.handle_error
   ].freeze
 
   class Error < StandardError; end

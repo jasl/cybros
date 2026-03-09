@@ -12,28 +12,14 @@ module Cybros
     def chat(messages:, model:, tools: nil, stream: false, **options)
       result = invoke_turn_compose(messages:, model:, tools:, options:)
       response = build_response(result)
-      @last_call_metadata = {
-        "agent_rpc" => {
-          "method" => "turn.compose",
-          "scope_type" => "conversation_run",
-          "scope_id" => conversation_run.id,
-        },
-      }
-
-      return response unless stream
-
-      message = response.message
-      usage = response.usage
-      Enumerator.new do |y|
-        text = message.text.to_s
-        y << AgentCore::StreamEvent::TextDelta.new(text: text) unless text.empty?
-        y << AgentCore::StreamEvent::MessageComplete.new(message: message)
-        y << AgentCore::StreamEvent::Done.new(stop_reason: response.stop_reason, usage: usage)
-      end
+      set_last_call_metadata!("turn.compose")
+      stream ? stream_response(response) : response
     rescue AgentCore::ValidationError
       raise
     rescue StandardError => e
-      raise AgentCore::ProviderError.new(e.message)
+      response = response_from_error_hook(messages:, model:, tools:, options:, error: e)
+      set_last_call_metadata!("turn.handle_error")
+      stream ? stream_response(response) : response
     end
 
     def name = "programmable_agent"
@@ -53,6 +39,19 @@ module Cybros
           method_name: "turn.compose",
           invocation_id: conversation_run.compose_invocation_id,
           request_payload: request_payload(messages:, model:, tools:, options:),
+          allowed_callback_methods: CALLBACK_METHODS,
+        )
+      end
+
+      def invoke_turn_handle_error(messages:, model:, tools:, options:, error:)
+        AgentRpc::LifecycleCaller.call!(
+          deployment: conversation_run.agent_deployment,
+          conversation: conversation_run.conversation,
+          scope_type: "conversation_run",
+          scope_id: conversation_run.id,
+          method_name: "turn.handle_error",
+          invocation_id: conversation_run.handle_error_invocation_id,
+          request_payload: request_payload(messages:, model:, tools:, options:).merge("error" => error_payload(error)),
           allowed_callback_methods: CALLBACK_METHODS,
         )
       end
@@ -113,6 +112,43 @@ module Cybros
           raw: payload,
           stop_reason: normalize_stop_reason(payload["stop_reason"]),
         )
+      end
+
+      def response_from_error_hook(messages:, model:, tools:, options:, error:)
+        result = invoke_turn_handle_error(messages:, model:, tools:, options:, error: error)
+        build_response(result)
+      rescue AgentCore::ValidationError
+        raise
+      rescue StandardError
+        raise AgentCore::ProviderError.new(error.message)
+      end
+
+      def set_last_call_metadata!(method_name)
+        @last_call_metadata = {
+          "agent_rpc" => {
+            "method" => method_name,
+            "scope_type" => "conversation_run",
+            "scope_id" => conversation_run.id,
+          },
+        }
+      end
+
+      def stream_response(response)
+        message = response.message
+        usage = response.usage
+        Enumerator.new do |y|
+          text = message.text.to_s
+          y << AgentCore::StreamEvent::TextDelta.new(text: text) unless text.empty?
+          y << AgentCore::StreamEvent::MessageComplete.new(message: message)
+          y << AgentCore::StreamEvent::Done.new(stop_reason: response.stop_reason, usage: usage)
+        end
+      end
+
+      def error_payload(error)
+        {
+          "class" => error.class.name,
+          "message" => error.message.to_s,
+        }.compact
       end
 
       def build_usage(value)

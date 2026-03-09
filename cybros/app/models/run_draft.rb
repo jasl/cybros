@@ -22,6 +22,25 @@ class RunDraft < ApplicationRecord
   validate :binding_consistency
   validate :governor_snapshot_consistency
 
+  def bound_conversation
+    return conversation if conversation.present?
+
+    conversation_id = trigger_snapshot["conversation_id"].to_s.strip
+    return nil if conversation_id.empty?
+
+    Conversation.find_by(id: conversation_id)
+  end
+
+  def bound_agent_node
+    conversation = bound_conversation
+    return nil if conversation.nil?
+
+    node_id = trigger_snapshot["dag_node_id"].to_s.strip
+    return nil if node_id.empty?
+
+    conversation.root_graph.nodes.find_by(id: node_id)
+  end
+
   private
 
     def normalize_payloads

@@ -68,6 +68,62 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
+  test "activates when health inspection reports an alternate successful status label" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "agent.health" => { "healthy" => true, "status" => "ok" },
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    deployment.reload
+    assert_equal "healthy", deployment.health_status
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+    deployment.reload
+    assert_equal "active", deployment.status
+  ensure
+    server&.shutdown
+  end
+
+  test "rejects activation when turn.handle_error is missing from the inspected contract" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "supported_methods" => %w[
+            initialize
+            agent.describe
+            agent.health
+            agent.schemas.get
+            turn.prepare
+            turn.compose
+          ],
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def sign_in_owner!

@@ -129,6 +129,42 @@ class RuntimeGovernance::ProviderBudgetReservationsTest < ActiveSupport::TestCas
     assert_equal "provider_limit", blocked.fetch(:runtime_wait).reason_type
   end
 
+  test "keeps released reservations in the rolling token window after concurrent capacity is freed" do
+    credential = create_provider_credential!(max_concurrent_requests: 1, requests_per_minute: 10, tokens_per_minute: 100)
+    now = Time.current.change(usec: 0)
+
+    RuntimeGovernance::ProviderBudgetReservations.acquire!(
+      provider_credential: credential,
+      provider_request_id: "provider-req-1",
+      request_units: 1,
+      estimated_tokens: 80,
+      owner_type: "RunDraft",
+      owner_id: "draft-1",
+      now: now,
+    )
+    released =
+      RuntimeGovernance::ProviderBudgetReservations.release!(
+        provider_credential: credential,
+        provider_request_id: "provider-req-1",
+        now: now + 5.seconds,
+      )
+
+    blocked =
+      RuntimeGovernance::ProviderBudgetReservations.acquire!(
+        provider_credential: credential,
+        provider_request_id: "provider-req-2",
+        request_units: 1,
+        estimated_tokens: 30,
+        owner_type: "RunDraft",
+        owner_id: "draft-2",
+        now: now + 10.seconds,
+      )
+
+    assert_equal "released", released.status
+    assert_equal "parked", blocked.fetch(:decision)
+    assert_equal "provider_limit", blocked.fetch(:runtime_wait).reason_type
+  end
+
   test "reconciles expired reservations so new work can acquire" do
     credential = create_provider_credential!(max_concurrent_requests: 1, requests_per_minute: 10, tokens_per_minute: 1_000)
     stale =

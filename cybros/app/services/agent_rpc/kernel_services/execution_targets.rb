@@ -62,7 +62,9 @@ module AgentRpc
             permission_mode: permission_mode,
           )
 
-        apply_proposal!(proposed_target) if %w[allow confirm].include?(switch_decision.fetch("decision"))
+        if %w[allow confirm].include?(switch_decision.fetch("decision"))
+          apply_proposal!(proposed_target, switch_decision: switch_decision)
+        end
 
         {
           "target" => target,
@@ -106,13 +108,27 @@ module AgentRpc
           "default"
         end
 
-        def apply_proposal!(proposed_target)
-          RuntimeGovernance::DraftGovernorResolver.apply!(
-            draft: draft,
-            entrypoint: entrypoint,
-            selected_model_ref: draft.selected_model_ref,
-            execution_target: proposed_target,
+        def apply_proposal!(proposed_target, switch_decision:)
+          resolved =
+            RuntimeGovernance::DraftGovernorResolver.resolve!(
+              entrypoint: entrypoint,
+              selected_model_ref: draft.selected_model_ref,
+              execution_target: proposed_target,
+            )
+          draft.assign_attributes(
+            provider_credential: resolved.fetch(:provider_credential),
+            proposed_execution_target: resolved.fetch(:proposed_execution_target),
+            selected_model_ref: resolved.fetch(:selected_model_ref),
+            runtime_governors: resolved.fetch(:runtime_governors),
           )
+          if switch_decision.fetch("decision") == "confirm"
+            draft.status = RunDrafts::ConversationTurnPlanningService::AWAITING_APPROVAL_STATUS
+            draft.approval_state = {
+              "status" => "pending_confirmation",
+              "reason" => "target_switch",
+              "proposed_execution_target_id" => proposed_target.id,
+            }
+          end
           draft.save!
         end
 

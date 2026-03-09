@@ -1,7 +1,7 @@
 require "test_helper"
 
 class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
-  test "replays the same invocation id only against the same pinned binding" do
+  test "replays the same invocation id only against the same pinned deployment row" do
     runtime = create_runtime!
     first =
       AgentRpc::InvocationStore.start_or_replay!(
@@ -32,22 +32,78 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
 
     assert_equal true, replay.fetch(:replayed)
     assert_equal first.fetch(:invocation).id, replay.fetch(:invocation).id
+  end
 
-    replacement = replacement_deployment!(program: runtime.fetch(:program), deployment_fingerprint: "deployment:v2")
-    error =
-      assert_raises(AgentCore::ValidationError) do
-        AgentRpc::InvocationStore.start_or_replay!(
-          deployment: replacement,
-          conversation: runtime.fetch(:conversation),
-          scope_type: "run_draft",
-          scope_id: "draft-123",
-          method_name: "turn.prepare",
-          invocation_id: "invoke-123",
-          request_payload: { "user_input" => "Hello" },
-        )
-      end
+  test "does not replay across a different deployment row with copied binding fields" do
+    runtime = create_runtime!
+    first =
+      AgentRpc::InvocationStore.start_or_replay!(
+        deployment: runtime.fetch(:deployment),
+        conversation: runtime.fetch(:conversation),
+        scope_type: "run_draft",
+        scope_id: "draft-123",
+        method_name: "turn.prepare",
+        invocation_id: "invoke-123",
+        request_payload: { "user_input" => "Hello" },
+      )
 
-    assert_equal "cybros.agent_rpc.invocation_binding_mismatch", error.code
+    replacement =
+      replacement_deployment!(
+        program: runtime.fetch(:program),
+        deployment_fingerprint: runtime.fetch(:deployment).deployment_fingerprint,
+        activated_at: runtime.fetch(:deployment).activated_at,
+      )
+
+    second =
+      AgentRpc::InvocationStore.start_or_replay!(
+        deployment: replacement,
+        conversation: runtime.fetch(:conversation),
+        scope_type: "run_draft",
+        scope_id: "draft-123",
+        method_name: "turn.prepare",
+        invocation_id: "invoke-123",
+        request_payload: { "user_input" => "Hello" },
+      )
+
+    assert_equal false, second.fetch(:replayed)
+    refute_equal first.fetch(:invocation).id, second.fetch(:invocation).id
+    assert_equal replacement.id, second.fetch(:invocation).agent_deployment_id
+  end
+
+  test "does not replay across a reactivation of the same deployment row" do
+    runtime = create_runtime!
+    first =
+      AgentRpc::InvocationStore.start_or_replay!(
+        deployment: runtime.fetch(:deployment),
+        conversation: runtime.fetch(:conversation),
+        scope_type: "run_draft",
+        scope_id: "draft-123",
+        method_name: "turn.prepare",
+        invocation_id: "invoke-123",
+        request_payload: { "user_input" => "Hello" },
+      )
+    AgentRpc::InvocationStore.mark_succeeded!(
+      invocation: first.fetch(:invocation),
+      result_snapshot: { "prepared_plan" => { "fixture" => true } },
+    )
+
+    reactivated_at = 2.minutes.from_now.change(usec: 0)
+    runtime.fetch(:deployment).update!(activated_at: reactivated_at)
+
+    replay =
+      AgentRpc::InvocationStore.start_or_replay!(
+        deployment: runtime.fetch(:deployment).reload,
+        conversation: runtime.fetch(:conversation),
+        scope_type: "run_draft",
+        scope_id: "draft-123",
+        method_name: "turn.prepare",
+        invocation_id: "invoke-123",
+        request_payload: { "user_input" => "Hello" },
+      )
+
+    assert_equal false, replay.fetch(:replayed)
+    refute_equal first.fetch(:invocation).id, replay.fetch(:invocation).id
+    assert_equal reactivated_at, replay.fetch(:invocation).deployment_activated_at
   end
 
   test "deduplicates operation ids across replayed sessions for the same invocation" do
@@ -163,7 +219,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
       { conversation: conversation, program: program, deployment: deployment }
     end
 
-    def replacement_deployment!(program:, deployment_fingerprint:)
+    def replacement_deployment!(program:, deployment_fingerprint:, activated_at: Time.current.change(usec: 0))
       AgentDeployment.create!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
@@ -180,7 +236,7 @@ class AgentRpcInvocationReplayTest < ActiveSupport::TestCase
         schema_snapshot: {},
         capability_snapshot: {},
         inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
+        activated_at: activated_at,
       )
     end
 

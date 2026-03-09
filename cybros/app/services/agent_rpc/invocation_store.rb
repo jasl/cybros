@@ -2,13 +2,22 @@ require "digest"
 
 module AgentRpc
   class InvocationStore
-    def self.replay_candidate_for(scope_type:, scope_id:, method_name:, invocation_id:)
-      AgentRpcInvocation.find_by(
-        scope_type: scope_type.to_s,
-        scope_id: scope_id.to_s,
-        method: method_name.to_s,
-        invocation_id: invocation_id.to_s,
-      )
+    def self.replay_candidate_for(deployment:, scope_type:, scope_id:, method_name:, invocation_id:)
+      scope =
+        AgentRpcInvocation.where(
+          agent_deployment_id: deployment.id,
+          binding_fingerprint: deployment.deployment_fingerprint,
+          scope_type: scope_type.to_s,
+          scope_id: scope_id.to_s,
+          method: method_name.to_s,
+          invocation_id: invocation_id.to_s,
+        )
+
+      if deployment.activated_at.present?
+        scope.find_by(deployment_activated_at: deployment.activated_at)
+      else
+        scope.order(deployment_activated_at: :desc).first
+      end
     end
 
     def self.ensure_replayable!(invocation:, deployment:, request_payload:)
@@ -116,6 +125,7 @@ module AgentRpc
 
       def replay_candidate
         self.class.replay_candidate_for(
+          deployment: deployment,
           scope_type: scope_type,
           scope_id: scope_id,
           method_name: method_name,
@@ -125,6 +135,7 @@ module AgentRpc
 
       def ensure_same_binding!(invocation)
         same_binding =
+          invocation.agent_deployment_id == deployment.id &&
           invocation.binding_fingerprint == deployment.deployment_fingerprint &&
             invocation.deployment_activated_at == (deployment.activated_at || invocation.deployment_activated_at)
 
@@ -135,6 +146,8 @@ module AgentRpc
           code: "cybros.agent_rpc.invocation_binding_mismatch",
           details: {
             invocation_id: invocation.invocation_id,
+            expected_agent_deployment_id: invocation.agent_deployment_id,
+            actual_agent_deployment_id: deployment.id,
             expected_binding_fingerprint: invocation.binding_fingerprint,
             actual_binding_fingerprint: deployment.deployment_fingerprint,
           },

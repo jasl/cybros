@@ -33,7 +33,7 @@ module AgentRpc
         attr_reader :draft
 
         def conversation
-          draft.conversation
+          draft.bound_conversation
         end
 
         def normalize_hash(value)

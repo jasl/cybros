@@ -334,6 +334,96 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     callback_server&.shutdown
   end
 
+  test "planning params read the draft-selected program config after the live conversation selection changes" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    original_program = runtime.fetch(:program)
+    alternate_program = create_program!
+    active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
+    conversation.update!(
+      agent_config: {
+        original_program.config_namespace => { "mode" => "review" },
+        alternate_program.config_namespace => { "mode" => "alternate" },
+      },
+      agent_config_schema_fingerprint: original_program.config_schema_fingerprint,
+    )
+    draft =
+      build_open_draft!(
+        conversation: conversation,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+    conversation.update!(
+      agent_program: alternate_program,
+      agent_config_schema_fingerprint: alternate_program.config_schema_fingerprint,
+    )
+    live_conversation = Conversation.find(conversation.id)
+    service =
+      RunDrafts::ConversationTurnPlanningService.new(
+        conversation: live_conversation,
+        initiated_by_user: live_conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: draft.trigger_snapshot,
+      )
+
+    assert_equal original_program.id, draft.agent_program_id
+    assert_equal alternate_program.id, live_conversation.agent_program_id
+    assert_equal({ "mode" => "alternate" }, live_conversation.selected_agent_config)
+    assert_equal(
+      { "mode" => "review" },
+      service.send(:prepare_params, draft).fetch("agent_config"),
+    )
+  ensure
+    server&.shutdown
+  end
+
+  test "conversation config get reads the draft-selected program namespace after the live conversation selection changes" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    original_program = runtime.fetch(:program)
+    alternate_program = create_program!
+    active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
+    conversation.update!(
+      agent_config: {
+        original_program.config_namespace => { "mode" => "review" },
+        alternate_program.config_namespace => { "mode" => "alternate" },
+      },
+      agent_config_schema_fingerprint: original_program.config_schema_fingerprint,
+    )
+    draft =
+      build_open_draft!(
+        conversation: conversation,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    conversation.update!(
+      agent_program: alternate_program,
+      agent_config_schema_fingerprint: alternate_program.config_schema_fingerprint,
+    )
+    live_conversation = Conversation.find(conversation.id)
+    draft_for_read = Struct.new(:bound_conversation, :agent_program).new(live_conversation, original_program)
+
+    assert_equal alternate_program.id, live_conversation.agent_program_id
+    assert_equal({ "mode" => "alternate" }, live_conversation.selected_agent_config)
+    assert_equal(
+      { "config" => { "mode" => "review" } },
+      AgentRpc::KernelServices::ConversationConfig.get(draft: draft_for_read),
+    )
+  ensure
+    server&.shutdown
+  end
+
   test "planning ignores direct staged mutation payloads returned by turn prepare" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(

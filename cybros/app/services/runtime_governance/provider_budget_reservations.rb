@@ -1,6 +1,6 @@
 module RuntimeGovernance
   module ProviderBudgetReservations
-    ACTIVE_WINDOW_STATUSES = %w[active settled].freeze
+    ACTIVE_WINDOW_STATUSES = %w[active settled released].freeze
     RESERVATION_TTL = 30.seconds
 
     module_function

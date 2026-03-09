@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000016) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -125,8 +125,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000016) do
     t.string "scope_type", null: false
     t.string "status", null: false
     t.datetime "updated_at", null: false
+    t.index ["agent_deployment_id", "binding_fingerprint", "deployment_activated_at", "scope_type", "scope_id", "method", "invocation_id"], name: "idx_agent_rpc_invocations_replay", unique: true
     t.index ["agent_deployment_id"], name: "index_agent_rpc_invocations_on_agent_deployment_id"
-    t.index ["binding_fingerprint", "deployment_activated_at", "scope_type", "scope_id", "method", "invocation_id"], name: "idx_agent_rpc_invocations_replay", unique: true
     t.index ["conversation_id"], name: "index_agent_rpc_invocations_on_conversation_id"
     t.index ["id", "agent_deployment_id"], name: "idx_agent_rpc_invocations_id_deploy", unique: true
   end

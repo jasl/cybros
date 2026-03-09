@@ -14,6 +14,7 @@ class AgentRpcInvocation < ApplicationRecord
   validates :invocation_id, presence: true,
     uniqueness: {
       scope: %i[
+        agent_deployment_id
         binding_fingerprint
         deployment_activated_at
         scope_type

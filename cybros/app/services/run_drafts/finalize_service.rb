@@ -1,6 +1,7 @@
 module RunDrafts
   class FinalizeService
     SNAPSHOT_VERSION = 1
+    ConversationEntrypoint = Struct.new(:permission_mode, :default_execution_target, keyword_init: true)
 
     def self.finalize!(draft:, debug: {}, error: {})
       new(draft: draft, debug: debug, error: error).finalize!
@@ -116,7 +117,6 @@ module RunDrafts
           deployment_fresh?(deployment) &&
             target.present? &&
             RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(target) &&
-            resolved.fetch(:permission_mode).to_s == draft.permission_mode.to_s &&
             resolved.fetch(:provider_credential).id.to_s == draft.provider_credential_id.to_s &&
             resolved.fetch(:proposed_execution_target).id.to_s == draft.proposed_execution_target_id.to_s &&
             resolved.fetch(:runtime_governors) == draft.runtime_governors
@@ -335,8 +335,8 @@ module RunDrafts
       end
 
       def runtime_entrypoint
-        return conversation if draft.conversation.present?
         return AgentRpc::KernelServices::ExecutionTargets.resolve_entrypoint_for(draft) if draft.automation_id.present?
+        return ConversationEntrypoint.new(permission_mode: draft.permission_mode, default_execution_target: conversation&.default_execution_target) if conversation.present?
 
         AgentCore::ValidationError.raise!(
           "Run draft is missing an execution entrypoint.",

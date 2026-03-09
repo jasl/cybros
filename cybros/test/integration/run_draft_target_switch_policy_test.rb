@@ -1,7 +1,7 @@
 require "test_helper"
 
 class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
-  test "execution_target propose confirms different visible targets under default mode and stages the requested target on the draft" do
+  test "execution_target propose confirms different visible targets under default mode and parks with kernel-owned approval state" do
     conversation = create_conversation!(permission_mode: "default")
     current_target = create_execution_target!(name: "Current target")
     alternate_target = create_execution_target!(name: "Alternate target")
@@ -13,6 +13,10 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
 
     assert_equal "confirm", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
+    assert_equal "awaiting_approval", draft.status
+    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
+    assert_equal "target_switch", draft.approval_state.fetch("reason")
+    assert_equal alternate_target.id, draft.approval_state.fetch("proposed_execution_target_id")
     assert_equal alternate_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
   end
 

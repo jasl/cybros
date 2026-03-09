@@ -43,6 +43,26 @@ class AgentDeploymentsInspectionTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
+  test "rejects inspection when initialize omits protocol version" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: { "protocol_version" => nil },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+    assert_equal "unhealthy", deployment.health_status
+    assert_includes deployment.inspection_details.fetch("error"), "protocol_version"
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def sign_in_owner!

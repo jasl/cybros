@@ -8,6 +8,7 @@ module AgentDeployments
     def inspect!
       initialize_result = client.call("initialize")
       identity = normalize_hash(initialize_result["identity"])
+      protocol_version = negotiated_protocol_version!(identity)
       validate_identity!(identity)
 
       describe_result = client.call("agent.describe")
@@ -15,7 +16,7 @@ module AgentDeployments
       schemas_result = client.call("agent.schemas.get")
 
       deployment.update!(
-        protocol_version: identity.fetch("protocol_version", deployment.protocol_version),
+        protocol_version: protocol_version,
         agent_sdk_version: identity["agent_sdk_version"],
         supported_methods: Array(identity["supported_methods"]).map(&:to_s),
         manifest_snapshot: {
@@ -61,9 +62,16 @@ module AgentDeployments
         end
       end
 
+      def negotiated_protocol_version!(identity)
+        protocol_version = identity["protocol_version"].to_s.presence
+        return protocol_version if protocol_version.present?
+
+        raise InspectionError, "deployment identity missing protocol_version"
+      end
+
       def health_status_for(result)
         if result["healthy"] == true
-          result["status"].to_s.presence || "healthy"
+          "healthy"
         else
           result["status"].to_s.presence || "unhealthy"
         end

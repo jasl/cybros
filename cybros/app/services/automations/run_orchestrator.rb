@@ -17,6 +17,7 @@ module Automations
       draft = RunDrafts::AutomationPlanningService.open_and_prepare!(automation_run: automation_run)
 
       if draft.status.to_s == RunDrafts::AutomationPlanningService::AWAITING_APPROVAL_STATUS
+        mark_bound_agent_node_awaiting_approval!(draft)
         Automations::RunStateRecorder.awaiting_approval!(automation_run: automation_run, draft: draft)
         return { draft: draft, conversation_run: nil }
       end
@@ -43,5 +44,15 @@ module Automations
     private
 
       attr_reader :automation_run, :debug, :error
+
+      def mark_bound_agent_node_awaiting_approval!(draft)
+        conversation = draft.bound_conversation
+        return unless conversation.present?
+
+        node_id = draft.trigger_snapshot["dag_node_id"].to_s.strip
+        return if node_id.empty?
+
+        conversation.root_graph.nodes.find_by(id: node_id)&.park_for_approval!
+      end
   end
 end

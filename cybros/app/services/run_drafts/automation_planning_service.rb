@@ -34,7 +34,11 @@ module RunDrafts
       draft.with_lock do
         draft.reload
         draft.prepared_plan = normalize_hash(response["prepared_plan"])
-        draft.approval_state = normalize_approval_state(response["approval_state"])
+        draft.approval_state =
+          effective_approval_state(
+            draft_approval_state: draft.approval_state,
+            response_approval_state: response["approval_state"],
+          )
         draft.status = approval_required?(draft.approval_state) ? AWAITING_APPROVAL_STATUS : PREPARED_STATUS
         draft.save!
       end
@@ -218,6 +222,13 @@ module RunDrafts
         normalized = normalize_hash(value)
         normalized["status"] = normalized["status"].to_s.presence || "not_required"
         normalized
+      end
+
+      def effective_approval_state(draft_approval_state:, response_approval_state:)
+        kernel_state = normalize_approval_state(draft_approval_state)
+        return kernel_state if approval_required?(kernel_state)
+
+        normalize_approval_state(response_approval_state)
       end
 
       def approval_required?(approval_state)

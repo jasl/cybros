@@ -45,6 +45,62 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "programmable conversation runs invoke turn handle_error when turn compose fails" do
+    handled_errors = []
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "turn.compose" => lambda do |_params, _base_result, _identity|
+            raise StandardError, "compose exploded"
+          end,
+          "turn.handle_error" => lambda do |params, _base_result, _identity|
+            handled_errors << params.fetch("error")
+            {
+              "output" => {
+                "role" => "assistant",
+                "content" => "fixture recovery response",
+              },
+            }
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
+    agent_node_id =
+      conversation.root_graph.nodes
+        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+        .order(:id)
+        .last
+        .id
+    conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+    assert_includes claimed, agent_node_id
+
+    DAG::Runner.run_node!(agent_node_id)
+
+    agent =
+      conversation.root_graph.nodes
+        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+        .order(:id)
+        .last
+    run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
+    compose_invocation = AgentRpcInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
+    handle_error_invocation = AgentRpcInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.handle_error")
+
+    assert_equal DAG::Node::FINISHED, agent.reload.state
+    assert_equal "fixture recovery response", agent.body_output.fetch("content")
+    assert_equal "succeeded", run.reload.state
+    assert_equal "failed", compose_invocation.status
+    assert_equal "succeeded", handle_error_invocation.status
+    assert handled_errors.dig(0, "class").present?
+    assert_includes handled_errors.dig(0, "message"), "compose exploded"
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def create_programmable_runtime!(server:)

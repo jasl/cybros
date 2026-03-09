@@ -48,6 +48,97 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "planning preserves kernel-owned target switch approval when turn prepare omits approval_state" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    alternate_target = create_execution_target!(name: "Alternate target")
+    service =
+      RunDrafts::ConversationTurnPlanningService.new(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    captured_draft = nil
+    service_singleton = class << service; self; end
+    lifecycle_singleton = class << AgentRpc::LifecycleCaller; self; end
+
+    service_singleton.alias_method :__test_original_create_draft!, :create_draft!
+    service_singleton.define_method(:create_draft!) do
+      captured_draft = __test_original_create_draft!
+    end
+
+    lifecycle_singleton.alias_method :__test_original_call!, :call!
+    lifecycle_singleton.define_method(:call!) do |**_kwargs|
+      AgentRpc::KernelServices::ExecutionTargets.propose!(
+        draft: captured_draft,
+        execution_target_id: alternate_target.id,
+      )
+      { "prepared_plan" => { "fixture" => true } }
+    end
+
+    service.open_and_prepare!
+
+    draft = captured_draft.reload
+    assert_equal "awaiting_approval", draft.status
+    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
+    assert_equal "target_switch", draft.approval_state.fetch("reason")
+    assert_equal alternate_target.id, draft.proposed_execution_target_id
+    assert_nil draft.materialized_conversation_run_id
+  ensure
+    if defined?(service_singleton) && service_singleton.method_defined?(:__test_original_create_draft!)
+      service_singleton.alias_method :create_draft!, :__test_original_create_draft!
+      service_singleton.remove_method :__test_original_create_draft!
+    end
+    if defined?(lifecycle_singleton) && lifecycle_singleton.method_defined?(:__test_original_call!)
+      lifecycle_singleton.alias_method :call!, :__test_original_call!
+      lifecycle_singleton.remove_method :__test_original_call!
+    end
+    server&.shutdown
+  end
+
+  test "approval resume keeps the draft permission mode pinned when the live conversation preset changes after parking" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    agent_node =
+      conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4").fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+
+    Conversations::RuntimeSettingsUpdater.update!(
+      conversation: conversation,
+      attributes: { permission_mode: "full_access" },
+    )
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob) do
+      conversation.approve_parked_agent_node!(node_id: agent_node.id, approved_by: "manual-approval:test")
+    end
+
+    run = draft.reload.materialized_conversation_run
+    assert_equal "finalized", draft.status
+    assert_equal "approved", draft.approval_state.fetch("status")
+    assert_equal "default", run.effective_permission_mode
+  ensure
+    server&.shutdown
+  end
+
   test "rejected approval discards staged draft mutations and leaves the draft terminal" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
@@ -368,10 +459,10 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       { conversation: conversation, deployment: deployment }
     end
 
-    def create_execution_target!
+    def create_execution_target!(name: "Primary target")
       location =
         ExecutionLocation.create!(
-          name: "Primary host",
+          name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
           status: "active",
@@ -385,7 +476,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       workspace =
         Workspace.create!(
           execution_location: location,
-          name: "Primary workspace",
+          name: "#{name} workspace",
           root_path: "/tmp/approval-#{SecureRandom.hex(4)}",
           workspace_type: "git",
           status: "active",
@@ -396,7 +487,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       ExecutionTarget.create!(
         execution_location: location,
         workspace: workspace,
-        name: "Primary target",
+        name: name,
         status: "active",
         sandboxed: true,
       )

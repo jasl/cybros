@@ -40,12 +40,13 @@ module RunDrafts
       end
 
       def agent_node_for(draft)
-        return nil unless draft.conversation.present?
+        conversation = draft.bound_conversation
+        return nil unless conversation.present?
 
         node_id = draft.trigger_snapshot["dag_node_id"].to_s.strip
         return nil if node_id.blank?
 
-        draft.conversation.root_graph.nodes.find_by(id: node_id)
+        conversation.root_graph.nodes.find_by(id: node_id)
       end
   end
 end

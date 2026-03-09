@@ -44,6 +44,44 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "rejecting a conversation-bound automation approval updates the bound agent node" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_automation_runtime!(server:, permission_mode: "default")
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+
+    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    conversation = runtime.fetch(:conversation)
+    agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
+
+    assert_equal "awaiting_approval", draft.status
+    assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
+
+    draft.update!(
+      approval_state: draft.approval_state.merge("status" => "rejected", "reason" => "operator_denied"),
+    )
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.approval_not_granted", error.code
+    assert_equal DAG::Node::REJECTED, agent_node.reload.state
+    assert_equal "operator_denied", agent_node.metadata.fetch("reason")
+  ensure
+    server&.shutdown
+  end
+
   test "automation conversation binding creates an executable agent node" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(server:)
@@ -83,9 +121,81 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "conversation-bound automation drafts read settings config and kv through the bound conversation" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_automation_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    ConversationKVEntry.create!(
+      conversation: conversation,
+      key: "shared.stage",
+      value: { "status" => "seeded" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    draft = RunDrafts::AutomationPlanningService.open_and_prepare!(automation_run: automation_run)
+
+    assert_nil draft.conversation_id
+    assert_equal conversation.id, draft.trigger_snapshot.fetch("conversation_id")
+    assert_equal(
+      { "settings" => conversation.public_settings },
+      AgentRpc::KernelServices::ConversationSettings.get(draft: draft),
+    )
+    assert_equal(
+      { "config" => { "mode" => "automation" } },
+      AgentRpc::KernelServices::ConversationConfig.get(draft: draft),
+    )
+    assert_equal(
+      { "entry" => { "key" => "shared.stage", "value" => { "status" => "seeded" } } },
+      AgentRpc::KernelServices::ConversationKV.get(draft: draft, key: "shared.stage"),
+    )
+    assert_equal(
+      [{ "key" => "shared.stage", "value" => { "status" => "seeded" } }],
+      AgentRpc::KernelServices::ConversationKV.list(draft: draft).fetch("entries"),
+    )
+  ensure
+    server&.shutdown
+  end
+
+  test "approval expiry rejects the bound automation agent node even when draft conversation is nil" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_automation_runtime!(server:, permission_mode: "default")
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    agent_node_id = draft.trigger_snapshot.fetch("dag_node_id")
+    agent_node = runtime.fetch(:conversation).root_graph.nodes.find(agent_node_id)
+
+    assert_equal "awaiting_approval", draft.status
+    assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
+
+    draft.update!(
+      expires_at: 1.minute.ago,
+    )
+
+    RunDrafts::ApprovalExpiryService.expire!(draft: draft)
+
+    assert_equal "expired", draft.reload.status
+    assert_equal DAG::Node::REJECTED, agent_node.reload.state
+    assert_equal "approval_expired", agent_node.metadata.fetch("reason")
+  ensure
+    server&.shutdown
+  end
+
   private
 
-    def create_automation_runtime!(server:)
+    def create_automation_runtime!(server:, permission_mode: "full_access")
       user = create_user!
       program = create_program!
       alternate_program = create_program!
@@ -96,7 +206,7 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
       conversation.update!(
         agent_program: alternate_program,
         default_execution_target: target,
-        permission_mode: "full_access",
+        permission_mode: permission_mode,
         agent_config: {
           program.config_namespace => { "mode" => "automation" },
           alternate_program.config_namespace => { "mode" => "conversation" },
@@ -109,7 +219,7 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
           conversation: conversation,
           agent_program: program,
           execution_target: target,
-          permission_mode: "full_access",
+          permission_mode: permission_mode,
           status: "active",
           schedule_kind: "rrule",
           schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
