@@ -27,4 +27,32 @@ class CiE2EScriptTest < ActiveSupport::TestCase
     output = [stdout, stderr].join("\n")
     assert_includes output, "bin/ci_e2e must run with RAILS_ENV=development"
   end
+
+  test "bin/ci_e2e can boot the programmable-agent fixture in dry-run mode" do
+    script = Rails.root.join("bin/ci_e2e")
+
+    stdout = nil
+    stderr = nil
+    status = nil
+
+    Timeout.timeout(20) do
+      stdout, stderr, status =
+        Open3.capture3(
+          {
+            "RAILS_ENV" => "development",
+            "CI_E2E_DRY_RUN" => "1",
+            "CI_E2E_PROGRAMMABLE_AGENT_FIXTURE" => "1",
+            "PROGRAMMABLE_AGENT_FIXTURE_PORT" => "3912",
+          },
+          script.to_s,
+          chdir: Rails.root.to_s,
+        )
+    end
+
+    assert_predicate status, :success?
+    output = [stdout, stderr].join("\n")
+    assert_includes output, "programmable agent fixture enabled"
+    assert_includes output, "http://127.0.0.1:3912/rpc"
+    assert_includes output, "CI E2E dry run complete"
+  end
 end

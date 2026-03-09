@@ -13,9 +13,68 @@ fi
 
 PORT="${E2E_PORT:-3000}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
+DRY_RUN="${CI_E2E_DRY_RUN:-0}"
+FIXTURE_ENABLED="${CI_E2E_PROGRAMMABLE_AGENT_FIXTURE:-0}"
 
 echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"
+
+mkdir -p tmp tmp/pids
+
+cleanup() {
+  echo ""
+  echo "CI E2E: stopping server + jobs"
+  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+    [[ -n "${pid}" ]] || continue
+    kill "${pid}" 2>/dev/null || true
+  done
+
+  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+    [[ -n "${pid}" ]] || continue
+    for _ in {1..40}; do
+      kill -0 "${pid}" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill -9 "${pid}" 2>/dev/null || true
+  done
+}
+trap cleanup EXIT INT TERM
+
+if [[ "${FIXTURE_ENABLED}" == "1" ]]; then
+  FIXTURE_HOST="${PROGRAMMABLE_AGENT_FIXTURE_HOST:-127.0.0.1}"
+  FIXTURE_PORT="${PROGRAMMABLE_AGENT_FIXTURE_PORT:-4319}"
+  export PROGRAMMABLE_AGENT_FIXTURE_URL="http://${FIXTURE_HOST}:${FIXTURE_PORT}/rpc"
+  export PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL="http://${FIXTURE_HOST}:${FIXTURE_PORT}/health"
+
+  echo "programmable agent fixture enabled"
+  echo "   rpc url: ${PROGRAMMABLE_AGENT_FIXTURE_URL}"
+  echo "   health url: ${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}"
+  echo "starting programmable-agent fixture"
+
+  bin/programmable_agent_fixture --host "${FIXTURE_HOST}" --port "${FIXTURE_PORT}" >tmp/ci_e2e_programmable_agent_fixture.log 2>&1 &
+  FIXTURE_PID="$!"
+
+  for _ in {1..40}; do
+    if curl -fsS "${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}" >/dev/null 2>&1; then
+      echo "programmable-agent fixture is up"
+      break
+    fi
+    sleep 0.25
+  done
+
+  if ! curl -fsS "${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}" >/dev/null 2>&1; then
+    echo "❌ programmable-agent fixture did not become ready"
+    echo ""
+    echo "--- programmable-agent fixture log (tail) ---"
+    tail -n 200 tmp/ci_e2e_programmable_agent_fixture.log || true
+    exit 1
+  fi
+fi
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  echo "CI E2E dry run complete"
+  exit 0
+fi
 
 bundle exec ruby -v >/dev/null
 bun run build >/dev/null
@@ -29,32 +88,10 @@ end
 User.find_or_create_by!(identity: identity) { |u| u.role = :owner }
 RUBY
 
-cleanup() {
-  echo ""
-  echo "CI E2E: stopping server + jobs"
-  for pid in "${JOBS_PID:-}" "${SERVER_PID:-}"; do
-    [[ -n "${pid}" ]] || continue
-    kill "${pid}" 2>/dev/null || true
-  done
-
-  for pid in "${JOBS_PID:-}" "${SERVER_PID:-}"; do
-    [[ -n "${pid}" ]] || continue
-    for _ in {1..40}; do
-      kill -0 "${pid}" 2>/dev/null || break
-      sleep 0.25
-    done
-    kill -9 "${pid}" 2>/dev/null || true
-  done
-}
-trap cleanup EXIT INT TERM
-
-mkdir -p tmp
-
 bin/jobs >tmp/ci_e2e_jobs.log 2>&1 &
 JOBS_PID="$!"
 
 PIDFILE="tmp/pids/server-e2e-${PORT}.pid"
-mkdir -p tmp/pids
 rm -f "${PIDFILE}"
 
 bin/rails server -b 127.0.0.1 -p "${PORT}" -P "${PIDFILE}" >tmp/ci_e2e_server.log 2>&1 &

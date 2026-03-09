@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+
+require_relative "../lib/cybros/programmable_agent_fixture"
+
+exit Cybros::ProgrammableAgentFixture::CLI.run(ARGV)
