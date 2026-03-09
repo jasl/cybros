@@ -1,44 +1,44 @@
 # Cybros Product Docs
 
-This directory is the active product-definition set for the runtime rebaseline approved on 2026-03-08.
+This directory is the normative product-definition set for the programmable-agent rebaseline.
 
-The old pre-rebaseline product docs were removed from the working tree after archival cleanup.
+Plans under `docs/plans/` may refine implementation details and sequencing, but they do not replace the product docs as the source of truth. If a plan conflicts with a product doc, the product doc wins and the plan must be rewritten.
 
-If historical context is needed, read them from git history at commit `84b7e3d`.
-
-Use the documents in this directory as the normative product source of truth.
-
-The linked plan documents in the reading order below refine runtime invariants and implementation-facing semantics; they do not replace the product docs as the normative product model.
+Historical pre-rebaseline material remains available in git history at commit `84b7e3d`.
 
 ## Reading Order
 
+Read the product contract in this order:
+
 1. `vision.md`
 2. `architecture.md`
-3. `domain_model.md`
-4. `state_taxonomy.md`
-5. `execution_model.md`
-6. `runtime_governance.md`
-7. `programmable_agents.md`
-8. `agent_rpc.md`
-9. `../plans/2026-03-09-execution-target-discovery-design.md`
-10. `../plans/2026-03-09-permission-presets-design.md`
-11. `../plans/2026-03-09-programmable-agent-preflight-design.md`
-12. `nexus_role.md`
-13. `roadmap.md`
-14. `migration_alignment.md`
+3. `agent_contract.md`
+4. `domain_model.md`
+5. `state_taxonomy.md`
+6. `kernel_service_surface.md`
+7. `run_lifecycle.md`
+8. `execution_model.md`
+9. `automation.md`
+10. `runtime_governance.md`
+11. `programmable_agents.md`
+12. `agent_rpc.md`
+13. `nexus_role.md`
+14. `roadmap.md`
+15. `migration_alignment.md`
 
-## Current Rules
+Use plan docs only after the contract above is understood.
 
-- Cybros is an agent runtime kernel and control plane.
-- Programmable agents are trusted, self-hosted, out-of-process programs.
-- Nexus is an execution substrate, not a programmable-agent runtime.
-- `ExecutionTarget` is a first-class concept: `location + workspace`.
-- Runtime governance is split into provider-credential limits, job concurrency, and execution quotas.
-- Conversations are programmable through public APIs, not storage-level writes.
-- Conversation-level runtime defaults include top-level agent selection, permission preset, and execution target selection.
-- Conversation and automation permission presets compile into explicit runtime policy bundles.
-- Execution-target discovery and target-switch policy are separate concerns.
-- Draft-time public mutations are staged until draft finalization or rejected entirely.
-- Each run pins one deployment binding and runtime-governor snapshot for execution.
-- `agent_rpc` is the language-agnostic contract between Cybros and programmable agents.
+## Core Invariants
+
+- Cybros is the control plane and the sole system of record.
+- External programmable agents are bounded runtimes, not peer control planes.
+- The canonical agent loop runs through Cybros for planning, policy, approval, finalization, execution handoff, transcript, and audit.
+- `AgentProgram` is the selectable product identity. `AgentDeployment` is the connectable runtime binding.
+- `ExecutionTarget` is a first-class product concept: `ExecutionLocation + Workspace`.
+- Runtime governance remains split into provider limits, job throughput, and execution quotas.
+- Conversations and automations are first-class entrypoints that resolve into the same canonical run lifecycle.
+- Draft-time mutations are staged on `RunDraft` and only commit during finalization.
+- Each materialized run snapshots one contract, one deployment binding, one target, one permission preset, and one governor snapshot.
+- Memory, knowledge, automation, connectors, MCP, and future stable protocol surfaces belong to Cybros substrate, even when external agents also maintain their own off-loop capabilities.
+- Off-loop agent elasticity is allowed, but anything that changes Cybros product state or governed execution must pass back through Cybros surfaces.
 - Breaking changes are allowed when needed to reach the correct long-term architecture.

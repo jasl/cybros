@@ -6,7 +6,7 @@ Cybros must support high DAG parallelism without collapsing external APIs, job w
 
 Runtime governance is the layer that keeps those resource domains independent and controllable.
 
-V1 should treat runtime governance as three separate concerns:
+V1 treats runtime governance as three separate concerns:
 
 - provider credential limiting
 - job concurrency
@@ -18,53 +18,25 @@ They must not be collapsed into one global "concurrency" setting.
 
 - DAG parallelism is allowed by default.
 - Remote LLM APIs are protected by provider-credential-scoped limits.
-- Agent program invocation is not rate-limited by default.
+- Agent-program RPC is bounded by deployment health and session scope, but not given a dedicated governor in v1.
 - Dangerous or heavy execution is protected by execution quotas.
 - Job throughput is tunable separately from remote API limits and host resource limits.
 - Blocked work must park durably instead of monopolizing worker throughput.
 - Deployment failures use durable scheduler backoff, but Cybros does not self-heal deployments.
-- V1 configuration should live in system settings, not yet in end-user product UI.
-- Observability must be collected before the final dashboard exists.
-
-## Provider Model
-
-The LLM domain should distinguish:
-
-- `ProviderSpec`
-- `ProviderCredential`
-
-`ProviderSpec` describes catalog capabilities.
-
-`ProviderCredential` carries operator-managed secret material, status, and explicit limiter fields.
-
-V1 product rule:
-
-- one active credential per `provider_key`
-
-Deferred:
-
-- credential-level load balancing
-- credential-level failover
-- automatic credential routing
+- V1 configuration should live in system settings before rich product UI exists.
+- Observability must start before dashboard polish.
 
 ## Governor 1: Provider Credential Limiter
 
-### Scope
+Scope:
 
-This governor applies to one configured provider credential, not to a provider family in the abstract.
+- one configured provider credential
 
-In product terms, this attaches to `ProviderCredential`.
+Purpose:
 
-### Purpose
+- protect remote LLM APIs from request bursts, token-budget exhaustion, and credential-specific rate-limit errors
 
-Protect remote LLM APIs from:
-
-- request bursts
-- concurrent run spikes
-- token-budget exhaustion
-- credential-specific rate-limit errors
-
-### Recommended Settings
+Recommended settings:
 
 - `max_concurrent_requests`
 - `requests_per_minute`
@@ -72,144 +44,108 @@ Protect remote LLM APIs from:
 - `burst_limit`
 - `backoff_policy`
 
-### Rules
+Rules:
 
 - limits are enforced per provider credential
 - different credentials for the same vendor do not share one limiter by default
-- this governor only applies to LLM traffic
-- it does not limit `AgentProgram` RPC calls
+- this governor applies to LLM traffic only
 
 ## Governor 2: Job Concurrency
 
-### Scope
+Scope:
 
-This governor controls how much Cybros work is allowed to progress through job workers at once.
+- Cybros worker throughput
 
-### Purpose
+Purpose:
 
-Protect the runtime kernel from under-utilization or starvation caused by overly conservative worker settings.
+- control how much kernel work progresses at once without pretending that worker count is the only runtime boundary
 
-### Recommended Settings
+Recommended settings:
 
 - default worker concurrency
 - queue-specific worker concurrency
-- optional backlog thresholds or alert thresholds
+- backlog or alert thresholds
 
-### Rules
+Rules:
 
-- this is a scheduler-throughput setting
+- this is scheduler throughput, not API governance
 - it is not a substitute for provider rate limiting
 - it is not a substitute for host execution quotas
-- V1 should raise the default concurrency above the current conservative baseline
-- operators must be able to tune it in system settings based on deployment shape
 
 ## Governor 3: Execution Quota
 
-### Scope
+Scope:
 
-This governor protects managed execution environments.
+- primary scope: `ExecutionLocation`
+- optional override scope: `ExecutionTarget`
 
-Primary scope:
+Purpose:
 
-- `ExecutionLocation`
+- protect managed execution environments from too much concurrent work or backlog
 
-Optional override scope:
-
-- `ExecutionTarget`
-
-### Purpose
-
-Protect local or remote machines from resource exhaustion caused by:
-
-- too many concurrent code-execution tasks
-- unbounded queued work
-- excessive task duration
-- optional CPU or memory pressure
-
-### Recommended Settings
+Recommended settings:
 
 - `max_concurrent_tasks`
 - `max_queued_tasks`
 - `default_timeout_s`
-- optional `cpu_limit_millicores`
-- optional `memory_limit_mb`
+- optional CPU and memory limits
 
-### Rules
+Rules:
 
-- the default policy lives on `ExecutionLocation`
-- `ExecutionTarget` may override it when a specific workspace needs stricter or looser behavior
-- this governor applies to Nexus-managed execution
-- it does not rate-limit the agent process itself
+- base policy lives on `ExecutionLocation`
+- `ExecutionTarget` may override that policy
+- this governor applies to Nexus-managed execution only
+
+## Programmable Runtime Capacity
+
+Programmable-agent runtime availability matters, but it is not a fourth governor in V1.
+
+V1 handles bounded runtime availability through:
+
+- deployment activation
+- deployment health status
+- durable `deployment_backoff`
+- operator-managed deployment replacement
+
+Why it is not a governor yet:
+
+- V1 recommends one active deployment per program
+- there is no multi-deployment scheduler to balance across
+- explicit per-deployment concurrency would add another control plane before the routing model exists
+
+Future multi-deployment routing may introduce a dedicated deployment-capacity governor. Until then, deployment capacity remains an operator and lifecycle concern, not a quota model.
 
 ## Configuration Model
 
-V1 should expose configuration through system settings.
-
-Field-shape rule for this rebaseline:
-
-- use explicit columns for stable limiter and quota values
-- use `text[]` for policy or capability tag sets
-- keep `jsonb` only for bounded settings payloads such as `queue_overrides` and `alert_thresholds`
+V1 exposes governance configuration through system settings.
 
 Recommended ownership:
 
-- provider-credential limiter fields on the provider credential record
+- provider limiter fields on provider credentials
 - execution-quota fields on `ExecutionLocation`
-- execution-quota override fields on `ExecutionTarget`
-- job-throughput fields in a dedicated instance-scoped runtime settings store
+- override fields on `ExecutionTarget`
+- job-throughput fields in dedicated instance-scoped runtime settings
 
-Product-grade user-facing controls may come later.
+Stable limiter and quota fields should be explicit columns. Use `jsonb` only for bounded settings payloads such as queue overrides or alert thresholds.
 
 ## Admission Model
 
-Provider-credential limits and execution quotas require durable admission, not just configurable thresholds.
+Provider limits and execution quotas require durable admission, not only configurable thresholds.
 
-V1 should use one shared coordination layer with two different admission primitives:
+Use one shared coordination layer with different primitives:
 
 - provider-side rate budgets use durable reservation and settlement semantics
 - execution-side quotas use durable capacity leases
 
-The authoritative runtime behavior should include:
+Required behavior:
 
 - atomic admission decisions
 - explicit release or settlement
-- lease expiry or heartbeat-based recovery for execution capacity
 - durable denial or backoff reasons
-- reconciliation after worker or process crashes
+- reconciliation after crashes
 - durable request identifiers for provider calls and execution requests
 
-Blocked work should park and re-enqueue later without occupying a job worker while it waits.
-
-### Provider Admission Primitive
-
-Provider admission protects time-window budgets such as:
-
-- concurrent request ceiling
-- requests per minute
-- tokens per minute
-- burst allowance
-
-It should use durable reservation and settlement semantics rather than generic host-capacity leases.
-
-Important consequences:
-
-- token reservations may be estimated before the call and settled after the call
-- reconciliation must recover stranded reservations after crashes or lost replies
-- retry safety requires a durable provider-request identifier
-
-### Execution Admission Primitive
-
-Execution admission protects host occupancy and backlog.
-
-It should use durable capacity leases with expiry or heartbeat recovery.
-
-Important consequences:
-
-- lease holders represent admitted execution work
-- lease recovery must reconcile abandoned or unknown execution work
-- retry safety requires a durable execution-request identifier
-
-### Wait State
+## Wait State
 
 Blocked work should park in a durable runtime wait state.
 
@@ -219,79 +155,14 @@ V1 wait reasons include:
 - `execution_quota`
 - `deployment_backoff`
 
-Parked waits are not the same thing as admitted queue occupancy.
-
-`deployment_backoff` is a durable retry wait for unreachable or unhealthy programmable-agent deployments. It is adjacent to runtime governance, but it is not a fourth governor.
-
-For execution quotas, `max_queued_tasks` should count execution work already admitted into the location or target queue, not globally parked waits.
+Parked waits are not admitted queue occupancy.
 
 Resume ordering should be stable and FIFO within one governed subject and wait reason.
 
-## Run-Time Behavior
+## Snapshot Versus Live State
 
-At execution time:
-
-1. Cybros schedules work through its job system.
-2. LLM calls must pass the provider-credential limiter through the rate-budget admission path.
-3. Agent program RPC calls proceed without a dedicated rate limiter by default.
-4. Deployment connectivity and transport failures must still be observable through health signals plus scheduler retry or backoff behavior.
-5. Nexus-bound execution must pass the resolved execution quota for the selected target through the capacity-lease admission path.
-6. If work is denied or delayed, the node should park durably rather than spin inside the worker pool.
-
-If a governor blocks work, the reason should be durable and observable.
-
-If the deployment itself is down, Cybros parks through `deployment_backoff` and later retries or fails the node. It does not attempt deployment remediation.
-
-Governor snapshots versus live state:
-
-- `RunDraft` and `ConversationRun` snapshot the resolved governor bindings and policy facts used for audit
+- `RunDraft`, `ConversationRun`, and `AutomationRun` snapshot the resolved governor bindings and policy facts used for audit
 - reservations, leases, and backlog state remain live runtime state
 - operator policy changes may invalidate an open draft before materialization
-- live admission state must never be bypassed just because an older snapshot exists
-
-## Dashboard Direction
-
-The dashboard can land later, but data collection should start in the kernel phases.
-
-The first useful visualizations are:
-
-### Agent Work
-
-- run state
-- node progress
-- provider call activity
-- retries
-- approval waits
-- limiter hits and backoff events
-
-### Deployment Work
-
-- deployment session counts
-- deployment unavailable intervals
-- scheduler backoff events for deployment connectivity pressure
-- per-location running tasks
-- queue depth
-- quota denials
-- timeouts
-- lease recovery events
-- provider reservation reconciliation events
-- execution-target override usage
-
-## Phase Placement
-
-### Phase 1
-
-Land:
-
-- provider-credential limiter model/config
-- job concurrency settings
-- execution quota model/config
-- baseline events and counters
-
-### Phase 3
-
-Wire execution quotas fully into Nexus and execution planning.
-
-### Phase 4
-
-Add developer-grade visualization for agent work and deployment work.
+- live admission state must never be bypassed because an older snapshot exists
+- automation dispatch uses the same admission model as interactive execution

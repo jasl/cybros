@@ -2,9 +2,9 @@
 
 ## Definition
 
-A programmable agent is a standalone trusted application that Cybros can register, inspect, configure, and invoke.
+A programmable agent is a trusted out-of-process application that Cybros can register, inspect, configure, and invoke as a bounded runtime.
 
-It is the app layer on top of the Cybros runtime kernel.
+It is the app layer on top of the Cybros kernel, not a second control plane beside it.
 
 ## V1 Constraints
 
@@ -21,48 +21,63 @@ Future Python or Rust implementations should use the same contract.
 - prompt-planning logic
 - persona and workflow selection
 - hook logic
-- conversation-level control through public APIs
+- domain-specific workflow logic
+- conversation-level control through Cybros public APIs
 - use of shared per-conversation KV
-- optional external integrations if the operator chooses to enable them
+- optional external integrations and off-loop capabilities if the operator enables them
 
 ## What The Agent Does Not Own
 
-- the core LLM loop
-- the core tool loop
+- the canonical run lifecycle
+- final prompt assembly
+- final tool policy
 - direct storage mutation inside Cybros
 - direct execution on a host without going through Cybros and Nexus
 
+## Canonical Loop And Off-Loop Elasticity
+
+The hard rule is not that every capability must be implemented inside Cybros.
+
+The hard rule is:
+
+- Cybros owns the canonical loop
+- Cybros owns product state and governed execution
+- anything that affects those concerns must pass through Cybros surfaces
+
+External agents may still:
+
+- maintain their own memory
+- maintain their own connectors
+- run their own internal tools or skills
+- keep auxiliary workflows outside the canonical loop
+
+That flexibility is allowed as long as it does not displace Cybros from the authoritative runtime path.
+
 ## Lifecycle
 
-### Register
+### Register Program
 
 `AgentProgram` source is registered with Cybros.
 
-The operator may point Cybros at local code or clone code locally first and then register it.
-
 ### Start Deployment
 
-A deployment may be started:
-
-- outside Cybros
-- by an operator
-- or by another agent through ordinary execution capabilities if it can reach the relevant environment
+A deployment may be started outside Cybros or by another agent acting through normal execution capabilities.
 
 ### Register Deployment
 
 An `AgentDeployment` is explicitly registered in Cybros once the deployment is reachable.
 
-This is the unit that should become selectable for runtime use.
+This is the runtime unit Cybros invokes. It is not the user-selectable product identity.
 
 ### Inspect
 
 Cybros records:
 
-- manifest
+- manifest snapshot
 - config schemas
 - healthcheck result
 - supported features
-- normalized deployment identity claims and pinned fingerprint inputs
+- normalized deployment identity claims
 
 Important boundary:
 
@@ -71,7 +86,7 @@ Important boundary:
 
 ### Activate
 
-The agent becomes selectable for conversations and automations.
+The program becomes selectable for conversations and automations when it has an active healthy deployment.
 
 V1 activation gate:
 
@@ -79,37 +94,33 @@ V1 activation gate:
 - required methods present
 - healthy inspection state
 
-If activation fails, Cybros records the metadata for debugging and leaves the deployment inactive.
-
 ### Upgrade
 
-The source revision may change over time, including through self-evolution patterns outside Cybros.
+Source revision may change over time, including through self-evolution outside Cybros.
 
-The resulting runnable unit is the currently active registered deployment for that program.
+Selection still flows through `AgentProgram`, then resolves to the current active deployment at planning time.
 
 ## Contract Surface
 
-The agent contract should eventually provide:
+The agent contract should provide:
 
 - manifest
 - global config schema
 - per-conversation config schema
-- healthcheck command or healthcheck entrypoint
-- turn handler or hook endpoints
-
-The transport and method boundary for those capabilities is defined by `agent_rpc`.
+- healthcheck entrypoint
+- turn handlers
 
 Contract ownership rule:
 
-- `AgentProgram` owns the canonical manifest and config-contract versions or fingerprints
-- `AgentDeployment` caches inspected runtime claims and debug snapshots for the deployed instance
+- `AgentProgram` owns the canonical manifest and contract fingerprints
+- `AgentDeployment` caches inspected runtime claims and debug snapshots
 - `ConversationRun` snapshots the effective contract fingerprint used for one execution attempt
 
 ## Deployment Model
 
 - the runnable binding is an `AgentDeployment`
-- a deployment may run on bare metal, in a container, or in any other Cybros-reachable environment
-- the environment that runs the deployment is not a separate canonical product model in v1
+- a deployment may run on bare metal, in a container, or in any Cybros-reachable environment
+- that environment is not a separate canonical product model in v1
 
 V1 recommendation:
 
@@ -119,77 +130,49 @@ V1 recommendation:
 
 ## Conversation Control
 
-The agent should be allowed to control conversation-level state through public APIs.
+The agent may control conversation-level state only through Cybros public APIs.
 
 This includes:
 
 - public settings
-- agent per-conversation config
-- shared per-conversation KV
+- per-conversation config
+- shared KV
 - execution-target discovery
 - requests to change execution target
 
 This control is declarative and policy-gated.
 
-The agent requests reads or changes through public APIs, and the Cybros kernel remains authoritative for final prompt assembly, DAG mutation, approvals, retries, and audit.
-
 During `turn.prepare`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
-
-Execution-target discovery is read-only and separate from target switching.
-
-V1 should let the agent inspect visible targets and capability summaries through formal public APIs, then request a switch through a separate proposal path.
-
-Target switching defaults to confirmation unless policy explicitly allows auto-switch within trusted boundaries.
-
-Conversation and automation permission presets may tighten or relax those defaults, but they still compile into Cybros-owned policy semantics instead of becoming a second approval system.
 
 If approval is required, Cybros persists the prepared draft result, ends the planning session, and resumes finalization locally after approval instead of reopening planning.
 
-This does not include direct writes to system state.
-
 ## Permission Presets
 
-Cybros should expose three runtime permission presets:
+Cybros exposes three runtime permission presets:
 
 - `conservative`
 - `default`
 - `full_access`
 
-These presets are selected at the product layer and compiled into runtime policy bundles.
-
-They are not raw sandbox flags and they are not direct host-security guarantees.
+These are selected at the product layer and compiled into Cybros-owned policy bundles.
 
 Recommended ownership:
 
-- `Conversation` stores the interactive top-level `AgentProgram` used by future turns
-- `Conversation` stores the interactive preset used by future turns
-- `Automation` stores the non-interactive preset and should default to `full_access`
-- `ConversationRun` snapshots the effective preset it actually ran under
+- `Conversation` stores the interactive top-level `AgentProgram`
+- `Conversation` stores the interactive preset
+- `Automation` stores the non-interactive preset and defaults to `full_access`
+- immutable run records snapshot the effective preset they actually used
 
-The composer UI should surface the active conversation agent, preset, and target next to model selection.
+## Product Coverage Direction
 
-Conversation-level agent selection controls only the top-level programmable agent used for future turns.
+The goal is not to clone one specific agent product.
 
-Subagents remain owned by the active top-level agent for the turn that launched them and are not redirected by later conversation-level agent changes.
+The goal is for Cybros substrate plus programmable-agent logic to express:
 
-## Session Rule
+- general assistants
+- coding agents
+- research agents
+- trading agents
+- chat and roleplay agents
 
-- registration does not grant ambient write authority
-- deployment bearer auth may stay lightweight in v1
-- each bounded session is scoped to one deployment binding plus one conversation/run context
-- callbacks use a short-lived session bearer tied to that scope
-- callbacks do not reverse workflow ownership; they are scoped requests inside a Cybros-owned session
-- callback authorization must expire with the session
-- each transport replay or interrupted remote retry attempt opens a fresh bounded session
-- callback de-duplication must survive session replay for the same logical invocation
-
-## KV Rules
-
-- default visibility is shared within the conversation even when agent changes
-- namespace isolation is by key convention in v1
-- `system.*` is reserved and not agent-writable
-- KV is current-state storage in v1, not append-only audit history
-
-## Default Template
-
-The product should ship one default programmable-agent implementation and use it as the starter template for new agents.
+Cybros should own the common substrate for those categories. Vertical logic should remain mostly in the external agent.

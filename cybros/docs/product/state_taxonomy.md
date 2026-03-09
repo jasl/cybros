@@ -4,6 +4,25 @@ This document defines the storage classes in the product model.
 
 The goal is to stop product state from collapsing back into generic `metadata`.
 
+## Agent Global Config
+
+Purpose:
+
+- operator-managed configuration shared by an `AgentProgram` across conversations and automations
+
+Examples:
+
+- integration defaults
+- account-level feature switches
+- program-wide behavior flags
+
+Rules:
+
+- stored under the owning `AgentProgram`
+- versioned by the published contract fingerprint
+- not writable through ordinary conversation-scoped runtime APIs
+- distinct from per-conversation config and shared KV
+
 ## Conversation Runtime Defaults
 
 Purpose:
@@ -58,8 +77,8 @@ Purpose:
 Examples:
 
 - persona tuning
-- feature toggles
 - workflow defaults
+- feature toggles
 
 Rules:
 
@@ -69,8 +88,9 @@ Rules:
 - audited
 - not a general runtime-state bucket
 - interpreted as namespaced by agent-program contract so switching the top-level conversation agent does not require clearing unrelated config
+- versioned against the published contract fingerprint for the selected program
 
-The agent may publish a schema for authoring help or future validation, but Cybros does not strongly enforce that schema in v1.
+V1 may enforce only light schema validation, but the contract fingerprint still matters for snapshot and migration semantics.
 
 ## Conversation KV
 
@@ -117,8 +137,11 @@ Rules:
 
 - retrieval-oriented
 - distinct from conversation KV
+- built-in baseline plus adapter-friendly
+- explicit scope and visibility rules are required
 - may be searchable
 - writes remain policy-aware and auditable
+- canonical retrieval results should be citation-friendly rather than opaque blobs
 
 ## Knowledge
 
@@ -137,7 +160,10 @@ Rules:
 - source-oriented
 - usually read-mostly
 - searchable and citation-friendly
+- may be built-in or adapter-backed
 - not writable as arbitrary runtime state
+
+Static prompt injections are one implementation technique, not the whole knowledge model.
 
 ## Run Snapshot
 
@@ -148,6 +174,7 @@ Purpose:
 Examples:
 
 - agent program id
+- contract fingerprint
 - agent deployment id
 - deployment fingerprint
 - deployment activation epoch
@@ -155,7 +182,6 @@ Examples:
 - selected model
 - effective public settings
 - effective `agent_config`
-- `agent_config` schema fingerprint
 - effective policy profile
 
 Rules:
@@ -164,6 +190,26 @@ Rules:
 - durable
 - auditable
 - never reused as mutable settings state
+
+## Automation Snapshot
+
+Purpose:
+
+- immutable record of one automation dispatch
+
+Examples:
+
+- selected `agent_program_id`
+- contract fingerprint
+- resolved deployment
+- execution target
+- scheduled trigger facts
+
+Rules:
+
+- immutable after materialization
+- may link to a `ConversationRun`, but does not collapse into it
+- durable and auditable
 
 ## System State
 
@@ -194,6 +240,7 @@ Rules:
 
 Use the smallest correct storage class:
 
+- global agent config for program-scoped operator configuration
 - settings for product configuration
 - per-conversation config for agent-owned JSON configuration
 - KV for operational variables

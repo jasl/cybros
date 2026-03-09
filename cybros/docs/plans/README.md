@@ -1,44 +1,46 @@
 # Plans
 
-This directory is reserved for the current active refactor and implementation thread.
+This directory contains the active rebaseline design docs and executable implementation plans.
 
-As of 2026-03-09, the active implementation sources are:
+Product docs under `docs/product/` are normative. Plans may refine implementation details and sequencing, but they must not redefine product semantics.
 
+## Active Design Sources
+
+- `2026-03-09-programmable-agent-preflight-design.md`
 - `2026-03-08-phase-1-schema-cut-list.md`
 - `2026-03-08-runtime-governance-design.md`
-- `2026-03-08-runtime-governance.md`
 - `2026-03-09-execution-target-discovery-design.md`
 - `2026-03-09-permission-presets-design.md`
 - `2026-03-09-agent-deployment-connection-design.md`
+- `2026-03-09-automation-runtime-design.md`
+
+## Active Executable Plans
+
+- `2026-03-08-runtime-governance.md`
 - `2026-03-09-agent-deployment-connection.md`
-- `2026-03-09-programmable-agent-preflight-design.md`
+- `2026-03-09-automation-runtime.md`
 
-Canonical implementation order for the current programmable-agent rebaseline:
+## Ownership Rules
 
-1. `2026-03-09-programmable-agent-preflight-design.md` defines the invariants that later tasks must not violate.
-2. `2026-03-08-phase-1-schema-cut-list.md` defines the destructive schema and model cut.
-3. `2026-03-09-execution-target-discovery-design.md` defines target discovery, target-switch policy reuse, and confirm-by-default target-switch semantics.
-4. `2026-03-09-permission-presets-design.md` defines the conversation-scoped and automation-scoped permission presets, their UI surface, and their compilation into runtime policy bundles.
-5. `2026-03-09-agent-deployment-connection-design.md` defines deployment, draft, approval, session, target-switch lifecycle semantics, and the canonical conversation-level agent/target defaults.
-6. `2026-03-08-runtime-governance-design.md` defines governor and durable-wait semantics.
-7. `2026-03-09-agent-deployment-connection.md` is the executable implementation plan for deployment, conversation runtime selectors, permission presets, target discovery, draft finalization, RPC auth, and E2E coverage.
-8. `2026-03-08-runtime-governance.md` is the executable implementation plan for provider limits, job throughput, execution quotas, and observability.
+- product contract lives in `docs/product/`
+- schema-cut guidance lives in `2026-03-08-phase-1-schema-cut-list.md`
+- runtime-governance plan owns provider, runtime-settings, execution-location, workspace, and execution-target schema plus admission primitives
+- agent-deployment plan owns programmable-agent lifecycle, drafts, permission presets, target inventory APIs, conversation runtime selectors, and replay-safe RPC
+- automation plan owns automation domain/runtime behavior on top of the canonical run lifecycle
 
-Recommended execution sequencing for an end-to-end automated implementation run:
+## Recommended Execution Order
 
-1. `2026-03-08-runtime-governance.md` Task 1 through Task 3
-2. `2026-03-09-agent-deployment-connection.md` Task 1 through Task 3
-3. `2026-03-08-runtime-governance.md` Task 4
-4. `2026-03-08-runtime-governance.md` Task 7
-5. `2026-03-09-agent-deployment-connection.md` Task 4 through Task 8
-6. `2026-03-08-runtime-governance.md` Task 5, Task 6, and Task 8
+1. Read product docs, then `2026-03-09-programmable-agent-preflight-design.md`.
+2. Apply `2026-03-08-phase-1-schema-cut-list.md`.
+3. Execute `2026-03-08-runtime-governance.md` Task 1 before any plan consumes execution locations, workspaces, or execution targets.
+4. Execute `2026-03-09-agent-deployment-connection.md` Task 1 through Task 3 so deployment lifecycle exists before draft planning depends on it.
+5. Execute `2026-03-08-runtime-governance.md` Task 2 through Task 5.
+6. Execute `2026-03-09-agent-deployment-connection.md` Task 4 through Task 7.
+7. Execute `2026-03-09-automation-runtime.md`.
+8. Finish with E2E, observability, and operator-surface cleanup across all three plans.
 
-This ordering keeps schema ownership and runtime-resolution dependencies linear enough to execute without manual backtracking.
+## Plan Hygiene
 
-The two executable plans in this directory are expected to stay automation-ready: every behavior-changing task should name concrete unit, integration, or E2E verification files plus the exact commands needed to fail first and pass after implementation.
-
-For repository-level cutover order around controllers, migrations, and UI updates, also read `docs/product/migration_alignment.md` before implementation starts.
-
-Superseded drafts for this refactor have been moved out of `docs/plans/` and into `docs/archive/plans/2026-03/`.
-
-Historical or unrelated plans have also been moved to `docs/archive/plans/`.
+- executable plans should own tasks, tests, and sequencing
+- design docs should explain invariants and ownership, not restate task lists
+- if a plan conflicts with product docs or preflight, stop and rewrite the plan first

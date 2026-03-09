@@ -188,6 +188,10 @@ That metadata can then drive preset compilation consistently across:
 
 If a tool does not declare a stable permission class in v1, the compiler should treat it conservatively.
 
+Rollout ownership:
+
+- `2026-03-09-agent-deployment-connection.md` Task 4 owns the first executable rollout of stable permission metadata and conservative fallback behavior
+
 ### 10. Target Switches Are Also Controlled By The Preset
 
 Permission presets should influence target-switch defaults, but target-switch policy remains its own resolver.

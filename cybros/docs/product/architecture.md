@@ -1,118 +1,113 @@
 # Architecture
 
+## Hard Invariants
+
+- Cybros is the control plane and the sole system of record.
+- External programmable agents are bounded runtimes, not peer workflow owners.
+- The canonical agent loop runs through Cybros for planning, policy, approval, finalization, execution handoff, transcript, and audit.
+- `AgentProgram` is the selectable identity. `AgentDeployment` is the connectable binding.
+- Nexus is an execution substrate, not a programmable-agent runtime.
+- Stable infrastructure such as automation, memory, knowledge, MCP, and future protocol surfaces belongs in Cybros substrate.
+- Off-loop agent elasticity is allowed, but anything that mutates Cybros product state or governed execution must come back through Cybros surfaces.
+
 ## Runtime Roles
 
 ### Cybros
 
-Cybros is the control plane and runtime kernel. It owns:
+Cybros owns:
 
-- conversations and DAG orchestration
-- LLM calls and tool loop orchestration
-- provider-credential rate limiting
-- job concurrency governance
-- policy and approval
-- permission-preset compilation
-- memory and knowledge services
-- scheduling and automation
-- UI and surface adapters
-- observability and audit
+- conversations and automations as product entrypoints
+- DAG orchestration and run lifecycle
+- provider selection and runtime governance
+- policy, approval, and permission-preset compilation
+- kernel service surfaces for settings, config, KV, target discovery, memory, knowledge, tools, and connectors
+- transcript, observability, and audit
 
-### Agent Program
+### Programmable Agent
 
-An agent program is a standalone application that contains programmable agent logic.
+A programmable agent is a trusted out-of-process application that supplies:
 
-It is responsible for:
-
-- prompt-planning logic
+- planning logic
 - persona and workflow logic
-- hooks
-- calling Cybros RPCs
-- managing its own internal conventions and namespaces
+- domain-specific orchestration
+- agent-owned off-loop capabilities
 
-It is not responsible for:
+It does not own:
 
-- the core LLM loop
-- the core tool loop
-- direct execution against locations
-- direct mutation of Cybros storage internals
+- canonical run lifecycle
+- final prompt assembly
+- final tool policy
+- direct storage mutation inside Cybros
+- direct host execution without Cybros governance
 
-### Agent Deployment
+### AgentDeployment
 
-An agent deployment is the registered, connectable binding Cybros uses to reach a programmable agent.
+An `AgentDeployment` is the reachable runtime binding Cybros can invoke for one `AgentProgram`.
 
 It owns:
 
-- transport binding
-- endpoint or local invocation details
-- deployment bearer secret reference
-- healthcheck and inspection snapshots
-- manifest and schema discovery snapshots
+- transport details
+- deployment secret binding
+- inspection and health facts
 - activation state
+- deployment fingerprint
+
+It does not replace the program contract as product truth.
 
 ### Nexus
 
-Nexus is the execution substrate.
+Nexus owns:
 
-It owns:
+- shell, file, browser, and desktop execution
+- sandbox and quota enforcement for execution work
+- execution against selected targets
 
-- command execution
-- file operations
-- browser and desktop automation
-- deployment and data-collection jobs
-- execution workspace access
-- execution quota enforcement
-- sandbox profile enforcement
+It does not own:
 
-It does not host programmable agents.
+- conversation state
+- programmable-agent lifecycle
+- prompt planning
+- product policy
 
 ## System Shape
 
 ```text
-User / Automation / Channel
-  -> Cybros Conversation API
-  -> Cybros Run Planning / Draft Finalization
-  -> AgentDeployment `agent_rpc` session to programmable agent
-     -> scoped agent requests back into Cybros public APIs
-  -> Cybros LLM / Tool orchestration
-  -> Nexus directive execution against an execution target
-  -> Cybros events / transcript / audit
+User / Automation / Channel Trigger
+  -> Cybros entrypoint
+  -> RunDraft planning
+  -> bounded `agent_rpc` session to AgentDeployment
+     -> scoped callbacks into Cybros kernel surfaces
+  -> Cybros finalization and execution orchestration
+  -> Nexus work against one ExecutionTarget
+  -> Cybros transcript, audit, and follow-up state
 ```
 
-## Turn Control Boundary
+## Canonical Loop Boundary
 
-Programmable agents return high-level intent, not direct runtime mutations.
+Agent-owned outputs remain declarative:
 
-Agent-owned outputs include:
-
-- prompt fragments and workflow decisions
-- staged public API requests for settings, agent config, and KV
+- prompt fragments
+- workflow decisions
+- staged public-surface requests
 - execution-target proposals
 
-Kernel-owned final authority includes:
+Kernel-owned authority remains final:
 
-- final prompt assembly
-- draft mutation commit or discard
-- approval resume from persisted prepared state
-- DAG node and edge mutation
-- tool-loop orchestration
-- tool-policy merge
-- deployment pinning and session authorization
-- approval and retry/resume
-- durable run snapshots and audit
-
-The kernel may merge, defer, reject, or require approval for agent intent when policy or runtime invariants require it.
+- prompt assembly
+- draft commit or discard
+- approval park and resume
+- deployment pinning
+- run materialization
+- tool orchestration
+- runtime governance
+- transcript and audit
 
 ## Boundary Rules
 
-- Product code uses `Conversation` public APIs, not raw DAG internals.
-- Agent control is high-level and policy-gated.
-- Cybros owns the business control flow; agent callbacks are scoped API requests inside that flow.
-- Conversation-level runtime defaults choose the top-level agent program, permission preset, and execution target for future turns.
-- `turn.prepare` is planning-only; draft-time public mutations are not durably committed until finalization.
-- approval resume continues from persisted draft state instead of reopening planning.
-- Execution routing is explicit and auditable.
-- A finalized run pins one deployment binding for execution instead of silently drifting to a new active deployment.
-- Subagents remain turn-local to the top-level agent that launched them and are not retroactively redirected by later conversation-default changes.
-- Provider limits, job concurrency, and execution quotas are separate governors.
-- The system snapshots run-time decisions per run instead of mutating history.
-- Compatibility layers are optional, not required.
+- Product code uses public product surfaces, not raw storage internals.
+- Conversation and automation defaults affect future drafts only.
+- `turn.prepare` is planning-only and cannot durably commit public state.
+- Approval resume continues from persisted draft state and does not reopen planning.
+- Each run snapshots one finalized contract and execution context instead of mutating history.
+- Subagents remain owned by the top-level agent that launched them for that turn.
+- Compatibility layers are optional. Correct long-term boundaries take priority over preserving transitional shapes.

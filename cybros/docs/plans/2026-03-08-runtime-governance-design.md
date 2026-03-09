@@ -2,205 +2,110 @@
 
 ## Goal
 
-Define how Cybros should govern resource usage when DAG execution fans out across remote LLM APIs, background jobs, and managed execution hosts.
+Define how Cybros governs resource usage across provider APIs, worker throughput, and execution hosts without collapsing those concerns into one pseudo-concurrency knob.
 
-Implementation of this model is gated by `docs/plans/2026-03-09-programmable-agent-preflight-design.md`.
-
-## Problem Statement
-
-Cybros is intentionally built around concurrent DAG execution.
-
-That creates three different pressure domains:
-
-- remote LLM APIs have credential-specific rate limits
-- job workers determine how much work the runtime kernel can advance at once
-- managed execution hosts can run out of local resources
-
-These domains are related, but they are not the same problem.
+Implementation of this model is gated by `2026-03-09-programmable-agent-preflight-design.md`.
 
 ## Core Decisions
 
-### 1. Runtime Governance Must Be Split Into Three Governors
+### 1. Runtime Governance Stays Split Into Three Governors
 
-V1 should use:
+V1 uses:
 
 - `ProviderCredentialLimiter`
 - `JobConcurrencySettings`
 - `ExecutionQuota`
 
-Do not collapse them into one global concurrency number.
+Do not collapse them into one global concurrency value.
 
-## 2. Provider Limits Attach To Credentials, Not Provider Families
+### 2. This Design Owns The Execution-Domain Source Models
 
-The limiter must be attached to one configured provider credential.
+This design owns the executable schema and operator source surfaces for:
 
-That is the real unit that experiences request and token ceilings.
+- `ExecutionLocation`
+- `Workspace`
+- `ExecutionTarget`
 
-In the current codebase this most closely maps to the legacy `LLMProvider` credential record.
+Why:
 
-Long-term the domain should distinguish:
+- execution-target discovery and target-switch policy need stable inputs
+- execution quotas need explicit owners
+- conversation and automation selectors cannot sit on top of resolver defaults or implicit filesystem state
 
-- `ProviderSpec`
-- `ProviderCredential`
+This design does not own the conversation-facing selector UX or the public target-inventory APIs. Those belong to the programmable-agent plan.
 
-V1 may keep a product constraint of one active credential per `provider_key`, but the model should not assume that is the permanent architecture.
+### 3. Provider Limits Attach To Credentials
 
-## 3. Job Concurrency Is Scheduler Throughput, Not API Governance
+The limiter attaches to one configured provider credential, not to a provider family in the abstract.
 
-ActiveJob or Solid Queue worker throughput must be tunable, but it should remain a separate concern.
+V1 may keep one active credential per `provider_key`, but the model should not assume that is the permanent architecture.
 
-Raising worker concurrency is necessary because DAG execution can fan out, but this alone cannot protect provider APIs or execution hosts.
+### 4. Job Concurrency Is Scheduler Throughput
 
-## 4. Execution Quotas Protect Nexus-Managed Work Only
+Worker concurrency is a kernel-throughput setting.
 
-Execution quotas should protect:
+It must be tunable, but it cannot replace provider-side rate limiting or execution-host quotas.
 
-- shell work
-- file work
-- browser or desktop work
-- deploy and data-collection work
+### 5. Execution Quotas Are Location-First With Target Overrides
 
-They should not rate-limit `AgentProgram` RPC calls.
+The base execution quota lives on `ExecutionLocation`.
 
-## 5. Execution Quotas Are Location-First With Target Overrides
+`ExecutionTarget` may override that quota where a specific workspace needs different handling.
 
-The base execution quota should live on `ExecutionLocation`.
+### 6. Automation Uses The Same Admission Model
 
-`ExecutionTarget` may override it where a specific workspace needs different handling.
+Automation is not a separate execution engine.
 
-This preserves host-level protection while allowing workspace-level tuning.
+Automation dispatch, planning, and execution must pass through the same:
 
-The same execution models may also carry explicit policy fields and tag arrays used by execution-target visibility and target-switch policy resolution, but those concerns must stay separate from quota admission itself.
+- provider admission
+- execution admission
+- durable waits
 
-## 6. V1 Configuration Lives In System Settings
+### 7. Deployment Backoff Is A Wait Path, Not A Governor
 
-V1 does not need end-user product UI for these controls.
+`deployment_backoff` is a durable retry wait for unreachable or unhealthy deployments.
 
-The operator-facing system settings layer is enough.
+It is not:
 
-Recommended storage direction:
+- a fourth governor
+- a deployment self-healing loop
+- a substitute for deployment lifecycle management
 
-- provider limiter fields on the provider credential record
-- execution-quota fields on `ExecutionLocation`
-- execution-quota override fields on `ExecutionTarget`
-- job-throughput fields in dedicated instance-scoped runtime settings
+### 8. Deployment Capacity Is Explicitly Deferred
 
-The operator-facing settings layer should expose execution-location and workspace records as the source surfaces that later execution-target management builds on.
+Per-deployment concurrency or capacity governance is deferred until Cybros supports multi-deployment routing.
 
-## 7. Dashboard Can Be Deferred, But Data Collection Cannot
+V1 handles programmable-runtime availability through:
 
-The first release can defer the visualization layer.
+- deployment activation
+- health status
+- durable backoff
+- operator intervention
 
-But Cybros should begin collecting facts now so Phase 4 can surface them without another architectural pass.
+### 9. Observability Starts Before Dashboards
 
-At minimum the kernel should produce enough data to visualize:
+The first release may defer polished dashboards, but it must still collect:
 
-- agent work
-- deployment work
 - limiter hits
-- quota denials
-- backlog pressure
+- parked waits
+- lease recovery
+- provider reservation recovery
+- execution quota denials
 
-## Recommended V1 Settings
+## Ownership Boundary
 
-### ProviderCredentialLimiter
+This design owns:
 
-- `max_concurrent_requests`
-- `requests_per_minute`
-- `tokens_per_minute`
-- `burst_limit`
-- `backoff_policy`
+- provider limiter model
+- runtime settings model
+- execution-domain schema
+- durable admission and wait primitives
+- runtime-governor resolution inputs
 
-### JobConcurrencySettings
+This design does not own:
 
-- `default_worker_concurrency`
-- `queue_overrides`
-- `alert_thresholds`
-
-### ExecutionQuota
-
-- `max_concurrent_tasks`
-- `max_queued_tasks`
-- `default_timeout_s`
-- optional `cpu_limit_millicores`
-- optional `memory_limit_mb`
-
-## Admission And Parking Rules
-
-Provider credential limits and execution quotas require one shared durable coordination layer, but not one identical admission primitive.
-
-Provider admission should use durable reservation and settlement semantics for:
-
-- request budgets
-- token budgets
-- burst budgets
-
-Execution admission should use durable capacity leases for:
-
-- concurrent execution slots
-- admitted execution queue occupancy
-- lease expiry or heartbeat recovery
-
-The minimum required behavior is:
-
-- atomic admission decisions
-- explicit release or settlement
-- durable denial or backoff reason
-- reconciliation after crashes or abandoned work
-- durable request identifiers for provider calls and execution requests
-
-If work is denied or delayed, the scheduler should park it durably and release worker capacity instead of spinning inside the worker pool.
-
-Blocked work should use a durable wait state with explicit reasons:
-
-- `provider_limit`
-- `execution_quota`
-- `deployment_backoff`
-
-`deployment_backoff` is not a fourth governor. It is the scheduler's durable retry wait for unreachable or unhealthy programmable-agent deployments.
-
-## Run-Time Flow
-
-At execution time:
-
-1. the job system advances runnable DAG work
-2. provider-bound LLM calls must pass the credential limiter through the rate-budget admission path
-3. agent RPC calls proceed without their own limiter by default
-4. execution-bound work must pass the resolved execution quota through the capacity-lease admission path
-5. denied work parks durably instead of monopolizing scheduler throughput
-
-If one of these governors blocks progress, the reason should be durable and observable.
-
-Deployment transport failures may also park work through `deployment_backoff`, but Cybros does not supervise or repair the deployment.
-
-## Phase Placement
-
-### Phase 1
-
-Land:
-
-- configuration model
-- settings entry points
-- run-time resolution rules
-- baseline observability facts
-
-### Phase 3
-
-Land:
-
-- full execution-quota enforcement against Nexus-managed work
-
-### Phase 4
-
-Land:
-
-- dashboard views for agent work and deployment work
-
-## Non-Goals
-
-V1 does not need:
-
-- per-user runtime governance
-- automatic adaptive limit tuning
-- product-grade end-user controls
-- agent-program-specific rate limiting
+- conversation agent selector
+- conversation target selector UX
+- deployment registration lifecycle
+- automation scheduling semantics

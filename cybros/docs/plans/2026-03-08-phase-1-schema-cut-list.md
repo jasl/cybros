@@ -36,12 +36,14 @@ Purpose:
 Suggested fields:
 
 - `id`
-- `conversation_id`
+- `conversation_id` nullable
+- `automation_id` nullable
 - `initiated_by_user_id` nullable
 - `status`
 - `permission_mode`
 - `trigger_snapshot` jsonb
 - `agent_program_id`
+- `contract_fingerprint`
 - `agent_deployment_id`
 - `deployment_fingerprint`
 - `deployment_activated_at`
@@ -61,6 +63,7 @@ Suggested fields:
 
 Suggested v1 rule:
 
+- exactly one of `conversation_id` or `automation_id` should be present
 - a draft may terminate without materializing a `ConversationRun`
 - `ConversationRun` must not carry draft-only states such as `awaiting_approval`, `stale`, or `expired`
 - if approval parks the draft, Cybros resumes finalization from the persisted prepared plan instead of re-running `turn.prepare`
@@ -79,6 +82,7 @@ Suggested fields:
 - `endpoint_url` nullable
 - `transport_config` jsonb nullable
 - `deployment_bearer_secret_ref`
+- `contract_fingerprint`
 - `deployment_fingerprint`
 - `status`
 - `health_status`
@@ -205,6 +209,7 @@ Suggested v1 rule:
 
 - `Automation` is its own product aggregate; `conversation_id`, if present, is an optional dispatch or transcript binding rather than the automation's primary identity
 - stable schedule fields should be explicit columns; keep `task_payload` as a versioned envelope only if task shapes are still intentionally open-ended
+- if an automation run needs manual approval, represent that as durable runtime state instead of silent auto-allow
 
 ### `automation_runs`
 
@@ -219,6 +224,7 @@ Suggested fields:
 - `initiated_by_user_id` nullable
 - `conversation_run_id` nullable
 - `status`
+- `approval_state` jsonb nullable
 - `scheduled_for`
 - `started_at`
 - `finished_at`
@@ -271,8 +277,10 @@ Add:
 
 - `manifest_snapshot` jsonb
 - `config_namespace`
+- `global_config` jsonb
 - `global_config_schema` jsonb
 - `conversation_config_schema` jsonb
+- `published_contract_fingerprint`
 - `config_schema_fingerprint`
 
 Purpose:
@@ -332,6 +340,7 @@ Add immutable snapshot fields:
 - `initiated_by_user_id` nullable
 - `effective_permission_mode`
 - `agent_program_id`
+- `contract_fingerprint`
 - `agent_deployment_id`
 - `deployment_fingerprint`
 - `deployment_activated_at`
@@ -350,6 +359,7 @@ Recommended v1 snapshot sections:
 - `trigger`
 - `permission_mode`
 - `agent`
+- `contract`
 - `deployment`
 - `provider_credential`
 - `model`
