@@ -129,7 +129,7 @@ module Cybros
           return if MODES.include?(permission_mode)
 
           AgentCore::ValidationError.raise!(
-            "permission_mode must be one of: #{MODES.join(', ')}",
+            "permission_mode must be one of: #{MODES.join(", ")}",
             code: "cybros.permissions.bundle_compiler.permission_mode_invalid",
             details: { permission_mode: permission_mode, allowed_modes: MODES },
           )

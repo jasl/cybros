@@ -98,7 +98,7 @@ module RuntimeGovernance
         return if Conversation::PERMISSION_MODES.include?(permission_mode)
 
         AgentCore::ValidationError.raise!(
-          "permission_mode must be one of: #{Conversation::PERMISSION_MODES.join(', ')}",
+          "permission_mode must be one of: #{Conversation::PERMISSION_MODES.join(", ")}",
           code: "cybros.execution_target_switch_policy.permission_mode_invalid",
           details: { permission_mode: permission_mode, allowed_modes: Conversation::PERMISSION_MODES },
         )

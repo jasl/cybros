@@ -75,7 +75,7 @@ module Automations
         unsupported = parsed.keys - SUPPORTED_KEYS_BY_FREQUENCY.fetch(frequency)
         return if unsupported.empty?
 
-        raise ArgumentError, "unsupported automation rrule keys #{unsupported.join(',')}"
+        raise ArgumentError, "unsupported automation rrule keys #{unsupported.join(",")}"
       end
 
       def validate_integer_field!(parsed, key, min:, max: nil)
