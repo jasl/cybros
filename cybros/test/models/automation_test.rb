@@ -20,13 +20,8 @@ class AutomationTest < ActiveSupport::TestCase
     assert_includes automation.errors[:user], "must exist"
     assert_includes automation.errors[:agent_program], "must exist"
     assert_includes automation.errors[:execution_target], "must exist"
-    assert_includes automation.errors[:schedule_kind], "can't be blank"
+    assert_includes automation.errors[:base], "must define exactly one schedule or trigger"
     assert_includes automation.errors[:task_payload], "must be a JSON object"
-
-    automation.schedule_kind = "rrule"
-    refute_predicate automation, :valid?
-    assert_includes automation.errors[:schedule_rrule], "can't be blank"
-    assert_includes automation.errors[:schedule_timezone], "can't be blank"
   end
 
   test "allows an optional conversation binding" do
@@ -38,11 +33,53 @@ class AutomationTest < ActiveSupport::TestCase
     assert_equal conversation, automation.conversation
   end
 
+  test "requires conversation binding to belong to the automation owner" do
+    owner = create_user!
+    other_user = create_user!
+    conversation = create_conversation!(user: other_user)
+    automation = build_automation(user: owner, conversation: conversation)
+
+    refute_predicate automation, :valid?
+    assert_includes automation.errors[:conversation], "must belong to the automation owner"
+  end
+
+  test "rejects invalid schedule definitions" do
+    automation = build_automation(schedule_rrule: "nonsense", schedule_timezone: "Mars/Olympus")
+
+    refute_predicate automation, :valid?
+    assert_includes automation.errors[:schedule_rrule], "must be a supported RRULE"
+    assert_includes automation.errors[:schedule_timezone], "must be a valid time zone"
+  end
+
+  test "rejects rrules with out-of-range schedule fields" do
+    automation = build_automation(schedule_rrule: "FREQ=DAILY;BYHOUR=99;BYMINUTE=0")
+
+    refute_predicate automation, :valid?
+    assert_includes automation.errors[:schedule_rrule], "must be a supported RRULE"
+  end
+
+  test "allows trigger-based automations without schedule fields" do
+    automation =
+      build_automation(
+        schedule_kind: nil,
+        schedule_rrule: nil,
+        schedule_timezone: nil,
+        trigger_kind: "event",
+        trigger_payload: { "source" => "conversation.message.created" },
+      )
+
+    assert_predicate automation, :valid?
+    automation.save!
+    assert_equal "event", automation.trigger_kind
+    assert_equal({ "source" => "conversation.message.created" }, automation.trigger_payload)
+  end
+
   test "does not cascade-destroy immutable automation runs" do
     automation = build_automation
     automation.save!
     AutomationRun.create!(
       automation: automation,
+      dispatch_key: "#{automation.id}:#{Time.current.change(usec: 0).iso8601}",
       status: "queued",
       scheduled_for: Time.current.change(usec: 0),
       snapshot: { "automation" => { "permission_mode" => automation.permission_mode } },
@@ -54,17 +91,29 @@ class AutomationTest < ActiveSupport::TestCase
 
   private
 
-    def build_automation(conversation: nil)
+    def build_automation(
+      user: nil,
+      conversation: nil,
+      schedule_kind: "rrule",
+      schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+      schedule_timezone: "UTC",
+      trigger_kind: nil,
+      trigger_payload: nil
+    )
+      resolved_user = user || conversation&.user || create_user!
+
       Automation.new(
-        user: create_user!,
+        user: resolved_user,
         conversation: conversation,
         agent_program: create_program!,
         execution_target: create_execution_target!(name: "Automation target"),
         permission_mode: "full_access",
         status: "active",
-        schedule_kind: "rrule",
-        schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
-        schedule_timezone: "UTC",
+        schedule_kind: schedule_kind,
+        schedule_rrule: schedule_rrule,
+        schedule_timezone: schedule_timezone,
+        trigger_kind: trigger_kind,
+        trigger_payload: trigger_payload,
         task_payload: { "kind" => "scheduled_prompt", "prompt" => "Ship it" },
       )
     end

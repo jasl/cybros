@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000015) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -172,6 +172,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.uuid "automation_id", null: false
     t.uuid "conversation_run_id"
     t.datetime "created_at", null: false
+    t.string "dispatch_key"
     t.datetime "finished_at"
     t.uuid "initiated_by_user_id"
     t.datetime "scheduled_for", null: false
@@ -179,6 +180,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.datetime "started_at"
     t.string "status", null: false
     t.datetime "updated_at", null: false
+    t.index ["automation_id", "dispatch_key"], name: "idx_automation_runs_dispatch_key", unique: true, where: "(dispatch_key IS NOT NULL)"
     t.index ["automation_id", "scheduled_for"], name: "idx_automation_runs_schedule"
     t.index ["automation_id"], name: "index_automation_runs_on_automation_id"
     t.index ["conversation_run_id"], name: "index_automation_runs_on_conversation_run_id"
@@ -191,11 +193,13 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.datetime "created_at", null: false
     t.uuid "execution_target_id", null: false
     t.string "permission_mode", default: "full_access", null: false
-    t.string "schedule_kind", null: false
+    t.string "schedule_kind"
     t.string "schedule_rrule"
     t.string "schedule_timezone"
     t.string "status", default: "active", null: false
     t.jsonb "task_payload", default: {}, null: false
+    t.string "trigger_kind"
+    t.jsonb "trigger_payload", default: {}, null: false
     t.datetime "updated_at", null: false
     t.uuid "user_id", null: false
     t.index ["agent_program_id"], name: "index_automations_on_agent_program_id"

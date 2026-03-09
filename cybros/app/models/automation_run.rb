@@ -5,14 +5,23 @@ class AutomationRun < ApplicationRecord
   belongs_to :initiated_by_user, class_name: "User", optional: true
   belongs_to :conversation_run, optional: true
 
-  attr_readonly :automation_id, :initiated_by_user_id, :conversation_run_id, :scheduled_for, :snapshot
+  before_validation :normalize_immutable_fields
 
+  attr_readonly :automation_id, :initiated_by_user_id, :conversation_run_id, :dispatch_key, :scheduled_for, :snapshot
+
+  validates :dispatch_key, presence: true
   validates :status, presence: true, inclusion: { in: STATUSES }
   validates :scheduled_for, presence: true
   validate :approval_state_must_be_object
   validate :snapshot_must_be_object
 
   private
+
+    def normalize_immutable_fields
+      self.dispatch_key = dispatch_key.to_s.strip.presence
+      self.approval_state = approval_state.deep_stringify_keys if approval_state.is_a?(Hash)
+      self.snapshot = snapshot.deep_stringify_keys if snapshot.is_a?(Hash)
+    end
 
     def approval_state_must_be_object
       return if approval_state.is_a?(Hash)

@@ -1,58 +1,29 @@
 require "test_helper"
 
-class AutomationRunTest < ActiveSupport::TestCase
-  test "stores immutable automation snapshot fields" do
-    run = build_run
+class AutomationSchedulerFlowTest < ActiveSupport::TestCase
+  test "scheduler dispatches due active automations once per schedule window" do
+    due = create_automation!(status: "active", hour: 9, minute: 0)
+    paused = create_automation!(status: "paused", hour: 9, minute: 0)
+    later = create_automation!(status: "active", hour: 10, minute: 0)
+    now = Time.utc(2026, 3, 9, 9, 0, 0)
 
-    assert_predicate run, :valid?
-    run.save!
+    created = Automations::Scheduler.dispatch_due!(now: now)
 
-    assert_equal "queued", run.status
-    assert_equal({ "automation" => { "permission_mode" => "full_access" } }, run.snapshot)
-  end
+    assert_equal 1, created.size
+    assert_equal due.id, created.first.automation_id
+    assert_nil AutomationRun.find_by(automation: paused)
+    assert_nil AutomationRun.find_by(automation: later)
+    assert_equal "#{due.id}:#{now.iso8601}", AutomationRun.find_by!(automation: due).dispatch_key
 
-  test "requires automation status scheduling facts and snapshot" do
-    run = AutomationRun.new
-
-    refute_predicate run, :valid?
-    assert_includes run.errors[:automation], "must exist"
-    assert_includes run.errors[:dispatch_key], "can't be blank"
-    assert_includes run.errors[:status], "can't be blank"
-    assert_includes run.errors[:scheduled_for], "can't be blank"
-    assert_includes run.errors[:snapshot], "must be a JSON object"
-  end
-
-  test "keeps immutable snapshot fields readonly after creation" do
-    run = build_run
-    run.save!
-
-    assert_raises(ActiveRecord::ReadonlyAttributeError) do
-      run.update!(
-        dispatch_key: SecureRandom.uuid,
-        scheduled_for: 1.hour.from_now.change(usec: 0),
-        snapshot: { "automation" => { "permission_mode" => "default" } },
-      )
+    assert_no_difference -> { AutomationRun.count } do
+      created_again = Automations::Scheduler.dispatch_due!(now: now)
+      assert_equal [created.first.id], created_again.map(&:id)
     end
-
-    run.reload
-    assert_equal({ "automation" => { "permission_mode" => "full_access" } }, run.snapshot)
   end
 
   private
 
-    def build_run
-      AutomationRun.new(
-        automation: create_automation!,
-        initiated_by_user: create_user!,
-        dispatch_key: SecureRandom.uuid,
-        status: "queued",
-        approval_state: {},
-        scheduled_for: Time.current.change(usec: 0),
-        snapshot: { "automation" => { "permission_mode" => "full_access" } },
-      )
-    end
-
-    def create_automation!
+    def create_automation!(status:, hour:, minute:)
       program =
         AgentProgram.create!(
           name: "Automation Program #{SecureRandom.hex(4)}",
@@ -101,9 +72,9 @@ class AutomationRunTest < ActiveSupport::TestCase
         agent_program: program,
         execution_target: target,
         permission_mode: "full_access",
-        status: "active",
+        status: status,
         schedule_kind: "rrule",
-        schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
+        schedule_rrule: "FREQ=DAILY;BYHOUR=#{hour};BYMINUTE=#{minute}",
         schedule_timezone: "UTC",
         task_payload: { "kind" => "scheduled_prompt", "prompt" => "Ship it" },
       )
