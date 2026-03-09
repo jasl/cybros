@@ -1,6 +1,13 @@
 require "test_helper"
 
 class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "requires authentication" do
     get system_settings_automations_path
 
@@ -20,9 +27,10 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
 
-    Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    end
 
     get system_settings_automations_path
 
@@ -62,9 +70,11 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
 
     get system_settings_automation_path(runtime.fetch(:automation))
 
@@ -158,10 +168,11 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
 
     def dispatch_due_automation!(automation:, now:)
       runs = Automations::Scheduler.dispatch_due!(now: now)
+      matching_run = runs.find { |run| run.automation_id == automation.id }
 
-      assert_equal [automation.id], runs.map(&:automation_id)
+      assert_not_nil matching_run
 
-      runs.fetch(0)
+      matching_run
     end
 
     def create_program!

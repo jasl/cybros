@@ -1,12 +1,12 @@
 require "test_helper"
 
-class RuntimeGovernance::ExecutionQuotaEnforcerTest < ActiveSupport::TestCase
+class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
   test "admit! acquires idempotently by durable execution request id" do
     target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
     run = create_conversation_run!(execution_target: target)
 
-    first = RuntimeGovernance::ExecutionQuotaEnforcer.admit!(conversation_run: run)
-    second = RuntimeGovernance::ExecutionQuotaEnforcer.admit!(conversation_run: run)
+    first = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run)
+    second = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run)
 
     assert_equal "acquired", first.fetch(:decision)
     assert_equal first.fetch(:lease).id, second.fetch(:lease).id
@@ -24,23 +24,23 @@ class RuntimeGovernance::ExecutionQuotaEnforcerTest < ActiveSupport::TestCase
     run_one = create_conversation_run!(execution_target: target)
     run_two = create_conversation_run!(execution_target: target)
 
-    first = RuntimeGovernance::ExecutionQuotaEnforcer.admit!(conversation_run: run_one)
-    second = RuntimeGovernance::ExecutionQuotaEnforcer.admit!(conversation_run: run_two)
+    first = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run_one)
+    second = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run_two)
 
     assert_equal "acquired", first.fetch(:decision)
     assert_equal "acquired", second.fetch(:decision)
-    assert_equal "execution_target", first.fetch(:quota).fetch("scope_type")
+    assert_equal "execution_target", first.fetch(:capacity).fetch("scope_type")
   end
 
-  test "admit! requires an execution quota snapshot" do
+  test "admit! requires an execution capacity snapshot" do
     run = create_conversation_run!(runtime_governors: {})
 
     error =
       assert_raises(AgentCore::ValidationError) do
-        RuntimeGovernance::ExecutionQuotaEnforcer.admit!(conversation_run: run)
+        RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run)
       end
 
-    assert_equal "cybros.runtime_governance.execution_quota_snapshot_missing", error.code
+    assert_equal "cybros.runtime_governance.execution_capacity_snapshot_missing", error.code
   end
 
   private
@@ -56,7 +56,7 @@ class RuntimeGovernance::ExecutionQuotaEnforcerTest < ActiveSupport::TestCase
         status: "active",
         api_key: "sk-test",
       )
-    runtime_governors ||= { "execution_quota" => RuntimeGovernance::ExecutionQuotaResolver.resolve!(execution_target: execution_target) }
+    runtime_governors ||= { "execution_capacity" => RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: execution_target) }
 
     ConversationRun.create!(
       conversation: conversation,

@@ -1,7 +1,7 @@
 require "test_helper"
 
 class ExecutionLocationTest < ActiveSupport::TestCase
-  test "requires explicit execution quota inputs" do
+  test "requires explicit execution capacity inputs" do
     location =
       build_location(
         max_concurrent_tasks: nil,

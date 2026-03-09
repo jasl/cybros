@@ -31,7 +31,7 @@ module RunDrafts
 
       def discarded_runtime_governors
         governors = draft.runtime_governors.is_a?(Hash) ? draft.runtime_governors.deep_dup : {}
-        governors.except("execution_quota")
+        governors.except("execution_capacity")
       end
   end
 end

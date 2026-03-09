@@ -1,6 +1,13 @@
 require "test_helper"
 
 class AutomationRunDraftFlowTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "automation dispatch opens a run draft and snapshots runtime bindings at execution time" do
     seen_conversation_ids = []
     server =
@@ -14,7 +21,7 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(server:)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
     runtime.fetch(:deployment).update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
     replacement =
@@ -24,9 +31,11 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
         deployment_fingerprint: "fixture-deployment-v1",
       )
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
 
-    draft = result.fetch(:draft)
+    draft = RunDraft.find(automation_run.reload.snapshot.dig("draft", "id"))
     automation_run.reload
 
     assert_equal [nil], seen_conversation_ids
@@ -34,7 +43,6 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
     assert_nil draft.conversation_id
     assert_equal "finalized", draft.status
     assert_nil draft.materialized_conversation_run_id
-    assert_nil result.fetch(:conversation_run)
     assert_equal replacement.id, draft.agent_deployment_id
     assert_equal "completed", automation_run.status
     assert_equal replacement.id, automation_run.snapshot.dig("runtime", "agent_deployment_id")

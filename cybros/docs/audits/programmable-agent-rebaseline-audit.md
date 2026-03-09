@@ -10,9 +10,9 @@ Environment note:
 
 ## Repair Status
 
-- Closed on 2026-03-09: `PA-001`, `PA-002`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-013`
-- Still open: `PA-006`, `PA-011`, `PA-012`
-- Explicitly excluded from implementation in this repair session: `PA-006`, `PA-011`, `PA-012`
+- Closed on 2026-03-09: `PA-001`, `PA-002`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-011`, `PA-012`, `PA-013`
+- Still open: `PA-006`
+- Explicitly excluded from implementation in this repair session: `PA-006`
 
 ## PA-001
 
@@ -272,29 +272,42 @@ Environment note:
 
 ## PA-011
 
-- Status: Open discussion item; explicitly excluded from implementation in the 2026-03-09 repair session.
+- Status: Closed on 2026-03-09.
+- Repair summary: execution capacity admission now happens at the DAG claim boundary, parked waits derive `waiting_for_capacity` from durable `RuntimeWait` facts, and lease release wakes the oldest parked waiter by clearing retry gating and kicking the graph.
+- Verification:
+  - `bin/rails test test/lib/dag/scheduler_test.rb test/lib/dag/runner_test.rb test/jobs/dag/tick_graph_job_test.rb test/services/runtime_governance/execution_capacity_enforcer_test.rb test/integration/execution_capacity_enforcement_test.rb test/integration/programmable_agent_execution_test.rb`
+  - `bin/rails test test/services/runtime_governance/runtime_waits_test.rb test/jobs/dag/tick_graph_job_test.rb test/integration/execution_capacity_enforcement_test.rb test/integration/automation_scheduler_flow_test.rb`
+- Historical finding retained below for traceability; it no longer describes current behavior.
 
 - Severity: P1
-- Conclusion: execution quota admission is not wired into the real programmable-runtime path. The current tests exercise `ExecutionQuotaEnforcer` directly, but no production orchestration code admits or releases runs through it.
+- Conclusion: execution capacity admission was not wired into the real programmable-runtime path. The prior tests exercised the enforcer directly, but production orchestration did not admit or release runs through it.
 - Violates:
   - `docs/plans/2026-03-08-runtime-governance.md` says execution admission uses durable capacity leases and parked waits.
   - `docs/product/run_lifecycle.md` says Cybros executes the run under the pinned governor snapshot.
 - Evidence:
-  - `rg -n "ExecutionQuotaEnforcer\\.admit!|ExecutionQuotaEnforcer\\.release!|ExecutionQuotaEnforcer\\.reconcile!" . -S` only returns test files, not `app/` or `lib/` production call sites.
-  - [`app/services/run_drafts/finalize_service.rb:193`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/run_drafts/finalize_service.rb#L193) materializes a queued `ConversationRun` without quota admission.
-  - [`test/integration/execution_quota_enforcement_test.rb:9`](/Users/jasl/Workspaces/Cybros/cybros/cybros/test/integration/execution_quota_enforcement_test.rb#L9) proves the current “integration” coverage manually calls the enforcer instead of exercising the normal runtime path.
+  - `ConversationRun` runtime snapshots now use `runtime_governors["execution_capacity"]`, and the scheduler admits capacity before claiming a programmable node for execution.
+  - [`lib/dag/scheduler.rb:115`](/Users/jasl/Workspaces/Cybros/cybros/cybros/lib/dag/scheduler.rb#L115) admits, parks, or denies execution capacity during the real claim path.
+  - [`app/models/conversation_run_tracker.rb:35`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/models/conversation_run_tracker.rb#L35) releases capacity from terminal execution transitions.
+  - [`app/services/runtime_governance/runtime_waits.rb:46`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/runtime_governance/runtime_waits.rb#L46) resumes the oldest parked waiter by clearing node retry gating and kicking the graph.
+  - [`test/integration/execution_capacity_enforcement_test.rb:4`](/Users/jasl/Workspaces/Cybros/cybros/cybros/test/integration/execution_capacity_enforcement_test.rb#L4) covers real claim-time park, deny, derived runtime state, and release wakeup.
 - Impact:
-  - Real programmable runs can bypass execution quotas entirely.
-  - The current acceptance evidence is largely fake coverage for the shipped runtime path.
+  - Real programmable runs no longer bypass execution capacity governance.
+  - Acceptance evidence now exercises the shipped runtime path instead of a manual-service shortcut.
 - Possible options:
   - Admit/release in run finalization plus lifecycle transitions.
   - Or admit/release in the worker/node execution path before work is actually claimed.
 - Recommended solution:
-  - Wire quota admission into the production execution path, then replace the manual-service test with an end-to-end runtime admission flow.
+  - Landed.
 
 ## PA-012
 
-- Status: Open discussion item; explicitly excluded from implementation in the 2026-03-09 repair session.
+- Status: Closed on 2026-03-09.
+- Repair summary: scheduled automation now runs through production jobs: a recurring dispatch job finds due automations, dispatch enqueues durable execute work, and scheduled-flow/operator tests assert the real job-wired path instead of manual orchestrator starts.
+- Verification:
+  - `bin/rails test test/services/automations/dispatch_test.rb test/integration/automation_scheduler_flow_test.rb test/jobs/automations/dispatch_due_job_test.rb test/jobs/automations/execute_run_job_test.rb`
+  - `bin/rails test test/integration/automation_run_draft_flow_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/automation_failure_recovery_test.rb test/integration/system_settings_automations_test.rb test/system/system_settings_automations_test.rb`
+  - `bin/rails test test/integration/automation_manual_approval_test.rb test/integration/automation_conversation_binding_test.rb`
+- Historical finding retained below for traceability; it no longer describes current behavior.
 
 - Severity: P1
 - Conclusion: scheduled automation dispatch is not wired to execution. The scheduler only persists queued `AutomationRun` rows; no production path enqueues or starts `Automations::RunOrchestrator` from that scheduled dispatch.
@@ -302,18 +315,19 @@ Environment note:
   - `docs/product/automation.md` says automation runtime follows the canonical lifecycle from trigger to run execution.
   - `docs/plans/2026-03-09-automation-runtime.md` Task 5 requires one end-to-end scheduled dispatch flow.
 - Evidence:
-  - [`app/services/automations/scheduler.rb:11`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/scheduler.rb#L11) dispatches due automations only by calling `Automations::Dispatch`.
-  - [`app/services/automations/dispatch.rb:35`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/dispatch.rb#L35) creates a queued `AutomationRun` and stops there.
-  - `rg -n "Automations::RunOrchestrator" app config -S` returns no production scheduler/job/controller wiring; current references are tests and the service itself.
-  - [`test/integration/system_settings_automations_test.rb:25`](/Users/jasl/Workspaces/Cybros/cybros/cybros/test/integration/system_settings_automations_test.rb#L25) and [`test/system/system_settings_automations_test.rb:11`](/Users/jasl/Workspaces/Cybros/cybros/cybros/test/system/system_settings_automations_test.rb#L11) manually call `Automations::RunOrchestrator.start!` before asserting operator surfaces.
+  - [`app/jobs/automations/dispatch_due_job.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/dispatch_due_job.rb#L1) provides production recurring dispatch execution.
+  - [`app/services/automations/dispatch.rb:32`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/dispatch.rb#L32) creates the durable queued `AutomationRun` inside a transaction and enqueues `Automations::ExecuteRunJob`.
+  - [`app/jobs/automations/execute_run_job.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/execute_run_job.rb#L1) bridges queued automation runs into the existing orchestration path.
+  - [`config/recurring.yml:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/config/recurring.yml#L1) wires scheduled dispatch into the production recurring job config.
+  - Scheduled-flow and operator-surface tests now drive `Automations::ExecuteRunJob` instead of manual `RunOrchestrator.start!`.
 - Impact:
-  - Due scheduled automations accumulate as queued rows unless some out-of-band caller starts them.
-  - The claimed scheduled end-to-end behavior is not actually landed.
+  - Due scheduled automations no longer accumulate as inert queued rows.
+  - Operator-visible states are now produced by the shipped scheduled path.
 - Possible options:
   - Enqueue an automation-run execution job from `Dispatch` / `Scheduler`.
   - Or make the scheduler itself execute orchestration inline, with explicit retry semantics.
 - Recommended solution:
-  - Add a production scheduler-to-orchestrator bridge and replace the manual-start tests with a true scheduled execution flow.
+  - Landed.
 
 ## PA-013
 

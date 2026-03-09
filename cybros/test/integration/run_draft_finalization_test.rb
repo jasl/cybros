@@ -226,7 +226,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "finalization fails stale when execution quota facts drift before materialization" do
+  test "finalization fails stale when execution capacity facts drift before materialization" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)

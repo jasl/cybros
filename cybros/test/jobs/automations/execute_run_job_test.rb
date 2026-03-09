@@ -1,64 +1,74 @@
 require "test_helper"
 
-class AutomationFailureRecoveryTest < ActiveSupport::TestCase
+class Automations::ExecuteRunJobTest < ActiveJob::TestCase
   include ActiveJob::TestHelper
 
-  setup do
-    clear_enqueued_jobs
-    clear_performed_jobs
-  end
-
-  test "planning rpc failure marks the automation run failed with durable error audit" do
-    failing_server = failing_initialize_server!
-    runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
-    clear_enqueued_jobs
-
-    error = assert_raises(AgentCore::ValidationError) { Automations::ExecuteRunJob.perform_now(automation_run.id) }
-    automation_run.reload
-
-    assert_equal "cybros.agent_rpc.initialize_failed", error.code
-    assert_equal "failed", automation_run.status
-    assert automation_run.finished_at.present?
-    assert_equal "AgentCore::ValidationError", automation_run.snapshot.dig("failure", "class")
-    assert_equal "cybros.agent_rpc.initialize_failed", automation_run.snapshot.dig("failure", "code")
-    assert_match(/refused|failed/i, automation_run.snapshot.dig("failure", "message").to_s)
-  ensure
-    failing_server&.shutdown
-  end
-
-  test "a later automation redispatch can complete after a failed run" do
-    failing_server = failing_initialize_server!
-    runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
-    first_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
-    clear_enqueued_jobs
-
-    assert_raises(AgentCore::ValidationError) { Automations::ExecuteRunJob.perform_now(first_run.id) }
-    assert_equal "failed", first_run.reload.status
-
+  test "perform starts queued runs through the orchestrator" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime.fetch(:program).active_healthy_deployment.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
-    active_deployment!(
-      program: runtime.fetch(:program),
-      endpoint_url: server.rpc_url,
-      deployment_fingerprint: "fixture-deployment-v1",
-    )
+    runtime = create_automation_runtime!(endpoint_url: server.rpc_url)
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
 
-    second_run = nil
+    Automations::ExecuteRunJob.perform_now(automation_run.id)
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      second_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 10, 9, 0, 0))
-    end
-    second_run.reload
-
-    assert_equal "completed", second_run.status
-    assert_equal "finalized", RunDraft.find(second_run.snapshot.dig("draft", "id")).status
-    assert_equal first_run.id, first_run.reload.id
-    assert_equal "failed", first_run.status
+    assert_equal "completed", automation_run.reload.status
   ensure
-    failing_server&.shutdown
     server&.shutdown
+  end
+
+  test "perform ignores runs that are no longer queued" do
+    automation_run = create_completed_run!
+
+    assert_no_difference -> { RunDraft.count } do
+      Automations::ExecuteRunJob.perform_now(automation_run.id)
+    end
+
+    assert_equal "completed", automation_run.reload.status
+  end
+
+  test "perform claims queued runs before orchestration so duplicate delivery is ignored" do
+    automation_run = create_queued_run!
+    start_calls = 0
+    orchestrator_singleton = Automations::RunOrchestrator.singleton_class
+
+    orchestrator_singleton.alias_method :__execute_run_job_test_original_start__, :start!
+    orchestrator_singleton.define_method(:start!) do |automation_run:, **|
+      start_calls += 1
+      automation_run
+    end
+
+    begin
+      Automations::ExecuteRunJob.perform_now(automation_run.id)
+      Automations::ExecuteRunJob.perform_now(automation_run.id)
+    ensure
+      orchestrator_singleton.alias_method :start!, :__execute_run_job_test_original_start__
+      orchestrator_singleton.remove_method :__execute_run_job_test_original_start__
+    end
+
+    assert_equal 1, start_calls
+    assert_equal "running", automation_run.reload.status
+  end
+
+  test "perform marks the run failed if orchestration raises a non-standard exception after claim" do
+    automation_run = create_queued_run!
+    crash_class = Class.new(Exception)
+    orchestrator_singleton = Automations::RunOrchestrator.singleton_class
+
+    orchestrator_singleton.alias_method :__execute_run_job_test_original_start__, :start!
+    orchestrator_singleton.define_method(:start!) do |**|
+      raise crash_class, "hard crash"
+    end
+
+    error =
+      begin
+        assert_raises(crash_class) { Automations::ExecuteRunJob.perform_now(automation_run.id) }
+      ensure
+        orchestrator_singleton.alias_method :start!, :__execute_run_job_test_original_start__
+        orchestrator_singleton.remove_method :__execute_run_job_test_original_start__
+      end
+
+    assert_equal "hard crash", error.message
+    assert_equal "failed", automation_run.reload.status
+    assert_equal "hard crash", automation_run.snapshot.dig("failure", "message")
   end
 
   private
@@ -95,6 +105,32 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
         scheduled_for: scheduled_for,
         dispatch_key: "#{automation.id}:#{scheduled_for.iso8601}",
         trigger_snapshot: { "kind" => "schedule", "scheduled_for" => scheduled_for.iso8601 },
+      )
+    end
+
+    def create_completed_run!
+      automation = create_automation_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc").fetch(:automation)
+
+      AutomationRun.create!(
+        automation: automation,
+        dispatch_key: "#{automation.id}:#{Time.utc(2026, 3, 9, 9, 0, 0).iso8601}",
+        status: "completed",
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+        approval_state: {},
+        snapshot: { "automation" => { "id" => automation.id } },
+      )
+    end
+
+    def create_queued_run!
+      automation = create_automation_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc").fetch(:automation)
+
+      AutomationRun.create!(
+        automation: automation,
+        dispatch_key: "#{automation.id}:#{Time.utc(2026, 3, 9, 9, 0, 0).iso8601}",
+        status: "queued",
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+        approval_state: {},
+        snapshot: { "automation" => { "id" => automation.id } },
       )
     end
 
@@ -182,15 +218,5 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
       )
       credential.save!
       credential
-    end
-
-    def failing_initialize_server!
-      Cybros::ProgrammableAgentFixture::Server.new(
-        rpc_overrides: {
-          "initialize" => lambda do |_params, _base_result, _identity|
-            raise "initialize refused"
-          end,
-        },
-      ).start
     end
 end

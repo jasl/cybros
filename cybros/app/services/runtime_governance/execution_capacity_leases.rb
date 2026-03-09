@@ -5,7 +5,7 @@ module RuntimeGovernance
     module_function
 
     def acquire!(
-      quota:,
+      capacity:,
       execution_request_id:,
       holder_type:,
       holder_id:,
@@ -13,8 +13,8 @@ module RuntimeGovernance
       now: Time.current,
       lease_ttl: LEASE_TTL
     )
-      subject_type = quota.fetch("scope_type")
-      subject_id = quota.fetch("scope_id")
+      subject_type = capacity.fetch("scope_type")
+      subject_id = capacity.fetch("scope_id")
 
       with_subject_lock(subject_type: subject_type, subject_id: subject_id) do
         existing = ExecutionCapacityLease.find_by(subject_type: subject_type, subject_id: subject_id, execution_request_id: execution_request_id)
@@ -26,7 +26,7 @@ module RuntimeGovernance
           .where("lease_expires_at > ?", now)
           .sum(:slots)
 
-        if active_slots + slots <= quota.fetch("max_concurrent_tasks")
+        if active_slots + slots <= capacity.fetch("max_concurrent_tasks")
           lease =
             ExecutionCapacityLease.create!(
               subject_type: subject_type,
@@ -43,7 +43,7 @@ module RuntimeGovernance
           RuntimeWaits.cancel!(
             owner_type: holder_type,
             owner_id: holder_id,
-            reason_type: "execution_quota",
+            reason_type: "execution_capacity",
             subject_type: subject_type,
             subject_id: subject_id,
           )
@@ -54,18 +54,18 @@ module RuntimeGovernance
           RuntimeWait.parked.find_by(
             owner_type: holder_type,
             owner_id: holder_id,
-            reason_type: "execution_quota",
+            reason_type: "execution_capacity",
             subject_type: subject_type,
             subject_id: subject_id,
           )
         return { decision: "parked", lease: nil, runtime_wait: existing_wait } if existing_wait
 
-        if RuntimeWaits.parked_count(reason_type: "execution_quota", subject_type: subject_type, subject_id: subject_id) < quota.fetch("max_queued_tasks")
+        if RuntimeWaits.parked_count(reason_type: "execution_capacity", subject_type: subject_type, subject_id: subject_id) < capacity.fetch("max_queued_tasks")
           runtime_wait =
             RuntimeWaits.park!(
               owner_type: holder_type,
               owner_id: holder_id,
-              reason_type: "execution_quota",
+              reason_type: "execution_capacity",
               subject_type: subject_type,
               subject_id: subject_id,
               retry_at: now + 15.seconds,
@@ -81,8 +81,16 @@ module RuntimeGovernance
 
     def release!(subject_type:, subject_id:, execution_request_id:, now: Time.current)
       with_subject_lock(subject_type: subject_type, subject_id: subject_id) do
-        lease = ExecutionCapacityLease.find_by!(subject_type: subject_type, subject_id: subject_id, execution_request_id: execution_request_id)
+        lease = ExecutionCapacityLease.active.find_by(subject_type: subject_type, subject_id: subject_id, execution_request_id: execution_request_id)
+        return nil if lease.nil?
+
         lease.update!(status: "released", lease_expires_at: [lease.lease_expires_at, now].compact.min)
+        RuntimeGovernance::RuntimeWaits.resume_next_parked!(
+          reason_type: "execution_capacity",
+          subject_type: subject_type,
+          subject_id: subject_id,
+          now: now,
+        )
         lease
       end
     end

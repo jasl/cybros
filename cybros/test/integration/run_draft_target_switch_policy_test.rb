@@ -17,7 +17,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
     assert_equal "pending_confirmation", draft.approval_state.fetch("status")
     assert_equal "target_switch", draft.approval_state.fetch("reason")
     assert_equal alternate_target.id, draft.approval_state.fetch("proposed_execution_target_id")
-    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
+    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
   end
 
   test "execution_target propose allows validated target switches under full access and re-resolves governors" do
@@ -38,9 +38,9 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
 
     assert_equal "allow", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
-    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
-    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
-    assert_equal 2, draft.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+    assert_equal 2, draft.runtime_governors.dig("execution_capacity", "max_concurrent_tasks")
   end
 
   test "execution_target propose denies invisible or inactive targets" do
@@ -55,7 +55,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
 
     assert_equal "deny", result.dig("switch_decision", "decision")
     assert_equal current_target.id, draft.reload.proposed_execution_target_id
-    assert_equal current_target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
+    assert_equal current_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
   end
 
   test "execution_target propose supports automation-backed drafts" do
@@ -76,7 +76,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
 
     assert_equal "allow", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
-    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
   end
 
   private
@@ -238,7 +238,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
           "burst_limit" => provider_credential.burst_limit,
           "backoff_policy" => provider_credential.backoff_policy.deep_stringify_keys,
         },
-        "execution_quota" => {
+        "execution_capacity" => {
           "scope_type" => "execution_location",
           "scope_id" => execution_target.execution_location_id,
           "execution_location_id" => execution_target.execution_location_id,

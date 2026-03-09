@@ -39,6 +39,14 @@ Automation uses the same canonical run lifecycle as interactive execution:
 
 Automation does not get a special side channel that bypasses drafts, approvals, or run snapshots.
 
+For scheduled automation, the production path is:
+
+1. a recurring dispatch job finds due automations
+2. dispatch creates or reuses one durable queued `AutomationRun`
+3. an execute job atomically claims that queued run before invoking the existing orchestration path
+
+Operator-visible automation-run states should come from that same job-wired path, not from test-only manual starts.
+
 ## Deployment Resolution
 
 Automation binds to `AgentProgram`, not a deployment id.

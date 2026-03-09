@@ -13,7 +13,7 @@ The current architecture direction is correct:
 - `AgentDeployment` is the connectable unit
 - `RunDraft` is the mutable planning object
 - `ConversationRun` is an immutable execution snapshot
-- runtime governance is split into provider limits, job throughput, and execution quotas
+- runtime governance is split into provider limits, job throughput, and execution capacity
 
 But those choices still leave a few runtime-critical invariants underdefined.
 
@@ -163,7 +163,7 @@ If that transition cannot complete safely, Cybros must fail or retry before expo
 
 ### 6. Runtime Governance Needs Durable Admission, Not Just Config
 
-Provider limits and execution quotas must use one shared durable coordination layer, but not one identical admission primitive.
+Provider limits and execution capacity must use one shared durable coordination layer, but not one identical admission primitive.
 
 Provider-side admission must support durable reservation and settlement for request and token budgets.
 
@@ -183,7 +183,7 @@ Blocked work must park durably and release worker capacity while it waits.
 The scheduler must not keep a worker occupied just because the node is waiting on:
 
 - provider capacity
-- execution quota
+- execution capacity
 - deployment connectivity backoff
 
 Rate-budget recovery and execution recovery also require durable request identifiers so retries can reconcile rather than blindly replay remote side effects.
@@ -201,7 +201,7 @@ Before implementation is considered architecture-complete, the active plans must
 - deployment fingerprint drift between inspection and invocation
 - deployment activation cutover while a draft is parked
 - blocked provider-limit work parking without monopolizing workers
-- blocked execution-quota work parking without monopolizing workers
+- blocked execution-capacity work parking without monopolizing workers
 - deployment connectivity backoff parking without monopolizing workers
 - expired or invalid callback session scope rejection
 

@@ -1,5 +1,5 @@
 module RuntimeGovernance
-  class ExecutionQuotaResolver
+  class ExecutionCapacityResolver
     OVERRIDE_FIELDS = %i[
       max_concurrent_tasks_override
       max_queued_tasks_override

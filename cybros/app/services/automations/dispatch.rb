@@ -33,15 +33,20 @@ module Automations
       end
 
       def create_run!
-        AutomationRun.create!(
-          automation: automation,
-          initiated_by_user: initiated_by_user,
-          dispatch_key: dispatch_key,
-          status: "queued",
-          scheduled_for: scheduled_for,
-          approval_state: {},
-          snapshot: snapshot_payload,
-        )
+        AutomationRun.transaction do
+          automation_run =
+            AutomationRun.create!(
+              automation: automation,
+              initiated_by_user: initiated_by_user,
+              dispatch_key: dispatch_key,
+              status: "queued",
+              scheduled_for: scheduled_for,
+              approval_state: {},
+              snapshot: snapshot_payload,
+            )
+          Automations::ExecuteRunJob.perform_later(automation_run.id)
+          automation_run
+        end
       end
 
       def snapshot_payload

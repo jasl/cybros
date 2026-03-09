@@ -1,10 +1,10 @@
 require "test_helper"
 
-class RuntimeGovernance::ExecutionQuotaResolverTest < ActiveSupport::TestCase
-  test "uses execution location quota facts when the target has no overrides" do
+class RuntimeGovernance::ExecutionCapacityResolverTest < ActiveSupport::TestCase
+  test "uses execution location capacity facts when the target has no overrides" do
     target = create_execution_target!
 
-    resolved = RuntimeGovernance::ExecutionQuotaResolver.resolve!(execution_target: target)
+    resolved = RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: target)
 
     assert_equal(
       {
@@ -33,7 +33,7 @@ class RuntimeGovernance::ExecutionQuotaResolverTest < ActiveSupport::TestCase
         memory_limit_mb_override: 2048,
       )
 
-    resolved = RuntimeGovernance::ExecutionQuotaResolver.resolve!(execution_target: target)
+    resolved = RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: target)
 
     assert_equal(
       {

@@ -109,13 +109,13 @@ Target:
 
 Current state:
 
-- provider limits, job settings, and execution quotas are not yet modeled as one coherent runtime system
+- provider limits, job settings, and execution capacity are not yet modeled as one coherent runtime system
 
 Target:
 
 - explicit provider credential governance
 - explicit runtime settings
-- location-first execution quotas with target override
+- location-first execution capacity with target override
 - durable waits and admission recovery
 
 ### 10. Plan Sequencing Still Encourages Rework

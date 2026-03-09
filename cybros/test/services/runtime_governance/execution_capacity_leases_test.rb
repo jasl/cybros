@@ -2,11 +2,11 @@ require "test_helper"
 
 class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   test "acquires idempotently and releases execution leases by durable request id" do
-    quota = create_quota_snapshot!(max_concurrent_tasks: 2, max_queued_tasks: 4)
+    capacity = create_capacity_snapshot!(max_concurrent_tasks: 2, max_queued_tasks: 4)
 
     acquired =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-        quota: quota,
+        capacity: capacity,
         execution_request_id: "exec-1",
         holder_type: "ConversationRun",
         holder_id: SecureRandom.uuid,
@@ -14,7 +14,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     duplicate =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-        quota: quota,
+        capacity: capacity,
         execution_request_id: "exec-1",
         holder_type: "ConversationRun",
         holder_id: SecureRandom.uuid,
@@ -23,12 +23,19 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
     lease = acquired.fetch(:lease)
     assert_equal "acquired", acquired.fetch(:decision)
     assert_equal lease.id, duplicate.fetch(:lease).id
-    assert_equal 1, ExecutionCapacityLease.count
+    assert_equal(
+      1,
+      ExecutionCapacityLease.where(
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
+        execution_request_id: "exec-1",
+      ).count,
+    )
 
     released =
       RuntimeGovernance::ExecutionCapacityLeases.release!(
-        subject_type: quota.fetch("scope_type"),
-        subject_id: quota.fetch("scope_id"),
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
         execution_request_id: "exec-1",
       )
 
@@ -36,10 +43,10 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   end
 
   test "parks work when execution concurrency is exhausted" do
-    quota = create_quota_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
 
     RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-      quota: quota,
+      capacity: capacity,
       execution_request_id: "exec-1",
       holder_type: "ConversationRun",
       holder_id: "run-1",
@@ -47,7 +54,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     blocked =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-        quota: quota,
+        capacity: capacity,
         execution_request_id: "exec-2",
         holder_type: "ConversationRun",
         holder_id: "run-2",
@@ -55,22 +62,22 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     assert_equal "parked", blocked.fetch(:decision)
     wait = blocked.fetch(:runtime_wait)
-    assert_equal "execution_quota", wait.reason_type
-    assert_equal quota.fetch("scope_type"), wait.subject_type
-    assert_equal quota.fetch("scope_id"), wait.subject_id
+    assert_equal "execution_capacity", wait.reason_type
+    assert_equal capacity.fetch("scope_type"), wait.subject_type
+    assert_equal capacity.fetch("scope_id"), wait.subject_id
   end
 
   test "denies work when execution backlog is already at the queued limit" do
-    quota = create_quota_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 1)
+    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 1)
 
     RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-      quota: quota,
+      capacity: capacity,
       execution_request_id: "exec-1",
       holder_type: "ConversationRun",
       holder_id: "run-1",
     )
     RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-      quota: quota,
+      capacity: capacity,
       execution_request_id: "exec-2",
       holder_type: "ConversationRun",
       holder_id: "run-2",
@@ -78,7 +85,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     denied =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-        quota: quota,
+        capacity: capacity,
         execution_request_id: "exec-3",
         holder_type: "ConversationRun",
         holder_id: "run-3",
@@ -89,11 +96,11 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   end
 
   test "reconciles expired execution leases so new work can acquire" do
-    quota = create_quota_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
     stale =
       ExecutionCapacityLease.create!(
-        subject_type: quota.fetch("scope_type"),
-        subject_id: quota.fetch("scope_id"),
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
         execution_request_id: "exec-stale",
         holder_type: "ConversationRun",
         holder_id: SecureRandom.uuid,
@@ -106,8 +113,8 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     count =
       RuntimeGovernance::ExecutionCapacityLeases.reconcile_expired!(
-        subject_type: quota.fetch("scope_type"),
-        subject_id: quota.fetch("scope_id"),
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
         now: Time.current,
       )
 
@@ -116,7 +123,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
     acquired =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
-        quota: quota,
+        capacity: capacity,
         execution_request_id: "exec-2",
         holder_type: "ConversationRun",
         holder_id: "run-2",
@@ -127,7 +134,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
   private
 
-  def create_quota_snapshot!(max_concurrent_tasks:, max_queued_tasks:)
+  def create_capacity_snapshot!(max_concurrent_tasks:, max_queued_tasks:)
     location =
       ExecutionLocation.create!(
         name: "Fixture host #{SecureRandom.hex(4)}",
@@ -160,6 +167,6 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
         sandboxed: true,
       )
 
-    RuntimeGovernance::ExecutionQuotaResolver.resolve!(execution_target: target)
+    RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: target)
   end
 end

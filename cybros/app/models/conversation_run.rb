@@ -45,6 +45,13 @@ class ConversationRun < ApplicationRecord
 
   before_validation :normalize_snapshot_payloads, on: :create
 
+  def self.latest_for_node(node_or_id)
+    node_id = node_or_id.respond_to?(:id) ? node_or_id.id : node_or_id
+    return nil if node_id.blank?
+
+    where(dag_node_id: node_id).order(:id).last
+  end
+
   def queued? = state == "queued"
   def running? = state == "running"
   def succeeded? = state == "succeeded"
@@ -53,6 +60,23 @@ class ConversationRun < ApplicationRecord
   def programmable? = snapshot["draft"].is_a?(Hash)
   def compose_invocation_id = "conversation_run:#{id}:turn.compose"
   def handle_error_invocation_id = "conversation_run:#{id}:turn.handle_error"
+  def execution_capacity_snapshot
+    runtime_governors["execution_capacity"] if runtime_governors.is_a?(Hash)
+  end
+  def execution_capacity_governed? = execution_capacity_snapshot.is_a?(Hash)
+
+  def waiting_for_capacity?
+    queued? &&
+      RuntimeWait.parked.exists?(
+        owner_type: self.class.name,
+        owner_id: id,
+        reason_type: "execution_capacity",
+      )
+  end
+
+  def runtime_state
+    waiting_for_capacity? ? "waiting_for_capacity" : state
+  end
 
   def mark_running!(at: Time.current)
     update!(state: "running", started_at: at) if queued?

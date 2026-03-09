@@ -70,7 +70,7 @@ Deliverables:
 - explicit conversation runtime defaults
 - explicit automation runtime defaults
 - `ExecutionLocation`, `Workspace`, and `ExecutionTarget`
-- provider limiter fields, job settings, and execution-quota fields
+- provider limiter fields, job settings, and execution-capacity fields
 - public settings/config/KV surfaces
 - immutable run snapshots
 

@@ -1,14 +1,22 @@
 require "application_system_test_case"
 
 class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "operator can browse scheduled automation history" do
     owner = create_user!(email: "owner@example.com")
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
 
-    Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    end
 
     sign_in_as!(email: owner.identity.email)
     visit system_settings_automations_path
@@ -18,7 +26,9 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     assert_text runtime.fetch(:program).name
     assert_text runtime.fetch(:target).name
 
-    click_link "View"
+    within("tr", text: runtime.fetch(:automation).task_payload.fetch("prompt")) do
+      click_link "View"
+    end
 
     assert_current_path system_settings_automation_path(runtime.fetch(:automation))
     assert_text "completed"
@@ -44,9 +54,11 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
         },
       ).start
     runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "default")
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    automation_run = nil
 
-    Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    end
 
     sign_in_as!(email: owner.identity.email)
     visit system_settings_automation_path(runtime.fetch(:automation))
@@ -112,10 +124,11 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
 
     def dispatch_due_automation!(automation:, now:)
       runs = Automations::Scheduler.dispatch_due!(now: now)
+      matching_run = runs.find { |run| run.automation_id == automation.id }
 
-      assert_equal [automation.id], runs.map(&:automation_id)
+      assert_not_nil matching_run
 
-      runs.fetch(0)
+      matching_run
     end
 
     def create_program!

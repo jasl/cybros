@@ -299,6 +299,15 @@ module DAG
       )
     end
 
+    def fail_pending!(error:, metadata: {})
+      transition_to!(
+        ERRORED,
+        from_states: [PENDING],
+        finished_at: Time.current,
+        metadata: self.metadata.merge(metadata).merge("error" => error.to_s)
+      )
+    end
+
     def mark_rejected!(reason:, metadata: {})
       transition_to!(
         REJECTED,

@@ -1,6 +1,13 @@
 require "test_helper"
 
 class AutomationManualApprovalTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "automation approval parking records awaiting approval audit on the automation run" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -17,15 +24,17 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
 
-    draft = result.fetch(:draft)
     automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
 
     assert_equal "awaiting_approval", draft.status
-    assert_nil result.fetch(:conversation_run)
+    assert_nil automation_run.conversation_run_id
     assert_equal "awaiting_approval", automation_run.status
     assert_equal "pending_confirmation", automation_run.approval_state.fetch("status")
     assert_equal "fixture_approval", automation_run.approval_state.fetch("reason")
@@ -51,10 +60,14 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
-    draft = result.fetch(:draft)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
+
+    automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "approved", "approved_at" => Time.current.iso8601),
     )
@@ -88,10 +101,14 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
-    draft = result.fetch(:draft)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
+
+    automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "rejected", "reason" => "operator_denied"),
     )
@@ -126,9 +143,14 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
+
+    automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "approved", "approved_at" => Time.current.iso8601),
     )

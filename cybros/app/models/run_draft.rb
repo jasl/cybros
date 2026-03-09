@@ -85,7 +85,7 @@ class RunDraft < ApplicationRecord
 
     def governor_snapshot_consistency
       provider_snapshot = runtime_governors["provider_limiter"]
-      execution_snapshot = runtime_governors["execution_quota"]
+      execution_snapshot = runtime_governors["execution_capacity"]
 
       if provider_credential_id.present? || selected_model_ref.present?
         unless provider_snapshot.is_a?(Hash)
@@ -106,7 +106,7 @@ class RunDraft < ApplicationRecord
       return unless proposed_execution_target_id.present?
 
       unless execution_snapshot.is_a?(Hash)
-        errors.add(:runtime_governors, "must include an execution_quota snapshot")
+        errors.add(:runtime_governors, "must include an execution_capacity snapshot")
         return
       end
 

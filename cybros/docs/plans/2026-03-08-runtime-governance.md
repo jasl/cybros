@@ -1,6 +1,6 @@
 # Runtime Governance Implementation Plan
 
-**Goal:** implement first-class provider limits, job throughput settings, execution quotas, and durable runtime waits.
+**Goal:** implement first-class provider limits, job throughput settings, execution capacity, and durable runtime waits.
 
 **Architecture:** keep the three governors separate. Provider admission uses durable budget reservations. Execution admission uses durable capacity leases. Blocked work parks without monopolizing job workers. `deployment_backoff` remains a wait path, not a fourth governor.
 
@@ -57,7 +57,7 @@
 
 **Verify with:**
 
-`bin/rails test test/models/run_draft_test.rb test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_quota_resolver_test.rb`
+`bin/rails test test/models/run_draft_test.rb test/services/runtime_governance/provider_credential_limiter_test.rb test/services/runtime_governance/execution_capacity_resolver_test.rb`
 
 ## Task 3: Implement Durable Admission Primitives And Waits
 
@@ -74,7 +74,7 @@
 - explicit release or settlement
 - crash recovery and reconciliation
 - durable request identifiers
-- parked waits for `provider_limit`, `execution_quota`, and `deployment_backoff`
+- parked waits for `provider_limit`, `execution_capacity`, and `deployment_backoff`
 
 **Verify with:**
 
@@ -100,7 +100,7 @@
 
 `bin/rails test test/lib/agent_core/resources/provider/rate_limit_enforcement_test.rb test/integration/provider_credential_limiter_flow_test.rb`
 
-## Task 5: Enforce Execution Quotas Around Nexus-Bound Work
+## Task 5: Enforce Execution Capacity Around Nexus-Bound Work
 
 **Files:**
 
@@ -114,11 +114,11 @@
 - target override when present
 - durable execution-request identifiers
 - lease recovery before replay
-- quota-denied work parking without holding worker slots
+- capacity-denied work parking without holding worker slots
 
 **Verify with:**
 
-`bin/rails test test/services/runtime_governance/execution_quota_enforcer_test.rb test/integration/execution_quota_enforcement_test.rb`
+`bin/rails test test/services/runtime_governance/execution_capacity_enforcer_test.rb test/integration/execution_capacity_enforcement_test.rb`
 
 ## Task 6: Add Operator Settings Surfaces And Observability
 

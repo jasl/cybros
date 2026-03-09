@@ -31,12 +31,14 @@ class ConversationRunTracker
         run.mark_canceled!(at: at)
         Automations::RunStateRecorder.canceled!(automation_run: run.automation_run) if run.automation_run.present?
       end
+
+      RuntimeGovernance::ExecutionCapacityEnforcer.release!(conversation_run: run) if run.execution_capacity_governed?
     end
 
     private
 
       def latest_run_for(node)
-        ConversationRun.where(dag_node_id: node.id).order(:id).last
+        ConversationRun.latest_for_node(node)
       end
   end
 end

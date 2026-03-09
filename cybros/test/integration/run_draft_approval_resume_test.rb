@@ -203,7 +203,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       proposed_execution_target: alternate_target,
       runtime_governors:
         draft.runtime_governors.deep_merge(
-          "execution_quota" => {
+          "execution_capacity" => {
             "scope_type" => "execution_target",
             "execution_target_id" => alternate_target.id,
             "execution_location_id" => alternate_target.execution_location_id,
@@ -219,7 +219,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     assert_equal "cybros.run_drafts.approval_not_granted", error.code
     assert_equal "discarded", draft.reload.status
     assert_nil draft.proposed_execution_target_id
-    assert_nil draft.runtime_governors["execution_quota"]
+    assert_nil draft.runtime_governors["execution_capacity"]
     assert_equal({}, draft.staged_public_settings_patch)
     assert_equal({}, draft.staged_agent_config_patch)
     assert_equal([], draft.staged_kv_ops)

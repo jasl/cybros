@@ -1,6 +1,6 @@
 class RuntimeWait < ApplicationRecord
   STATUSES = %w[parked resumed cancelled expired].freeze
-  REASONS = %w[provider_limit execution_quota deployment_backoff].freeze
+  REASONS = %w[provider_limit execution_capacity deployment_backoff].freeze
 
   before_validation :normalize_payloads
 

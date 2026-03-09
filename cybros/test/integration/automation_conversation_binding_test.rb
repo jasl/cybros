@@ -23,13 +23,15 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(server:)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
 
-    draft = result.fetch(:draft)
-    conversation_run = result.fetch(:conversation_run)
     automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
+    conversation_run = ConversationRun.find(automation_run.conversation_run_id)
 
     assert_equal [runtime.fetch(:conversation).id], seen_conversation_ids
     assert_equal [{ "mode" => "automation" }], seen_agent_configs
@@ -60,9 +62,14 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(server:, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
+
+    automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
     conversation = runtime.fetch(:conversation)
     agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
 
@@ -86,12 +93,14 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(server:)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    automation_run = nil
 
-    result = Automations::RunOrchestrator.start!(automation_run: automation_run)
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    end
 
     conversation = runtime.fetch(:conversation)
-    conversation_run = result.fetch(:conversation_run)
+    conversation_run = ConversationRun.find(automation_run.reload.conversation_run_id)
     agent_node = conversation.root_graph.nodes.find(conversation_run.dag_node_id)
     agent_node.update!(claim_after_at: nil)
 
@@ -112,10 +121,11 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(server:)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
 
     assert_enqueued_jobs 1, only: DAG::TickGraphJob do
-      Automations::RunOrchestrator.start!(automation_run: automation_run)
+      perform_enqueued_jobs only: Automations::ExecuteRunJob do
+        dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+      end
     end
   ensure
     server&.shutdown
@@ -172,8 +182,14 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
         },
       ).start
     runtime = create_automation_runtime!(server:, permission_mode: "default")
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
-    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    automation_run = nil
+
+    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    end
+
+    automation_run.reload
+    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
     agent_node_id = draft.trigger_snapshot.fetch("dag_node_id")
     agent_node = runtime.fetch(:conversation).root_graph.nodes.find(agent_node_id)
 

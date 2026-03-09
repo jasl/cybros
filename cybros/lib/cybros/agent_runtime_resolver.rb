@@ -441,9 +441,7 @@ module Cybros
     private_class_method :programmable_provider_for
 
     def latest_conversation_run_for(node)
-      return nil if node.nil?
-
-      ConversationRun.where(dag_node_id: node.id).order(:id).last
+      ConversationRun.latest_for_node(node)
     rescue StandardError
       nil
     end

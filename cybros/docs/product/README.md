@@ -35,7 +35,7 @@ Use plan docs only after the contract above is understood.
 - The canonical agent loop runs through Cybros for planning, policy, approval, finalization, execution handoff, transcript, and audit.
 - `AgentProgram` is the selectable product identity. `AgentDeployment` is the connectable runtime binding.
 - `ExecutionTarget` is a first-class product concept: `ExecutionLocation + Workspace`.
-- Runtime governance remains split into provider limits, job throughput, and execution quotas.
+- Runtime governance remains split into provider limits, job throughput, and execution capacity.
 - Conversations and automations are first-class entrypoints that resolve into the same canonical run lifecycle.
 - Draft-time mutations are staged on `RunDraft` and only commit during finalization.
 - Each materialized run snapshots one contract, one deployment binding, one target, one permission preset, and one governor snapshot.

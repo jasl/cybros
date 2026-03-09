@@ -30,8 +30,8 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
     assert_equal "allow", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
     assert_equal alternate_target.id, run.execution_target_id
-    assert_equal "execution_target", run.runtime_governors.dig("execution_quota", "scope_type")
-    assert_equal 2, run.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
+    assert_equal "execution_target", run.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal 2, run.runtime_governors.dig("execution_capacity", "max_concurrent_tasks")
     assert_equal alternate_target.id, conversation.reload.default_execution_target_id
   ensure
     server&.shutdown
@@ -67,8 +67,8 @@ class RunDraftTargetSwitchTest < ActiveSupport::TestCase
     assert_equal "confirm", result.dig("switch_decision", "decision")
     assert_equal alternate_target.id, draft.reload.proposed_execution_target_id
     assert_equal alternate_target.id, run.execution_target_id
-    assert_equal "execution_target", run.runtime_governors.dig("execution_quota", "scope_type")
-    assert_equal 2, run.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
+    assert_equal "execution_target", run.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal 2, run.runtime_governors.dig("execution_capacity", "max_concurrent_tasks")
     assert_equal alternate_target.id, conversation.reload.default_execution_target_id
   ensure
     server&.shutdown

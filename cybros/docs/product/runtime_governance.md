@@ -10,7 +10,7 @@ V1 treats runtime governance as three separate concerns:
 
 - provider credential limiting
 - job concurrency
-- execution quotas
+- execution capacity
 
 They must not be collapsed into one global "concurrency" setting.
 
@@ -19,7 +19,7 @@ They must not be collapsed into one global "concurrency" setting.
 - DAG parallelism is allowed by default.
 - Remote LLM APIs are protected by provider-credential-scoped limits.
 - Agent-program RPC is bounded by deployment health and session scope, but not given a dedicated governor in v1.
-- Dangerous or heavy execution is protected by execution quotas.
+- Dangerous or heavy execution is protected by execution capacity.
 - Job throughput is tunable separately from remote API limits and host resource limits.
 - Blocked work must park durably instead of monopolizing worker throughput.
 - Deployment failures use durable scheduler backoff, but Cybros does not self-heal deployments.
@@ -70,9 +70,9 @@ Rules:
 
 - this is scheduler throughput, not API governance
 - it is not a substitute for provider rate limiting
-- it is not a substitute for host execution quotas
+- it is not a substitute for host execution capacity
 
-## Governor 3: Execution Quota
+## Governor 3: Execution Capacity
 
 Scope:
 
@@ -113,7 +113,7 @@ Why it is not a governor yet:
 - there is no multi-deployment scheduler to balance across
 - explicit per-deployment concurrency would add another control plane before the routing model exists
 
-Future multi-deployment routing may introduce a dedicated deployment-capacity governor. Until then, deployment capacity remains an operator and lifecycle concern, not a quota model.
+Future multi-deployment routing may introduce a dedicated deployment-capacity governor. Until then, deployment capacity remains an operator and lifecycle concern, not a separate capacity governor.
 
 ## Configuration Model
 
@@ -122,20 +122,20 @@ V1 exposes governance configuration through system settings.
 Recommended ownership:
 
 - provider limiter fields on provider credentials
-- execution-quota fields on `ExecutionLocation`
+- execution-capacity fields on `ExecutionLocation`
 - override fields on `ExecutionTarget`
 - job-throughput fields in dedicated instance-scoped runtime settings
 
-Stable limiter and quota fields should be explicit columns. Use `jsonb` only for bounded settings payloads such as queue overrides or alert thresholds.
+Stable limiter and capacity fields should be explicit columns. Use `jsonb` only for bounded settings payloads such as queue overrides or alert thresholds.
 
 ## Admission Model
 
-Provider limits and execution quotas require durable admission, not only configurable thresholds.
+Provider limits and execution capacity require durable admission, not only configurable thresholds.
 
 Use one shared coordination layer with different primitives:
 
 - provider-side rate budgets use durable reservation and settlement semantics
-- execution-side quotas use durable capacity leases
+- execution-side execution capacity uses durable capacity leases
 
 Required behavior:
 
@@ -145,6 +145,8 @@ Required behavior:
 - reconciliation after crashes
 - durable request identifiers for provider calls and execution requests
 
+Successful, canceled, stopped, rejected, failed, and reclaimed execution terminal paths must release execution-capacity leases exactly once.
+
 ## Wait State
 
 Blocked work should park in a durable runtime wait state.
@@ -152,12 +154,14 @@ Blocked work should park in a durable runtime wait state.
 V1 wait reasons include:
 
 - `provider_limit`
-- `execution_quota`
+- `execution_capacity`
 - `deployment_backoff`
 
 Parked waits are not admitted queue occupancy.
 
 Resume ordering should be stable and FIFO within one governed subject and wait reason.
+
+When execution capacity releases a slot, Cybros should resume the oldest parked waiter for that governed subject, clear the node's retry gating, and kick the graph for prompt retry. `retry_at` remains the fallback path if no immediate wakeup happens.
 
 ## Snapshot Versus Live State
 

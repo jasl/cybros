@@ -27,7 +27,7 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal({ "title" => "Updated" }, draft.staged_public_settings_patch)
     assert_equal([{ "op" => "set", "key" => "shared.stage" }], draft.staged_kv_ops)
     assert_equal draft.provider_credential_id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
-    assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
+    assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
   end
 
   test "enforces the entrypoint invariant at the database layer" do
@@ -107,7 +107,7 @@ class RunDraftTest < ActiveSupport::TestCase
             "provider_key" => "anthropic",
             "provider_credential_id" => SecureRandom.uuid,
           },
-          "execution_quota" => {
+          "execution_capacity" => {
             "execution_target_id" => SecureRandom.uuid,
             "execution_location_id" => SecureRandom.uuid,
           },
@@ -150,8 +150,8 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal target, draft.proposed_execution_target
     assert_equal "openai/gpt-5.4", draft.selected_model_ref
     assert_equal credential.id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
-    assert_equal target.id, draft.runtime_governors.dig("execution_quota", "execution_target_id")
-    assert_equal "execution_location", draft.runtime_governors.dig("execution_quota", "scope_type")
+    assert_equal target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+    assert_equal "execution_location", draft.runtime_governors.dig("execution_capacity", "scope_type")
   end
 
   test "re-resolves governor facts after an accepted target change" do
@@ -180,10 +180,10 @@ class RunDraftTest < ActiveSupport::TestCase
     )
 
     assert_equal override_target, draft.proposed_execution_target
-    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
-    assert_equal 2, draft.runtime_governors.dig("execution_quota", "max_concurrent_tasks")
-    assert_equal 5, draft.runtime_governors.dig("execution_quota", "max_queued_tasks")
-    assert_equal 600, draft.runtime_governors.dig("execution_quota", "default_timeout_s")
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal 2, draft.runtime_governors.dig("execution_capacity", "max_concurrent_tasks")
+    assert_equal 5, draft.runtime_governors.dig("execution_capacity", "max_queued_tasks")
+    assert_equal 600, draft.runtime_governors.dig("execution_capacity", "default_timeout_s")
   end
 
   test "uses the same governor resolver for automation entrypoints" do
@@ -201,7 +201,7 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal "full_access", draft.permission_mode
     assert_equal credential, draft.provider_credential
     assert_equal target, draft.proposed_execution_target
-    assert_equal "execution_target", draft.runtime_governors.dig("execution_quota", "scope_type")
+    assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
   end
 
   private
@@ -344,7 +344,7 @@ class RunDraftTest < ActiveSupport::TestCase
         "burst_limit" => provider_credential.burst_limit,
         "backoff_policy" => provider_credential.backoff_policy.deep_stringify_keys,
       },
-      "execution_quota" => {
+      "execution_capacity" => {
         "scope_type" => "execution_location",
         "scope_id" => execution_target.execution_location_id,
         "execution_location_id" => execution_target.execution_location_id,

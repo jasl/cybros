@@ -129,7 +129,7 @@ Suggested fields:
 Suggested v1 rule:
 
 - `trust_group`, `environment`, and `tags` are discovery and policy inputs, not free-form metadata
-- execution-quota settings should use explicit columns instead of a generic quota blob
+- execution-capacity settings should use explicit columns instead of a generic capacity blob
 
 ### `workspaces`
 
@@ -182,7 +182,7 @@ Suggested v1 rule:
 
 - discovery summaries may derive from `execution_location.trust_group`, `execution_location.environment`, `execution_location.tags`, `execution_target.sandboxed`, `workspace.capability_tags`, and `workspace.tags`
 - target-switch policy should reuse the shared `allow` / `confirm` / `deny` decision semantics instead of inventing a new approval vocabulary
-- execution-quota overrides should use explicit nullable override columns instead of a generic JSON blob
+- execution-capacity overrides should use explicit nullable override columns instead of a generic JSON blob
 
 ### `automations`
 
@@ -506,7 +506,7 @@ Suggested v1 constraint:
 
 Purpose:
 
-- durable occupancy leases for execution work admitted against an execution quota
+- durable occupancy leases for execution work admitted against execution capacity
 
 Suggested fields:
 
@@ -549,7 +549,7 @@ Suggested fields:
 
 Suggested v1 rule:
 
-- use this for `provider_limit`, `execution_quota`, and `deployment_backoff`
+- use this for `provider_limit`, `execution_capacity`, and `deployment_backoff`
 - parked waits do not count as admitted execution queue occupancy
 - `deployment_backoff` is a scheduler retry wait for unreachable or unhealthy deployments, not a Cybros-owned self-healing mechanism
 

@@ -339,8 +339,9 @@ class Conversation < ApplicationRecord
         raise Cybros::Error, "state_changed" unless startable_pending_agent?(node: started_node)
         raise Cybros::Error, "state_changed" unless pending_agent_dependencies_satisfied?(graph: graph, agent_node: started_node)
 
-        claim_pending_agent_for_manual_start!(graph: graph, agent_node: started_node, claimed_by: claimed_by, now: now)
-        enqueue_execution = true
+        claimed_node = claim_pending_agent_for_manual_start!(graph: graph, agent_node: started_node, claimed_by: claimed_by, now: now)
+        started_node = claimed_node || started_node.reload
+        enqueue_execution = started_node.running?
       end
 
       DAG::ExecuteNodeJob.perform_later(started_node.id) if enqueue_execution
@@ -1457,6 +1458,8 @@ class Conversation < ApplicationRecord
       return if run.nil?
       return if run.canceled? || run.succeeded? || run.failed?
 
+      cancel_execution_capacity_wait!(run)
+
       if run.running?
         begin
           node.stop!(reason: "soft_deleted")
@@ -1465,7 +1468,26 @@ class Conversation < ApplicationRecord
         end
       end
 
-      run.mark_canceled!
+      if node.terminal?
+        ConversationRunTracker.mark_terminal_for_node!(node, at: node.finished_at || Time.current)
+      else
+        run.mark_canceled!
+      end
+    end
+
+    def cancel_execution_capacity_wait!(run)
+      capacity = run.execution_capacity_snapshot
+      return unless capacity.is_a?(Hash)
+
+      RuntimeGovernance::RuntimeWaits.cancel!(
+        owner_type: run.class.name,
+        owner_id: run.id,
+        reason_type: "execution_capacity",
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
+      )
+    rescue KeyError
+      nil
     end
 
     def rewrite_queued_turns!(selected_user_node_id:, mode:, model_ref: nil, interrupted_output_policy_override: nil)
@@ -1828,34 +1850,7 @@ class Conversation < ApplicationRecord
     end
 
     def claim_pending_agent_for_manual_start!(graph:, agent_node:, claimed_by:, now:)
-      lease_expires_at = now + graph.claim_lease_seconds_for(nil)
-      affected_rows =
-        DAG::Node.where(
-          id: agent_node.id,
-          state: DAG::Node::PENDING,
-          compressed_at: nil,
-          deleted_at: nil,
-          claimed_at: nil,
-          started_at: nil,
-        ).update_all(
-          state: DAG::Node::RUNNING,
-          claim_after_at: nil,
-          started_at: nil,
-          claimed_at: now,
-          claimed_by: claimed_by,
-          lease_expires_at: lease_expires_at,
-          heartbeat_at: nil,
-          updated_at: now,
-        )
-
-      raise Cybros::Error, "state_changed" unless affected_rows == 1
-
-      agent_node.reload
-      graph.emit_event(
-        event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
-        subject: agent_node,
-        particulars: { "from" => DAG::Node::PENDING, "to" => DAG::Node::RUNNING },
-      )
+      DAG::Scheduler.claim_pending_node!(graph: graph, node: agent_node, claimed_by: claimed_by, now: now)
     end
 
     def latest_executing_agent_for_lane(graph:, lane:)

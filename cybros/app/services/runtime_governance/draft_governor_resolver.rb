@@ -33,7 +33,7 @@ module RuntimeGovernance
         proposed_execution_target: target,
         runtime_governors: {
           "provider_limiter" => provider_resolution.fetch(:snapshot),
-          "execution_quota" => ExecutionQuotaResolver.resolve!(execution_target: target),
+          "execution_capacity" => ExecutionCapacityResolver.resolve!(execution_target: target),
         },
       }
     end

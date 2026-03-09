@@ -110,7 +110,7 @@ The lifecycle must explicitly cover:
 - deployment identity drift
 - activation cutover while a draft is parked
 - provider-limit parking
-- execution-quota parking
+- execution-capacity parking
 - rejected approval
 - expired or stale draft finalization
 

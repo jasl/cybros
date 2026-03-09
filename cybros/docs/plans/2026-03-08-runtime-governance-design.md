@@ -14,7 +14,7 @@ V1 uses:
 
 - `ProviderCredentialLimiter`
 - `JobConcurrencySettings`
-- `ExecutionQuota`
+- `ExecutionCapacity`
 
 Do not collapse them into one global concurrency value.
 
@@ -29,7 +29,7 @@ This design owns the executable schema and operator source surfaces for:
 Why:
 
 - execution-target discovery and target-switch policy need stable inputs
-- execution quotas need explicit owners
+- execution-capacity limits need explicit owners
 - conversation and automation selectors cannot sit on top of resolver defaults or implicit filesystem state
 
 This design does not own the conversation-facing selector UX or the public target-inventory APIs. Those belong to the programmable-agent plan.
@@ -46,11 +46,11 @@ Worker concurrency is a kernel-throughput setting.
 
 It must be tunable, but it cannot replace provider-side rate limiting or execution-host quotas.
 
-### 5. Execution Quotas Are Location-First With Target Overrides
+### 5. Execution Capacity Is Location-First With Target Overrides
 
-The base execution quota lives on `ExecutionLocation`.
+The base execution capacity lives on `ExecutionLocation`.
 
-`ExecutionTarget` may override that quota where a specific workspace needs different handling.
+`ExecutionTarget` may override that capacity where a specific workspace needs different handling.
 
 ### 6. Automation Uses The Same Admission Model
 
@@ -91,7 +91,7 @@ The first release may defer polished dashboards, but it must still collect:
 - parked waits
 - lease recovery
 - provider reservation recovery
-- execution quota denials
+- execution-capacity denials
 
 ## Ownership Boundary
 

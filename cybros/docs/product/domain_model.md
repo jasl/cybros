@@ -57,7 +57,7 @@ Owns:
 - trust boundary metadata
 - environment classification
 - visibility tags
-- base execution-quota settings
+- base execution-capacity settings
 
 ### Workspace
 
@@ -81,7 +81,7 @@ Owns:
 - canonical pairing of location and workspace
 - user-facing selection identity
 - target-level sandbox posture
-- optional execution-quota overrides
+- optional execution-capacity overrides
 - target-switch policy inputs
 
 ### Conversation
