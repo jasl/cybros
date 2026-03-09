@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000011) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -165,6 +165,43 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000011) do
     t.index ["agent_rpc_invocation_id"], name: "index_agent_rpc_sessions_on_agent_rpc_invocation_id"
     t.index ["conversation_id"], name: "index_agent_rpc_sessions_on_conversation_id"
     t.index ["session_token_digest"], name: "idx_agent_rpc_sessions_token", unique: true
+  end
+
+  create_table "automation_runs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.jsonb "approval_state", default: {}, null: false
+    t.uuid "automation_id", null: false
+    t.uuid "conversation_run_id"
+    t.datetime "created_at", null: false
+    t.datetime "finished_at"
+    t.uuid "initiated_by_user_id"
+    t.datetime "scheduled_for", null: false
+    t.jsonb "snapshot", default: {}, null: false
+    t.datetime "started_at"
+    t.string "status", null: false
+    t.datetime "updated_at", null: false
+    t.index ["automation_id", "scheduled_for"], name: "idx_automation_runs_schedule"
+    t.index ["automation_id"], name: "index_automation_runs_on_automation_id"
+    t.index ["conversation_run_id"], name: "index_automation_runs_on_conversation_run_id"
+    t.index ["initiated_by_user_id"], name: "index_automation_runs_on_initiated_by_user_id"
+  end
+
+  create_table "automations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "agent_program_id", null: false
+    t.uuid "conversation_id"
+    t.datetime "created_at", null: false
+    t.uuid "execution_target_id", null: false
+    t.string "permission_mode", default: "full_access", null: false
+    t.string "schedule_kind", null: false
+    t.string "schedule_rrule"
+    t.string "schedule_timezone"
+    t.string "status", default: "active", null: false
+    t.jsonb "task_payload", default: {}, null: false
+    t.datetime "updated_at", null: false
+    t.uuid "user_id", null: false
+    t.index ["agent_program_id"], name: "index_automations_on_agent_program_id"
+    t.index ["conversation_id"], name: "index_automations_on_conversation_id"
+    t.index ["execution_target_id"], name: "index_automations_on_execution_target_id"
+    t.index ["user_id"], name: "index_automations_on_user_id"
   end
 
   create_table "conversation_kv_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -680,6 +717,13 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000011) do
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations"
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations", column: ["agent_rpc_invocation_id", "agent_deployment_id"], primary_key: ["id", "agent_deployment_id"], name: "fk_agent_rpc_sessions_invocation_deploy"
   add_foreign_key "agent_rpc_sessions", "conversations"
+  add_foreign_key "automation_runs", "automations"
+  add_foreign_key "automation_runs", "conversation_runs"
+  add_foreign_key "automation_runs", "users", column: "initiated_by_user_id"
+  add_foreign_key "automations", "agent_programs"
+  add_foreign_key "automations", "conversations"
+  add_foreign_key "automations", "execution_targets"
+  add_foreign_key "automations", "users"
   add_foreign_key "conversation_kv_entries", "conversations"
   add_foreign_key "conversation_runs", "agent_deployments"
   add_foreign_key "conversation_runs", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_conversation_runs_deploy_program"
@@ -722,6 +766,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000011) do
   add_foreign_key "run_drafts", "agent_deployments"
   add_foreign_key "run_drafts", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_run_drafts_deployment_program"
   add_foreign_key "run_drafts", "agent_programs"
+  add_foreign_key "run_drafts", "automations"
   add_foreign_key "run_drafts", "conversation_runs", column: "materialized_conversation_run_id"
   add_foreign_key "run_drafts", "conversations"
   add_foreign_key "run_drafts", "execution_targets", column: "proposed_execution_target_id"
