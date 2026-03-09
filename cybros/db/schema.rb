@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000009) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000010) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -407,6 +407,23 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000009) do
     t.index ["subject_type", "subject_id"], name: "index_events_on_subject"
   end
 
+  create_table "execution_capacity_leases", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "execution_request_id", null: false
+    t.datetime "heartbeat_at", null: false
+    t.string "holder_id", null: false
+    t.string "holder_type", null: false
+    t.datetime "lease_expires_at", null: false
+    t.jsonb "recovery_metadata", default: {}, null: false
+    t.integer "slots", default: 1, null: false
+    t.string "status", default: "active", null: false
+    t.uuid "subject_id", null: false
+    t.string "subject_type", null: false
+    t.datetime "updated_at", null: false
+    t.index ["subject_type", "subject_id", "execution_request_id"], name: "idx_execution_capacity_leases_subject_request", unique: true
+    t.index ["subject_type", "subject_id", "status"], name: "idx_execution_capacity_leases_subject_status"
+  end
+
   create_table "execution_locations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.integer "cpu_limit_millicores"
     t.datetime "created_at", null: false
@@ -471,6 +488,21 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000009) do
     t.index ["provider_key"], name: "index_llm_provider_credentials_on_active_provider_key", unique: true, where: "((status)::text = 'active'::text)"
   end
 
+  create_table "provider_budget_reservations", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.integer "actual_tokens"
+    t.datetime "created_at", null: false
+    t.integer "estimated_tokens", default: 0, null: false
+    t.uuid "provider_credential_id", null: false
+    t.string "provider_request_id", null: false
+    t.jsonb "reconciliation_metadata", default: {}, null: false
+    t.integer "request_units", default: 1, null: false
+    t.datetime "reserved_until", null: false
+    t.string "status", default: "active", null: false
+    t.datetime "updated_at", null: false
+    t.index ["provider_credential_id", "provider_request_id"], name: "idx_provider_budget_reservations_request", unique: true
+    t.index ["provider_credential_id"], name: "index_provider_budget_reservations_on_provider_credential_id"
+  end
+
   create_table "run_drafts", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.uuid "agent_deployment_id", null: false
     t.uuid "agent_program_id", null: false
@@ -518,6 +550,23 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000009) do
     t.string "scope_key", default: "instance", null: false
     t.datetime "updated_at", null: false
     t.index ["scope_key"], name: "index_runtime_settings_on_scope_key", unique: true
+  end
+
+  create_table "runtime_waits", id: :uuid, default: -> { "gen_random_uuid()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.jsonb "details", default: {}, null: false
+    t.string "ordering_key", null: false
+    t.string "owner_id", null: false
+    t.string "owner_type", null: false
+    t.string "reason_type", null: false
+    t.datetime "retry_at", null: false
+    t.string "status", default: "parked", null: false
+    t.uuid "subject_id", null: false
+    t.string "subject_type", null: false
+    t.datetime "updated_at", null: false
+    t.index ["owner_type", "owner_id", "reason_type", "subject_type", "subject_id"], name: "idx_runtime_waits_owner_reason_subject_parked", unique: true, where: "((status)::text = 'parked'::text)"
+    t.index ["reason_type", "subject_type", "subject_id", "status", "ordering_key"], name: "idx_runtime_waits_fifo_lookup"
+    t.index ["reason_type", "subject_type", "subject_id", "status", "retry_at"], name: "idx_runtime_waits_ready_lookup"
   end
 
   create_table "sessions", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -654,6 +703,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000009) do
   add_foreign_key "execution_targets", "execution_locations"
   add_foreign_key "execution_targets", "workspaces"
   add_foreign_key "execution_targets", "workspaces", column: ["workspace_id", "execution_location_id"], primary_key: ["id", "execution_location_id"], name: "fk_execution_targets_workspace_location"
+  add_foreign_key "provider_budget_reservations", "llm_provider_credentials", column: "provider_credential_id"
   add_foreign_key "run_drafts", "agent_deployments"
   add_foreign_key "run_drafts", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_run_drafts_deployment_program"
   add_foreign_key "run_drafts", "agent_programs"
