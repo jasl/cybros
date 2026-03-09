@@ -1,6 +1,13 @@
 require "test_helper"
 
 class AutomationConversationBindingTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "automation conversation binding links the materialized conversation run" do
     seen_conversation_ids = []
     seen_agent_configs = []
@@ -57,6 +64,19 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     assert_equal DAG::Node::FINISHED, agent_node.reload.state
     assert_equal "fixture compose response", agent_node.body_output.fetch("content")
     assert_equal "succeeded", conversation_run.reload.state
+  ensure
+    server&.shutdown
+  end
+
+  test "automation conversation binding kicks the bound graph for execution" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_automation_runtime!(server:)
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+
+    assert_enqueued_jobs 1, only: DAG::TickGraphJob do
+      Automations::RunOrchestrator.start!(automation_run: automation_run)
+    end
   ensure
     server&.shutdown
   end

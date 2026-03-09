@@ -16,9 +16,12 @@ module Automations
       if draft.status.to_s == RunDrafts::AutomationPlanningService::AWAITING_APPROVAL_STATUS
         { draft: draft, conversation_run: nil }
       else
+        conversation_run = RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error)
+        conversation_run&.conversation&.root_graph&.kick!
+
         {
           draft: draft,
-          conversation_run: RunDrafts::FinalizeService.finalize!(draft: draft, debug: debug, error: error),
+          conversation_run: conversation_run,
         }
       end
     end
