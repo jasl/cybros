@@ -100,7 +100,7 @@ Communication is **pull-based**: Nexus polls the control plane (Cybros or Mother
 ### Shared Principles
 
 - **UUIDv7 primary keys** across all databases
-- **Multi-tenancy by Account** — all resources are scoped by `account_id`
+- **Account is the long-term tenant boundary** — Cybros is currently being reworked as a single-default-`Account` app, so do not assume every Cybros table carries `account_id` until URL-path multi-tenancy lands
 - **Contract-first protocol** — Conduits API schemas in `nexus/docs/protocol/` are the source of truth; change schemas before code
 - **Pull-based communication** — Nexus pulls work from the control plane; no inbound ports needed
 - **Database-backed infrastructure** — Solid Queue/Cache/Cable in Rails apps (no Redis dependency)
