@@ -33,6 +33,14 @@ module RuntimeGovernance
           "backoff_policy" => normalize_hash(provider_credential.backoff_policy),
         },
       }
+    rescue AgentCore::ValidationError => e
+      raise unless e.code == "cybros.llm.credential_missing"
+
+      AgentCore::ValidationError.raise!(
+        "Provider credential missing. Please configure credentials and try again.",
+        code: "cybros.runtime_governance.provider_credential_missing",
+        details: { provider_key: e.details[:provider_key] || e.details["provider_key"] },
+      )
     end
 
     private

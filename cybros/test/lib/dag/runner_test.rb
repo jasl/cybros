@@ -196,14 +196,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     run =
-      ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: node.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: {},
-        error: {},
-      )
+      create_conversation_run!(conversation: conversation, dag_node_id: node.id)
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, UsageExecutor.new)
@@ -226,14 +219,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
 
     run =
-      ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: node.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: {},
-        error: {},
-      )
+      create_conversation_run!(conversation: conversation, dag_node_id: node.id)
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, ErrorResultExecutor.new)
@@ -256,14 +242,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     graph = conversation.dag_graph
     node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::RUNNING, metadata: {})
     run =
-      ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: node.id,
-        state: "queued",
-        queued_at: Time.current,
-        debug: {},
-        error: {},
-      )
+      create_conversation_run!(conversation: conversation, dag_node_id: node.id)
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, StopMidStreamExecutor.new)
@@ -292,4 +271,69 @@ class DAG::RunnerTest < ActiveSupport::TestCase
   ensure
     DAG.executor_registry = original_registry
   end
+
+  private
+
+    def create_conversation_run!(conversation:, dag_node_id:)
+      program = create_program!
+      deployment = create_deployment!(program)
+
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: dag_node_id,
+        state: "queued",
+        queued_at: Time.current.change(usec: 0),
+        snapshot_version: 1,
+        initiated_by_user: conversation.user,
+        effective_permission_mode: conversation.permission_mode,
+        agent_program: program,
+        contract_fingerprint: program.published_contract_fingerprint,
+        agent_deployment: deployment,
+        deployment_fingerprint: deployment.deployment_fingerprint,
+        deployment_activated_at: deployment.activated_at,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: { "origin" => "dag_runner_test" },
+        debug: {},
+        error: {},
+      )
+    end
+
+    def create_program!
+      AgentProgram.create!(
+        name: "Runner Fixture Program #{SecureRandom.hex(4)}",
+        config_namespace: "dag.runner.fixture.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
+        manifest_snapshot: {},
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+      )
+    end
+
+    def create_deployment!(program)
+      AgentDeployment.create!(
+        agent_program: program,
+        transport_kind: "websocket",
+        endpoint_url: "http://127.0.0.1:4319/rpc",
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
+        status: "active",
+        health_status: "healthy",
+        activated_at: Time.current.change(usec: 0),
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: %w[initialize turn.prepare turn.compose],
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+      )
+    end
 end
