@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000015) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000016) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -722,7 +722,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000015) do
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations", column: ["agent_rpc_invocation_id", "agent_deployment_id"], primary_key: ["id", "agent_deployment_id"], name: "fk_agent_rpc_sessions_invocation_deploy"
   add_foreign_key "agent_rpc_sessions", "conversations"
   add_foreign_key "automation_runs", "automations"
-  add_foreign_key "automation_runs", "conversation_runs"
+  add_foreign_key "automation_runs", "conversation_runs", on_delete: :nullify
   add_foreign_key "automation_runs", "users", column: "initiated_by_user_id"
   add_foreign_key "automations", "agent_programs"
   add_foreign_key "automations", "conversations"

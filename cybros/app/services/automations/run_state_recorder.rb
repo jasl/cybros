@@ -77,6 +77,7 @@ module Automations
         snapshot = automation_run.snapshot.is_a?(Hash) ? automation_run.snapshot.deep_dup : {}
         snapshot = snapshot.deep_merge(draft_snapshot) if draft.present?
         snapshot = snapshot.deep_merge("runtime" => runtime_snapshot) if runtime_snapshot.present?
+        snapshot.delete("failure")
         snapshot["failure"] = failure_snapshot if failure_snapshot.present?
         snapshot
       end

@@ -110,6 +110,49 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "unexpected approval resume failures are audited on the automation run" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+
+    draft = Automations::RunOrchestrator.start!(automation_run: automation_run).fetch(:draft)
+    draft.update!(
+      approval_state: draft.approval_state.merge("status" => "approved", "approved_at" => Time.current.iso8601),
+    )
+
+    finalize_singleton = RunDrafts::FinalizeService.singleton_class
+    finalize_singleton.alias_method :__task4_original_finalize__, :finalize!
+    finalize_singleton.define_method(:finalize!) { |*_, **_| raise StandardError, "resume exploded" }
+
+    error = assert_raises(StandardError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
+    automation_run.reload
+
+    assert_equal "resume exploded", error.message
+    assert_equal "failed", automation_run.status
+    assert automation_run.finished_at.present?
+    assert_equal "StandardError", automation_run.snapshot.dig("failure", "class")
+    assert_equal "resume exploded", automation_run.snapshot.dig("failure", "message")
+  ensure
+    if defined?(finalize_singleton) && finalize_singleton.method_defined?(:__task4_original_finalize__)
+      finalize_singleton.alias_method :finalize!, :__task4_original_finalize__
+      finalize_singleton.remove_method :__task4_original_finalize__
+    end
+    server&.shutdown
+  end
+
   private
 
     def create_automation_runtime!(endpoint_url:, permission_mode:)

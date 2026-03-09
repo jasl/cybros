@@ -26,7 +26,7 @@ class ConversationRun < ApplicationRecord
   belongs_to :agent_deployment, optional: true
   belongs_to :provider_credential, class_name: "LLMProviderCredential", optional: true
   belongs_to :execution_target, optional: true
-  has_one :automation_run
+  has_one :automation_run, dependent: :nullify
 
   attr_readonly(*SNAPSHOT_FIELDS)
 

@@ -1,0 +1,99 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between">
+    <div>
+      <h2 class="text-lg font-semibold"><%= @automation.task_payload["prompt"].presence || "Automation" %></h2>
+      <div class="text-sm opacity-70 font-mono"><%= @automation.id %></div>
+    </div>
+    <%= link_to "Back", system_settings_automations_path, class: "btn btn-ghost btn-sm" %>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div>
+          <div class="text-xs opacity-60">Automation status</div>
+          <div class="text-sm"><%= @automation.status %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Permission</div>
+          <div class="text-sm"><%= @automation.permission_mode %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Agent program</div>
+          <div class="text-sm"><%= @automation.agent_program.name %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Execution target</div>
+          <div class="text-sm"><%= @automation.execution_target.name %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Conversation binding</div>
+          <div class="text-sm">
+            <% if @automation.conversation.present? %>
+              <span class="font-mono"><%= @automation.conversation.id %></span>
+            <% else %>
+              Standalone
+            <% end %>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Schedule</div>
+          <div class="font-mono text-sm"><%= @automation.schedule_rrule || @automation.trigger_kind %></div>
+          <% if @automation.schedule_timezone.present? %>
+            <div class="text-xs opacity-60"><%= @automation.schedule_timezone %></div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body p-0 overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Scheduled for</th>
+            <th>Status</th>
+            <th>Approval</th>
+            <th>Conversation run</th>
+            <th>Dispatch key</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @automation_runs.each do |run| %>
+            <% approval_status = run.approval_state["status"].presence || "not_required" %>
+            <tr class="hover:bg-base-200/50 transition-colors">
+              <td class="font-mono text-xs"><%= run.scheduled_for.iso8601 %></td>
+              <td class="font-medium"><%= run.status %></td>
+              <td>
+                <div class="font-medium"><%= approval_status %></div>
+                <% if run.approval_state["reason"].present? %>
+                  <div class="text-xs opacity-60"><%= run.approval_state["reason"] %></div>
+                <% end %>
+              </td>
+              <td class="font-mono text-xs"><%= run.conversation_run_id.presence || "None" %></td>
+              <td class="font-mono text-xs"><%= run.dispatch_key %></td>
+              <td class="text-right">
+                <% if run.status == "awaiting_approval" %>
+                  <div class="flex items-center justify-end gap-2">
+                    <%= button_to "Approve",
+                                  approve_system_settings_automation_automation_run_path(@automation, run),
+                                  method: :post,
+                                  class: "btn btn-primary btn-sm" %>
+                    <%= button_to "Reject",
+                                  reject_system_settings_automation_automation_run_path(@automation, run),
+                                  method: :post,
+                                  class: "btn btn-ghost btn-sm" %>
+                  </div>
+                <% else %>
+                  <span class="text-xs opacity-60">No actions</span>
+                <% end %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

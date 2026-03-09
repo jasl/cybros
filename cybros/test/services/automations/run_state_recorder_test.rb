@@ -42,6 +42,23 @@ class Automations::RunStateRecorderTest < ActiveSupport::TestCase
     assert_equal "connection refused", automation_run.snapshot.dig("failure", "details", "message")
   end
 
+  test "completed clears any stale failure snapshot" do
+    automation_run = create_runtime!.fetch(:automation_run)
+    error =
+      AgentCore::ValidationError.new(
+        "Deployment initialize failed.",
+        code: "cybros.agent_rpc.initialize_failed",
+        details: { "message" => "connection refused" },
+      )
+
+    Automations::RunStateRecorder.failed!(automation_run: automation_run, error: error)
+    Automations::RunStateRecorder.completed!(automation_run: automation_run)
+
+    automation_run.reload
+    assert_equal "completed", automation_run.status
+    assert_nil automation_run.snapshot["failure"]
+  end
+
   private
 
     def create_runtime!

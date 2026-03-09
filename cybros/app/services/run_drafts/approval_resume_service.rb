@@ -54,6 +54,9 @@ module RunDrafts
       rescue AgentCore::ValidationError => e
         handle_finalize_failure!(e)
         raise
+      rescue StandardError => e
+        Automations::RunStateRecorder.failed!(automation_run: automation_run, draft: draft.reload, error: e)
+        raise
       end
 
       def handle_finalize_failure!(error)

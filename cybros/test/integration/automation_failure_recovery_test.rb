@@ -2,7 +2,8 @@ require "test_helper"
 
 class AutomationFailureRecoveryTest < ActiveSupport::TestCase
   test "planning rpc failure marks the automation run failed with durable error audit" do
-    runtime = create_automation_runtime!(endpoint_url: "http://127.0.0.1:9")
+    failing_server = failing_initialize_server!
+    runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
     automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
 
@@ -15,10 +16,13 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
     assert_equal "AgentCore::ValidationError", automation_run.snapshot.dig("failure", "class")
     assert_equal "cybros.agent_rpc.initialize_failed", automation_run.snapshot.dig("failure", "code")
     assert_match(/refused|failed/i, automation_run.snapshot.dig("failure", "message").to_s)
+  ensure
+    failing_server&.shutdown
   end
 
   test "a later automation redispatch can complete after a failed run" do
-    runtime = create_automation_runtime!(endpoint_url: "http://127.0.0.1:9")
+    failing_server = failing_initialize_server!
+    runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
     first_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
 
     assert_raises(AgentCore::ValidationError) { Automations::RunOrchestrator.start!(automation_run: first_run) }
@@ -43,6 +47,7 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
     assert_equal first_run.id, first_run.reload.id
     assert_equal "failed", first_run.status
   ensure
+    failing_server&.shutdown
     server&.shutdown
   end
 
@@ -167,5 +172,15 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
       )
       credential.save!
       credential
+    end
+
+    def failing_initialize_server!
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "initialize" => lambda do |_params, _base_result, _identity|
+            raise "initialize refused"
+          end,
+        },
+      ).start
     end
 end

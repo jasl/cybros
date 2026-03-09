@@ -25,6 +25,12 @@ Rails.application.routes.draw do
         post :activate, on: :member
       end
       resources :execution_targets, only: %i[index show]
+      resources :automations, only: %i[index show] do
+        resources :automation_runs, only: [], path: "runs", controller: "automation_runs" do
+          post :approve, on: :member
+          post :reject, on: :member
+        end
+      end
     end
   end
 
