@@ -7,6 +7,10 @@ module NavigationHelper
       controller_path.start_with?("settings/sessions")
     when :llm_providers
       controller_path.start_with?("system/settings/llm_providers")
+    when :runtime_settings
+      controller_path.start_with?("system/settings/runtime_settings")
+    when :runtime_governance
+      controller_path.start_with?("system/settings/runtime_governance")
     when :agent_programs
       controller_path.start_with?("system/settings/agent_programs")
     when :execution_targets

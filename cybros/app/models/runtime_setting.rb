@@ -1,4 +1,6 @@
 class RuntimeSetting < ApplicationRecord
+  DEFAULT_WORKER_CONCURRENCY = 12
+
   before_validation :apply_scope_key
 
   validates :scope_key, presence: true, inclusion: { in: %w[instance] }, uniqueness: true

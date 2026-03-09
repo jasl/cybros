@@ -1,0 +1,130 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold">Runtime Governance</h2>
+      <p class="text-sm opacity-70">Current durable waits and recent runtime outcomes grouped by governed subject.</p>
+    </div>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="font-medium">Current parked waits</div>
+      <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <% RuntimeWait::REASONS.each do |reason_type| %>
+          <div class="rounded-box border border-base-300 bg-base-100 p-4">
+            <div class="text-sm font-medium opacity-80"><%= RuntimeGovernance::ObservabilityFeed::WAIT_REASON_LABELS.fetch(reason_type, reason_type.humanize) %></div>
+            <div class="mt-2 text-3xl font-semibold"><%= @observability.fetch(:parked_wait_counts).fetch(reason_type, 0) %></div>
+            <div class="mt-2 font-mono text-xs opacity-70"><%= reason_type %></div>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  </div>
+
+  <% if @observability.fetch(:subject_groups).any? %>
+    <% @observability.fetch(:subject_groups).each do |group| %>
+      <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+        <div class="card-body space-y-5">
+          <div>
+            <div class="text-xs tracking-wide opacity-60"><%= group.fetch(:subject_kind) %></div>
+            <h3 class="text-lg font-semibold"><%= group.fetch(:subject_label) %></h3>
+            <% if group.fetch(:subject_subtitle).present? %>
+              <div class="text-sm opacity-70"><%= group.fetch(:subject_subtitle) %></div>
+            <% end %>
+          </div>
+
+          <% if group.fetch(:current_parked_waits).any? %>
+            <div>
+              <div class="text-sm font-medium">Current waits</div>
+              <div class="mt-3 space-y-3">
+                <% group.fetch(:current_parked_waits).each do |wait| %>
+                  <div class="rounded-box border border-base-300 bg-base-100 p-4">
+                    <div class="flex flex-wrap items-center gap-3 text-sm">
+                      <span class="badge badge-outline"><%= wait.fetch(:reason_label) %></span>
+                      <span class="font-medium"><%= wait.fetch(:owner_label) %></span>
+                      <span class="opacity-70"><%= wait.fetch(:retry_at).iso8601 %></span>
+                    </div>
+                    <% if wait.fetch(:details_summary).present? %>
+                      <div class="mt-2 font-mono text-xs opacity-70"><%= wait.fetch(:details_summary) %></div>
+                    <% end %>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+
+          <% if group.fetch(:recent_wait_recovery).any? %>
+            <div>
+              <div class="text-sm font-medium">Recent wait recovery</div>
+              <div class="mt-3 space-y-3">
+                <% group.fetch(:recent_wait_recovery).each do |event| %>
+                  <div class="rounded-box border border-base-300 bg-base-100 p-4 text-sm">
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="badge badge-outline"><%= event.fetch(:status) %></span>
+                      <span class="font-medium"><%= event.fetch(:owner_label) %></span>
+                      <span class="opacity-70"><%= event.fetch(:reason_label) %></span>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+
+          <% if group.fetch(:recent_lease_recovery).any? %>
+            <div>
+              <div class="text-sm font-medium">Recent lease recovery</div>
+              <div class="mt-3 space-y-3">
+                <% group.fetch(:recent_lease_recovery).each do |event| %>
+                  <div class="rounded-box border border-base-300 bg-base-100 p-4 text-sm">
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="badge badge-outline"><%= event.fetch(:status) %></span>
+                      <span class="font-medium"><%= event.fetch(:holder_label) %></span>
+                      <span class="font-mono text-xs opacity-70"><%= event.fetch(:execution_request_id) %></span>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+
+          <% if group.fetch(:recent_provider_activity).any? %>
+            <div>
+              <div class="text-sm font-medium">Recent provider activity</div>
+              <div class="mt-3 space-y-3">
+                <% group.fetch(:recent_provider_activity).each do |event| %>
+                  <div class="rounded-box border border-base-300 bg-base-100 p-4 text-sm">
+                    <div class="flex flex-wrap items-center gap-3">
+                      <span class="badge badge-outline"><%= event.fetch(:status) %></span>
+                      <span class="font-mono text-xs"><%= event.fetch(:request_id) %></span>
+                      <span class="opacity-70"><%= event.fetch(:actual_tokens) || event.fetch(:estimated_tokens) %> tokens</span>
+                    </div>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+
+          <% if group.fetch(:recent_execution_capacity_denials).any? %>
+            <div>
+              <div class="text-sm font-medium">Recent execution capacity denials</div>
+              <div class="mt-3 space-y-3">
+                <% group.fetch(:recent_execution_capacity_denials).each do |event| %>
+                  <div class="rounded-box border border-base-300 bg-base-100 p-4 text-sm">
+                    <div class="font-medium"><%= event.fetch(:message) %></div>
+                    <div class="mt-2 font-mono text-xs opacity-70"><%= event.fetch(:run_id) %></div>
+                  </div>
+                <% end %>
+              </div>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    <% end %>
+  <% else %>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body text-sm opacity-70">
+        No current waits or recent runtime-governance pressure.
+      </div>
+    </div>
+  <% end %>
+</div>

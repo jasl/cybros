@@ -122,6 +122,8 @@
 
 ## Task 6: Add Operator Settings Surfaces And Observability
 
+**Status:** superseded and completed on 2026-03-10 by [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md), which split this oversized acceptance slice into independently shippable operator-surface tasks.
+
 **Files:**
 
 - system settings controllers and views for provider governance and runtime settings
@@ -139,3 +141,5 @@
 **Verify with:**
 
 `bin/rails test test/integration/system_settings_runtime_governance_test.rb test/integration/runtime_governance_observability_test.rb`
+
+Do not treat this original Task 6 block as the active implementation checklist anymore. Use the 2026-03-09 follow-up plan for the closed acceptance scope and verification files.

@@ -11,8 +11,7 @@ Environment note:
 ## Repair Status
 
 - Closed on 2026-03-09: `PA-001`, `PA-002`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-011`, `PA-012`, `PA-013`
-- Still open: `PA-006`
-- Explicitly excluded from implementation in this repair session: `PA-006`
+- Closed on 2026-03-10: `PA-006`
 
 ## PA-001
 
@@ -146,7 +145,12 @@ Environment note:
 
 ## PA-006
 
-- Status: Open discussion item; explicitly excluded from implementation in the 2026-03-09 repair session.
+- Status: Closed on 2026-03-10.
+- Repair summary: the operator slice was split into [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md) and then implemented on this branch. The system settings surfaces now cover provider limiter editing, runtime settings, execution locations, workspaces, execution targets, and a read-only runtime-governance observability page backed by durable waits, leases, reservations, and run snapshots.
+- Verification:
+  - `bin/rails test test/integration/system_settings_llm_provider_governance_test.rb test/integration/system_settings_runtime_settings_test.rb test/integration/system_settings_execution_locations_test.rb test/integration/system_settings_workspaces_test.rb test/integration/system_settings_execution_targets_test.rb test/integration/system_settings_runtime_governance_test.rb test/integration/runtime_governance_observability_test.rb`
+  - `PARALLEL_WORKERS=1 bin/rails test test/integration/system_settings_llm_provider_governance_test.rb test/system/system_settings_llm_provider_governance_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb test/integration/system_settings_execution_locations_test.rb test/system/system_settings_execution_locations_test.rb test/integration/system_settings_workspaces_test.rb test/system/system_settings_workspaces_test.rb test/integration/system_settings_execution_targets_test.rb test/system/system_settings_execution_targets_test.rb test/integration/system_settings_runtime_governance_test.rb test/system/system_settings_runtime_governance_test.rb test/integration/runtime_governance_observability_test.rb test/integration/execution_target_inventory_test.rb test/integration/llm_providers_test.rb test/integration/system_settings_automations_test.rb test/system/system_settings_automations_test.rb test/services/runtime_governance/provider_budget_reservations_test.rb test/services/runtime_governance/execution_capacity_leases_test.rb test/services/runtime_governance/runtime_waits_test.rb test/integration/execution_capacity_enforcement_test.rb`
+- Historical finding retained below for traceability; it no longer describes current behavior.
 
 - Severity: P2
 - Conclusion: runtime-governance Task 6 is currently a plan/implementation mismatch, not a closed acceptance slice. The branch ships only part of the operator surface while the plan still claims a broader settings and observability scope.

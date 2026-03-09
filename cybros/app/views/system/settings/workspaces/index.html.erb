@@ -1,0 +1,40 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold">Workspaces</h2>
+      <p class="text-sm opacity-70">Operator-visible workspace inventory with location context.</p>
+    </div>
+    <%= link_to "Back to targets", system_settings_execution_targets_path, class: "btn btn-ghost btn-sm" %>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body p-0 overflow-x-auto">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Location</th>
+            <th>Path</th>
+            <th>Capabilities</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          <% @workspaces.each do |workspace| %>
+            <tr class="hover:bg-base-200/50 transition-colors">
+              <td class="font-medium"><%= workspace.name %></td>
+              <td><%= link_to workspace.execution_location.name, system_settings_execution_location_path(workspace.execution_location), class: "link link-hover" %></td>
+              <td class="font-mono text-xs"><%= workspace.root_path %></td>
+              <td><%= Array(workspace.capability_tags).join(", ").presence || "None" %></td>
+              <td><%= workspace.status %></td>
+              <td class="text-right">
+                <%= link_to "View", system_settings_workspace_path(workspace), class: "btn btn-ghost btn-sm" %>
+              </td>
+            </tr>
+          <% end %>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>

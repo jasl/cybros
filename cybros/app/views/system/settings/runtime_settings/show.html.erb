@@ -1,0 +1,48 @@
+<div class="space-y-6">
+  <div class="flex items-center justify-between gap-4">
+    <div>
+      <h2 class="text-lg font-semibold">Runtime Settings</h2>
+      <p class="text-sm opacity-70">Instance-scoped worker throughput and alert thresholds.</p>
+    </div>
+    <%= link_to "Edit runtime settings", edit_system_settings_runtime_settings_path, class: "btn btn-primary btn-sm" %>
+  </div>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div>
+          <div class="text-xs opacity-60">Scope</div>
+          <div class="text-sm">Instance</div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Record state</div>
+          <div class="text-sm"><%= @runtime_setting.persisted? ? "Saved" : "Using defaults" %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Default worker concurrency</div>
+          <div class="text-sm font-medium"><%= @runtime_setting.default_worker_concurrency %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Scope key</div>
+          <div class="font-mono text-sm"><%= @runtime_setting.scope_key %></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid grid-cols-1 gap-6 xl:grid-cols-2">
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="text-sm font-medium">Queue overrides</div>
+        <pre class="mt-3 rounded-box bg-base-100 border border-base-300 p-4 text-xs leading-6 overflow-x-auto"><%= JSON.pretty_generate(@runtime_setting.queue_overrides.presence || {}) %></pre>
+      </div>
+    </div>
+
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <div class="text-sm font-medium">Alert thresholds</div>
+        <pre class="mt-3 rounded-box bg-base-100 border border-base-300 p-4 text-xs leading-6 overflow-x-auto"><%= JSON.pretty_generate(@runtime_setting.alert_thresholds.presence || {}) %></pre>
+      </div>
+    </div>
+  </div>
+</div>

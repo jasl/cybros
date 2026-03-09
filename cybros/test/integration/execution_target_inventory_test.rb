@@ -4,20 +4,28 @@ class ExecutionTargetInventoryTest < ActionDispatch::IntegrationTest
   test "execution_target list and get return visible inventory with switch previews" do
     current_target = create_execution_target!(name: "Current target")
     alternate_target = create_execution_target!(name: "Alternate target")
-    _inactive_target = create_execution_target!(name: "Inactive target", target_status: "inactive")
+    inactive_target = create_execution_target!(name: "Inactive target", target_status: "inactive")
     conversation = create_conversation!(default_execution_target: current_target, permission_mode: "default")
 
-    payload = AgentRpc::KernelServices::ExecutionTargets.list(entrypoint: conversation)
+    relation = ExecutionTarget.where(id: [current_target.id, alternate_target.id, inactive_target.id])
+    payload = RuntimeGovernance::ExecutionTargetInventory.list(current_target: current_target, permission_mode: conversation.permission_mode, relation: relation)
 
-    assert_equal [alternate_target.id, current_target.id].sort, payload.fetch("targets").map { |target| target.fetch("id") }.sort
+    visible_target_ids = payload.map { |target| target.fetch("id") }
+    assert_equal [alternate_target.id, current_target.id], visible_target_ids
 
-    current_summary = payload.fetch("targets").find { |target| target.fetch("id") == current_target.id }
+    current_summary = payload.find { |target| target.fetch("id") == current_target.id }
     assert_equal true, current_summary.fetch("is_default")
     assert_equal "allow", current_summary.dig("switch_decision_preview", "decision")
     assert_equal "available", current_summary.fetch("availability")
     assert_equal "healthy", current_summary.fetch("health_status")
 
-    alternate_summary = AgentRpc::KernelServices::ExecutionTargets.get(entrypoint: conversation, execution_target_id: alternate_target.id).fetch("target")
+    alternate_summary =
+      RuntimeGovernance::ExecutionTargetInventory.get(
+        current_target: current_target,
+        permission_mode: conversation.permission_mode,
+        execution_target_id: alternate_target.id,
+        relation: relation,
+      )
     assert_equal alternate_target.id, alternate_summary.fetch("id")
     assert_equal "Alternate target", alternate_summary.fetch("name")
     assert_equal "Alternate target workspace", alternate_summary.fetch("workspace_label")

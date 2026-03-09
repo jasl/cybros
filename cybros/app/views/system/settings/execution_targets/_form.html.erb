@@ -1,0 +1,54 @@
+<%= form_with model: execution_target, scope: :execution_target, url: system_settings_execution_target_path(execution_target), method: :patch, class: "space-y-4 max-w-3xl" do %>
+  <% if execution_target.errors.any? %>
+    <div role="alert" class="alert alert-error items-start">
+      <ul class="space-y-1 text-sm">
+        <% execution_target.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body space-y-4">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div>
+          <div class="text-xs opacity-60">Location baseline</div>
+          <div class="text-sm"><%= "run=#{execution_target.execution_location.max_concurrent_tasks}, queue=#{execution_target.execution_location.max_queued_tasks}, timeout=#{execution_target.execution_location.default_timeout_s}s" %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Workspace</div>
+          <div class="font-mono text-sm"><%= execution_target.workspace.root_path %></div>
+        </div>
+      </div>
+
+      <div>
+        <%= label_tag "execution_target_max_concurrent_tasks_override", class: "label" do %>
+          <span class="label-text">Max concurrent tasks override</span>
+        <% end %>
+        <%= text_field_tag "execution_target[max_concurrent_tasks_override]", @max_concurrent_tasks_override_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <div>
+        <%= label_tag "execution_target_max_queued_tasks_override", class: "label" do %>
+          <span class="label-text">Max queued tasks override</span>
+        <% end %>
+        <%= text_field_tag "execution_target[max_queued_tasks_override]", @max_queued_tasks_override_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <div>
+        <%= label_tag "execution_target_default_timeout_s_override", class: "label" do %>
+          <span class="label-text">Default timeout override (seconds)</span>
+        <% end %>
+        <%= text_field_tag "execution_target[default_timeout_s_override]", @default_timeout_s_override_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <p class="text-xs opacity-70">Leave a field blank to inherit that policy from the execution location.</p>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn btn-primary">Save target</button>
+    <%= link_to "Back", system_settings_execution_target_path(execution_target), class: "btn btn-ghost" %>
+  </div>
+<% end %>

@@ -19,12 +19,16 @@ Rails.application.routes.draw do
         post :device_flow_start, on: :member
         post :device_flow_poll, on: :member
       end
+      resource :runtime_settings, only: %i[show edit update]
+      resource :runtime_governance, only: :show, controller: "runtime_governance"
       resources :agent_programs, only: %i[index new create show]
       resources :agent_deployments, only: %i[index new create show] do
         post :inspect, on: :member
         post :activate, on: :member
       end
-      resources :execution_targets, only: %i[index show]
+      resources :execution_locations, only: %i[index show edit update]
+      resources :workspaces, only: %i[index show edit update]
+      resources :execution_targets, only: %i[index show edit update]
       resources :automations, only: %i[index show] do
         resources :automation_runs, only: [], path: "runs", controller: "automation_runs" do
           post :approve, on: :member

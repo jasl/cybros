@@ -27,6 +27,18 @@
                 LLM
               <% end %>
 
+              <%= link_to system_settings_runtime_settings_path,
+                          class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:runtime_settings) ? "tab-active" : ""}" do %>
+                <span class="icon-[lucide--gauge] size-4"></span>
+                Runtime
+              <% end %>
+
+              <%= link_to system_settings_runtime_governance_path,
+                          class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:runtime_governance) ? "tab-active" : ""}" do %>
+                <span class="icon-[lucide--activity] size-4"></span>
+                Governance
+              <% end %>
+
               <%= link_to system_settings_agent_programs_path,
                           class: "tab flex-1 min-w-0 gap-2 #{settings_section_active?(:agent_programs) ? "tab-active" : ""}" do %>
                 <span class="icon-[lucide--sparkles] size-4"></span>
@@ -77,6 +89,20 @@
                             class: "gap-3 transition-colors #{settings_section_active?(:llm_providers) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
                   <span class="icon-[lucide--cpu] size-5"></span>
                   LLM Providers
+                <% end %>
+              </li>
+              <li>
+                <%= link_to system_settings_runtime_settings_path,
+                            class: "gap-3 transition-colors #{settings_section_active?(:runtime_settings) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                  <span class="icon-[lucide--gauge] size-5"></span>
+                  Runtime Settings
+                <% end %>
+              </li>
+              <li>
+                <%= link_to system_settings_runtime_governance_path,
+                            class: "gap-3 transition-colors #{settings_section_active?(:runtime_governance) ? "menu-active" : "hover:bg-base-300/60 focus-visible:bg-base-300/60"}" do %>
+                  <span class="icon-[lucide--activity] size-5"></span>
+                  Runtime Governance
                 <% end %>
               </li>
               <li>

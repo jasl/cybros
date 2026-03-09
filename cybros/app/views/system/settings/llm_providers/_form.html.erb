@@ -1,5 +1,5 @@
 <% if llm_provider.credential_type == "api_key" %>
-  <%= form_with model: llm_provider, url: system_settings_llm_provider_path(llm_provider.provider_key), method: :patch, class: "space-y-4" do |f| %>
+  <%= form_with model: llm_provider, scope: :llm_provider, url: system_settings_llm_provider_path(llm_provider.provider_key), method: :patch, class: "space-y-4" do |f| %>
     <% if llm_provider.errors.any? %>
       <div role="alert" class="alert alert-error">
         <span><%= llm_provider.errors.full_messages.first %></span>
@@ -23,6 +23,44 @@
         <% end %>
         <%= f.password_field :api_key, class: "input input-bordered w-full", placeholder: (llm_provider.persisted? ? "(unchanged)" : "") %>
         <p class="text-xs opacity-70 mt-2">Leave blank to keep the existing key.</p>
+      </div>
+
+      <div class="divider my-0">Limiter</div>
+
+      <div>
+        <%= f.label :max_concurrent_requests, class: "label" do %>
+          <span class="label-text">Max concurrent requests</span>
+        <% end %>
+        <%= f.number_field :max_concurrent_requests, class: "input input-bordered w-full", min: 1 %>
+      </div>
+
+      <div>
+        <%= f.label :requests_per_minute, class: "label" do %>
+          <span class="label-text">Requests per minute</span>
+        <% end %>
+        <%= f.number_field :requests_per_minute, class: "input input-bordered w-full", min: 1 %>
+      </div>
+
+      <div>
+        <%= f.label :tokens_per_minute, class: "label" do %>
+          <span class="label-text">Tokens per minute</span>
+        <% end %>
+        <%= f.number_field :tokens_per_minute, class: "input input-bordered w-full", min: 1 %>
+      </div>
+
+      <div>
+        <%= f.label :burst_limit, class: "label" do %>
+          <span class="label-text">Burst limit</span>
+        <% end %>
+        <%= f.number_field :burst_limit, class: "input input-bordered w-full", min: 1 %>
+      </div>
+
+      <div>
+        <%= label_tag "llm_provider_backoff_policy_json", class: "label" do %>
+          <span class="label-text">Backoff policy</span>
+        <% end %>
+        <%= text_area_tag "llm_provider[backoff_policy_json]", @backoff_policy_json, class: "textarea textarea-bordered w-full font-mono text-sm", rows: 6 %>
+        <p class="text-xs opacity-70 mt-2">Enter a JSON object with the provider retry policy.</p>
       </div>
     </div>
 
@@ -101,6 +139,66 @@
         <% end %>
       </div>
     </div>
+
+    <%= form_with model: llm_provider, scope: :llm_provider, url: system_settings_llm_provider_path(llm_provider.provider_key), method: :patch, class: "space-y-4" do |f| %>
+      <% if llm_provider.errors.any? %>
+        <div role="alert" class="alert alert-error">
+          <span><%= llm_provider.errors.full_messages.first %></span>
+        </div>
+      <% end %>
+
+      <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+        <div class="card-body space-y-4">
+          <div>
+            <div class="font-medium">Limiter</div>
+            <div class="text-xs opacity-70">These limits govern requests admitted through this credential.</div>
+          </div>
+
+          <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+            <div>
+              <%= f.label :max_concurrent_requests, class: "label" do %>
+                <span class="label-text">Max concurrent requests</span>
+              <% end %>
+              <%= f.number_field :max_concurrent_requests, class: "input input-bordered w-full", min: 1 %>
+            </div>
+
+            <div>
+              <%= f.label :requests_per_minute, class: "label" do %>
+                <span class="label-text">Requests per minute</span>
+              <% end %>
+              <%= f.number_field :requests_per_minute, class: "input input-bordered w-full", min: 1 %>
+            </div>
+
+            <div>
+              <%= f.label :tokens_per_minute, class: "label" do %>
+                <span class="label-text">Tokens per minute</span>
+              <% end %>
+              <%= f.number_field :tokens_per_minute, class: "input input-bordered w-full", min: 1 %>
+            </div>
+
+            <div>
+              <%= f.label :burst_limit, class: "label" do %>
+                <span class="label-text">Burst limit</span>
+              <% end %>
+              <%= f.number_field :burst_limit, class: "input input-bordered w-full", min: 1 %>
+            </div>
+          </div>
+
+          <div>
+            <%= label_tag "llm_provider_backoff_policy_json", class: "label" do %>
+              <span class="label-text">Backoff policy</span>
+            <% end %>
+            <%= text_area_tag "llm_provider[backoff_policy_json]", @backoff_policy_json, class: "textarea textarea-bordered w-full font-mono text-sm", rows: 6 %>
+            <p class="text-xs opacity-70 mt-2">Enter a JSON object with the provider retry policy.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3">
+        <button type="submit" class="btn btn-primary">Save limiter settings</button>
+        <%= link_to "Back", system_settings_llm_providers_path, class: "btn btn-ghost" %>
+      </div>
+    <% end %>
 
     <div class="flex items-center gap-3">
       <%= link_to "Back", system_settings_llm_providers_path, class: "btn btn-ghost" %>

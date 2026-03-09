@@ -1,0 +1,52 @@
+<%= form_with model: execution_location, scope: :execution_location, url: system_settings_execution_location_path(execution_location), method: :patch, class: "space-y-4 max-w-3xl" do %>
+<% if execution_location.errors.any? %>
+    <div role="alert" class="alert alert-error items-start">
+      <ul class="space-y-1 text-sm">
+        <% execution_location.errors.full_messages.each do |message| %>
+          <li><%= message %></li>
+        <% end %>
+      </ul>
+    </div>
+  <% end %>
+
+  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+    <div class="card-body space-y-4">
+      <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div>
+          <div class="text-xs opacity-60">Platform</div>
+          <div class="font-mono text-sm"><%= "#{execution_location.kind}/#{execution_location.platform}" %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Environment</div>
+          <div class="text-sm"><%= "#{execution_location.environment} / #{execution_location.trust_group}" %></div>
+        </div>
+      </div>
+
+      <div>
+        <%= label_tag "execution_location_max_concurrent_tasks", class: "label" do %>
+          <span class="label-text">Max concurrent tasks</span>
+        <% end %>
+        <%= text_field_tag "execution_location[max_concurrent_tasks]", @max_concurrent_tasks_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <div>
+        <%= label_tag "execution_location_max_queued_tasks", class: "label" do %>
+          <span class="label-text">Max queued tasks</span>
+        <% end %>
+        <%= text_field_tag "execution_location[max_queued_tasks]", @max_queued_tasks_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <div>
+        <%= label_tag "execution_location_default_timeout_s", class: "label" do %>
+          <span class="label-text">Default timeout (seconds)</span>
+        <% end %>
+        <%= text_field_tag "execution_location[default_timeout_s]", @default_timeout_s_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+    </div>
+  </div>
+
+  <div class="flex items-center gap-3">
+    <button type="submit" class="btn btn-primary">Save location</button>
+    <%= link_to "Back", system_settings_execution_location_path(execution_location), class: "btn btn-ghost" %>
+  </div>
+<% end %>

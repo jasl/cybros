@@ -31,12 +31,16 @@ module System
 
       def edit
         @device_flow = active_device_flow_for(@provider_key)
+        @backoff_policy_json = format_backoff_policy(@llm_provider.backoff_policy)
       end
 
       def update
+        @device_flow = active_device_flow_for(@provider_key)
         attrs, errors = credential_attributes_and_errors_from_params
 
         attrs.delete(:api_key) if attrs.key?(:api_key) && attrs[:api_key].to_s.strip == ""
+        @backoff_policy_json = llm_provider_params.fetch(:backoff_policy_json, nil).to_s
+        @backoff_policy_json = format_backoff_policy(@llm_provider.backoff_policy) if @backoff_policy_json.blank?
 
         if errors.any?
           @llm_provider.assign_attributes(attrs)
@@ -125,7 +129,7 @@ module System
         def set_llm_provider
           @llm_provider =
             LLMProvider.find_by(provider_key: @provider_key) ||
-              LLMProvider.new(provider_key: @provider_key, credential_type: credential_type_from_spec)
+              LLMProvider.new(provider_key: @provider_key, credential_type: credential_type_from_spec, status: "active")
         end
 
         def credential_type_from_spec
@@ -144,18 +148,55 @@ module System
 
         def credential_attributes_and_errors_from_params
           ct = credential_type_from_spec
-          attrs = {}
+          raw =
+            llm_provider_params.permit(
+              :api_key,
+              :max_concurrent_requests,
+              :requests_per_minute,
+              :tokens_per_minute,
+              :burst_limit,
+              :backoff_policy_json,
+            )
+          attrs = raw.except(:backoff_policy_json).to_h
           errors = []
 
-          if ct == "api_key"
-            raw = params.require(:llm_provider).permit(:api_key)
-            attrs = raw.to_h
+          unless ct == "api_key"
+            attrs.delete("api_key")
+          end
+
+          if raw.key?(:backoff_policy_json)
+            backoff_policy_json = raw[:backoff_policy_json].to_s
+            if backoff_policy_json.blank?
+              attrs["backoff_policy"] = nil
+            else
+              parsed = parse_backoff_policy(backoff_policy_json)
+              if parsed
+                attrs["backoff_policy"] = parsed
+              else
+                errors << [:backoff_policy, "must be a JSON object"]
+              end
+            end
           end
 
           attrs["provider_key"] = @provider_key
           attrs["credential_type"] = ct
 
           [attrs.symbolize_keys, errors]
+        end
+
+        def parse_backoff_policy(raw_json)
+          parsed = JSON.parse(raw_json)
+          parsed if parsed.is_a?(Hash)
+        rescue JSON::ParserError
+          nil
+        end
+
+        def llm_provider_params
+          params.fetch(:llm_provider, params.fetch(:llm_provider_credential, ActionController::Parameters.new))
+        end
+
+        def format_backoff_policy(policy)
+          JSON.pretty_generate(policy.presence || {})
         end
 
         def load_index_context

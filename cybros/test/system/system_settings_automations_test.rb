@@ -80,14 +80,6 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
 
   private
 
-    def sign_in_as!(email:, password: "Passw0rd")
-      visit new_session_path
-      fill_in "Email", with: email
-      fill_in "Password", with: password
-      click_button "Sign in"
-      assert_current_path dashboard_path
-    end
-
     def create_automation_runtime!(user:, endpoint_url:, permission_mode:)
       program = create_program!
       active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")

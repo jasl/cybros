@@ -128,6 +128,16 @@ Recommended ownership:
 
 Stable limiter and capacity fields should be explicit columns. Use `jsonb` only for bounded settings payloads such as queue overrides or alert thresholds.
 
+Current operator surfaces:
+
+- `System Settings > LLM Providers` edits provider-credential limiter fields
+- `System Settings > Runtime Settings` edits instance-scoped worker concurrency, queue overrides, and alert thresholds
+- `System Settings > Execution Locations` and `System Settings > Workspaces` expose the execution topology and its operator-managed safety/runtime metadata
+- `System Settings > Execution Targets` shows inherited-versus-overridden `execution_capacity` policy and edits per-target overrides
+- `System Settings > Runtime Governance` is the read-only observability surface for current waits and recent runtime outcomes
+
+These pages intentionally favor edit/update flows over broad CRUD. They expose existing runtime policy and topology instead of introducing a second dashboard or inventory framework first.
+
 ## Admission Model
 
 Provider limits and execution capacity require durable admission, not only configurable thresholds.
@@ -170,3 +180,21 @@ When execution capacity releases a slot, Cybros should resume the oldest parked 
 - operator policy changes may invalidate an open draft before materialization
 - live admission state must never be bypassed because an older snapshot exists
 - automation dispatch uses the same admission model as interactive execution
+
+## Operator Observability
+
+The runtime-governance operator page should read durable runtime facts directly instead of replaying a separate event bus.
+
+It is intentionally a bounded observability surface for current blockers and recent durable outcomes, not a full historical dashboard.
+
+Current V1 observability reads:
+
+- parked `RuntimeWait` rows for `provider_limit`, `execution_capacity`, and `deployment_backoff`
+- recent non-active `ProviderBudgetReservation` rows for provider-limit outcomes
+- recent non-active `ExecutionCapacityLease` rows for wakeup and recovery evidence
+- recent `ConversationRun` failures whose `runtime_governors["execution_capacity"]` snapshot and error payload show `execution_capacity_denied`
+
+The page groups those facts by governed subject so an operator can answer two questions quickly:
+
+- which subject is currently blocking work
+- whether the latest durable evidence shows parking, wakeup, recovery, or terminal denial

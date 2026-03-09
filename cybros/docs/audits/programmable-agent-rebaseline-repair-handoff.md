@@ -1,5 +1,7 @@
 # Programmable Agent Rebaseline Repair Handoff
 
+Historical note: this handoff predates the dedicated operator-surface follow-up. `PA-006` was later implemented and closed on 2026-03-10 by [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md). Keep the prompt below as session history, not the current status source for `PA-006`.
+
 Use this prompt to start a fresh repair session from the existing audit without re-doing the audit itself.
 
 ## Recommended Skills
@@ -49,7 +51,7 @@ Do not re-open product semantics that are already explicit in plans/docs unless 
 Start with:
 1. confirm current branch and worktree status
 2. read the audit doc and extract only the fixable findings
-3. explicitly exclude PA-006, PA-011, and PA-012 from implementation in this session; keep them as discussion items
+3. explicitly exclude PA-006, PA-011, and PA-012 from implementation in this session; keep them as discussion items (historical instruction only; `PA-006` was later closed by a follow-up session)
 4. write a repair plan to docs/plans with small TDD-first tasks and verification commands
 5. execute the plan in batches, using parallel agents only for independent domains
 
