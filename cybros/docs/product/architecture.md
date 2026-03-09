@@ -59,7 +59,7 @@ It does not replace the program contract as product truth.
 Nexus owns:
 
 - shell, file, browser, and desktop execution
-- sandbox and quota enforcement for execution work
+- sandbox and execution capacity enforcement for execution work
 - execution against selected targets
 
 It does not own:

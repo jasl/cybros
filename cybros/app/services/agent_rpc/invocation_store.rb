@@ -20,6 +20,16 @@ module AgentRpc
       end
     end
 
+    def self.reply_unknown_candidate_for(scope_type:, scope_id:, method_name:, invocation_id:)
+      AgentRpcInvocation.where(
+        scope_type: scope_type.to_s,
+        scope_id: scope_id.to_s,
+        method: method_name.to_s,
+        invocation_id: invocation_id.to_s,
+        status: "reply_unknown",
+      ).order(created_at: :desc).first
+    end
+
     def self.ensure_replayable!(invocation:, deployment:, request_payload:)
       store =
         new(
@@ -99,6 +109,8 @@ module AgentRpc
         return { invocation: existing, replayed: true }
       end
 
+      ensure_no_reply_unknown_binding_drift!
+
       {
         invocation:
           AgentRpcInvocation.create!(
@@ -131,6 +143,20 @@ module AgentRpc
           method_name: method_name,
           invocation_id: invocation_id,
         )
+      end
+
+      def ensure_no_reply_unknown_binding_drift!
+        candidate =
+          self.class.reply_unknown_candidate_for(
+            scope_type: scope_type,
+            scope_id: scope_id,
+            method_name: method_name,
+            invocation_id: invocation_id,
+          )
+        return if candidate.blank?
+
+        ensure_same_binding!(candidate)
+        ensure_same_request!(candidate)
       end
 
       def ensure_same_binding!(invocation)

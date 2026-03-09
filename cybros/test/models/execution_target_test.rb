@@ -16,7 +16,7 @@ class ExecutionTargetTest < ActiveSupport::TestCase
     assert target.errors[:workspace].any?
   end
 
-  test "validates quota override values when present" do
+  test "validates execution capacity override values when present" do
     location = create_location!(name: "Local")
     workspace = create_workspace!(execution_location: location)
 

@@ -31,6 +31,8 @@ class SystemSettingsExecutionTargetsIntegrationTest < ActionDispatch::Integratio
 
     assert_response :success
     assert_includes response.body, "Execution capacity policy"
+    assert_includes response.body, "Execution capacity overrides"
+    refute_includes response.body, "Quota overrides"
     assert_includes response.body, "Max concurrent tasks"
     assert_includes response.body, "2"
     assert_includes response.body, "Override"
