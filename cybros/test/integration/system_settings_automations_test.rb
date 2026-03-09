@@ -22,13 +22,13 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     assert_response :forbidden
   end
 
-  test "index and show expose automation bindings and scheduled run history" do
+  test "index and show expose execution conversation history" do
     sign_in_owner!
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
       dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
     end
 
@@ -39,6 +39,8 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, runtime.fetch(:program).name
     assert_includes response.body, runtime.fetch(:target).name
     assert_includes response.body, "full_access"
+    assert_includes response.body, "completed"
+    refute_includes response.body, "Standalone"
 
     get system_settings_automation_path(runtime.fetch(:automation))
 
@@ -49,11 +51,13 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "UTC"
     assert_includes response.body, scheduled_for.iso8601
     assert_includes response.body, "completed"
+    assert_includes response.body, Conversation.find_by!(automation: runtime.fetch(:automation)).id
+    refute_includes response.body, "Conversation binding"
   ensure
     server&.shutdown
   end
 
-  test "show supports operator approval for parked automation runs" do
+  test "show supports operator approval for parked automation executions" do
     sign_in_owner!
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -70,10 +74,10 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
     get system_settings_automation_path(runtime.fetch(:automation))
@@ -84,15 +88,18 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Approve"
     assert_includes response.body, "Reject"
 
-    post approve_system_settings_automation_automation_run_path(runtime.fetch(:automation), automation_run)
+    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+      post approve_system_settings_automation_execution_path(runtime.fetch(:automation), execution_conversation)
+    end
 
     assert_redirected_to system_settings_automation_path(runtime.fetch(:automation))
     follow_redirect!
 
-    automation_run.reload
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
 
-    assert_equal "completed", automation_run.status
-    assert_equal "approved", automation_run.approval_state.fetch("status")
+    assert_equal "approved", draft.approval_state.fetch("status")
+    assert_equal "completed", execution_conversation.metadata.dig("automation_execution", "status")
     assert_includes response.body, "completed"
     assert_includes response.body, "approved"
   ensure
@@ -167,12 +174,12 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     end
 
     def dispatch_due_automation!(automation:, now:)
-      runs = Automations::Scheduler.dispatch_due!(now: now)
-      matching_run = runs.find { |run| run.automation_id == automation.id }
+      executions = Automations::Scheduler.dispatch_due!(now: now)
+      matching_execution = executions.find { |conversation| conversation.automation_id == automation.id }
 
-      assert_not_nil matching_run
+      assert_not_nil matching_execution
 
-      matching_run
+      matching_execution
     end
 
     def create_program!

@@ -167,29 +167,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
     t.index ["session_token_digest"], name: "idx_agent_rpc_sessions_token", unique: true
   end
 
-  create_table "automation_runs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.jsonb "approval_state", default: {}, null: false
-    t.uuid "automation_id", null: false
-    t.uuid "conversation_run_id"
-    t.datetime "created_at", null: false
-    t.string "dispatch_key"
-    t.datetime "finished_at"
-    t.uuid "initiated_by_user_id"
-    t.datetime "scheduled_for", null: false
-    t.jsonb "snapshot", default: {}, null: false
-    t.datetime "started_at"
-    t.string "status", null: false
-    t.datetime "updated_at", null: false
-    t.index ["automation_id", "dispatch_key"], name: "idx_automation_runs_dispatch_key", unique: true, where: "(dispatch_key IS NOT NULL)"
-    t.index ["automation_id", "scheduled_for"], name: "idx_automation_runs_schedule"
-    t.index ["automation_id"], name: "index_automation_runs_on_automation_id"
-    t.index ["conversation_run_id"], name: "index_automation_runs_on_conversation_run_id"
-    t.index ["initiated_by_user_id"], name: "index_automation_runs_on_initiated_by_user_id"
-  end
-
   create_table "automations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.uuid "agent_program_id", null: false
-    t.uuid "conversation_id"
     t.datetime "created_at", null: false
     t.uuid "execution_target_id", null: false
     t.string "permission_mode", default: "full_access", null: false
@@ -203,7 +182,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
     t.datetime "updated_at", null: false
     t.uuid "user_id", null: false
     t.index ["agent_program_id"], name: "index_automations_on_agent_program_id"
-    t.index ["conversation_id"], name: "index_automations_on_conversation_id"
     t.index ["execution_target_id"], name: "index_automations_on_execution_target_id"
     t.index ["user_id"], name: "index_automations_on_user_id"
   end
@@ -264,6 +242,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
   create_table "conversations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.jsonb "agent_config", default: {}, null: false
     t.string "agent_config_schema_fingerprint"
+    t.uuid "automation_id"
+    t.string "automation_dispatch_key"
+    t.datetime "automation_triggered_at"
     t.uuid "agent_program_id"
     t.datetime "created_at", null: false
     t.uuid "default_execution_target_id"
@@ -279,6 +260,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
     t.datetime "updated_at", null: false
     t.uuid "user_id"
     t.index ["agent_program_id"], name: "index_conversations_on_agent_program_id"
+    t.index ["automation_id", "automation_dispatch_key"], name: "idx_conversations_automation_dispatch_key", unique: true, where: "(automation_dispatch_key IS NOT NULL)"
+    t.index ["automation_id"], name: "index_conversations_on_automation_id"
     t.index ["default_execution_target_id"], name: "index_conversations_on_default_execution_target_id"
     t.index ["forked_from_node_id"], name: "index_conversations_on_forked_from_node_id"
     t.index ["kind"], name: "index_conversations_on_kind"
@@ -562,9 +545,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
     t.uuid "agent_deployment_id", null: false
     t.uuid "agent_program_id", null: false
     t.jsonb "approval_state", default: {}, null: false
-    t.uuid "automation_id"
     t.string "contract_fingerprint", null: false
-    t.uuid "conversation_id"
+    t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
     t.datetime "deployment_activated_at", null: false
     t.string "deployment_fingerprint", null: false
@@ -587,14 +569,12 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
     t.index ["agent_deployment_id", "agent_program_id"], name: "idx_run_drafts_deploy_program"
     t.index ["agent_deployment_id"], name: "index_run_drafts_on_agent_deployment_id"
     t.index ["agent_program_id"], name: "index_run_drafts_on_agent_program_id"
-    t.index ["automation_id", "status"], name: "idx_run_drafts_automation_status"
     t.index ["conversation_id", "status"], name: "idx_run_drafts_conversation_status"
     t.index ["conversation_id"], name: "index_run_drafts_on_conversation_id"
     t.index ["initiated_by_user_id"], name: "index_run_drafts_on_initiated_by_user_id"
     t.index ["materialized_conversation_run_id"], name: "index_run_drafts_on_materialized_conversation_run_id"
     t.index ["proposed_execution_target_id"], name: "index_run_drafts_on_proposed_execution_target_id"
     t.index ["provider_credential_id"], name: "index_run_drafts_on_provider_credential_id"
-    t.check_constraint "num_nonnulls(conversation_id, automation_id) = 1", name: "chk_run_drafts_one_entrypoint"
   end
 
   create_table "runtime_settings", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -721,11 +701,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations"
   add_foreign_key "agent_rpc_sessions", "agent_rpc_invocations", column: ["agent_rpc_invocation_id", "agent_deployment_id"], primary_key: ["id", "agent_deployment_id"], name: "fk_agent_rpc_sessions_invocation_deploy"
   add_foreign_key "agent_rpc_sessions", "conversations"
-  add_foreign_key "automation_runs", "automations"
-  add_foreign_key "automation_runs", "conversation_runs", on_delete: :nullify
-  add_foreign_key "automation_runs", "users", column: "initiated_by_user_id"
   add_foreign_key "automations", "agent_programs"
-  add_foreign_key "automations", "conversations"
   add_foreign_key "automations", "execution_targets"
   add_foreign_key "automations", "users"
   add_foreign_key "conversation_kv_entries", "conversations"
@@ -742,6 +718,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
   add_foreign_key "conversations", "dag_nodes", column: "forked_from_node_id", on_delete: :nullify
   add_foreign_key "conversations", "execution_targets", column: "default_execution_target_id"
   add_foreign_key "conversations", "users"
+  add_foreign_key "conversations", "automations"
   add_foreign_key "dag_edges", "dag_graphs", column: "graph_id"
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "from_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_from_node_graph_scoped", on_delete: :cascade
   add_foreign_key "dag_edges", "dag_nodes", column: ["graph_id", "to_node_id"], primary_key: ["graph_id", "id"], name: "fk_dag_edges_to_node_graph_scoped", on_delete: :cascade
@@ -770,7 +747,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000017) do
   add_foreign_key "run_drafts", "agent_deployments"
   add_foreign_key "run_drafts", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_run_drafts_deployment_program"
   add_foreign_key "run_drafts", "agent_programs"
-  add_foreign_key "run_drafts", "automations"
   add_foreign_key "run_drafts", "conversation_runs", column: "materialized_conversation_run_id"
   add_foreign_key "run_drafts", "conversations"
   add_foreign_key "run_drafts", "execution_targets", column: "proposed_execution_target_id"

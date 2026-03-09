@@ -8,7 +8,7 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "automation approval parking records awaiting approval audit on the automation run" do
+  test "automation approval parking records awaiting approval audit on the execution conversation" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -24,27 +24,26 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
 
     assert_equal "awaiting_approval", draft.status
-    assert_nil automation_run.conversation_run_id
-    assert_equal "awaiting_approval", automation_run.status
-    assert_equal "pending_confirmation", automation_run.approval_state.fetch("status")
-    assert_equal "fixture_approval", automation_run.approval_state.fetch("reason")
-    assert_equal draft.id, automation_run.snapshot.dig("draft", "id")
-    assert_equal "pending_confirmation", automation_run.snapshot.dig("draft", "approval_state", "status")
+    assert_nil draft.materialized_conversation_run_id
+    assert_equal "awaiting_approval", execution_conversation.metadata.dig("automation_execution", "status")
+    assert_equal draft.id, execution_conversation.metadata.dig("automation_execution", "draft_id")
+    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
+    assert_equal "fixture_approval", draft.approval_state.fetch("reason")
   ensure
     server&.shutdown
   end
 
-  test "approved parked automation run records approval and completion" do
+  test "approved parked automation execution records approval and creates the only run on the conversation" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -60,32 +59,32 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "approved", "approved_at" => Time.current.iso8601),
     )
 
     resumed = RunDrafts::ApprovalResumeService.resume!(draft: draft)
-    automation_run.reload
+    execution_conversation.reload
 
-    assert_nil resumed
+    assert_instance_of ConversationRun, resumed
     assert_equal "finalized", draft.reload.status
-    assert_equal "completed", automation_run.status
-    assert_equal "approved", automation_run.approval_state.fetch("status")
-    assert_equal "approved", automation_run.snapshot.dig("draft", "approval_state", "status")
-    assert_nil automation_run.conversation_run_id
+    assert_equal "running", execution_conversation.metadata.dig("automation_execution", "status")
+    assert_equal resumed.id, execution_conversation.metadata.dig("automation_execution", "conversation_run_id")
+    assert_equal "approved", draft.approval_state.fetch("status")
+    assert_equal resumed.id, draft.materialized_conversation_run_id
   ensure
     server&.shutdown
   end
 
-  test "rejected parked automation run records rejection without materializing a conversation run" do
+  test "rejected parked automation execution records rejection without materializing a conversation run" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -101,33 +100,32 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "rejected", "reason" => "operator_denied"),
     )
 
     error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
-    automation_run.reload
+    execution_conversation.reload
 
     assert_equal "cybros.run_drafts.approval_not_granted", error.code
     assert_equal "discarded", draft.reload.status
-    assert_equal "rejected", automation_run.status
-    assert_equal "rejected", automation_run.approval_state.fetch("status")
-    assert_equal "operator_denied", automation_run.approval_state.fetch("reason")
-    assert_equal "rejected", automation_run.snapshot.dig("draft", "approval_state", "status")
-    assert_nil automation_run.conversation_run_id
+    assert_equal "rejected", execution_conversation.metadata.dig("automation_execution", "status")
+    assert_equal "rejected", draft.approval_state.fetch("status")
+    assert_equal "operator_denied", draft.approval_state.fetch("reason")
+    assert_nil draft.materialized_conversation_run_id
   ensure
     server&.shutdown
   end
 
-  test "unexpected approval resume failures are audited on the automation run" do
+  test "unexpected approval resume failures are audited on the execution conversation" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -143,14 +141,14 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "approved", "approved_at" => Time.current.iso8601),
     )
@@ -160,13 +158,13 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
     finalize_singleton.define_method(:finalize!) { |*_, **_| raise StandardError, "resume exploded" }
 
     error = assert_raises(StandardError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
-    automation_run.reload
+    execution_conversation.reload
 
     assert_equal "resume exploded", error.message
-    assert_equal "failed", automation_run.status
-    assert automation_run.finished_at.present?
-    assert_equal "StandardError", automation_run.snapshot.dig("failure", "class")
-    assert_equal "resume exploded", automation_run.snapshot.dig("failure", "message")
+    assert_equal "failed", execution_conversation.metadata.dig("automation_execution", "status")
+    assert execution_conversation.metadata.dig("automation_execution", "finished_at").present?
+    assert_equal "StandardError", execution_conversation.metadata.dig("automation_execution", "failure", "class")
+    assert_equal "resume exploded", execution_conversation.metadata.dig("automation_execution", "failure", "message")
   ensure
     if defined?(finalize_singleton) && finalize_singleton.method_defined?(:__task4_original_finalize__)
       finalize_singleton.alias_method :finalize!, :__task4_original_finalize__

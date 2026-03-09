@@ -152,7 +152,6 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
   private
 
     def reset_runtime_governance_state!
-      AutomationRun.delete_all
       RunDraft.delete_all
       ConversationRun.delete_all
       RuntimeWait.delete_all

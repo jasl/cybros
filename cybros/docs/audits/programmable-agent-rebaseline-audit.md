@@ -8,6 +8,16 @@ Environment note:
 - Fresh evidence below comes from rerun Rails batches, Playwright E2E, current source inspection, and explicit file-existence checks.
 - During this repair pass, progress and closure state are recorded here. Product docs and plan docs remain the semantic baseline until the final full re-review reconciles any true documentation drift.
 
+Automation-runtime note:
+
+- `PA-009` and `PA-012` were originally written against the pre-convergence automation model
+- on 2026-03-10, automation execution converged to `Automation -> Conversation -> RunDraft -> ConversationRun`
+- current automation source of truth is:
+  - [`docs/product/automation.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/product/automation.md)
+  - [`docs/plans/2026-03-10-automation-conversation-convergence-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence-design.md)
+  - [`docs/plans/2026-03-10-automation-conversation-convergence.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence.md)
+- treat older automation-run evidence in this audit as historical trace unless a section explicitly says otherwise
+
 ## Repair Status
 
 - Closed on 2026-03-09: `PA-001`, `PA-002`, `PA-003`, `PA-004`, `PA-005`, `PA-007`, `PA-008`, `PA-009`, `PA-010`, `PA-011`, `PA-012`, `PA-013`
@@ -223,7 +233,7 @@ Environment note:
 ## PA-009
 
 - Status: Closed on 2026-03-09.
-- Repair summary: automation drafts now resolve one canonical bound conversation for conversation-scoped kernel services and approval/rejection/expiry node synchronization.
+- Repair summary: this finding was first repaired inside the pre-convergence conversation-binding model, then rendered obsolete by the 2026-03-10 convergence that deleted optional conversation binding entirely. Current automation execution always creates a fresh execution conversation and scopes callbacks, approvals, and DAG attachment to that conversation.
 - Verification: `bin/rails test test/integration/automation_conversation_binding_test.rb`
 - Historical finding retained below for traceability; it no longer describes current behavior.
 
@@ -306,9 +316,9 @@ Environment note:
 ## PA-012
 
 - Status: Closed on 2026-03-09.
-- Repair summary: scheduled automation now runs through production jobs: a recurring dispatch job finds due automations, dispatch enqueues durable execute work, and scheduled-flow/operator tests assert the real job-wired path instead of manual orchestrator starts.
+- Repair summary: scheduled automation now runs through production jobs on the converged execution model. A recurring dispatch job finds due automations, dispatch creates or reuses one execution conversation per logical trigger delivery, and `Automations::ExecuteConversationJob` claims that queued conversation before shared orchestration continues. This supersedes the earlier `AutomationRun`-based wiring.
 - Verification:
-  - `bin/rails test test/services/automations/dispatch_test.rb test/integration/automation_scheduler_flow_test.rb test/jobs/automations/dispatch_due_job_test.rb test/jobs/automations/execute_run_job_test.rb`
+  - `bin/rails test test/services/automations/dispatch_test.rb test/integration/automation_scheduler_flow_test.rb test/jobs/automations/dispatch_due_job_test.rb test/jobs/automations/execute_conversation_job_test.rb`
   - `bin/rails test test/integration/automation_run_draft_flow_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/automation_failure_recovery_test.rb test/integration/system_settings_automations_test.rb test/system/system_settings_automations_test.rb`
   - `bin/rails test test/integration/automation_manual_approval_test.rb test/integration/automation_conversation_binding_test.rb`
 - Historical finding retained below for traceability; it no longer describes current behavior.
@@ -320,10 +330,11 @@ Environment note:
   - `docs/plans/2026-03-09-automation-runtime.md` Task 5 requires one end-to-end scheduled dispatch flow.
 - Evidence:
   - [`app/jobs/automations/dispatch_due_job.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/dispatch_due_job.rb#L1) provides production recurring dispatch execution.
-  - [`app/services/automations/dispatch.rb:32`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/dispatch.rb#L32) creates the durable queued `AutomationRun` inside a transaction and enqueues `Automations::ExecuteRunJob`.
-  - [`app/jobs/automations/execute_run_job.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/execute_run_job.rb#L1) bridges queued automation runs into the existing orchestration path.
+  - [`app/services/automations/dispatch.rb:32`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/dispatch.rb#L32) creates or reuses the durable execution conversation inside a transaction and enqueues `Automations::ExecuteConversationJob`.
+  - [`app/jobs/automations/execute_conversation_job.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/execute_conversation_job.rb#L1) atomically claims queued execution conversations before shared automation orchestration continues.
+  - [`app/services/automations/conversation_orchestrator.rb:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/services/automations/conversation_orchestrator.rb#L1) drives planning, approval parking, run materialization, and graph kickoff from that execution conversation.
   - [`config/recurring.yml:1`](/Users/jasl/Workspaces/Cybros/cybros/cybros/config/recurring.yml#L1) wires scheduled dispatch into the production recurring job config.
-  - Scheduled-flow and operator-surface tests now drive `Automations::ExecuteRunJob` instead of manual `RunOrchestrator.start!`.
+  - Scheduled-flow and operator-surface tests now drive `Automations::ExecuteConversationJob` instead of manual orchestration shortcuts.
 - Impact:
   - Due scheduled automations no longer accumulate as inert queued rows.
   - Operator-visible states are now produced by the shipped scheduled path.

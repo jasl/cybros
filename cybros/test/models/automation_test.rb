@@ -24,23 +24,13 @@ class AutomationTest < ActiveSupport::TestCase
     assert_includes automation.errors[:task_payload], "must be a JSON object"
   end
 
-  test "allows an optional conversation binding" do
-    conversation = create_conversation!
-    automation = build_automation(conversation: conversation)
-
-    assert_predicate automation, :valid?
-    automation.save!
-    assert_equal conversation, automation.conversation
-  end
-
-  test "requires conversation binding to belong to the automation owner" do
-    owner = create_user!
-    other_user = create_user!
-    conversation = create_conversation!(user: other_user)
-    automation = build_automation(user: owner, conversation: conversation)
-
-    refute_predicate automation, :valid?
-    assert_includes automation.errors[:conversation], "must belong to the automation owner"
+  test "does not expose conversation or automation run ownership" do
+    assert_nil Automation.reflect_on_association(:conversation)
+    assert_nil Automation.reflect_on_association(:automation_runs)
+    refute_respond_to Automation.new, :conversation_id
+    assert_raises(ActiveModel::UnknownAttributeError) do
+      Automation.new(conversation_id: SecureRandom.uuid)
+    end
   end
 
   test "rejects invalid schedule definitions" do
@@ -74,37 +64,43 @@ class AutomationTest < ActiveSupport::TestCase
     assert_equal({ "source" => "conversation.message.created" }, automation.trigger_payload)
   end
 
-  test "does not cascade-destroy immutable automation runs" do
+  test "conversations carry explicit automation lineage fields" do
     automation = build_automation
     automation.save!
-    AutomationRun.create!(
-      automation: automation,
-      dispatch_key: "#{automation.id}:#{Time.current.change(usec: 0).iso8601}",
-      status: "queued",
-      scheduled_for: Time.current.change(usec: 0),
-      snapshot: { "automation" => { "permission_mode" => automation.permission_mode } },
-    )
+    automation_association = Automation.reflect_on_association(:conversations)
+    conversation_association = Conversation.reflect_on_association(:automation)
+    index =
+      Conversation.connection.indexes(:conversations).find do |candidate|
+        candidate.columns == ["automation_id", "automation_dispatch_key"] &&
+          candidate.unique
+      end
 
-    assert_raises(ActiveRecord::DeleteRestrictionError) { automation.destroy }
-    assert_equal 1, AutomationRun.where(automation: automation).count
+    assert_not_nil automation_association
+    assert_equal :has_many, automation_association.macro
+    assert_not_nil conversation_association
+    assert_equal :belongs_to, conversation_association.macro
+    assert_equal "Automation", conversation_association.class_name
+    assert_includes Conversation.column_names, "automation_id"
+    assert_includes Conversation.column_names, "automation_dispatch_key"
+    assert_includes Conversation.column_names, "automation_triggered_at"
+    assert_not_nil index
+    assert_match(/automation_dispatch_key IS NOT NULL/i, index.where)
   end
 
   private
 
     def build_automation(
       user: nil,
-      conversation: nil,
       schedule_kind: "rrule",
       schedule_rrule: "FREQ=DAILY;BYHOUR=9;BYMINUTE=0",
       schedule_timezone: "UTC",
       trigger_kind: nil,
       trigger_payload: nil
     )
-      resolved_user = user || conversation&.user || create_user!
+      resolved_user = user || create_user!
 
       Automation.new(
         user: resolved_user,
-        conversation: conversation,
         agent_program: create_program!,
         execution_target: create_execution_target!(name: "Automation target"),
         permission_mode: "full_access",

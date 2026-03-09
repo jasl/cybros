@@ -1,18 +1,21 @@
 require "test_helper"
 
 class RunDraftTest < ActiveSupport::TestCase
-  AutomationEntrypoint = Struct.new(:id, :execution_target, :permission_mode, keyword_init: true)
+  test "requires a conversation entrypoint" do
+    draft = build_draft(conversation: nil)
 
-  test "requires exactly one entrypoint scope" do
-    missing_scope = build_draft(conversation: nil, automation_id: nil)
+    refute_predicate draft, :valid?
+    assert_includes draft.errors[:conversation], "must exist"
+  end
 
-    refute_predicate missing_scope, :valid?
-    assert missing_scope.errors[:base].any?
-
-    both_scopes = build_draft(automation_id: SecureRandom.uuid)
-
-    refute_predicate both_scopes, :valid?
-    assert both_scopes.errors[:base].any?
+  test "does not expose automation ownership attributes" do
+    assert_nil RunDraft.reflect_on_association(:automation)
+    assert_not_includes RunDraft.column_names, "automation_id"
+    assert_equal false, RunDraft.columns_hash.fetch("conversation_id").null
+    refute_respond_to RunDraft.new, :automation_id
+    assert_raises(ActiveModel::UnknownAttributeError) do
+      RunDraft.new(automation_id: SecureRandom.uuid)
+    end
   end
 
   test "persists prepared plans and staged draft mutations" do
@@ -30,46 +33,11 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
   end
 
-  test "enforces the entrypoint invariant at the database layer" do
+  test "bound_conversation only uses the explicit conversation association" do
     conversation = create_conversation!
-    program = create_program!
-    deployment = create_deployment!(program)
-    credential =
-      LLMProviderCredential.create!(
-        provider_key: "openai-#{SecureRandom.hex(4)}",
-        credential_type: "api_key",
-      )
+    draft = build_draft(conversation: nil, trigger_snapshot: { "conversation_id" => conversation.id })
 
-    assert_raises(ActiveRecord::StatementInvalid) do
-      RunDraft.insert!({
-        id: SecureRandom.uuid,
-        conversation_id: nil,
-        automation_id: nil,
-        initiated_by_user_id: conversation.user_id,
-        status: "open",
-        permission_mode: "default",
-        trigger_snapshot: {},
-        agent_program_id: program.id,
-        contract_fingerprint: "contract:v1",
-        agent_deployment_id: deployment.id,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: Time.current.change(usec: 0),
-        provider_credential_id: credential.id,
-        proposed_execution_target_id: nil,
-        selected_model_ref: nil,
-        runtime_governors: {},
-        prepare_invocation_id: nil,
-        prepared_plan: {},
-        staged_public_settings_patch: {},
-        staged_agent_config_patch: {},
-        staged_kv_ops: [],
-        approval_state: {},
-        expires_at: 30.minutes.from_now.change(usec: 0),
-        materialized_conversation_run_id: nil,
-        created_at: Time.current.change(usec: 0),
-        updated_at: Time.current.change(usec: 0),
-      })
-    end
+    assert_nil draft.bound_conversation
   end
 
   test "requires deployment and contract bindings to match the selected program" do
@@ -186,24 +154,6 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal 600, draft.runtime_governors.dig("execution_capacity", "default_timeout_s")
   end
 
-  test "uses the same governor resolver for automation entrypoints" do
-    target = create_execution_target!(max_concurrent_tasks_override: 2)
-    automation = AutomationEntrypoint.new(id: SecureRandom.uuid, execution_target: target, permission_mode: "full_access")
-    credential = LLMProviderCredential.create!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
-    draft = build_draft(conversation: nil, automation_id: automation.id, proposed_execution_target: nil, provider_credential: nil, runtime_governors: {}, permission_mode: nil)
-
-    RuntimeGovernance::DraftGovernorResolver.apply!(
-      draft: draft,
-      entrypoint: automation,
-      selected_model_ref: "openai/gpt-5.4",
-    )
-
-    assert_equal "full_access", draft.permission_mode
-    assert_equal credential, draft.provider_credential
-    assert_equal target, draft.proposed_execution_target
-    assert_equal "execution_target", draft.runtime_governors.dig("execution_capacity", "scope_type")
-  end
-
   private
 
   def build_draft(attributes = {})
@@ -258,7 +208,6 @@ class RunDraftTest < ActiveSupport::TestCase
         staged_kv_ops: [{ "op" => "set", "key" => "shared.stage" }],
         approval_state: { "status" => "not_required" },
         expires_at: 30.minutes.from_now.change(usec: 0),
-        automation_id: nil,
       }.merge(attributes.except(:conversation)),
     )
   end

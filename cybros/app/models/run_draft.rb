@@ -1,6 +1,5 @@
 class RunDraft < ApplicationRecord
-  belongs_to :conversation, optional: true
-  belongs_to :automation, optional: true
+  belongs_to :conversation
   belongs_to :initiated_by_user, class_name: "User", optional: true
   belongs_to :agent_program
   belongs_to :agent_deployment
@@ -18,17 +17,11 @@ class RunDraft < ApplicationRecord
   validates :deployment_activated_at, presence: true
   validates :expires_at, presence: true
 
-  validate :exactly_one_entrypoint_scope
   validate :binding_consistency
   validate :governor_snapshot_consistency
 
   def bound_conversation
-    return conversation if conversation.present?
-
-    conversation_id = trigger_snapshot["conversation_id"].to_s.strip
-    return nil if conversation_id.empty?
-
-    Conversation.find_by(id: conversation_id)
+    conversation
   end
 
   def bound_agent_node
@@ -55,16 +48,6 @@ class RunDraft < ApplicationRecord
 
     def normalize_hash(value)
       value.is_a?(Hash) ? value.deep_stringify_keys : {}
-    end
-
-    def exactly_one_entrypoint_scope
-      count = 0
-      count += 1 if conversation_id.present?
-      count += 1 if automation_id.present?
-
-      return if count == 1
-
-      errors.add(:base, "must reference exactly one entrypoint")
     end
 
     def binding_consistency

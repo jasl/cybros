@@ -8,34 +8,34 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "planning rpc failure marks the automation run failed with durable error audit" do
+  test "planning rpc failure marks the execution conversation failed with durable error audit" do
     failing_server = failing_initialize_server!
     runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     clear_enqueued_jobs
 
-    error = assert_raises(AgentCore::ValidationError) { Automations::ExecuteRunJob.perform_now(automation_run.id) }
-    automation_run.reload
+    error = assert_raises(AgentCore::ValidationError) { Automations::ExecuteConversationJob.perform_now(conversation.id) }
+    conversation.reload
 
     assert_equal "cybros.agent_rpc.initialize_failed", error.code
-    assert_equal "failed", automation_run.status
-    assert automation_run.finished_at.present?
-    assert_equal "AgentCore::ValidationError", automation_run.snapshot.dig("failure", "class")
-    assert_equal "cybros.agent_rpc.initialize_failed", automation_run.snapshot.dig("failure", "code")
-    assert_match(/refused|failed/i, automation_run.snapshot.dig("failure", "message").to_s)
+    assert_equal "failed", conversation.metadata.dig("automation_execution", "status")
+    assert conversation.metadata.dig("automation_execution", "finished_at").present?
+    assert_equal "AgentCore::ValidationError", conversation.metadata.dig("automation_execution", "failure", "class")
+    assert_equal "cybros.agent_rpc.initialize_failed", conversation.metadata.dig("automation_execution", "failure", "code")
+    assert_match(/refused|failed/i, conversation.metadata.dig("automation_execution", "failure", "message").to_s)
   ensure
     failing_server&.shutdown
   end
 
-  test "a later automation redispatch can complete after a failed run" do
+  test "a later automation redispatch creates a new execution conversation after a failed trigger" do
     failing_server = failing_initialize_server!
     runtime = create_automation_runtime!(endpoint_url: failing_server.rpc_url)
-    first_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    first_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
     clear_enqueued_jobs
 
-    assert_raises(AgentCore::ValidationError) { Automations::ExecuteRunJob.perform_now(first_run.id) }
-    assert_equal "failed", first_run.reload.status
+    assert_raises(AgentCore::ValidationError) { Automations::ExecuteConversationJob.perform_now(first_conversation.id) }
+    assert_equal "failed", first_conversation.reload.metadata.dig("automation_execution", "status")
 
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime.fetch(:program).active_healthy_deployment.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
@@ -45,17 +45,18 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
       deployment_fingerprint: "fixture-deployment-v1",
     )
 
-    second_run = nil
+    second_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      second_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 10, 9, 0, 0))
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      second_conversation =
+        dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 10, 9, 0, 0))
     end
-    second_run.reload
+    second_conversation.reload
 
-    assert_equal "completed", second_run.status
-    assert_equal "finalized", RunDraft.find(second_run.snapshot.dig("draft", "id")).status
-    assert_equal first_run.id, first_run.reload.id
-    assert_equal "failed", first_run.status
+    assert_not_equal first_conversation.id, second_conversation.id
+    assert_equal "running", second_conversation.metadata.dig("automation_execution", "status")
+    assert_equal "finalized", second_conversation.run_drafts.order(:created_at, :id).last.status
+    assert_equal "failed", first_conversation.reload.metadata.dig("automation_execution", "status")
   ensure
     failing_server&.shutdown
     server&.shutdown

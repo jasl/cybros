@@ -3,18 +3,16 @@ class Automation < ApplicationRecord
   SCHEDULE_KINDS = %w[rrule].freeze
 
   belongs_to :user
-  belongs_to :conversation, optional: true
   belongs_to :agent_program
   belongs_to :execution_target
 
-  has_many :automation_runs, dependent: :restrict_with_exception
+  has_many :conversations, inverse_of: :automation
 
   before_validation :normalize_defaults
 
   validates :permission_mode, presence: true, inclusion: { in: Conversation::PERMISSION_MODES }
   validates :status, presence: true, inclusion: { in: STATUSES }
   validate :task_payload_must_be_object
-  validate :conversation_belongs_to_user
   validate :schedule_or_trigger_definition_present
   validate :schedule_rrule_is_valid
   validate :schedule_timezone_is_valid
@@ -49,12 +47,6 @@ class Automation < ApplicationRecord
       return if task_payload.is_a?(Hash) && task_payload.present?
 
       errors.add(:task_payload, "must be a JSON object")
-    end
-
-    def conversation_belongs_to_user
-      return if conversation.blank? || user.blank? || conversation.user_id == user_id
-
-      errors.add(:conversation, "must belong to the automation owner")
     end
 
     def schedule_or_trigger_definition_present

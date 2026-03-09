@@ -8,7 +8,7 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "automation dispatch opens a run draft and snapshots runtime bindings at execution time" do
+  test "automation dispatch creates an execution conversation and snapshots runtime bindings at execution time" do
     seen_conversation_ids = []
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -21,7 +21,7 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
       ).start
     runtime = create_automation_runtime!(server:)
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    execution_conversation = nil
 
     runtime.fetch(:deployment).update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
     replacement =
@@ -31,26 +31,29 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
         deployment_fingerprint: "fixture-deployment-v1",
       )
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
     end
 
-    draft = RunDraft.find(automation_run.reload.snapshot.dig("draft", "id"))
-    automation_run.reload
+    execution_conversation.reload
+    draft = execution_conversation.run_drafts.order(:created_at, :id).last
+    conversation_run = draft.materialized_conversation_run
 
-    assert_equal [nil], seen_conversation_ids
-    assert_equal runtime.fetch(:automation).id, draft.automation_id
-    assert_nil draft.conversation_id
+    assert_equal [execution_conversation.id], seen_conversation_ids
+    assert_equal runtime.fetch(:automation).id, execution_conversation.automation_id
+    assert_equal runtime.fetch(:automation).agent_program_id, execution_conversation.agent_program_id
+    assert_equal runtime.fetch(:automation).execution_target_id, execution_conversation.default_execution_target_id
+    assert_equal draft.conversation_id, execution_conversation.id
     assert_equal "finalized", draft.status
-    assert_nil draft.materialized_conversation_run_id
+    assert_equal conversation_run.id, draft.materialized_conversation_run_id
     assert_equal replacement.id, draft.agent_deployment_id
-    assert_equal "completed", automation_run.status
-    assert_equal replacement.id, automation_run.snapshot.dig("runtime", "agent_deployment_id")
-    assert_equal runtime.fetch(:target).id, automation_run.snapshot.dig("runtime", "execution_target_id")
-    assert_equal "full_access", automation_run.snapshot.dig("runtime", "permission_mode")
-    assert_equal draft.id, automation_run.snapshot.dig("draft", "id")
-    assert_equal scheduled_for.iso8601, automation_run.snapshot.dig("schedule", "scheduled_for")
-    assert_nil automation_run.conversation_run_id
+    assert_equal replacement.id, conversation_run.agent_deployment_id
+    assert_equal runtime.fetch(:target).id, conversation_run.execution_target_id
+    assert_equal "full_access", conversation_run.effective_permission_mode
+    assert_equal draft.id, conversation_run.snapshot.dig("draft", "id")
+    assert_equal scheduled_for.iso8601, execution_conversation.metadata.dig("schedule", "scheduled_for")
+    assert_equal "running", execution_conversation.metadata.dig("automation_execution", "status")
+    assert_equal conversation_run.id, execution_conversation.metadata.dig("automation_execution", "conversation_run_id")
   ensure
     server&.shutdown
   end

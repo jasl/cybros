@@ -8,13 +8,13 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     clear_performed_jobs
   end
 
-  test "operator can browse scheduled automation history" do
+  test "operator can browse scheduled automation execution history" do
     owner = create_user!(email: "owner@example.com")
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
       dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
     end
 
@@ -34,11 +34,12 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     assert_text "completed"
     assert_text scheduled_for.iso8601
     assert_text "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
+    assert_no_text "Conversation binding"
   ensure
     server&.shutdown
   end
 
-  test "operator can approve a parked automation run from the browser surface" do
+  test "operator can approve a parked automation execution from the browser surface" do
     owner = create_user!(email: "approver@example.com")
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -54,10 +55,10 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
         },
       ).start
     runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "default")
-    automation_run = nil
+    execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
     end
 
     sign_in_as!(email: owner.identity.email)
@@ -67,13 +68,17 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     assert_text "pending_confirmation"
 
     within("tbody tr", text: "awaiting_approval") do
-      click_button "Approve"
+      perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+        click_button "Approve"
+      end
     end
 
     assert_current_path system_settings_automation_path(runtime.fetch(:automation))
-    assert_text "Automation run approved."
-    assert_text "completed"
-    assert_text "approved"
+    execution_conversation.reload
+    assert_text "Automation execution approved."
+    assert_no_text "awaiting_approval"
+    assert_no_text "pending_confirmation"
+    assert_text "queued"
   ensure
     server&.shutdown
   end
@@ -115,12 +120,12 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     end
 
     def dispatch_due_automation!(automation:, now:)
-      runs = Automations::Scheduler.dispatch_due!(now: now)
-      matching_run = runs.find { |run| run.automation_id == automation.id }
+      executions = Automations::Scheduler.dispatch_due!(now: now)
+      matching_execution = executions.find { |conversation| conversation.automation_id == automation.id }
 
-      assert_not_nil matching_run
+      assert_not_nil matching_execution
 
-      matching_run
+      matching_execution
     end
 
     def create_program!

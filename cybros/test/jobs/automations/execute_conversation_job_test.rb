@@ -1,74 +1,76 @@
 require "test_helper"
 
-class Automations::ExecuteRunJobTest < ActiveJob::TestCase
+class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
   include ActiveJob::TestHelper
 
-  test "perform starts queued runs through the orchestrator" do
+  test "perform starts queued execution conversations through the orchestrator" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
+    conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
 
-    Automations::ExecuteRunJob.perform_now(automation_run.id)
+    Automations::ExecuteConversationJob.perform_now(conversation.id)
 
-    assert_equal "completed", automation_run.reload.status
+    assert_equal "running", conversation.reload.metadata.dig("automation_execution", "status")
+    assert_equal 1, conversation.run_drafts.count
+    assert_equal 1, ConversationRun.where(conversation: conversation).count
   ensure
     server&.shutdown
   end
 
-  test "perform ignores runs that are no longer queued" do
-    automation_run = create_completed_run!
+  test "perform ignores conversations that are no longer queued" do
+    conversation = create_completed_execution_conversation!
 
     assert_no_difference -> { RunDraft.count } do
-      Automations::ExecuteRunJob.perform_now(automation_run.id)
+      Automations::ExecuteConversationJob.perform_now(conversation.id)
     end
 
-    assert_equal "completed", automation_run.reload.status
+    assert_equal "completed", conversation.reload.metadata.dig("automation_execution", "status")
   end
 
-  test "perform claims queued runs before orchestration so duplicate delivery is ignored" do
-    automation_run = create_queued_run!
+  test "perform claims queued execution conversations before orchestration so duplicate delivery is ignored" do
+    conversation = create_queued_execution_conversation!
     start_calls = 0
-    orchestrator_singleton = Automations::RunOrchestrator.singleton_class
+    orchestrator_singleton = Automations::ConversationOrchestrator.singleton_class
 
-    orchestrator_singleton.alias_method :__execute_run_job_test_original_start__, :start!
-    orchestrator_singleton.define_method(:start!) do |automation_run:, **|
+    orchestrator_singleton.alias_method :__execute_conversation_job_test_original_start__, :start!
+    orchestrator_singleton.define_method(:start!) do |conversation:, **|
       start_calls += 1
-      automation_run
+      conversation
     end
 
     begin
-      Automations::ExecuteRunJob.perform_now(automation_run.id)
-      Automations::ExecuteRunJob.perform_now(automation_run.id)
+      Automations::ExecuteConversationJob.perform_now(conversation.id)
+      Automations::ExecuteConversationJob.perform_now(conversation.id)
     ensure
-      orchestrator_singleton.alias_method :start!, :__execute_run_job_test_original_start__
-      orchestrator_singleton.remove_method :__execute_run_job_test_original_start__
+      orchestrator_singleton.alias_method :start!, :__execute_conversation_job_test_original_start__
+      orchestrator_singleton.remove_method :__execute_conversation_job_test_original_start__
     end
 
     assert_equal 1, start_calls
-    assert_equal "running", automation_run.reload.status
+    assert_equal "planning", conversation.reload.metadata.dig("automation_execution", "status")
   end
 
-  test "perform marks the run failed if orchestration raises a non-standard exception after claim" do
-    automation_run = create_queued_run!
+  test "perform marks the execution conversation failed if orchestration raises a non-standard exception after claim" do
+    conversation = create_queued_execution_conversation!
     crash_class = Class.new(Exception)
-    orchestrator_singleton = Automations::RunOrchestrator.singleton_class
+    orchestrator_singleton = Automations::ConversationOrchestrator.singleton_class
 
-    orchestrator_singleton.alias_method :__execute_run_job_test_original_start__, :start!
+    orchestrator_singleton.alias_method :__execute_conversation_job_test_original_start__, :start!
     orchestrator_singleton.define_method(:start!) do |**|
       raise crash_class, "hard crash"
     end
 
     error =
       begin
-        assert_raises(crash_class) { Automations::ExecuteRunJob.perform_now(automation_run.id) }
+        assert_raises(crash_class) { Automations::ExecuteConversationJob.perform_now(conversation.id) }
       ensure
-        orchestrator_singleton.alias_method :start!, :__execute_run_job_test_original_start__
-        orchestrator_singleton.remove_method :__execute_run_job_test_original_start__
+        orchestrator_singleton.alias_method :start!, :__execute_conversation_job_test_original_start__
+        orchestrator_singleton.remove_method :__execute_conversation_job_test_original_start__
       end
 
     assert_equal "hard crash", error.message
-    assert_equal "failed", automation_run.reload.status
-    assert_equal "hard crash", automation_run.snapshot.dig("failure", "message")
+    assert_equal "failed", conversation.reload.metadata.dig("automation_execution", "status")
+    assert_equal "hard crash", conversation.metadata.dig("automation_execution", "failure", "message")
   end
 
   private
@@ -108,30 +110,17 @@ class Automations::ExecuteRunJobTest < ActiveJob::TestCase
       )
     end
 
-    def create_completed_run!
-      automation = create_automation_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc").fetch(:automation)
-
-      AutomationRun.create!(
-        automation: automation,
-        dispatch_key: "#{automation.id}:#{Time.utc(2026, 3, 9, 9, 0, 0).iso8601}",
-        status: "completed",
-        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
-        approval_state: {},
-        snapshot: { "automation" => { "id" => automation.id } },
+    def create_completed_execution_conversation!
+      conversation = create_queued_execution_conversation!
+      conversation.update!(
+        metadata: conversation.metadata.deep_merge("automation_execution" => { "status" => "completed" }),
       )
+      conversation
     end
 
-    def create_queued_run!
+    def create_queued_execution_conversation!
       automation = create_automation_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc").fetch(:automation)
-
-      AutomationRun.create!(
-        automation: automation,
-        dispatch_key: "#{automation.id}:#{Time.utc(2026, 3, 9, 9, 0, 0).iso8601}",
-        status: "queued",
-        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
-        approval_state: {},
-        snapshot: { "automation" => { "id" => automation.id } },
-      )
+      dispatch_automation!(automation: automation, scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
     end
 
     def create_program!

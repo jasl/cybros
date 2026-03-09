@@ -35,7 +35,7 @@ Deliverables:
 - `AgentDeployment` as reachable binding
 - `RunDraft` as durable planning state
 - explicit Cybros ownership of `ExecutionLocation`, `Workspace`, and `ExecutionTarget`
-- automation as a first-class entrypoint
+- automation as a first-class definition entrypoint
 
 Acceptance:
 
@@ -106,15 +106,14 @@ Goal: land the non-interactive execution path as a first-class product capabilit
 Deliverables:
 
 - durable automation dispatch
-- automation-run records
-- optional conversation binding
+- one fresh execution conversation per trigger
 - manual-approval parking semantics when non-default presets require review
 - operator-visible automation audit
 
 Acceptance:
 
 - automation uses the same canonical run lifecycle as conversations
-- deployment and target are snapshotted per automation run
+- deployment and target are snapshotted per execution conversation and `ConversationRun`
 
 ## Phase 4: Nexus Re-alignment
 

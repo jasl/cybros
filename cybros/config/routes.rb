@@ -30,7 +30,7 @@ Rails.application.routes.draw do
       resources :workspaces, only: %i[index show edit update]
       resources :execution_targets, only: %i[index show edit update]
       resources :automations, only: %i[index show] do
-        resources :automation_runs, only: [], path: "runs", controller: "automation_runs" do
+        resources :executions, only: [], controller: "automation_executions" do
           post :approve, on: :member
           post :reject, on: :member
         end

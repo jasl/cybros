@@ -1,29 +1,28 @@
 require "test_helper"
 
-class Automations::RunStateRecorderTest < ActiveSupport::TestCase
+class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
   test "running and completed follow the linked conversation run lifecycle" do
     runtime = create_runtime!
-    automation_run = runtime.fetch(:automation_run)
+    conversation = runtime.fetch(:conversation)
     conversation_run = runtime.fetch(:conversation_run)
 
-    Automations::RunStateRecorder.running!(automation_run: automation_run)
+    Automations::ExecutionStateRecorder.running!(conversation: conversation, conversation_run: conversation_run)
 
-    automation_run.reload
-    assert_equal "running", automation_run.status
-    assert_nil automation_run.finished_at
-    assert_equal conversation_run.id, automation_run.snapshot.dig("runtime", "conversation_run_id")
-    assert_equal conversation_run.conversation_id, automation_run.snapshot.dig("runtime", "conversation_id")
+    conversation.reload
+    assert_equal "running", conversation.metadata.dig("automation_execution", "status")
+    assert_equal conversation_run.id, conversation.metadata.dig("automation_execution", "conversation_run_id")
+    assert_nil conversation.metadata.dig("automation_execution", "finished_at")
 
-    Automations::RunStateRecorder.completed!(automation_run: automation_run)
+    Automations::ExecutionStateRecorder.completed!(conversation: conversation, conversation_run: conversation_run)
 
-    automation_run.reload
-    assert_equal "completed", automation_run.status
-    assert automation_run.finished_at.present?
-    assert_equal conversation_run.id, automation_run.snapshot.dig("runtime", "conversation_run_id")
+    conversation.reload
+    assert_equal "completed", conversation.metadata.dig("automation_execution", "status")
+    assert_equal conversation_run.id, conversation.metadata.dig("automation_execution", "conversation_run_id")
+    assert conversation.metadata.dig("automation_execution", "finished_at").present?
   end
 
   test "failed captures structured validation error audit" do
-    automation_run = create_runtime!.fetch(:automation_run)
+    conversation = create_runtime!.fetch(:conversation)
     error =
       AgentCore::ValidationError.new(
         "Deployment initialize failed.",
@@ -31,32 +30,31 @@ class Automations::RunStateRecorderTest < ActiveSupport::TestCase
         details: { "message" => "connection refused" },
       )
 
-    Automations::RunStateRecorder.failed!(automation_run: automation_run, error: error)
+    Automations::ExecutionStateRecorder.failed!(conversation: conversation, error: error)
 
-    automation_run.reload
-    assert_equal "failed", automation_run.status
-    assert automation_run.finished_at.present?
-    assert_equal "AgentCore::ValidationError", automation_run.snapshot.dig("failure", "class")
-    assert_equal "cybros.agent_rpc.initialize_failed", automation_run.snapshot.dig("failure", "code")
-    assert_equal "Deployment initialize failed.", automation_run.snapshot.dig("failure", "message")
-    assert_equal "connection refused", automation_run.snapshot.dig("failure", "details", "message")
+    conversation.reload
+    assert_equal "failed", conversation.metadata.dig("automation_execution", "status")
+    assert conversation.metadata.dig("automation_execution", "finished_at").present?
+    assert_equal "AgentCore::ValidationError", conversation.metadata.dig("automation_execution", "failure", "class")
+    assert_equal "cybros.agent_rpc.initialize_failed", conversation.metadata.dig("automation_execution", "failure", "code")
+    assert_equal "Deployment initialize failed.", conversation.metadata.dig("automation_execution", "failure", "message")
+    assert_equal "connection refused", conversation.metadata.dig("automation_execution", "failure", "details", "message")
   end
 
-  test "completed clears any stale failure snapshot" do
-    automation_run = create_runtime!.fetch(:automation_run)
-    error =
-      AgentCore::ValidationError.new(
-        "Deployment initialize failed.",
-        code: "cybros.agent_rpc.initialize_failed",
-        details: { "message" => "connection refused" },
-      )
+  test "attach agent node preserves the current execution status" do
+    conversation = create_runtime!.fetch(:conversation)
+    Automations::ExecutionStateRecorder.queued!(
+      conversation: conversation,
+      initiated_by_user: nil,
+      scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+      dispatch_key: "dispatch-1",
+    )
 
-    Automations::RunStateRecorder.failed!(automation_run: automation_run, error: error)
-    Automations::RunStateRecorder.completed!(automation_run: automation_run)
+    Automations::ExecutionStateRecorder.attach_agent_node!(conversation: conversation, dag_node_id: "node-1")
 
-    automation_run.reload
-    assert_equal "completed", automation_run.status
-    assert_nil automation_run.snapshot["failure"]
+    conversation.reload
+    assert_equal "queued", conversation.metadata.dig("automation_execution", "status")
+    assert_equal "node-1", conversation.metadata.dig("automation_execution", "dag_node_id")
   end
 
   private
@@ -65,16 +63,13 @@ class Automations::RunStateRecorderTest < ActiveSupport::TestCase
       user = create_user!
       program = create_program!
       target = create_execution_target!(name: "Recorder target")
-      conversation = create_conversation!(user: user, title: "Recorder conversation")
       deployment = active_deployment!(program: program, endpoint_url: "http://127.0.0.1:9", deployment_fingerprint: "fixture-deployment-v1")
       ensure_active_openai_credential!
-
       automation =
         Automation.create!(
           user: user,
           agent_program: program,
           execution_target: target,
-          conversation: conversation,
           permission_mode: "full_access",
           status: "active",
           schedule_kind: "rrule",
@@ -87,21 +82,17 @@ class Automations::RunStateRecorderTest < ActiveSupport::TestCase
           },
         )
 
-      automation_run =
-        AutomationRun.create!(
+      conversation =
+        Conversation.create!(
+          user: user,
           automation: automation,
-          dispatch_key: SecureRandom.uuid,
-          status: "queued",
-          scheduled_for: Time.current.change(usec: 0),
-          approval_state: { "status" => "not_required" },
-          snapshot: {
-            "automation" => { "id" => automation.id },
-            "runtime" => {
-              "agent_program_id" => program.id,
-              "agent_deployment_id" => deployment.id,
-              "execution_target_id" => target.id,
-            },
-          },
+          automation_dispatch_key: SecureRandom.uuid,
+          automation_triggered_at: Time.current.change(usec: 0),
+          title: "Recorder execution",
+          agent_program: program,
+          default_execution_target: target,
+          permission_mode: "full_access",
+          metadata: {},
         )
 
       conversation_run =
@@ -128,9 +119,7 @@ class Automations::RunStateRecorderTest < ActiveSupport::TestCase
           snapshot: { "draft" => { "id" => SecureRandom.uuid } },
         )
 
-      automation_run.update!(conversation_run: conversation_run)
-
-      { automation_run: automation_run, conversation_run: conversation_run }
+      { conversation: conversation, conversation_run: conversation_run }
     end
 
     def create_program!

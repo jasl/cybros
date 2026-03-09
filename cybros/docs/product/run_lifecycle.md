@@ -32,7 +32,7 @@ All entry points converge on the same lifecycle once planning begins.
 8. If policy or approval requires a human decision, Cybros persists the prepared draft and parks it without materializing a run.
 9. Once finalization is allowed, Cybros atomically:
    - commits staged draft mutations
-   - materializes immutable run records
+   - materializes one immutable `ConversationRun`
    - snapshots the finalized runtime inputs
    - hands execution to the runtime kernel
 10. Cybros executes the run under the pinned deployment binding, provider binding, target binding, and governor snapshot.
@@ -123,6 +123,6 @@ Interactive conversations and automations share the same lifecycle.
 The differences are in the entrypoint defaults and operator surfaces:
 
 - conversations emphasize human-visible selection and approval
-- automations emphasize scheduling, non-interactive execution, and optional conversation binding
+- automations emphasize scheduling, fresh execution conversations, and non-interactive defaults
 
 Neither entrypoint gets its own ad hoc run model.

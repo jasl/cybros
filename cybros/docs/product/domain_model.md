@@ -140,7 +140,7 @@ It is operational state, not append-only audit history.
 
 ### Automation
 
-The non-interactive product aggregate for scheduled or event-triggered work.
+The definition aggregate for scheduled or event-triggered work.
 
 Owns:
 
@@ -148,19 +148,7 @@ Owns:
 - `execution_target_id`
 - `permission_mode`
 - schedule or trigger definition
-- optional `conversation_id`
 - task payload
-
-### AutomationRun
-
-The immutable runtime record for one automation dispatch.
-
-Owns:
-
-- automation snapshot
-- scheduling facts
-- approval or parking state when applicable
-- optional link to a materialized `ConversationRun`
 
 ## Agent RPC Runtime State
 
@@ -205,6 +193,6 @@ Owns:
 - Users and operators select `AgentProgram`, never `AgentDeployment`.
 - `AgentDeployment` is runtime connectivity, not product identity.
 - `RunDraft` is mutable planning state.
-- `ConversationRun` and `AutomationRun` are immutable execution state.
+- `ConversationRun` is the only immutable execution state record.
 - `ExecutionLocation`, `Workspace`, and `ExecutionTarget` are Cybros product models, not Nexus-owned abstractions.
 - Public settings, per-conversation config, KV, memory, knowledge, and system state remain different storage classes even when the first implementation is simple.

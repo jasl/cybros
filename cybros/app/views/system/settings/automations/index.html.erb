@@ -12,15 +12,14 @@
             <th>Agent</th>
             <th>Target</th>
             <th>Permission</th>
-            <th>Binding</th>
             <th>Schedule</th>
-            <th>Latest run</th>
+            <th>Latest execution</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <% @automations.each do |automation| %>
-            <% latest_run = @latest_runs[automation.id] %>
+            <% latest_execution = @latest_executions[automation.id] %>
             <tr class="hover:bg-base-200/50 transition-colors">
               <td class="font-medium"><%= automation.task_payload["prompt"].presence || automation.id %></td>
               <td>
@@ -30,24 +29,23 @@
               <td><%= automation.execution_target.name %></td>
               <td><%= automation.permission_mode %></td>
               <td>
-                <% if automation.conversation.present? %>
-                  <span class="font-mono text-xs"><%= automation.conversation.id %></span>
-                <% else %>
-                  <span class="opacity-60">Standalone</span>
-                <% end %>
-              </td>
-              <td>
                 <div class="font-mono text-xs"><%= automation.schedule_rrule || automation.trigger_kind %></div>
                 <% if automation.schedule_timezone.present? %>
                   <div class="text-xs opacity-60"><%= automation.schedule_timezone %></div>
                 <% end %>
               </td>
               <td>
-                <% if latest_run.present? %>
-                  <div class="font-medium"><%= latest_run.status %></div>
-                  <div class="font-mono text-xs opacity-60"><%= latest_run.scheduled_for.iso8601 %></div>
+                <% if latest_execution.present? %>
+                  <div class="font-medium"><%= execution_status_label(latest_execution) %></div>
+                  <div class="font-mono text-xs opacity-60">
+                    <%= link_to latest_execution.id, conversation_path(latest_execution) %>
+                  </div>
+                  <div class="font-mono text-xs opacity-60"><%= latest_execution.automation_triggered_at&.iso8601 %></div>
+                  <% if execution_approval_status(latest_execution) != "not_required" %>
+                    <div class="text-xs opacity-60"><%= execution_approval_status(latest_execution) %></div>
+                  <% end %>
                 <% else %>
-                  <span class="opacity-60">No runs yet</span>
+                  <span class="opacity-60">No executions yet</span>
                 <% end %>
               </td>
               <td class="text-right">

@@ -2,9 +2,9 @@
 
 ## Purpose
 
-`Automation` is a first-class product entrypoint for non-interactive programmable-agent execution.
+`Automation` is the definition model for non-interactive programmable-agent execution.
 
-It is not a downgraded conversation feature.
+It does not carry live run state.
 
 ## Ownership
 
@@ -14,9 +14,9 @@ An automation binds to:
 - one `ExecutionTarget`
 - one permission preset
 - one schedule or trigger definition
-- optional conversation binding for transcript continuity
+- one task payload
 
-It owns its own lifecycle even when it dispatches into an existing conversation.
+Each trigger creates a fresh execution `Conversation` linked back to the automation definition.
 
 ## Default Rule
 
@@ -31,27 +31,28 @@ This is a product rule, not an implementation accident.
 Automation uses the same canonical run lifecycle as interactive execution:
 
 1. trigger fires
-2. Cybros opens a `RunDraft`
-3. Cybros resolves the selected program, contract, deployment, target, and governors
-4. Cybros runs planning and finalization
-5. Cybros materializes immutable execution records
-6. Cybros writes transcript and audit output
+2. Cybros creates one fresh execution `Conversation`
+3. Cybros opens a conversation-scoped `RunDraft`
+4. Cybros resolves the selected program, contract, deployment, target, and governors
+5. Cybros runs planning and finalization
+6. Cybros materializes one immutable `ConversationRun`
+7. Cybros writes transcript and audit output
 
-Automation does not get a special side channel that bypasses drafts, approvals, or run snapshots.
+Automation does not get a separate run model or a side channel that bypasses drafts, approvals, or conversation-backed audit.
 
 For scheduled automation, the production path is:
 
 1. a recurring dispatch job finds due automations
-2. dispatch creates or reuses one durable queued `AutomationRun`
-3. an execute job atomically claims that queued run before invoking the existing orchestration path
+2. dispatch creates or reuses one durable execution `Conversation` per logical trigger delivery
+3. an execute job atomically claims that execution conversation before invoking the shared orchestration path
 
-Operator-visible automation-run states should come from that same job-wired path, not from test-only manual starts.
+Operator-visible automation state should come from execution conversations, active drafts, and conversation runs on that same job-wired path.
 
 ## Deployment Resolution
 
-Automation binds to `AgentProgram`, not a deployment id.
+Automation binds to `AgentProgram`, not a deployment id or a live run record.
 
-Each automation run resolves the currently active healthy deployment at execution time and snapshots:
+Each automation execution resolves the currently active healthy deployment at execution time and snapshots:
 
 - `agent_program_id`
 - contract fingerprint
@@ -61,24 +62,13 @@ Each automation run resolves the currently active healthy deployment at executio
 - execution target
 - effective permission preset
 
-This keeps long-lived automations compatible with operator-managed deployment replacement while preserving auditability per run.
-
-## Conversation Binding
-
-`conversation_id` on an automation is optional.
-
-When present, it means:
-
-- transcript output may flow into that conversation
-- conversation-scoped settings and config may be part of the execution context
-
-It does not mean the automation stops being its own product aggregate.
+This keeps long-lived automations compatible with operator-managed deployment replacement while preserving auditability per execution conversation.
 
 ## Approval Rule
 
 The preferred V1 path is for automation to run under `full_access` so no interactive approval is required.
 
-If an automation uses a stricter preset and policy yields `confirm`, Cybros must not silently auto-allow. It should park the automation run in a durable manual-approval state until an operator or future approval surface resolves it.
+If an automation uses a stricter preset and policy yields `confirm`, Cybros must not silently auto-allow. It should park the conversation-scoped `RunDraft` in a durable manual-approval state until an operator approval surface resolves it.
 
 ## Product Surfaces
 
@@ -87,9 +77,9 @@ V1 should land the domain model and runtime semantics before full end-user autom
 The minimum correct surface is:
 
 - operator-visible automation records
-- durable automation-run records
+- execution-conversation history per automation
 - explicit target and permission binding
-- audit of scheduling, dispatch, parking, and completion
+- audit of scheduling, dispatch, parking, conversation-run materialization, and completion
 
 ## Non-Goals
 
@@ -99,3 +89,4 @@ V1 does not require:
 - end-user workflow builders
 - automation-specific prompt languages
 - a separate automation execution engine
+- a second execution record outside `ConversationRun`

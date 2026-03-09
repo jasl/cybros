@@ -1,8 +1,6 @@
 module AgentRpc
   module KernelServices
     class ExecutionTargets
-      AutomationEntrypoint = Struct.new(:id, :permission_mode, :execution_target, keyword_init: true)
-
       def self.list(entrypoint:, draft: nil)
         new(entrypoint: entrypoint, draft: draft).list
       end
@@ -17,13 +15,8 @@ module AgentRpc
 
       def self.resolve_entrypoint_for(draft)
         return draft.conversation if draft.respond_to?(:conversation) && draft.conversation.present?
-        return nil unless draft.respond_to?(:automation_id) && draft.automation_id.present?
 
-        AutomationEntrypoint.new(
-          id: draft.automation_id,
-          permission_mode: draft.permission_mode,
-          execution_target: draft.proposed_execution_target,
-        )
+        nil
       end
 
       def initialize(entrypoint:, draft: nil)

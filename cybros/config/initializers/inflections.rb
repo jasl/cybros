@@ -12,6 +12,7 @@
 
 # These inflection rules are supported but not enabled by default:
 ActiveSupport::Inflector.inflections(:en) do |inflect|
+  inflect.acronym "AI"
   inflect.acronym "API"
   inflect.acronym "CLI"
   inflect.acronym "DAG"
@@ -21,5 +22,4 @@ ActiveSupport::Inflector.inflections(:en) do |inflect|
   inflect.acronym "MCP"
   inflect.acronym "OAuth"
   inflect.acronym "OpenAI"
-  inflect.acronym "AI"
 end

@@ -1,8 +1,8 @@
 module System
   module Settings
-    class AutomationRunsController < BaseController
+    class AutomationExecutionsController < BaseController
       before_action :set_automation
-      before_action :set_automation_run
+      before_action :set_execution_conversation
 
       def approve
         draft = parked_draft!
@@ -18,9 +18,9 @@ module System
         conversation_run = RunDrafts::ApprovalResumeService.resume!(draft: draft)
         conversation_run&.conversation&.root_graph&.kick!
 
-        redirect_to system_settings_automation_path(@automation), notice: "Automation run approved."
+        redirect_to system_settings_automation_path(@automation), notice: "Automation execution approved."
       rescue ActiveRecord::RecordNotFound
-        redirect_to system_settings_automation_path(@automation), alert: "Automation run is missing its parked draft."
+        redirect_to system_settings_automation_path(@automation), alert: "Automation execution is missing its parked draft."
       rescue AgentCore::ValidationError => e
         redirect_to system_settings_automation_path(@automation), alert: e.message
       end
@@ -38,12 +38,12 @@ module System
         )
 
         RunDrafts::ApprovalResumeService.resume!(draft: draft)
-        redirect_to system_settings_automation_path(@automation), notice: "Automation run rejected."
+        redirect_to system_settings_automation_path(@automation), notice: "Automation execution rejected."
       rescue ActiveRecord::RecordNotFound
-        redirect_to system_settings_automation_path(@automation), alert: "Automation run is missing its parked draft."
+        redirect_to system_settings_automation_path(@automation), alert: "Automation execution is missing its parked draft."
       rescue AgentCore::ValidationError => e
         if e.code == "cybros.run_drafts.approval_not_granted"
-          redirect_to system_settings_automation_path(@automation), notice: "Automation run rejected."
+          redirect_to system_settings_automation_path(@automation), notice: "Automation execution rejected."
         else
           redirect_to system_settings_automation_path(@automation), alert: e.message
         end
@@ -55,17 +55,21 @@ module System
           @automation = Automation.find(params[:automation_id])
         end
 
-        def set_automation_run
-          @automation_run = @automation.automation_runs.find(params[:id])
+        def set_execution_conversation
+          @execution_conversation = @automation.conversations.find(params[:id])
         end
 
         def parked_draft!
-          raise ActiveRecord::RecordNotFound unless @automation_run.status == "awaiting_approval"
+          draft =
+            @execution_conversation
+              .run_drafts
+              .where(status: RunDrafts::ConversationTurnPlanningService::AWAITING_APPROVAL_STATUS)
+              .order(created_at: :desc, id: :desc)
+              .first
 
-          draft_id = @automation_run.snapshot.dig("draft", "id").to_s.strip
-          raise ActiveRecord::RecordNotFound if draft_id.blank?
+          raise ActiveRecord::RecordNotFound if draft.blank?
 
-          RunDraft.find(draft_id)
+          draft
         end
 
         def approval_actor

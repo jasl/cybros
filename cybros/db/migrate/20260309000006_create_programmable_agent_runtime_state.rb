@@ -40,8 +40,7 @@ class CreateProgrammableAgentRuntimeState < ActiveRecord::Migration[8.2]
       name: "idx_agent_deploy_active_program"
 
     create_table :run_drafts, id: :uuid, default: -> { "uuidv7()" } do |t|
-      t.references :conversation, type: :uuid, foreign_key: true
-      t.uuid :automation_id
+      t.references :conversation, null: false, type: :uuid, foreign_key: true
       t.references :initiated_by_user, type: :uuid, foreign_key: { to_table: :users }
       t.string :status, null: false, default: "open"
       t.string :permission_mode, null: false
@@ -67,7 +66,6 @@ class CreateProgrammableAgentRuntimeState < ActiveRecord::Migration[8.2]
     end
 
     add_index :run_drafts, %i[conversation_id status], name: "idx_run_drafts_conversation_status"
-    add_index :run_drafts, %i[automation_id status], name: "idx_run_drafts_automation_status"
 
     create_table :agent_rpc_invocations, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :agent_deployment, null: false, type: :uuid, foreign_key: true

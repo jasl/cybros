@@ -19,7 +19,7 @@ module Automations
     end
 
     def call!
-      existing_run || create_run!
+      existing_conversation || create_execution_conversation!
     rescue ActiveRecord::RecordNotUnique
       retry
     end
@@ -28,32 +28,49 @@ module Automations
 
       attr_reader :automation, :scheduled_for, :dispatch_key, :trigger_snapshot, :initiated_by_user
 
-      def existing_run
-        AutomationRun.find_by(automation: automation, dispatch_key: dispatch_key)
+      def existing_conversation
+        Conversation.find_by(automation: automation, automation_dispatch_key: dispatch_key)
       end
 
-      def create_run!
-        AutomationRun.transaction do
-          automation_run =
-            AutomationRun.create!(
+      def create_execution_conversation!
+        Conversation.transaction do
+          conversation =
+            Conversation.create!(
+              user: automation.user,
               automation: automation,
-              initiated_by_user: initiated_by_user,
-              dispatch_key: dispatch_key,
-              status: "queued",
-              scheduled_for: scheduled_for,
-              approval_state: {},
-              snapshot: snapshot_payload,
+              automation_dispatch_key: dispatch_key,
+              automation_triggered_at: scheduled_for,
+              title: conversation_title,
+              agent_program: automation.agent_program,
+              default_execution_target: automation.execution_target,
+              permission_mode: automation.permission_mode,
+              metadata: conversation_metadata,
             )
-          Automations::ExecuteRunJob.perform_later(automation_run.id)
-          automation_run
+
+          Automations::ExecutionStateRecorder.queued!(
+            conversation: conversation,
+            initiated_by_user: initiated_by_user,
+            scheduled_for: scheduled_for,
+            dispatch_key: dispatch_key,
+          )
+          Automations::ExecuteConversationJob.perform_later(conversation.id)
+          conversation
         end
       end
 
-      def snapshot_payload
+      def conversation_title
+        prompt = automation.task_payload["prompt"].to_s.squish
+        return "Automation execution" if prompt.blank?
+
+        "Automation: #{prompt}".truncate(120)
+      end
+
+      def conversation_metadata
         {
           "automation" => automation_snapshot,
           "schedule" => schedule_snapshot,
           "trigger" => trigger_snapshot.merge("dispatch_key" => dispatch_key),
+          "llm" => { "model_ref" => selected_model_ref }.compact,
         }
       end
 
@@ -61,7 +78,6 @@ module Automations
         {
           "id" => automation.id,
           "user_id" => automation.user_id,
-          "conversation_id" => automation.conversation_id,
           "agent_program_id" => automation.agent_program_id,
           "execution_target_id" => automation.execution_target_id,
           "permission_mode" => automation.permission_mode,
@@ -76,6 +92,10 @@ module Automations
           "timezone" => automation.schedule_timezone,
           "scheduled_for" => scheduled_for.iso8601,
         }
+      end
+
+      def selected_model_ref
+        automation.task_payload["selected_model_ref"].to_s.presence
       end
   end
 end

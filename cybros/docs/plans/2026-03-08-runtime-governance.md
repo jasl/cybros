@@ -8,7 +8,7 @@
 
 - This plan owns the executable schema and settings surfaces for `ExecutionLocation`, `Workspace`, and `ExecutionTarget`.
 - `2026-03-09-agent-deployment-connection.md` consumes those models for target inventory APIs, switch policy, and composer selectors.
-- `2026-03-09-automation-runtime.md` consumes the same admission and wait primitives for scheduled work.
+- `2026-03-10-automation-conversation-convergence.md` consumes the same admission and wait primitives for scheduled work.
 
 ## Testing Posture
 

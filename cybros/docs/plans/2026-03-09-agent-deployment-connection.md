@@ -6,7 +6,7 @@
 
 - `2026-03-08-runtime-governance.md` Task 1 owns executable schema for `ExecutionLocation`, `Workspace`, and `ExecutionTarget`.
 - `2026-03-08-runtime-governance.md` Task 2 through Task 5 own governor resolution, waits, and admission primitives consumed during draft planning.
-- `2026-03-09-automation-runtime.md` reuses the draft, run, and deployment semantics from this plan.
+- `2026-03-10-automation-conversation-convergence.md` reuses the draft, run, and deployment semantics from this plan.
 
 ## Testing Posture
 

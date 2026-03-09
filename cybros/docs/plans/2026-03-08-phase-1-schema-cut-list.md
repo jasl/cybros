@@ -1,5 +1,7 @@
 # Phase 1 Schema Cut List
 
+> Historical note (2026-03-10): this schema-cut list predates the automation-conversation convergence. Its automation-specific guidance, including `run_drafts.automation_id` and automation-owned run semantics, is superseded by [`2026-03-10-automation-conversation-convergence-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence-design.md). Keep using this file for broader schema-cut rationale, but not as the current automation model contract.
+
 This document defines the first schema cut for the runtime rebaseline.
 
 It is intentionally product-first. Conduits and Nexus should adapt later.

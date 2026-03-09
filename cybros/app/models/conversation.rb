@@ -8,6 +8,7 @@ class Conversation < ApplicationRecord
   PERMISSION_MODE_LABELS = Cybros::Permissions::LABELS.freeze
 
   belongs_to :user
+  belongs_to :automation, optional: true
   belongs_to :agent_program, optional: true
   belongs_to :default_execution_target, class_name: "ExecutionTarget", optional: true
 
@@ -31,7 +32,8 @@ class Conversation < ApplicationRecord
 
   has_many :events, dependent: :destroy
   has_many :conversation_kv_entries, dependent: :destroy
-  has_many :run_drafts, dependent: :nullify
+  has_many :conversation_runs, dependent: :destroy
+  has_many :run_drafts, dependent: :destroy
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil? && root?

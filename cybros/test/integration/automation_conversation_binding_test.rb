@@ -8,45 +8,67 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "automation conversation binding links the materialized conversation run" do
-    seen_conversation_ids = []
-    seen_agent_configs = []
-    server =
-      Cybros::ProgrammableAgentFixture::Server.new(
-        rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            seen_conversation_ids << params["conversation_id"]
-            seen_agent_configs << params["agent_config"]
-            base_result
-          end,
-        },
-      ).start
+  test "each automation trigger creates a fresh execution conversation" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(server:)
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
-    end
+    first =
+      perform_dispatch!(
+        automation: runtime.fetch(:automation),
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+      )
+    second =
+      perform_dispatch!(
+        automation: runtime.fetch(:automation),
+        scheduled_for: Time.utc(2026, 3, 10, 9, 0, 0),
+      )
 
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
-    conversation_run = ConversationRun.find(automation_run.conversation_run_id)
-
-    assert_equal [runtime.fetch(:conversation).id], seen_conversation_ids
-    assert_equal [{ "mode" => "automation" }], seen_agent_configs
-    assert_equal runtime.fetch(:conversation).id, conversation_run.conversation_id
-    assert_equal({ "mode" => "automation" }, conversation_run.effective_agent_config)
-    assert_equal conversation_run.id, automation_run.conversation_run_id
-    assert_equal conversation_run.id, draft.materialized_conversation_run_id
-    assert_equal automation_run.id, conversation_run.snapshot.dig("draft", "trigger_snapshot", "automation_run_id")
-    assert_equal runtime.fetch(:conversation).id, automation_run.snapshot.dig("runtime", "conversation_id")
-    assert_equal "running", automation_run.status
+    assert_not_equal first.id, second.id
+    assert_equal runtime.fetch(:automation).id, first.automation_id
+    assert_equal runtime.fetch(:automation).id, second.automation_id
+    assert_equal 2, runtime.fetch(:automation).conversations.count
   ensure
     server&.shutdown
   end
 
-  test "rejecting a conversation-bound automation approval updates the bound agent node" do
+  test "dispatching the same trigger delivery reuses the same execution conversation" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_automation_runtime!(server:)
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+
+    first = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    second = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+
+    assert_equal first.id, second.id
+    assert_equal 1, runtime.fetch(:automation).conversations.count
+  ensure
+    server&.shutdown
+  end
+
+  test "automation execution materializes the only run on the execution conversation" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_automation_runtime!(server:)
+
+    conversation =
+      perform_dispatch!(
+        automation: runtime.fetch(:automation),
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+      )
+
+    draft = conversation.run_drafts.order(:created_at, :id).last
+    run = ConversationRun.where(conversation: conversation).order(:created_at, :id).last
+
+    assert_equal "finalized", draft.status
+    assert_equal run.id, draft.materialized_conversation_run_id
+    assert_equal conversation.id, run.conversation_id
+    assert_equal run.id, conversation.metadata.dig("automation_execution", "conversation_run_id")
+    assert_equal conversation.id, run.snapshot.dig("draft", "trigger_snapshot", "conversation_id")
+    assert_equal conversation.automation_id, run.snapshot.dig("draft", "trigger_snapshot", "automation_id")
+  ensure
+    server&.shutdown
+  end
+
+  test "rejecting a parked automation execution updates the execution conversation and parked node" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -61,20 +83,14 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
         },
       ).start
     runtime = create_automation_runtime!(server:, permission_mode: "default")
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
+    conversation =
+      perform_dispatch!(
+        automation: runtime.fetch(:automation),
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+      )
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
-    end
-
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
-    conversation = runtime.fetch(:conversation)
+    draft = conversation.run_drafts.order(:created_at, :id).last
     agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
-
-    assert_equal "awaiting_approval", draft.status
-    assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
 
     draft.update!(
       approval_state: draft.approval_state.merge("status" => "rejected", "reason" => "operator_denied"),
@@ -83,91 +99,14 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
     error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
 
     assert_equal "cybros.run_drafts.approval_not_granted", error.code
+    assert_equal "rejected", conversation.reload.metadata.dig("automation_execution", "status")
     assert_equal DAG::Node::REJECTED, agent_node.reload.state
     assert_equal "operator_denied", agent_node.metadata.fetch("reason")
   ensure
     server&.shutdown
   end
 
-  test "automation conversation binding creates an executable agent node" do
-    server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_automation_runtime!(server:)
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = nil
-
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
-    end
-
-    conversation = runtime.fetch(:conversation)
-    conversation_run = ConversationRun.find(automation_run.reload.conversation_run_id)
-    agent_node = conversation.root_graph.nodes.find(conversation_run.dag_node_id)
-    agent_node.update!(claim_after_at: nil)
-
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-    assert_includes claimed, agent_node.id
-
-    DAG::Runner.run_node!(agent_node.id)
-
-    assert_equal DAG::Node::FINISHED, agent_node.reload.state
-    assert_equal "fixture compose response", agent_node.body_output.fetch("content")
-    assert_equal "succeeded", conversation_run.reload.state
-    assert_equal "completed", automation_run.reload.status
-  ensure
-    server&.shutdown
-  end
-
-  test "automation conversation binding kicks the bound graph for execution" do
-    server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_automation_runtime!(server:)
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-
-    assert_enqueued_jobs 1, only: DAG::TickGraphJob do
-      perform_enqueued_jobs only: Automations::ExecuteRunJob do
-        dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
-      end
-    end
-  ensure
-    server&.shutdown
-  end
-
-  test "conversation-bound automation drafts read settings config and kv through the bound conversation" do
-    server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_automation_runtime!(server:)
-    conversation = runtime.fetch(:conversation)
-    ConversationKVEntry.create!(
-      conversation: conversation,
-      key: "shared.stage",
-      value: { "status" => "seeded" },
-      written_by_type: "Seed",
-      written_by_id: SecureRandom.uuid,
-    )
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
-    draft = RunDrafts::AutomationPlanningService.open_and_prepare!(automation_run: automation_run)
-
-    assert_nil draft.conversation_id
-    assert_equal conversation.id, draft.trigger_snapshot.fetch("conversation_id")
-    assert_equal(
-      { "settings" => conversation.public_settings },
-      AgentRpc::KernelServices::ConversationSettings.get(draft: draft),
-    )
-    assert_equal(
-      { "config" => { "mode" => "automation" } },
-      AgentRpc::KernelServices::ConversationConfig.get(draft: draft),
-    )
-    assert_equal(
-      { "entry" => { "key" => "shared.stage", "value" => { "status" => "seeded" } } },
-      AgentRpc::KernelServices::ConversationKV.get(draft: draft, key: "shared.stage"),
-    )
-    assert_equal(
-      [{ "key" => "shared.stage", "value" => { "status" => "seeded" } }],
-      AgentRpc::KernelServices::ConversationKV.list(draft: draft).fetch("entries"),
-    )
-  ensure
-    server&.shutdown
-  end
-
-  test "approval expiry rejects the bound automation agent node even when draft conversation is nil" do
+  test "approval expiry rejects the parked automation execution node" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -182,27 +121,20 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
         },
       ).start
     runtime = create_automation_runtime!(server:, permission_mode: "default")
-    automation_run = nil
+    conversation =
+      perform_dispatch!(
+        automation: runtime.fetch(:automation),
+        scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
+      )
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
-      automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
-    end
-
-    automation_run.reload
-    draft = RunDraft.find(automation_run.snapshot.dig("draft", "id"))
-    agent_node_id = draft.trigger_snapshot.fetch("dag_node_id")
-    agent_node = runtime.fetch(:conversation).root_graph.nodes.find(agent_node_id)
-
-    assert_equal "awaiting_approval", draft.status
-    assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
-
-    draft.update!(
-      expires_at: 1.minute.ago,
-    )
+    draft = conversation.run_drafts.order(:created_at, :id).last
+    agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
+    draft.update!(expires_at: 1.minute.ago)
 
     RunDrafts::ApprovalExpiryService.expire!(draft: draft)
 
     assert_equal "expired", draft.reload.status
+    assert_equal "canceled", conversation.reload.metadata.dig("automation_execution", "status")
     assert_equal DAG::Node::REJECTED, agent_node.reload.state
     assert_equal "approval_expired", agent_node.metadata.fetch("reason")
   ensure
@@ -211,28 +143,25 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
 
   private
 
+    def perform_dispatch!(automation:, scheduled_for:)
+      conversation = nil
+
+      perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+        conversation = dispatch_automation!(automation: automation, scheduled_for: scheduled_for)
+      end
+
+      conversation.reload
+    end
+
     def create_automation_runtime!(server:, permission_mode: "full_access")
       user = create_user!
       program = create_program!
-      alternate_program = create_program!
       deployment = active_deployment!(program: program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Automation target")
       ensure_active_openai_credential!
-      conversation = create_conversation!(user: user, title: "Automation transcript")
-      conversation.update!(
-        agent_program: alternate_program,
-        default_execution_target: target,
-        permission_mode: permission_mode,
-        agent_config: {
-          program.config_namespace => { "mode" => "automation" },
-          alternate_program.config_namespace => { "mode" => "conversation" },
-        },
-        agent_config_schema_fingerprint: alternate_program.config_schema_fingerprint,
-      )
       automation =
         Automation.create!(
           user: user,
-          conversation: conversation,
           agent_program: program,
           execution_target: target,
           permission_mode: permission_mode,
@@ -247,7 +176,7 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
           },
         )
 
-      { automation: automation, conversation: conversation, program: program, deployment: deployment, target: target }
+      { automation: automation, program: program, deployment: deployment, target: target }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)

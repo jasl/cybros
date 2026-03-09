@@ -15,19 +15,21 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
     later = create_automation!(status: "active", hour: 10, minute: 0, endpoint_url: server.rpc_url)
     now = Time.utc(2026, 3, 9, 9, 0, 0)
 
-    perform_enqueued_jobs only: Automations::ExecuteRunJob do
+    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
       Automations::DispatchDueJob.perform_now(now: now)
     end
 
-    due_run = AutomationRun.find_by!(automation: due)
-    assert_equal "completed", due_run.status
-    assert_nil AutomationRun.find_by(automation: paused)
-    assert_nil AutomationRun.find_by(automation: later)
-    assert_equal "#{due.id}:#{now.iso8601}", due_run.dispatch_key
-    assert_equal now.iso8601, due_run.snapshot.dig("schedule", "scheduled_for")
+    due_conversation = Conversation.find_by!(automation: due)
+    due_run = ConversationRun.where(conversation: due_conversation).order(:created_at, :id).last
+    assert_equal "completed", due_conversation.metadata.dig("automation_execution", "status")
+    assert_nil Conversation.find_by(automation: paused)
+    assert_nil Conversation.find_by(automation: later)
+    assert_equal "#{due.id}:#{now.iso8601}", due_conversation.automation_dispatch_key
+    assert_equal now.iso8601, due_conversation.metadata.dig("schedule", "scheduled_for")
+    assert_equal "succeeded", due_run.state
 
     clear_enqueued_jobs
-    assert_no_difference -> { AutomationRun.count } do
+    assert_no_difference -> { Conversation.count } do
       assert_no_enqueued_jobs do
         Automations::DispatchDueJob.perform_now(now: now)
       end

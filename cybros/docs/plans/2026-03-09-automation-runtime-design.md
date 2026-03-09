@@ -1,5 +1,7 @@
 # Automation Runtime Design
 
+> Historical note (2026-03-10): this design was superseded by [`2026-03-10-automation-conversation-convergence-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence-design.md). It assumed `AutomationRun` and optional conversation binding. Current automation semantics are `Automation` = definition, one fresh execution `Conversation` per trigger, and `ConversationRun` as the only run. Keep this file only as pre-convergence history.
+
 ## Goal
 
 Define automation as a first-class programmable-agent entrypoint instead of a thin wrapper around conversations.

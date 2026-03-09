@@ -27,14 +27,8 @@
           <div class="text-sm"><%= @automation.execution_target.name %></div>
         </div>
         <div>
-          <div class="text-xs opacity-60">Conversation binding</div>
-          <div class="text-sm">
-            <% if @automation.conversation.present? %>
-              <span class="font-mono"><%= @automation.conversation.id %></span>
-            <% else %>
-              Standalone
-            <% end %>
-          </div>
+          <div class="text-xs opacity-60">Executions</div>
+          <div class="text-sm"><%= @execution_conversations.size %></div>
         </div>
         <div>
           <div class="text-xs opacity-60">Schedule</div>
@@ -52,37 +46,37 @@
       <table class="table">
         <thead>
           <tr>
-            <th>Scheduled for</th>
+            <th>Triggered at</th>
             <th>Status</th>
             <th>Approval</th>
-            <th>Conversation run</th>
+            <th>Conversation</th>
             <th>Dispatch key</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
-          <% @automation_runs.each do |run| %>
-            <% approval_status = run.approval_state["status"].presence || "not_required" %>
+          <% @execution_conversations.each do |conversation| %>
+            <% approval_status = execution_approval_status(conversation) %>
             <tr class="hover:bg-base-200/50 transition-colors">
-              <td class="font-mono text-xs"><%= run.scheduled_for.iso8601 %></td>
-              <td class="font-medium"><%= run.status %></td>
+              <td class="font-mono text-xs"><%= conversation.automation_triggered_at&.iso8601 %></td>
+              <td class="font-medium"><%= execution_status_label(conversation) %></td>
               <td>
                 <div class="font-medium"><%= approval_status %></div>
-                <% if run.approval_state["reason"].present? %>
-                  <div class="text-xs opacity-60"><%= run.approval_state["reason"] %></div>
+                <% if execution_approval_reason(conversation).present? %>
+                  <div class="text-xs opacity-60"><%= execution_approval_reason(conversation) %></div>
                 <% end %>
               </td>
-              <td class="font-mono text-xs"><%= run.conversation_run_id.presence || "None" %></td>
-              <td class="font-mono text-xs"><%= run.dispatch_key %></td>
+              <td class="font-mono text-xs"><%= link_to conversation.id, conversation_path(conversation) %></td>
+              <td class="font-mono text-xs"><%= conversation.automation_dispatch_key %></td>
               <td class="text-right">
-                <% if run.status == "awaiting_approval" %>
+                <% if execution_status_label(conversation) == "awaiting_approval" %>
                   <div class="flex items-center justify-end gap-2">
                     <%= button_to "Approve",
-                                  approve_system_settings_automation_automation_run_path(@automation, run),
+                                  approve_system_settings_automation_execution_path(@automation, conversation),
                                   method: :post,
                                   class: "btn btn-primary btn-sm" %>
                     <%= button_to "Reject",
-                                  reject_system_settings_automation_automation_run_path(@automation, run),
+                                  reject_system_settings_automation_execution_path(@automation, conversation),
                                   method: :post,
                                   class: "btn btn-ghost btn-sm" %>
                   </div>

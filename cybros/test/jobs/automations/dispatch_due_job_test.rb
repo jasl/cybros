@@ -8,17 +8,17 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
     clear_performed_jobs
   end
 
-  test "perform dispatches due automations and enqueues execution jobs" do
+  test "perform dispatches due automations and enqueues execution conversations" do
     due = create_automation!(status: "active", hour: 9, minute: 0)
     create_automation!(status: "paused", hour: 9, minute: 0)
 
-    assert_enqueued_with(job: Automations::ExecuteRunJob) do
+    assert_enqueued_with(job: Automations::ExecuteConversationJob) do
       Automations::DispatchDueJob.perform_now(now: Time.utc(2026, 3, 9, 9, 0, 0))
     end
 
-    run = AutomationRun.find_by!(automation: due)
-    assert_equal "queued", run.status
-    assert_equal [run.id], enqueued_jobs.last[:args]
+    conversation = Conversation.find_by!(automation: due)
+    assert_equal "queued", conversation.metadata.dig("automation_execution", "status")
+    assert_equal [conversation.id], enqueued_jobs.last[:args]
   end
 
   private

@@ -8,14 +8,14 @@ class Automations::DispatchTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "dispatch creates one queued automation run with durable schedule facts" do
+  test "dispatch creates one queued execution conversation with durable trigger facts" do
     automation = create_automation!
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
     dispatch_key = "#{automation.id}:#{scheduled_for.iso8601}"
-    run = nil
+    conversation = nil
 
-    assert_enqueued_with(job: Automations::ExecuteRunJob) do
-      run =
+    assert_enqueued_with(job: Automations::ExecuteConversationJob) do
+      conversation =
         Automations::Dispatch.call!(
           automation: automation,
           scheduled_for: scheduled_for,
@@ -24,19 +24,24 @@ class Automations::DispatchTest < ActiveSupport::TestCase
         )
     end
 
-    assert_equal "queued", run.status
-    assert_equal dispatch_key, run.dispatch_key
-    assert_equal scheduled_for, run.scheduled_for
-    assert_equal automation.id, run.snapshot.dig("automation", "id")
-    assert_equal automation.agent_program_id, run.snapshot.dig("automation", "agent_program_id")
-    assert_equal automation.execution_target_id, run.snapshot.dig("automation", "execution_target_id")
-    assert_equal "full_access", run.snapshot.dig("automation", "permission_mode")
-    assert_equal "rrule", run.snapshot.dig("schedule", "kind")
-    assert_equal automation.schedule_rrule, run.snapshot.dig("schedule", "rrule")
-    assert_equal automation.schedule_timezone, run.snapshot.dig("schedule", "timezone")
-    assert_equal scheduled_for.iso8601, run.snapshot.dig("schedule", "scheduled_for")
-    assert_equal "schedule", run.snapshot.dig("trigger", "kind")
-    assert_equal [run.id], enqueued_jobs.last[:args]
+    assert_equal automation.id, conversation.automation_id
+    assert_equal automation.user_id, conversation.user_id
+    assert_equal automation.agent_program_id, conversation.agent_program_id
+    assert_equal automation.execution_target_id, conversation.default_execution_target_id
+    assert_equal "full_access", conversation.permission_mode
+    assert_equal dispatch_key, conversation.automation_dispatch_key
+    assert_equal scheduled_for, conversation.automation_triggered_at
+    assert_equal "queued", conversation.metadata.dig("automation_execution", "status")
+    assert_equal dispatch_key, conversation.metadata.dig("automation_execution", "dispatch_key")
+    assert_equal automation.id, conversation.metadata.dig("automation", "id")
+    assert_equal automation.agent_program_id, conversation.metadata.dig("automation", "agent_program_id")
+    assert_equal automation.execution_target_id, conversation.metadata.dig("automation", "execution_target_id")
+    assert_equal "rrule", conversation.metadata.dig("schedule", "kind")
+    assert_equal automation.schedule_rrule, conversation.metadata.dig("schedule", "rrule")
+    assert_equal automation.schedule_timezone, conversation.metadata.dig("schedule", "timezone")
+    assert_equal scheduled_for.iso8601, conversation.metadata.dig("schedule", "scheduled_for")
+    assert_equal "schedule", conversation.metadata.dig("trigger", "kind")
+    assert_equal [conversation.id], enqueued_jobs.last[:args]
   end
 
   test "dispatch does not enqueue duplicate execution work for the same logical trigger delivery" do
@@ -54,7 +59,7 @@ class Automations::DispatchTest < ActiveSupport::TestCase
 
     clear_enqueued_jobs
 
-    assert_no_difference -> { AutomationRun.count } do
+    assert_no_difference -> { Conversation.count } do
       assert_no_enqueued_jobs do
         second =
         Automations::Dispatch.call!(
@@ -73,12 +78,12 @@ class Automations::DispatchTest < ActiveSupport::TestCase
     automation = create_automation!
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
     dispatch_key = "#{automation.id}:#{scheduled_for.iso8601}"
-    execute_job_singleton = Automations::ExecuteRunJob.singleton_class
+    execute_job_singleton = Automations::ExecuteConversationJob.singleton_class
 
     error =
       assert_raises(RuntimeError) do
         execute_job_singleton.alias_method :__dispatch_test_original_perform_later__, :perform_later
-        execute_job_singleton.define_method(:perform_later) { |_automation_run_id| raise "enqueue failed" }
+        execute_job_singleton.define_method(:perform_later) { |_conversation_id| raise "enqueue failed" }
 
         begin
           Automations::Dispatch.call!(
@@ -94,7 +99,7 @@ class Automations::DispatchTest < ActiveSupport::TestCase
       end
 
     assert_equal "enqueue failed", error.message
-    assert_nil AutomationRun.find_by(automation: automation, dispatch_key: dispatch_key)
+    assert_nil Conversation.find_by(automation: automation, automation_dispatch_key: dispatch_key)
   end
 
   private
@@ -152,7 +157,11 @@ class Automations::DispatchTest < ActiveSupport::TestCase
         schedule_kind: "rrule",
         schedule_rrule: "FREQ=DAILY;BYHOUR=#{hour};BYMINUTE=#{minute}",
         schedule_timezone: timezone,
-        task_payload: { "kind" => "scheduled_prompt", "prompt" => "Ship it" },
+        task_payload: {
+          "kind" => "scheduled_prompt",
+          "prompt" => "Ship it",
+          "selected_model_ref" => "openai/gpt-5.4",
+        },
       )
     end
 end

@@ -1,5 +1,7 @@
 # Execution Capacity And Scheduled Automation Implementation Plan
 
+> Historical note (2026-03-10): the `execution_capacity` half of this implementation record remains valid, but its scheduled-automation runtime description was superseded by [`2026-03-10-automation-conversation-convergence.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence.md). Current scheduled automation creates or reuses execution conversations and runs [`Automations::ExecuteConversationJob`](/Users/jasl/Workspaces/Cybros/cybros/cybros/app/jobs/automations/execute_conversation_job.rb), not `AutomationRun` plus `ExecuteRunJob`.
+
 **Status:** implemented on 2026-03-09 on `codex/programmable-agent-rebaseline`.
 
 **Outcome:** this batch closed `PA-011` and `PA-012`. The governor naming is now `execution_capacity` everywhere with no compatibility shims. Scheduled automation runs through `ActiveJob + Solid Queue`: a recurring dispatch job finds due automations, dispatch creates or reuses an `AutomationRun`, and a dedicated execute job atomically claims the queued run before invoking the existing orchestrator. Execution-capacity admission happens at the DAG claim boundary, not during draft finalization. `waiting_for_capacity` remains a derived runtime state from durable `RuntimeWait` facts, not a new persisted `ConversationRun.state`. Capacity release, cancel, and running-lease reclaim all release execution capacity and wake the oldest parked waiter by clearing retry gating and kicking the graph.
@@ -7,7 +9,7 @@
 ## Cross-Plan Dependencies
 
 - `2026-03-08-runtime-governance.md` owns the governor, lease, and wait primitives being renamed and enforced.
-- `2026-03-09-automation-runtime.md` owns the production dispatch semantics and acceptance surface for scheduled automation.
+- `2026-03-10-automation-conversation-convergence.md` now owns the current production dispatch semantics and acceptance surface for scheduled automation.
 - `docs/audits/programmable-agent-rebaseline-audit.md` tracks `PA-011` and `PA-012`; update it as findings are closed.
 
 ## Explicit Scope And Assumptions

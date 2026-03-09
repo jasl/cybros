@@ -175,7 +175,7 @@ When execution capacity releases a slot, Cybros should resume the oldest parked 
 
 ## Snapshot Versus Live State
 
-- `RunDraft`, `ConversationRun`, and `AutomationRun` snapshot the resolved governor bindings and policy facts used for audit
+- `RunDraft` and `ConversationRun` snapshot the resolved governor bindings and policy facts used for audit
 - reservations, leases, and backlog state remain live runtime state
 - operator policy changes may invalidate an open draft before materialization
 - live admission state must never be bypassed because an older snapshot exists

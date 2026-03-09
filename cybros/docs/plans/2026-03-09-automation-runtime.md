@@ -1,5 +1,7 @@
 # Automation Runtime Implementation Plan
 
+> Historical note (2026-03-10): this implementation plan was superseded by [`2026-03-10-automation-conversation-convergence.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-10-automation-conversation-convergence.md). It targeted a pre-convergence model with `AutomationRun` and optional conversation binding. Do not use this file as the current automation execution contract.
+
 **Goal:** implement first-class automation dispatch, runtime semantics, and durable audit on top of the canonical programmable-agent lifecycle.
 
 ## Cross-Plan Dependencies

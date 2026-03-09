@@ -74,6 +74,7 @@ It does not own:
 ```text
 User / Automation / Channel Trigger
   -> Cybros entrypoint
+  -> execution Conversation (for automation triggers)
   -> RunDraft planning
   -> bounded `agent_rpc` session to AgentDeployment
      -> scoped callbacks into Cybros kernel surfaces
@@ -105,7 +106,8 @@ Kernel-owned authority remains final:
 ## Boundary Rules
 
 - Product code uses public product surfaces, not raw storage internals.
-- Conversation and automation defaults affect future drafts only.
+- Conversation defaults affect future drafts only.
+- Automation defaults seed fresh execution conversations; they do not act as live run state.
 - `turn.prepare` is planning-only and cannot durably commit public state.
 - Approval resume continues from persisted draft state and does not reopen planning.
 - Each run snapshots one finalized contract and execution context instead of mutating history.
