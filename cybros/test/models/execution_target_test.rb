@@ -33,6 +33,22 @@ class ExecutionTargetTest < ActiveSupport::TestCase
     assert target.errors[:default_timeout_s_override].any?
   end
 
+  test "enforces location ownership at the database layer" do
+    local_location = create_location!(name: "Local")
+    remote_location = create_location!(name: "Remote")
+    remote_workspace = create_workspace!(execution_location: remote_location)
+
+    target =
+      build_target(
+        execution_location: local_location,
+        workspace: remote_workspace,
+      )
+
+    assert_raises(ActiveRecord::InvalidForeignKey, ActiveRecord::StatementInvalid) do
+      target.save!(validate: false)
+    end
+  end
+
   private
 
   def create_location!(name:)

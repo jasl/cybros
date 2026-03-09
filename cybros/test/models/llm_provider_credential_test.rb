@@ -32,6 +32,16 @@ class LLMProviderCredentialTest < ActiveSupport::TestCase
     assert_predicate inactive_duplicate, :valid?
   end
 
+  test "provides limiter defaults for new credentials" do
+    credential = LLMProviderCredential.new(provider_key: "openai", credential_type: "api_key")
+
+    assert_equal 4, credential.max_concurrent_requests
+    assert_equal 120, credential.requests_per_minute
+    assert_equal 240_000, credential.tokens_per_minute
+    assert_equal 8, credential.burst_limit
+    assert_equal({ "kind" => "exponential", "base_delay_ms" => 500, "max_delay_ms" => 30_000 }, credential.backoff_policy)
+  end
+
   private
 
   def build_credential(attributes = {})

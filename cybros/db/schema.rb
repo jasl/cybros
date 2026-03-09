@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000005) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -312,7 +312,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
     t.string "status", default: "active", null: false
     t.datetime "updated_at", null: false
     t.uuid "workspace_id", null: false
+    t.index ["execution_location_id", "workspace_id"], name: "idx_execution_targets_on_location_workspace", unique: true
     t.index ["execution_location_id"], name: "index_execution_targets_on_execution_location_id"
+    t.index ["workspace_id", "execution_location_id"], name: "idx_execution_targets_on_workspace_location", unique: true
     t.index ["workspace_id"], name: "index_execution_targets_on_workspace_id"
   end
 
@@ -328,17 +330,17 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
     t.string "access_token"
     t.string "account_id"
     t.string "api_key"
-    t.jsonb "backoff_policy", default: {"kind" => "exponential", "base_delay_ms" => 500}, null: false
-    t.integer "burst_limit"
+    t.jsonb "backoff_policy", default: {"kind" => "exponential", "max_delay_ms" => 30000, "base_delay_ms" => 500}, null: false
+    t.integer "burst_limit", default: 8, null: false
     t.datetime "created_at", null: false
     t.string "credential_type", null: false
     t.datetime "expires_at"
-    t.integer "max_concurrent_requests"
+    t.integer "max_concurrent_requests", default: 4, null: false
     t.string "provider_key", null: false
     t.string "refresh_token"
-    t.integer "requests_per_minute"
+    t.integer "requests_per_minute", default: 120, null: false
     t.string "status", default: "active", null: false
-    t.integer "tokens_per_minute"
+    t.integer "tokens_per_minute", default: 240000, null: false
     t.datetime "updated_at", null: false
     t.index ["provider_key", "status"], name: "index_llm_provider_credentials_on_provider_key_and_status"
     t.index ["provider_key"], name: "index_llm_provider_credentials_on_active_provider_key", unique: true, where: "((status)::text = 'active'::text)"
@@ -434,6 +436,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
     t.string "workspace_type", null: false
     t.index ["execution_location_id", "root_path"], name: "index_workspaces_on_execution_location_id_and_root_path", unique: true
     t.index ["execution_location_id"], name: "index_workspaces_on_execution_location_id"
+    t.index ["id", "execution_location_id"], name: "index_workspaces_on_id_and_execution_location_id", unique: true
   end
 
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
@@ -467,6 +470,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
   add_foreign_key "events", "conversations"
   add_foreign_key "execution_targets", "execution_locations"
   add_foreign_key "execution_targets", "workspaces"
+  add_foreign_key "execution_targets", "workspaces", column: ["workspace_id", "execution_location_id"], primary_key: ["id", "execution_location_id"], name: "fk_execution_targets_workspace_location"
   add_foreign_key "sessions", "identities"
   add_foreign_key "users", "identities"
   add_foreign_key "workspaces", "execution_locations"

@@ -17,6 +17,16 @@ class RuntimeSettingTest < ActiveSupport::TestCase
     assert duplicate.errors[:base].any?
   end
 
+  test "enforces the singleton at the database layer" do
+    build_settings.save!
+
+    duplicate = build_settings
+
+    assert_raises(ActiveRecord::RecordNotUnique, ActiveRecord::StatementInvalid) do
+      duplicate.save!(validate: false)
+    end
+  end
+
   private
 
   def build_settings(attributes = {})

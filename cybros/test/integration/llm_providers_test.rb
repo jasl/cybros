@@ -91,7 +91,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
       LLMProvider.lease_connection.select_value(
         LLMProvider.send(
           :sanitize_sql_array,
-          ["SELECT api_key FROM llm_providers WHERE provider_key = ?", "openai"],
+          ["SELECT api_key FROM #{LLMProvider.table_name} WHERE provider_key = ?", "openai"],
         ),
       ).to_s
     refute_equal "sk-test", raw
