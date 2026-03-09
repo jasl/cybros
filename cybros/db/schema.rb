@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000004) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -282,6 +282,40 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
     t.index ["subject_type", "subject_id"], name: "index_events_on_subject"
   end
 
+  create_table "execution_locations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.integer "cpu_limit_millicores"
+    t.datetime "created_at", null: false
+    t.integer "default_timeout_s", null: false
+    t.string "environment", null: false
+    t.string "kind", null: false
+    t.integer "max_concurrent_tasks", null: false
+    t.integer "max_queued_tasks", null: false
+    t.integer "memory_limit_mb"
+    t.string "name", null: false
+    t.string "platform", null: false
+    t.string "status", default: "active", null: false
+    t.text "tags", default: [], null: false, array: true
+    t.string "trust_group", null: false
+    t.datetime "updated_at", null: false
+  end
+
+  create_table "execution_targets", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.integer "cpu_limit_millicores_override"
+    t.datetime "created_at", null: false
+    t.integer "default_timeout_s_override"
+    t.uuid "execution_location_id", null: false
+    t.integer "max_concurrent_tasks_override"
+    t.integer "max_queued_tasks_override"
+    t.integer "memory_limit_mb_override"
+    t.string "name", null: false
+    t.boolean "sandboxed", default: false, null: false
+    t.string "status", default: "active", null: false
+    t.datetime "updated_at", null: false
+    t.uuid "workspace_id", null: false
+    t.index ["execution_location_id"], name: "index_execution_targets_on_execution_location_id"
+    t.index ["workspace_id"], name: "index_execution_targets_on_workspace_id"
+  end
+
   create_table "identities", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
     t.string "email", limit: 255, null: false
@@ -290,17 +324,34 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
     t.index ["email"], name: "index_identities_on_email", unique: true
   end
 
-  create_table "llm_providers", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+  create_table "llm_provider_credentials", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.string "access_token"
     t.string "account_id"
     t.string "api_key"
+    t.jsonb "backoff_policy", default: {"kind" => "exponential", "base_delay_ms" => 500}, null: false
+    t.integer "burst_limit"
     t.datetime "created_at", null: false
     t.string "credential_type", null: false
     t.datetime "expires_at"
+    t.integer "max_concurrent_requests"
     t.string "provider_key", null: false
     t.string "refresh_token"
+    t.integer "requests_per_minute"
+    t.string "status", default: "active", null: false
+    t.integer "tokens_per_minute"
     t.datetime "updated_at", null: false
-    t.index ["provider_key"], name: "index_llm_providers_on_provider_key", unique: true
+    t.index ["provider_key", "status"], name: "index_llm_provider_credentials_on_provider_key_and_status"
+    t.index ["provider_key"], name: "index_llm_provider_credentials_on_active_provider_key", unique: true, where: "((status)::text = 'active'::text)"
+  end
+
+  create_table "runtime_settings", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.jsonb "alert_thresholds", default: {}, null: false
+    t.datetime "created_at", null: false
+    t.integer "default_worker_concurrency", null: false
+    t.jsonb "queue_overrides", default: {}, null: false
+    t.string "scope_key", default: "instance", null: false
+    t.datetime "updated_at", null: false
+    t.index ["scope_key"], name: "index_runtime_settings_on_scope_key", unique: true
   end
 
   create_table "sessions", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -371,6 +422,20 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
     t.index ["identity_id"], name: "index_users_on_identity_id", unique: true
   end
 
+  create_table "workspaces", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.text "capability_tags", default: [], null: false, array: true
+    t.datetime "created_at", null: false
+    t.uuid "execution_location_id", null: false
+    t.string "name", null: false
+    t.string "root_path", null: false
+    t.string "status", default: "active", null: false
+    t.text "tags", default: [], null: false, array: true
+    t.datetime "updated_at", null: false
+    t.string "workspace_type", null: false
+    t.index ["execution_location_id", "root_path"], name: "index_workspaces_on_execution_location_id_and_root_path", unique: true
+    t.index ["execution_location_id"], name: "index_workspaces_on_execution_location_id"
+  end
+
   add_foreign_key "active_storage_attachments", "active_storage_blobs", column: "blob_id"
   add_foreign_key "active_storage_variant_records", "active_storage_blobs", column: "blob_id"
   add_foreign_key "agent_memory_entries", "conversations"
@@ -400,6 +465,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_08_130000) do
   add_foreign_key "dag_turns", "dag_graphs", column: "graph_id", on_delete: :cascade
   add_foreign_key "dag_turns", "dag_lanes", column: ["graph_id", "lane_id"], primary_key: ["graph_id", "id"], name: "fk_dag_turns_lane_graph_scoped", on_delete: :cascade
   add_foreign_key "events", "conversations"
+  add_foreign_key "execution_targets", "execution_locations"
+  add_foreign_key "execution_targets", "workspaces"
   add_foreign_key "sessions", "identities"
   add_foreign_key "users", "identities"
+  add_foreign_key "workspaces", "execution_locations"
 end
