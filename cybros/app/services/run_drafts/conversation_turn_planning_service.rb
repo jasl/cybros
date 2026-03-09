@@ -2,6 +2,19 @@ module RunDrafts
   class ConversationTurnPlanningService
     PREPARED_STATUS = "prepared".freeze
     AWAITING_APPROVAL_STATUS = "awaiting_approval".freeze
+    CALLBACK_METHODS = %w[
+      conversation.settings.get
+      conversation.settings.update
+      conversation.config.get
+      conversation.config.update
+      conversation.kv.get
+      conversation.kv.set
+      conversation.kv.delete
+      conversation.kv.list
+      execution_target.list
+      execution_target.get
+      execution_target.propose
+    ].freeze
 
     def self.open_and_prepare!(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:)
       new(
@@ -21,7 +34,17 @@ module RunDrafts
 
     def open_and_prepare!
       draft = create_draft!
-      response = rpc_client_for(draft).call("turn.prepare", prepare_params(draft))
+      response =
+        AgentRpc::LifecycleCaller.call!(
+          deployment: draft.agent_deployment,
+          conversation: conversation,
+          scope_type: "run_draft",
+          scope_id: draft.id,
+          method_name: "turn.prepare",
+          invocation_id: draft.prepare_invocation_id,
+          request_payload: prepare_params(draft),
+          allowed_callback_methods: CALLBACK_METHODS,
+        )
 
       draft.with_lock do
         draft.prepared_plan = normalize_hash(response["prepared_plan"])
@@ -103,10 +126,6 @@ module RunDrafts
           "public_settings" => conversation.public_settings,
           "agent_config" => conversation.selected_agent_config,
         }
-      end
-
-      def rpc_client_for(draft)
-        AgentDeployments::RpcClient.new(deployment: draft.agent_deployment)
       end
 
       def normalize_hash(value)

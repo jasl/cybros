@@ -169,7 +169,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     def create_programmable_runtime!(server:, permission_mode: "default")
       user = create_user!
       program = create_program!
-      deployment = active_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "deployment:v1")
+      deployment = active_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Primary target")
       ensure_active_openai_credential!
       conversation = create_conversation!(user: user, title: "Chat")

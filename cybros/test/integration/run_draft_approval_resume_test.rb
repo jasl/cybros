@@ -68,7 +68,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
         contract_fingerprint: program.published_contract_fingerprint,
-        deployment_fingerprint: "deployment:v1",
+        deployment_fingerprint: "fixture-deployment-v1",
         status: "active",
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",

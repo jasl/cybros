@@ -124,11 +124,12 @@ module Cybros
 
       attr_reader :host, :port
 
-      def initialize(host: "127.0.0.1", port: 0, identity_overrides: {}, rpc_overrides: {})
+      def initialize(host: "127.0.0.1", port: 0, identity_overrides: {}, rpc_overrides: {}, required_bearer: nil)
         @host = host
         @port = Integer(port)
         @identity_overrides = ProgrammableAgentFixture.deep_copy(identity_overrides)
         @rpc_overrides = rpc_overrides
+        @required_bearer = required_bearer.to_s.presence
         @server = nil
         @thread = nil
       end
@@ -200,6 +201,8 @@ module Cybros
           return
         end
 
+        ensure_authorized!(req)
+
         payload = JSON.parse(req.body.to_s)
         result = fixture_rpc_result(payload.fetch("method"), payload.fetch("params", {}))
         write_json(
@@ -212,11 +215,15 @@ module Cybros
         )
       rescue KeyError => e
         write_json(res, { "jsonrpc" => "2.0", "id" => nil, "error" => { "code" => -32601, "message" => e.message } }, status: 404)
+      rescue Unauthorized => e
+        write_json(res, { "jsonrpc" => "2.0", "id" => nil, "error" => { "code" => -32001, "message" => e.message } }, status: 401)
       rescue JSON::ParserError => e
         write_json(res, { "jsonrpc" => "2.0", "id" => nil, "error" => { "code" => -32700, "message" => e.message } }, status: 400)
       end
 
       private
+
+        Unauthorized = Class.new(StandardError)
 
         def bound_port
           @server&.config&.fetch(:Port) || port
@@ -246,6 +253,15 @@ module Cybros
 
         def fixture_identity
           @fixture_identity ||= ProgrammableAgentFixture.identity(@identity_overrides)
+        end
+
+        def ensure_authorized!(req)
+          return if @required_bearer.blank?
+
+          header = req["Authorization"].to_s
+          return if header == "Bearer #{@required_bearer}"
+
+          raise Unauthorized, "invalid bearer"
         end
 
         def fixture_rpc_result(method_name, params)
