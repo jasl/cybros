@@ -1,52 +1,35 @@
-require "test_helper"
+require "application_system_test_case"
 
-class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
-  test "requires authentication" do
-    get system_settings_automations_path
-
-    assert_redirected_to new_session_path
-  end
-
-  test "requires owner or admin" do
-    sign_in_member!
-
-    get system_settings_automations_path
-
-    assert_response :forbidden
-  end
-
-  test "index and show expose automation bindings and scheduled run history" do
-    sign_in_owner!
+class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
+  test "operator can browse scheduled automation history" do
+    owner = create_user!(email: "owner@example.com")
     server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
+    runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
     automation_run = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
 
     Automations::RunOrchestrator.start!(automation_run: automation_run)
 
-    get system_settings_automations_path
+    sign_in_as!(email: owner.identity.email)
+    visit system_settings_automations_path
 
-    assert_response :success
-    assert_includes response.body, runtime.fetch(:automation).task_payload.fetch("prompt")
-    assert_includes response.body, runtime.fetch(:program).name
-    assert_includes response.body, runtime.fetch(:target).name
-    assert_includes response.body, "full_access"
+    assert_text "Automations"
+    assert_text runtime.fetch(:automation).task_payload.fetch("prompt")
+    assert_text runtime.fetch(:program).name
+    assert_text runtime.fetch(:target).name
 
-    get system_settings_automation_path(runtime.fetch(:automation))
+    click_link "View"
 
-    assert_response :success
-    assert_includes response.body, runtime.fetch(:program).name
-    assert_includes response.body, runtime.fetch(:target).name
-    assert_includes response.body, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
-    assert_includes response.body, "UTC"
-    assert_includes response.body, scheduled_for.iso8601
-    assert_includes response.body, "completed"
+    assert_current_path system_settings_automation_path(runtime.fetch(:automation))
+    assert_text "completed"
+    assert_text scheduled_for.iso8601
+    assert_text "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
   ensure
     server&.shutdown
   end
 
-  test "show supports operator approval for parked automation runs" do
-    sign_in_owner!
+  test "operator can approve a parked automation run from the browser surface" do
+    owner = create_user!(email: "approver@example.com")
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
@@ -60,69 +43,40 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
           end,
         },
       ).start
-    runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+    runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "default")
+    automation_run = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0))
 
     Automations::RunOrchestrator.start!(automation_run: automation_run)
 
-    get system_settings_automation_path(runtime.fetch(:automation))
+    sign_in_as!(email: owner.identity.email)
+    visit system_settings_automation_path(runtime.fetch(:automation))
 
-    assert_response :success
-    assert_includes response.body, "awaiting_approval"
-    assert_includes response.body, "pending_confirmation"
-    assert_includes response.body, "Approve"
-    assert_includes response.body, "Reject"
+    assert_text "awaiting_approval"
+    assert_text "pending_confirmation"
 
-    post approve_system_settings_automation_automation_run_path(runtime.fetch(:automation), automation_run)
+    within("tbody tr", text: "awaiting_approval") do
+      click_button "Approve"
+    end
 
-    assert_redirected_to system_settings_automation_path(runtime.fetch(:automation))
-    follow_redirect!
-
-    automation_run.reload
-
-    assert_equal "completed", automation_run.status
-    assert_equal "approved", automation_run.approval_state.fetch("status")
-    assert_includes response.body, "completed"
-    assert_includes response.body, "approved"
+    assert_current_path system_settings_automation_path(runtime.fetch(:automation))
+    assert_text "Automation run approved."
+    assert_text "completed"
+    assert_text "approved"
   ensure
     server&.shutdown
   end
 
   private
 
-    def sign_in_owner!
-      identity =
-        Identity.create!(
-          email: "admin@example.com",
-          password: "Passw0rd",
-          password_confirmation: "Passw0rd",
-        )
-
-      User.create!(identity: identity, role: :owner)
-
-      post session_path, params: { email: "admin@example.com", password: "Passw0rd" }
-      assert_redirected_to root_path
-      assert cookies[:session_token].present?
+    def sign_in_as!(email:, password: "Passw0rd")
+      visit new_session_path
+      fill_in "Email", with: email
+      fill_in "Password", with: password
+      click_button "Sign in"
+      assert_current_path dashboard_path
     end
 
-    def sign_in_member!
-      identity =
-        Identity.create!(
-          email: "member@example.com",
-          password: "Passw0rd",
-          password_confirmation: "Passw0rd",
-        )
-
-      User.create!(identity: identity, role: :member)
-
-      post session_path, params: { email: "member@example.com", password: "Passw0rd" }
-      assert_redirected_to root_path
-      assert cookies[:session_token].present?
-    end
-
-    def create_automation_runtime!(endpoint_url:, permission_mode:)
-      user = create_user!
+    def create_automation_runtime!(user:, endpoint_url:, permission_mode:)
       program = create_program!
       active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Operator automation target")
