@@ -2,6 +2,31 @@ require "digest"
 
 module AgentRpc
   class InvocationStore
+    def self.replay_candidate_for(scope_type:, scope_id:, method_name:, invocation_id:)
+      AgentRpcInvocation.find_by(
+        scope_type: scope_type.to_s,
+        scope_id: scope_id.to_s,
+        method: method_name.to_s,
+        invocation_id: invocation_id.to_s,
+      )
+    end
+
+    def self.ensure_replayable!(invocation:, deployment:, request_payload:)
+      store =
+        new(
+          deployment: deployment,
+          conversation: invocation.conversation,
+          scope_type: invocation.scope_type,
+          scope_id: invocation.scope_id,
+          method_name: invocation.method,
+          invocation_id: invocation.invocation_id,
+          request_payload: request_payload,
+        )
+      store.send(:ensure_same_binding!, invocation)
+      store.send(:ensure_same_request!, invocation)
+      invocation
+    end
+
     def self.start_or_replay!(deployment:, conversation:, scope_type:, scope_id:, method_name:, invocation_id:, request_payload:)
       new(
         deployment: deployment,
@@ -90,10 +115,10 @@ module AgentRpc
       attr_reader :deployment, :conversation, :scope_type, :scope_id, :method_name, :invocation_id, :request_payload
 
       def replay_candidate
-        AgentRpcInvocation.find_by(
+        self.class.replay_candidate_for(
           scope_type: scope_type,
           scope_id: scope_id,
-          method: method_name,
+          method_name: method_name,
           invocation_id: invocation_id,
         )
       end
