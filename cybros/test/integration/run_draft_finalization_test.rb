@@ -66,6 +66,40 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "finalization normalizes staged kv keys before applying updates" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    ConversationKVEntry.create!(
+      conversation: conversation,
+      key: "shared.stage",
+      value: { "status" => "old" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(
+      staged_kv_ops: [{ "op" => "set", "key" => " shared.stage ", "value" => { "status" => "planned" } }],
+    )
+
+    RunDrafts::FinalizeService.finalize!(draft: draft)
+
+    assert_equal 1, ConversationKVEntry.where(conversation: conversation, key: "shared.stage").count
+    assert_equal({ "status" => "planned" }, ConversationKVEntry.find_by!(conversation: conversation, key: "shared.stage").value)
+  ensure
+    server&.shutdown
+  end
+
   test "planning pins turn prepare to the draft deployment selected at open time" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
@@ -106,6 +140,31 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "finalization rejects drafts that have not completed planning" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    dag_node_id = SecureRandom.uuid
+    draft =
+      build_open_draft!(
+        conversation: conversation,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => dag_node_id,
+          "user_input" => "Still planning",
+        },
+      )
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.not_prepared", error.code
+    assert_equal "open", draft.reload.status
+    assert_equal 0, ConversationRun.where(conversation: conversation, dag_node_id: dag_node_id).count
+  ensure
+    server&.shutdown
+  end
+
   test "stale finalization fails and leaves staged mutations uncommitted" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
@@ -127,6 +186,66 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       program: runtime.fetch(:program),
       endpoint_url: server.rpc_url,
       deployment_fingerprint: "deployment:v2",
+    )
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.stale", error.code
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal "stale", draft.reload.status
+    assert_nil draft.materialized_conversation_run_id
+  ensure
+    server&.shutdown
+  end
+
+  test "finalization fails stale when provider governor facts drift before materialization" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(staged_public_settings_patch: { "tone" => "concise" })
+    draft.provider_credential.update!(requests_per_minute: draft.provider_credential.requests_per_minute + 1)
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.stale", error.code
+    assert_equal({}, conversation.reload.public_settings)
+    assert_equal "stale", draft.reload.status
+    assert_nil draft.materialized_conversation_run_id
+  ensure
+    server&.shutdown
+  end
+
+  test "finalization fails stale when execution quota facts drift before materialization" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(staged_public_settings_patch: { "tone" => "concise" })
+    draft.proposed_execution_target.update!(
+      max_concurrent_tasks_override: 2,
+      max_queued_tasks_override: 5,
+      default_timeout_s_override: 600,
     )
 
     error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
@@ -415,6 +534,39 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       )
 
       { conversation: conversation, program: program, deployment: deployment, target: target }
+    end
+
+    def build_open_draft!(conversation:, selected_model_ref:, trigger_snapshot:)
+      resolved =
+        RuntimeGovernance::DraftGovernorResolver.resolve!(
+          entrypoint: conversation,
+          selected_model_ref: selected_model_ref,
+        )
+      deployment = conversation.agent_program.active_healthy_deployment
+
+      RunDraft.create!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        status: "open",
+        permission_mode: resolved.fetch(:permission_mode),
+        trigger_snapshot: trigger_snapshot,
+        agent_program: conversation.agent_program,
+        contract_fingerprint: conversation.agent_program.published_contract_fingerprint,
+        agent_deployment: deployment,
+        deployment_fingerprint: deployment.deployment_fingerprint,
+        deployment_activated_at: deployment.activated_at&.change(usec: 0),
+        provider_credential: resolved.fetch(:provider_credential),
+        proposed_execution_target: resolved.fetch(:proposed_execution_target),
+        selected_model_ref: resolved.fetch(:selected_model_ref),
+        runtime_governors: resolved.fetch(:runtime_governors),
+        prepare_invocation_id: SecureRandom.uuid,
+        prepared_plan: {},
+        staged_public_settings_patch: {},
+        staged_agent_config_patch: {},
+        staged_kv_ops: [],
+        approval_state: { "status" => "not_required" },
+        expires_at: 30.minutes.from_now.change(usec: 0),
+      )
     end
 
     def create_program!

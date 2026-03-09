@@ -46,6 +46,7 @@ module RunDrafts
         ensure_not_already_finalized!
         ensure_not_terminal_status!
         ensure_not_expired!
+        ensure_planning_completed!
         ensure_approval_ready!
         ensure_fresh_binding!
       end
@@ -96,20 +97,33 @@ module RunDrafts
         )
       end
 
+      def ensure_planning_completed!
+        return if %w[prepared awaiting_approval].include?(draft.status.to_s)
+
+        AgentCore::ValidationError.raise!(
+          "Run draft has not completed planning.",
+          code: "cybros.run_drafts.not_prepared",
+          details: { run_draft_id: draft.id, status: draft.status },
+        )
+      end
+
       def ensure_fresh_binding!
-        deployment = draft.agent_deployment&.reload
-        active_deployment = draft.agent_program&.active_healthy_deployment
+        deployment = reload_record(draft.agent_deployment)
+        target = reload_record(draft.proposed_execution_target)
+        resolved = resolve_current_binding!(target: target)
         fresh =
-          deployment.present? &&
-            deployment.status == "active" &&
-            deployment.health_status == "healthy" &&
-            deployment.contract_fingerprint == draft.contract_fingerprint &&
-            deployment.deployment_fingerprint == draft.deployment_fingerprint &&
-            deployment.activated_at&.change(usec: 0) == draft.deployment_activated_at&.change(usec: 0) &&
-            active_deployment&.id == deployment.id
+          deployment_fresh?(deployment) &&
+            target.present? &&
+            RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(target) &&
+            resolved.fetch(:permission_mode).to_s == draft.permission_mode.to_s &&
+            resolved.fetch(:provider_credential).id.to_s == draft.provider_credential_id.to_s &&
+            resolved.fetch(:proposed_execution_target).id.to_s == draft.proposed_execution_target_id.to_s &&
+            resolved.fetch(:runtime_governors) == draft.runtime_governors
 
         return if fresh
 
+        stale_validation_error!
+      rescue ActiveRecord::RecordNotFound, AgentCore::ValidationError
         stale_validation_error!
       end
 
@@ -144,7 +158,7 @@ module RunDrafts
           next unless operation.is_a?(Hash)
 
           op = operation["op"].to_s
-          key = operation["key"].to_s
+          key = operation["key"].to_s.strip
           next if key.blank?
 
           case op
@@ -230,6 +244,30 @@ module RunDrafts
 
       def normalize_hash(value)
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
+      end
+
+      def reload_record(record)
+        record&.reload
+      end
+
+      def deployment_fresh?(deployment)
+        active_deployment = draft.agent_program&.active_healthy_deployment
+
+        deployment.present? &&
+          deployment.status == "active" &&
+          deployment.health_status == "healthy" &&
+          deployment.contract_fingerprint == draft.contract_fingerprint &&
+          deployment.deployment_fingerprint == draft.deployment_fingerprint &&
+          deployment.activated_at&.change(usec: 0) == draft.deployment_activated_at&.change(usec: 0) &&
+          active_deployment&.id == deployment.id
+      end
+
+      def resolve_current_binding!(target:)
+        RuntimeGovernance::DraftGovernorResolver.resolve!(
+          entrypoint: conversation,
+          selected_model_ref: draft.selected_model_ref,
+          execution_target: target,
+        )
       end
 
       def persist_terminal_status_for!(error)
