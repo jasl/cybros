@@ -1,6 +1,6 @@
 module AgentPrograms
   module BundledProfiles
-    PROFILE_ROOT = Rails.root.join("cybros-agent", "profiles").freeze
+    PROFILE_ROOT = Rails.root.join("agents", "profiles").freeze
 
     module_function
 
