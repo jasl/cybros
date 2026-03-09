@@ -20,6 +20,9 @@ Thumbs.db
 # === Temp files ===
 /tmp/
 
+# === Test files ===
+/coverage/
+
 # === MCP temp files ===
 .playwright-mcp/
 

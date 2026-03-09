@@ -1,7 +1,7 @@
 require "test_helper"
 require "simple_inference"
 
-class AgentCore::Resources::Provider::RateLimitEnforcementTest < Minitest::Test
+class AgentCore::Resources::Provider::RateLimitEnforcementTest < ActiveSupport::TestCase
   class StubAdapter < SimpleInference::HTTPAdapter
     def initialize(&handler)
       @handler = handler
@@ -85,7 +85,24 @@ class AgentCore::Resources::Provider::RateLimitEnforcementTest < Minitest::Test
     assert_includes trace.events.map { |event| event[:name] }, "agent_core.llm.rate_limit"
   end
 
+  def test_rails_transactional_test_harness_rolls_back_database_writes
+    credential = create_provider_credential!
+    @rollback_probe_credential_id = credential.id
+
+    assert_predicate self.class, :use_transactional_tests
+    assert_predicate ActiveRecord::Base.connection, :transaction_open?
+    assert_predicate LLMProviderCredential, :exists?, credential.id
+  end
+
   private
+
+  def after_teardown
+    rollback_probe_credential_id = @rollback_probe_credential_id
+    super
+    return if rollback_probe_credential_id.blank?
+
+    assert_nil LLMProviderCredential.find_by(id: rollback_probe_credential_id)
+  end
 
   def build_provider(adapter:)
     client = SimpleInference::Client.new(base_url: "http://example.com", api_key: "x", adapter: adapter)
