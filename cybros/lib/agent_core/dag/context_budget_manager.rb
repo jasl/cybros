@@ -21,7 +21,10 @@ module AgentCore
           :decisions,
           :limit_turns,
           :auto_compacted,
+          :fit_tactics_applied,
         )
+
+      NEAR_HARD_CAP_RATIO = 0.9
 
       def initialize(node:, runtime:, execution_context:)
         @node = node
@@ -96,6 +99,7 @@ module AgentCore
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
               auto_compacted: false,
+              fit_tactics_applied: false,
             )
           end
 
@@ -119,6 +123,7 @@ module AgentCore
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
               auto_compacted: false,
+              fit_tactics_applied: memory_dropped,
             )
           end
 
@@ -139,6 +144,7 @@ module AgentCore
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
               auto_compacted: false,
+              fit_tactics_applied: memory_dropped || fit_decisions_applied?(decisions),
             )
           end
 
@@ -168,6 +174,7 @@ module AgentCore
             decisions: [],
             limit_turns: current_limit_turns(context_nodes),
             auto_compacted: false,
+            fit_tactics_applied: false,
           )
         end
 
@@ -238,6 +245,7 @@ module AgentCore
               decisions: decisions,
               limit_turns: limit_turns,
               auto_compacted: auto_compacted,
+              fit_tactics_applied: true,
             )
           end
 
@@ -271,6 +279,7 @@ module AgentCore
               decisions: decisions,
               limit_turns: 1,
               auto_compacted: auto_compacted,
+              fit_tactics_applied: true,
             )
           end
 
@@ -386,18 +395,19 @@ module AgentCore
         end
 
         def prepare_turn_input(build:, limit:)
+          budget_facts = budget_facts_for(build: build, limit: limit)
+
           AgentCore::RuntimeSurface::Inputs::PrepareTurn.new(
             prompt: build.built_prompt.to_h,
             context: build.context_nodes,
             budget: {
-              context_window_tokens: @runtime.context_window_tokens,
-              reserved_output_tokens: @runtime.reserved_output_tokens,
-              limit: limit,
-              estimated_tokens: build.estimate,
+              effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
+              effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
+              estimated_tokens: estimated_total(build.estimate),
+              budget_state: budget_facts.fetch(:budget_state),
             }.compact,
             capabilities: {
               prompt_mode: @runtime.prompt_mode,
-              auto_compact: @runtime.auto_compact,
             },
             helpers: nil,
           )
@@ -426,11 +436,13 @@ module AgentCore
             decisions: decisions,
             limit_turns: build.limit_turns,
             auto_compacted: build.auto_compacted,
+            fit_tactics_applied: build.fit_tactics_applied,
           )
         end
 
         def context_cost_report(build, prepared:, limit:)
           estimate = build.estimate.is_a?(Hash) ? build.estimate : {}
+          budget_facts = budget_facts_for(build: build, limit: limit)
           token_counter = @runtime.token_counter
 
           memory_results = build.memory_dropped ? [] : Array(prepared.memory_results)
@@ -482,11 +494,17 @@ module AgentCore
 
           {
             "context_window_tokens" => @runtime.context_window_tokens,
+            "effective_context_window_tokens" => budget_facts.fetch(:effective_context_window_tokens),
+            "model_context_window_tokens" => budget_facts.fetch(:model_context_window_tokens, nil),
+            "provider_context_window_tokens" => budget_facts.fetch(:provider_context_window_tokens, nil),
             "reserved_output_tokens" => @runtime.reserved_output_tokens,
-            "limit" => limit,
+            "effective_prompt_budget_tokens" => budget_facts.fetch(:effective_prompt_budget_tokens, nil),
+            "context_soft_limit_tokens" => budget_facts.fetch(:context_soft_limit_tokens, nil),
+            "context_soft_limit_ratio" => budget_facts.fetch(:context_soft_limit_ratio, nil),
+            "effective_context_soft_limit_tokens" => budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
+            "budget_state" => budget_facts.fetch(:budget_state),
             "memory_dropped" => build.memory_dropped,
             "limit_turns" => build.limit_turns,
-            "auto_compact" => @runtime.auto_compact,
             "estimated_tokens" => {
               "total" => estimate.fetch(:total, nil),
               "messages" => estimate.fetch(:messages, nil),
@@ -505,8 +523,15 @@ module AgentCore
         rescue StandardError
           {
             "context_window_tokens" => @runtime.context_window_tokens,
+            "effective_context_window_tokens" => @runtime.context_window_tokens,
+            "model_context_window_tokens" => @runtime.model_context_window_tokens,
+            "provider_context_window_tokens" => @runtime.provider_context_window_tokens,
             "reserved_output_tokens" => @runtime.reserved_output_tokens,
-            "limit" => limit,
+            "effective_prompt_budget_tokens" => limit,
+            "context_soft_limit_tokens" => @runtime.context_soft_limit_tokens,
+            "context_soft_limit_ratio" => @runtime.context_soft_limit_ratio,
+            "effective_context_soft_limit_tokens" => effective_context_soft_limit_tokens(limit: limit),
+            "budget_state" => budget_state_for(build: build, limit: limit, effective_context_soft_limit_tokens: effective_context_soft_limit_tokens(limit: limit)),
             "estimated_tokens" => {
               "total" => estimate.fetch(:total, nil),
               "messages" => estimate.fetch(:messages, nil),
@@ -819,6 +844,71 @@ module AgentCore
           turn_ids.length
         rescue StandardError
           @runtime.context_turns
+        end
+
+        def budget_facts_for(build:, limit:)
+          effective_context_soft_limit_tokens = effective_context_soft_limit_tokens(limit: limit)
+
+          {
+            effective_context_window_tokens: @runtime.context_window_tokens,
+            model_context_window_tokens: @runtime.model_context_window_tokens,
+            provider_context_window_tokens: @runtime.provider_context_window_tokens,
+            effective_prompt_budget_tokens: limit,
+            context_soft_limit_tokens: @runtime.context_soft_limit_tokens,
+            context_soft_limit_ratio: @runtime.context_soft_limit_ratio,
+            effective_context_soft_limit_tokens: effective_context_soft_limit_tokens,
+            budget_state: budget_state_for(
+              build: build,
+              limit: limit,
+              effective_context_soft_limit_tokens: effective_context_soft_limit_tokens,
+            ),
+          }
+        end
+
+        def effective_context_soft_limit_tokens(limit:)
+          return nil if limit.nil?
+
+          token_limit = @runtime.context_soft_limit_tokens
+          ratio_limit =
+            if @runtime.context_soft_limit_ratio.nil?
+              nil
+            else
+              (limit * @runtime.context_soft_limit_ratio).floor
+            end
+
+          soft_limit = [token_limit, ratio_limit].compact.min
+          return nil if soft_limit.nil?
+
+          [soft_limit, limit].min
+        end
+
+        def budget_state_for(build:, limit:, effective_context_soft_limit_tokens:)
+          return "normal" if limit.nil?
+          return "forced_fit" if build.fit_tactics_applied
+
+          estimate_total = estimated_total(build.estimate)
+          near_hard_cap_threshold = (limit * NEAR_HARD_CAP_RATIO).floor
+
+          return "near_hard_cap" if estimate_total >= near_hard_cap_threshold
+          return "soft_limit_reached" if !effective_context_soft_limit_tokens.nil? && estimate_total >= effective_context_soft_limit_tokens
+
+          "normal"
+        end
+
+        def estimated_total(estimate)
+          return 0 unless estimate.is_a?(Hash)
+
+          estimate.fetch(:total, 0)
+        rescue StandardError
+          0
+        end
+
+        def fit_decisions_applied?(decisions)
+          Array(decisions).any? do |decision|
+            next false unless decision.is_a?(Hash)
+
+            %w[drop_memory_results prune_tool_outputs shrink_turns].include?(decision.fetch("type", nil).to_s)
+          end
         end
 
         def try_auto_compact!(from_context_nodes:, to_context_nodes:)

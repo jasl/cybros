@@ -2,6 +2,17 @@ require "test_helper"
 require "securerandom"
 
 class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::TestCase
+  class BudgetCapturingSurface < AgentCore::RuntimeSurface::Base
+    class << self
+      attr_accessor :last_input
+    end
+
+    def prepare_turn(input:)
+      self.class.last_input = input
+      AgentCore::RuntimeSurface::Decisions::Pass.new
+    end
+  end
+
   class RewritingSurface < AgentCore::RuntimeSurface::Base
     def prepare_turn(input:)
       prompt = input.prompt.dup
@@ -79,7 +90,131 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
     assert_includes decisions, { "type" => "prepare_turn_rewrite", "applied" => false, "reason" => "budget_exceeded", "fallback" => false }
   end
 
+  test "prepare_turn budget payload only exposes effective budget facts and state" do
+    agent_node, graph = build_simple_turn!
+    estimate = estimate_for(agent_node, graph)
+
+    BudgetCapturingSurface.last_input = nil
+
+    build_prompt(
+      agent_node,
+      graph,
+      context_window_tokens: estimate + 100,
+      model_context_window_tokens: estimate + 160,
+      provider_context_window_tokens: estimate + 120,
+      context_soft_limit_tokens: estimate,
+      context_soft_limit_ratio: 0.95,
+      runtime_surface: BudgetCapturingSurface.new,
+      runtime_surface_runner: AgentCore::RuntimeSurface::Runner.new,
+    )
+
+    budget = BudgetCapturingSurface.last_input.budget
+
+    assert_equal %i[budget_state effective_context_soft_limit_tokens effective_prompt_budget_tokens estimated_tokens], budget.keys.sort
+    assert_equal estimate + 100, budget.fetch(:effective_prompt_budget_tokens)
+    assert_equal estimate, budget.fetch(:effective_context_soft_limit_tokens)
+    assert_equal estimate, budget.fetch(:estimated_tokens)
+    assert_equal "soft_limit_reached", budget.fetch(:budget_state)
+  end
+
+  test "effective soft limit uses tokens ratio or the stricter of both" do
+    agent_node, graph = build_simple_turn!
+
+    tokens_only =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: 4000,
+        reserved_output_tokens: 100,
+        context_soft_limit_tokens: 2200,
+      )
+    ratio_only =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: 4000,
+        reserved_output_tokens: 100,
+        context_soft_limit_ratio: 0.5,
+      )
+    both =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: 4000,
+        reserved_output_tokens: 100,
+        context_soft_limit_tokens: 2200,
+        context_soft_limit_ratio: 0.5,
+      )
+
+    assert_equal 2200, tokens_only.metadata.fetch("context_cost").fetch("effective_context_soft_limit_tokens")
+    assert_equal 1950, ratio_only.metadata.fetch("context_cost").fetch("effective_context_soft_limit_tokens")
+    assert_equal 1950, both.metadata.fetch("context_cost").fetch("effective_context_soft_limit_tokens")
+  end
+
+  test "budget state transitions cover normal soft_limit_reached and near_hard_cap" do
+    agent_node, graph = build_simple_turn!
+    estimate = estimate_for(agent_node, graph)
+
+    normal =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: estimate + 200,
+        context_soft_limit_tokens: estimate + 50,
+      )
+    soft_limit_reached =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: estimate + 200,
+        context_soft_limit_tokens: estimate,
+      )
+    near_hard_cap =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: estimate + 1,
+      )
+
+    assert_equal "normal", normal.metadata.fetch("context_cost").fetch("budget_state")
+    assert_equal "soft_limit_reached", soft_limit_reached.metadata.fetch("context_cost").fetch("budget_state")
+    assert_equal "near_hard_cap", near_hard_cap.metadata.fetch("context_cost").fetch("budget_state")
+  end
+
   private
+
+    def estimate_for(agent_node, graph)
+      result = build_prompt(agent_node, graph)
+      result.metadata.fetch("context_cost").fetch("estimated_tokens").fetch("total")
+    end
+
+    def build_prompt(agent_node, graph, **runtime_overrides)
+      runtime =
+        AgentCore::DAG::Runtime.new(
+          provider: Object.new,
+          model: "test-model",
+          tools_registry: AgentCore::Resources::Tools::Registry.new,
+          token_counter: precise_token_counter,
+          **runtime_overrides,
+        )
+
+      manager =
+        AgentCore::DAG::ContextBudgetManager.new(
+          node: agent_node,
+          runtime: runtime,
+          execution_context: {},
+        )
+
+      manager.build_prompt(context_nodes: graph.context_for_full(agent_node.id))
+    end
+
+    def precise_token_counter
+      AgentCore::Resources::TokenCounter::HeuristicWithOverhead.new(
+        chars_per_token: 1.0,
+        non_ascii_chars_per_token: 1.0,
+        per_message_overhead: 0,
+      )
+    end
 
     def build_simple_turn!
       conversation = create_conversation!

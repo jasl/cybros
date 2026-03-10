@@ -94,8 +94,12 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
             soft_trim_tail_chars: 4,
             hard_clear_enabled: false,
           ),
-        context_window_tokens: 1500,
-        reserved_output_tokens: 0,
+        context_window_tokens: 1600,
+        model_context_window_tokens: 1800,
+        provider_context_window_tokens: 1600,
+        context_soft_limit_tokens: 1200,
+        context_soft_limit_ratio: 0.9,
+        reserved_output_tokens: 100,
         token_counter: AgentCore::Resources::TokenCounter::Heuristic.new(chars_per_token: 1.0, non_ascii_chars_per_token: 1.0),
       )
 
@@ -126,6 +130,15 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
       ctx_cost = a3.metadata.fetch("context_cost")
       decisions = ctx_cost.fetch("decisions")
       assert decisions.any? { |d| d["type"] == "prune_tool_outputs" }
+
+      assert_equal "forced_fit", ctx_cost.fetch("budget_state")
+      assert_equal 1600, ctx_cost.fetch("effective_context_window_tokens")
+      assert_equal 1800, ctx_cost.fetch("model_context_window_tokens")
+      assert_equal 1600, ctx_cost.fetch("provider_context_window_tokens")
+      assert_equal 1500, ctx_cost.fetch("effective_prompt_budget_tokens")
+      assert_equal 1200, ctx_cost.fetch("context_soft_limit_tokens")
+      assert_equal 0.9, ctx_cost.fetch("context_soft_limit_ratio")
+      assert_equal 1200, ctx_cost.fetch("effective_context_soft_limit_tokens")
 
       assert_equal 3, ctx_cost.fetch("limit_turns")
       refute decisions.any? { |d| d["type"] == "shrink_turns" }
