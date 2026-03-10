@@ -30,6 +30,17 @@ module DAG
     has_many :turns,
              class_name: "DAG::Turn",
              inverse_of: :lane
+    has_many :lane_kv_entries,
+             class_name: "LaneKVEntry",
+             foreign_key: :lane_id,
+             dependent: :destroy,
+             inverse_of: :lane
+    has_many :lane_prompt_buffer_entries,
+             -> { order(:seq, :id) },
+             class_name: "LanePromptBufferEntry",
+             foreign_key: :lane_id,
+             dependent: :destroy,
+             inverse_of: :lane
 
     validates :role, inclusion: { in: ROLES }
     validate :lane_relationships_must_match_graph

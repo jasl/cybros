@@ -1,11 +1,11 @@
-class ConversationKVEntry < ApplicationRecord
-  belongs_to :conversation
+class LaneKVEntry < ApplicationRecord
+  belongs_to :lane, class_name: "DAG::Lane"
   belongs_to :written_by, polymorphic: true, optional: true
 
   before_validation :normalize_key
   before_validation :normalize_value
 
-  validates :key, presence: true, uniqueness: { scope: :conversation_id }
+  validates :key, presence: true, uniqueness: { scope: :lane_id }
 
   validate :value_must_not_be_nil
   validate :writer_attribution_must_be_complete

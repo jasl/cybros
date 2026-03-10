@@ -781,8 +781,9 @@ class Conversation < ApplicationRecord
       title = "Conversation" if title.blank?
 
       graph = root_graph
+      source_lane = chat_lane
       from_node = graph.nodes.active.find(from_node_id)
-      raise ArgumentError, "wrong lane" unless from_node.lane_id.to_s == chat_lane.id.to_s
+      raise ArgumentError, "wrong lane" unless from_node.lane_id.to_s == source_lane.id.to_s
       raise ArgumentError, "from_node must be terminal" unless from_node.terminal?
       raise Cybros::Error, "cannot fork from deleted node" if from_node.deleted?
       raise Cybros::Error, "node type is not forkable: #{from_node.node_type}" unless from_node.body&.forkable?
@@ -810,7 +811,9 @@ class Conversation < ApplicationRecord
           root_node = fork_child_root_node!(mutations: m, from_node: from_node, user_content: user_content)
         end
 
-        root_node.lane.update!(attachable: child)
+        child_lane = root_node.lane
+        child_lane.update!(attachable: child)
+        snapshot_lane_state!(source_lane: source_lane, target_lane: child_lane)
       end
 
       child
@@ -1249,6 +1252,76 @@ class Conversation < ApplicationRecord
         content: seeded_user_content,
         metadata: {},
       )
+    end
+
+    def snapshot_lane_state!(source_lane:, target_lane:)
+      apply_lane_state_snapshot!(lane: target_lane, snapshot: lane_state_snapshot(lane: source_lane))
+    end
+
+    def lane_state_snapshot(lane: chat_lane)
+      {
+        "kv_entries" =>
+          lane.lane_kv_entries.order(:key, :id).map do |entry|
+            {
+              "key" => entry.key,
+              "value" => snapshot_json(entry.value),
+              "written_by_type" => entry.written_by_type,
+              "written_by_id" => entry.written_by_id,
+            }
+          end,
+        "prompt_buffer_entries" =>
+          lane.lane_prompt_buffer_entries.ordered.map do |entry|
+            {
+              "buffer_name" => entry.buffer_name,
+              "seq" => entry.seq,
+              "kind" => entry.kind,
+              "content" => entry.content,
+              "priority" => entry.priority,
+              "estimated_tokens" => entry.estimated_tokens,
+              "metadata" => snapshot_json(entry.metadata),
+            }
+          end,
+      }
+    end
+
+    def apply_lane_state_snapshot!(lane:, snapshot:)
+      snapshot = snapshot.is_a?(Hash) ? snapshot.deep_stringify_keys : {}
+
+      Array(snapshot["kv_entries"]).each do |entry|
+        next unless entry.is_a?(Hash)
+
+        lane.lane_kv_entries.create!(
+          key: entry["key"],
+          value: snapshot_json(entry["value"]),
+          written_by_type: entry["written_by_type"],
+          written_by_id: entry["written_by_id"],
+        )
+      end
+
+      Array(snapshot["prompt_buffer_entries"]).each do |entry|
+        next unless entry.is_a?(Hash)
+
+        lane.lane_prompt_buffer_entries.create!(
+          buffer_name: entry["buffer_name"],
+          seq: entry["seq"],
+          kind: entry["kind"],
+          content: entry["content"],
+          priority: entry["priority"],
+          estimated_tokens: entry["estimated_tokens"],
+          metadata: snapshot_json(entry["metadata"]),
+        )
+      end
+    end
+
+    def snapshot_json(value)
+      case value
+      when Hash
+        value.deep_dup
+      when Array
+        value.map { |element| snapshot_json(element) }
+      else
+        value
+      end
     end
 
     def decorate_transcript_page(page)

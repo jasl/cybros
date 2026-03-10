@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -189,20 +189,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.index ["user_id"], name: "index_automations_on_user_id"
   end
 
-  create_table "conversation_kv_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.uuid "conversation_id", null: false
-    t.datetime "created_at", null: false
-    t.string "key", null: false
-    t.datetime "updated_at", null: false
-    t.jsonb "value", default: {}, null: false
-    t.uuid "written_by_id"
-    t.string "written_by_type"
-    t.index ["conversation_id", "key"], name: "index_conversation_kv_entries_on_conversation_id_and_key", unique: true
-    t.index ["conversation_id"], name: "index_conversation_kv_entries_on_conversation_id"
-    t.index ["written_by_type", "written_by_id"], name: "idx_on_written_by_type_written_by_id_425410460d"
-    t.check_constraint "btrim(key::text) <> ''::text", name: "check_conversation_kv_entries_key_present"
-  end
-
   create_table "conversation_runs", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.string "agent_config_schema_fingerprint"
     t.uuid "agent_deployment_id", null: false
@@ -289,7 +275,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
     t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
-    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying, 'dependency'::character varying, 'branch'::character varying]::text[])", name: "check_dag_edges_edge_type_enum"
+    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying::text, 'dependency'::character varying::text, 'branch'::character varying::text])", name: "check_dag_edges_edge_type_enum"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
   end
 
@@ -326,7 +312,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.index ["graph_id"], name: "index_dag_lanes_on_graph_id"
     t.check_constraint "merged_into_lane_id IS NULL OR merged_into_lane_id <> id", name: "check_dag_lanes_no_self_merge"
     t.check_constraint "parent_lane_id IS NULL OR parent_lane_id <> id", name: "check_dag_lanes_no_self_parent"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_dag_lanes_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_dag_lanes_role_enum"
   end
 
   create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -406,9 +392,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'awaiting_approval'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying::text, 'awaiting_approval'::character varying::text, 'running'::character varying::text, 'finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -515,6 +501,40 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.string "password_digest", null: false
     t.datetime "updated_at", null: false
     t.index ["email"], name: "index_identities_on_email", unique: true
+  end
+
+  create_table "lane_kv_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.datetime "created_at", null: false
+    t.string "key", null: false
+    t.uuid "lane_id", null: false
+    t.datetime "updated_at", null: false
+    t.jsonb "value", default: {}, null: false
+    t.uuid "written_by_id"
+    t.string "written_by_type"
+    t.index ["lane_id", "key"], name: "index_lane_kv_entries_on_lane_id_and_key", unique: true
+    t.index ["lane_id"], name: "index_lane_kv_entries_on_lane_id"
+    t.index ["written_by_type", "written_by_id"], name: "index_lane_kv_entries_on_written_by_type_and_written_by_id"
+    t.check_constraint "btrim(key::text) <> ''::text", name: "check_lane_kv_entries_key_present"
+  end
+
+  create_table "lane_prompt_buffer_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.string "buffer_name", null: false
+    t.text "content", null: false
+    t.datetime "created_at", null: false
+    t.integer "estimated_tokens", default: 0, null: false
+    t.string "kind", null: false
+    t.uuid "lane_id", null: false
+    t.jsonb "metadata", default: {}, null: false
+    t.integer "priority", default: 0, null: false
+    t.integer "seq", null: false
+    t.datetime "updated_at", null: false
+    t.index ["lane_id", "buffer_name", "priority", "seq"], name: "index_lane_prompt_buffer_entries_on_lane_buffer_priority_seq"
+    t.index ["lane_id", "buffer_name", "seq"], name: "index_lane_prompt_buffer_entries_on_lane_buffer_seq", unique: true
+    t.index ["lane_id"], name: "index_lane_prompt_buffer_entries_on_lane_id"
+    t.check_constraint "btrim(buffer_name::text) <> ''::text", name: "check_lane_prompt_buffer_entries_buffer_name_present"
+    t.check_constraint "btrim(content) <> ''::text", name: "check_lane_prompt_buffer_entries_content_present"
+    t.check_constraint "estimated_tokens >= 0", name: "check_lane_prompt_buffer_entries_estimated_tokens_nonnegative"
+    t.check_constraint "seq > 0", name: "check_lane_prompt_buffer_entries_seq_positive"
   end
 
   create_table "llm_provider_credentials", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -718,7 +738,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
   add_foreign_key "automations", "agent_programs"
   add_foreign_key "automations", "execution_targets"
   add_foreign_key "automations", "users"
-  add_foreign_key "conversation_kv_entries", "conversations"
   add_foreign_key "conversation_runs", "agent_deployments"
   add_foreign_key "conversation_runs", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_conversation_runs_deploy_program"
   add_foreign_key "conversation_runs", "agent_programs"
@@ -757,6 +776,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
   add_foreign_key "execution_targets", "execution_locations"
   add_foreign_key "execution_targets", "workspaces"
   add_foreign_key "execution_targets", "workspaces", column: ["workspace_id", "execution_location_id"], primary_key: ["id", "execution_location_id"], name: "fk_execution_targets_workspace_location"
+  add_foreign_key "lane_kv_entries", "dag_lanes", column: "lane_id"
+  add_foreign_key "lane_prompt_buffer_entries", "dag_lanes", column: "lane_id"
   add_foreign_key "provider_budget_reservations", "llm_provider_credentials", column: "provider_credential_id"
   add_foreign_key "run_drafts", "agent_deployments"
   add_foreign_key "run_drafts", "agent_deployments", column: ["agent_deployment_id", "agent_program_id"], primary_key: ["id", "agent_program_id"], name: "fk_run_drafts_deployment_program"
