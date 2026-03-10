@@ -12,13 +12,15 @@ Current Cybros still mixes two product models:
 
 - the current product docs define programmable agents as external, deployment-bound, and `agent_rpc`-driven
 - the interactive conversation runtime still contains a builtin fallback that materializes a direct `ConversationRun` when `conversation.agent_program_id` is blank
-- the bundled `default-assistant` under `agents/profiles/default-assistant` is only a declarative profile with `runtime_surface.type: noop`, not a real external runtime
+- the legacy `default-assistant` profile under `agents/profiles/default-assistant` is only a declarative profile with `runtime_surface.type: noop`, not a real external runtime
+- the new `agents/default` directory is currently only a Bundler-generated gem skeleton, not yet a real programmable-agent program
 
 That leaves the product in the worst possible state:
 
 - the default user path is not programmable
 - the canonical `RunDraft -> ConversationRun -> agent_rpc deployment` lifecycle is bypassed
 - copying a bundled agent cannot preserve capability parity because the bundled path is not using the same runtime contract
+- the bundled source tree does not yet have a program structure suitable for agent-owned tests, adapters, or domain extensions
 
 ## Decision
 
@@ -52,6 +54,13 @@ Bundled agents may have bootstrap and operator-UX conveniences, but they must no
 `cybros/agents` becomes the official bundled-agent source directory. It is product-owned, versioned with Cybros, and treated as read-only application content.
 
 Each bundled agent is represented in product state by a normal `AgentProgram`. The default bundled agent is pre-created and paired with a normal `AgentDeployment`.
+
+The official bundled key for the first agent should be `default`.
+
+The legacy `default-assistant` name remains only as migration input:
+
+- legacy profile rows or profile references may be migrated from `default-assistant`
+- the post-cut bundled runtime identity should be singular and should live under `agents/default`
 
 ### Companion Host
 
@@ -101,6 +110,128 @@ Bundled-only behavior is limited to:
 - convenience actions such as copy/fork and upgrade hints
 
 Bundled-only runtime power is explicitly out of scope. If a capability exists, it must be available to any external agent that satisfies the same explicit contract.
+
+## Programmable-Agent Capability Model
+
+The point of this cut is not only to externalize the default agent. It is also to establish what a Cybros programmable agent is expected to be able to express.
+
+### Current Contract Floor
+
+Current Cybros already gives programmable agents a real but narrow canonical contract:
+
+- `turn.prepare` for planning against a mutable `RunDraft`
+- `turn.compose` and `turn.handle_error` for immutable run-bound output hooks
+- bounded callback access to:
+  - `conversation.settings.*`
+  - `conversation.config.*`
+  - `conversation.kv.*`
+  - `execution_target.*`
+
+That floor is enough to support:
+
+- explicit agent identity and deployment binding
+- declarative planning logic
+- conversation-scoped settings/config/KV mutations
+- execution-target discovery and switching proposals
+- Cybros-owned approval, finalization, runtime governance, tool policy, and audit
+
+### Capability Split
+
+The intended split for Cybros programmable agents is:
+
+- Cybros substrate owns:
+  - canonical run lifecycle
+  - tool loop and governed execution
+  - approvals and runtime governance
+  - transcript, audit, and deployment binding
+  - stable kernel service surfaces
+- agent programs own:
+  - prompt-planning logic
+  - persona and workflow logic
+  - domain-specific orchestration
+  - agent-private adapters, plugins, or off-loop services
+
+That means the external agent must be a complete program, not a prompt bundle or profile asset.
+
+### Capability Direction By Agent Class
+
+The target product should eventually be able to express all of these classes without moving the canonical loop out of Cybros:
+
+- general / universal agents
+- coding agents
+- research agents
+- trading agents
+- chat / roleplay / companion agents
+
+The current substrate is already closest to coding and general-assistant use cases because execution governance, workspace routing, browser/file/shell tooling, and audited turn control naturally belong in Cybros.
+
+The biggest remaining substrate gaps for the later challenge classes are:
+
+- memory as a real programmable canonical surface rather than only an implementation direction
+- knowledge / retrieval with provenance and citation semantics
+- channel / connector / event surfaces for always-on and multi-surface agents
+- media / artifact surfaces for richer chat, character, and desktop-style agents
+- long-running event, wakeup, and risk-oriented surfaces for trading-style agents
+
+These are substrate gaps, not reasons to move loop ownership back into the agent.
+
+## Bundled Agent Program Structure
+
+The bundled default agent should live under `agents/default` as a real agent program.
+
+The structure should be gem-style for discipline and testability, but not a RubyGems package:
+
+```text
+agents/default/
+  agent.yml
+  README.md
+  Gemfile
+  Rakefile
+  bin/
+    setup
+    server
+    test
+    console
+  lib/
+    cybros/
+      agents/
+        default/
+          application.rb
+          identity.rb
+          manifest.rb
+          rpc_server.rb
+          rpc_dispatcher.rb
+          hooks/
+            prepare.rb
+            compose.rb
+            handle_error.rb
+          domain/
+          adapters/
+  prompts/
+    AGENT.md
+    SOUL.md
+    USER.md
+    system.md.liquid
+  test/
+    test_helper.rb
+    unit/
+    integration/
+```
+
+Hard rules for the bundled source tree:
+
+- no nested `.git`
+- no `.gemspec`
+- no RubyGems release/install semantics
+- no deployment runtime config written back into the source tree
+- prompt assets may live in the program tree, but they are no longer the runtime source of truth by themselves
+
+This gives the bundled default agent the minimum shape needed for:
+
+- direct RPC contract tests
+- unit tests for planning/composition logic
+- explicit domain adapters and future category-specific extensions
+- a clean copy-as-custom source bootstrap
 
 ## Source Ownership And Copy-As-Custom
 
@@ -271,7 +402,7 @@ This should be a hard cut, not a long-lived compatibility layer.
 3. Remove `Built-in` from conversation UI.
 4. Remove the builtin fallback code path.
 5. Backfill historical builtin conversations onto an explicit system-created default bundled `AgentProgram`.
-6. Migrate or collapse legacy `profile_source: "default-assistant"` `AgentProgram` rows so there is only one official bundled default identity.
+6. Migrate or collapse legacy `profile_source: "default-assistant"` `AgentProgram` rows so there is only one official bundled default identity with bundled key `default`.
 7. Keep only enough trace metadata to explain that historical records originated on the legacy builtin path.
 
 After the cut, the product mental model is singular:
@@ -289,8 +420,39 @@ These assumptions are intentionally narrow so the first implementation lands qui
 - the first operator-configured path is the user-owned agent workspace root
 - the first deployment config generator can live under the shared runtime-visible root as a deployment-owned file, rather than introducing a separate orchestration service
 - `AgentProgram` path handling may need to move from repo-relative `local_path` semantics to a path model that can represent mounted user-owned roots explicitly
+- the first bundled agent only needs to clear an acceptance bar equivalent to a high-quality general assistant plus a light coding agent; it does not need to clear the full research / trading / roleplay challenge suite on day one
+- the first bundled source should reshape `agents/default` into the canonical bundled agent program and absorb the useful prompt assets from the legacy `default-assistant` profile
 - if arbitrary custom deployments cannot yet be auto-launched, milestone 1 must explicitly scope them to generated-config readiness rather than false "immediately runnable" promises
 - deeper git automation, upstream merge flows, and multi-host orchestration stay out of scope
+
+## Acceptance And Challenge Strategy
+
+Milestone 1 should be accepted only if the bundled default external agent can act as:
+
+- the default interactive Cybros agent
+- a strong general assistant
+- a light coding agent that can reason over a workspace while still delegating governed execution and loop control back to Cybros
+
+After that first acceptance, Cybros should use progressively harder reference classes as challenge suites:
+
+1. general / universal agents
+2. research and chat / roleplay agents
+3. trading agents
+
+The purpose of those challenge suites is not to force all category logic into the bundled default agent.
+
+Their purpose is to expose which missing capabilities belong to:
+
+- Cybros substrate
+- the programmable-agent contract
+- the bundled agent package
+- category-specific agent programs
+
+The passing standard is therefore architectural:
+
+- agent loop orchestration remains Cybros-owned
+- category logic remains largely agent-owned
+- any capability needed across multiple categories eventually graduates into Cybros substrate rather than being left as bundled-agent-only magic
 
 ## Non-Goals
 

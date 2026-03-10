@@ -8,6 +8,31 @@
 
 **Tech Stack:** Ruby on Rails, ActiveRecord migrations, Hotwire/ERB, JSON-RPC `agent_rpc`, git CLI, Procfile.dev, Docker Compose
 
+## Milestone 1 Acceptance Bar
+
+Milestone 1 does not try to prove that Cybros can already fully replicate every target agent category.
+
+It must prove these narrower claims:
+
+- Cybros can run its own default agent as a real external programmable agent
+- the bundled default agent is a complete source program under `agents/default`, not a profile asset or placeholder gem packaging scaffold
+- the bundled default agent is good enough to serve as the product's default interactive assistant
+- the bundled default agent can also clear a light coding-agent bar while keeping loop ownership, policy, approvals, and governed execution inside Cybros
+
+After that first acceptance, the project should use these reference classes as challenge suites to refine the substrate:
+
+- general / universal agents
+- research agents
+- chat / roleplay / companion agents
+- trading agents
+
+Challenge-suite failures should be used to decide whether the missing capability belongs in:
+
+- Cybros substrate
+- the programmable-agent contract
+- the bundled default agent package
+- or a category-specific external agent
+
 ---
 
 ### Task 1: Model Source Ownership And Workspace Root
@@ -35,7 +60,7 @@ test "bundled programs require bundled_agent_key" do
     name: "Default assistant",
     source_kind: "bundled",
     bundled_agent_key: "",
-    local_path: "agents/default-assistant"
+    local_path: "agents/default"
   )
 
   assert_not program.valid?
@@ -112,15 +137,42 @@ git commit -m "feat: model bundled agent source ownership"
 ### Task 2: Ship The Bundled Default Agent Package And External Host
 
 **Files:**
-- Create: `agents/default-assistant/agent.yml`
-- Create: `agents/default-assistant/README.md`
+- Create: `agents/default/agent.yml`
+- Create: `agents/default/bin/server`
+- Create: `agents/default/bin/test`
+- Create: `agents/default/lib/cybros/agents/default.rb`
+- Create: `agents/default/lib/cybros/agents/default/application.rb`
+- Create: `agents/default/lib/cybros/agents/default/identity.rb`
+- Create: `agents/default/lib/cybros/agents/default/manifest.rb`
+- Create: `agents/default/lib/cybros/agents/default/rpc_server.rb`
+- Create: `agents/default/lib/cybros/agents/default/rpc_dispatcher.rb`
+- Create: `agents/default/lib/cybros/agents/default/hooks/prepare.rb`
+- Create: `agents/default/lib/cybros/agents/default/hooks/compose.rb`
+- Create: `agents/default/lib/cybros/agents/default/hooks/handle_error.rb`
+- Create: `agents/default/prompts/AGENT.md`
+- Create: `agents/default/prompts/SOUL.md`
+- Create: `agents/default/prompts/USER.md`
+- Create: `agents/default/prompts/system.md.liquid`
+- Create: `agents/default/test/unit/manifest_test.rb`
+- Create: `agents/default/test/integration/rpc_contract_test.rb`
+- Modify: `agents/default/README.md`
+- Modify: `agents/default/Gemfile`
+- Modify: `agents/default/Rakefile`
 - Create: `bin/default_agent_host`
 - Create: `lib/cybros/bundled_agent_host/application.rb`
 - Create: `lib/cybros/bundled_agent_host/router.rb`
 - Create: `app/services/agent_programs/bundled_sources.rb`
 - Modify: `app/services/agent_programs/creator.rb`
 - Modify: `app/services/agent_programs/loader.rb`
+- Delete: `agents/default/default.gemspec`
+- Delete: `agents/default/lib/default.rb`
+- Delete: `agents/default/lib/default/version.rb`
+- Delete: `agents/default/test/test_default.rb`
 - Delete: `agents/profiles/default-assistant/agent.yml`
+- Delete: `agents/profiles/default-assistant/AGENT.md`
+- Delete: `agents/profiles/default-assistant/SOUL.md`
+- Delete: `agents/profiles/default-assistant/USER.md`
+- Delete: `agents/profiles/default-assistant/prompts/system.md.liquid`
 - Test: `test/integration/agent_programs_test.rb`
 - Test: `test/integration/agent_deployments_inspection_test.rb`
 - Test: `test/lib/cybros/bundled_agent_host_test.rb`
@@ -130,17 +182,24 @@ git commit -m "feat: model bundled agent source ownership"
 Add tests that prove:
 
 ```ruby
-test "bundled source registry exposes default assistant" do
-  assert_includes AgentPrograms::BundledSources.available_keys, "default-assistant"
+test "bundled source registry exposes the default bundled agent" do
+  assert_includes AgentPrograms::BundledSources.available_keys, "default"
 end
 
-test "default agent host responds to required methods" do
-  host = Cybros::BundledAgentHost::Application.new(source_root: Rails.root.join("agents/default-assistant"))
+test "default bundled agent host responds to required methods" do
+  host = Cybros::BundledAgentHost::Application.new(source_root: Rails.root.join("agents/default"))
 
   assert_includes host.supported_methods, "initialize"
   assert_includes host.supported_methods, "turn.prepare"
   assert_includes host.supported_methods, "turn.compose"
   assert_includes host.supported_methods, "turn.handle_error"
+end
+
+test "bundled default agent package exposes manifest and rpc contract" do
+  manifest = Cybros::Agents::Default::Manifest.load!(source_root: Rails.root.join("agents/default"))
+
+  assert_equal "default", manifest.fetch("agent_program_key")
+  assert_includes manifest.fetch("supported_methods"), "turn.prepare"
 end
 ```
 
@@ -154,12 +213,17 @@ Expected: missing files/constants and failing expectations around bundled-source
 
 Land the first milestone as:
 
-- `agents/default-assistant/agent.yml` describes the official bundled agent source
+- `agents/default` becomes a real agent program rather than a placeholder gem scaffold
+- `agents/default/agent.yml` describes the official bundled agent source
+- `agents/default` keeps gem-style app structure for discipline and testability, but removes RubyGems packaging semantics
+- the legacy prompt assets move from `agents/profiles/default-assistant` into `agents/default/prompts`
+- the bundled source must not include nested `.git`
 - `bin/default_agent_host` boots a standalone Ruby process
 - `lib/cybros/bundled_agent_host/**` serves the required `agent_rpc` methods
 - `AgentPrograms::BundledSources` replaces bundled-profile discovery
 - `AgentPrograms::Creator` can create programs from bundled sources, not only copied no-op profiles
-- the bundled source carries an immutable official `agent_program_key`
+- the bundled source carries an immutable official `agent_program_key` of `default`
+- the bundled agent package includes its own unit and RPC contract tests so the copied source remains testable as a standalone program
 
 Use the current programmable-agent fixture behavior as the contract floor, not as a hidden runtime path.
 
@@ -167,12 +231,14 @@ Use the current programmable-agent fixture behavior as the contract floor, not a
 
 Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/agent_programs_test.rb test/integration/agent_deployments_inspection_test.rb test/lib/cybros/bundled_agent_host_test.rb`
 
+Run: `cd agents/default && bundle exec ruby -Itest test/unit/manifest_test.rb test/integration/rpc_contract_test.rb`
+
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add agents/default-assistant/agent.yml agents/default-assistant/README.md bin/default_agent_host lib/cybros/bundled_agent_host/application.rb lib/cybros/bundled_agent_host/router.rb app/services/agent_programs/bundled_sources.rb app/services/agent_programs/creator.rb app/services/agent_programs/loader.rb test/integration/agent_programs_test.rb test/integration/agent_deployments_inspection_test.rb test/lib/cybros/bundled_agent_host_test.rb
+git add agents/default/agent.yml agents/default/README.md agents/default/Gemfile agents/default/Rakefile agents/default/bin/server agents/default/bin/test agents/default/lib/cybros/agents/default.rb agents/default/lib/cybros/agents/default/application.rb agents/default/lib/cybros/agents/default/identity.rb agents/default/lib/cybros/agents/default/manifest.rb agents/default/lib/cybros/agents/default/rpc_server.rb agents/default/lib/cybros/agents/default/rpc_dispatcher.rb agents/default/lib/cybros/agents/default/hooks/prepare.rb agents/default/lib/cybros/agents/default/hooks/compose.rb agents/default/lib/cybros/agents/default/hooks/handle_error.rb agents/default/prompts/AGENT.md agents/default/prompts/SOUL.md agents/default/prompts/USER.md agents/default/prompts/system.md.liquid agents/default/test/unit/manifest_test.rb agents/default/test/integration/rpc_contract_test.rb bin/default_agent_host lib/cybros/bundled_agent_host/application.rb lib/cybros/bundled_agent_host/router.rb app/services/agent_programs/bundled_sources.rb app/services/agent_programs/creator.rb app/services/agent_programs/loader.rb test/integration/agent_programs_test.rb test/integration/agent_deployments_inspection_test.rb test/lib/cybros/bundled_agent_host_test.rb
 git commit -m "feat: add bundled default external agent host"
 ```
 
@@ -296,7 +362,7 @@ Add assertions like:
 test "setup bootstraps the bundled default program and active deployment" do
   post setup_path, params: { identity: { email: "owner@example.com", password: "Passw0rd", password_confirmation: "Passw0rd" } }
 
-  program = AgentProgram.find_by!(bundled_agent_key: "default-assistant")
+  program = AgentProgram.find_by!(bundled_agent_key: "default")
   deployment = program.active_healthy_deployment
 
   assert_equal "bundled", program.source_kind
@@ -365,7 +431,7 @@ test "new conversations default to the bundled default agent" do
   post conversations_path, params: { conversation: { title: "Test" } }
 
   conversation = Conversation.order(:created_at).last
-  program = AgentProgram.find_by!(bundled_agent_key: "default-assistant")
+  program = AgentProgram.find_by!(bundled_agent_key: "default")
 
   assert_equal program.id, conversation.agent_program_id
 end
@@ -425,7 +491,7 @@ Add coverage like:
 
 ```ruby
 test "copy as custom agent creates a forked program and git repo" do
-  bundled = AgentProgram.find_by!(bundled_agent_key: "default-assistant")
+  bundled = AgentProgram.find_by!(bundled_agent_key: "default")
 
   post fork_system_settings_agent_program_path(bundled), params: { name: "My assistant" }
 
@@ -515,6 +581,13 @@ Expose durable facts only:
 
 Then refresh the product docs so they describe the bundled default external agent as the new default path.
 
+Make the operator surfaces and docs match the milestone acceptance bar:
+
+- the official bundled default agent is presented as the product default
+- the bundled source is clearly a standalone program under `agents/default`
+- nothing in the UI suggests the product still depends on a builtin or profile-only runtime
+- follow-on reference classes remain challenge suites rather than silent implied promises
+
 **Step 4: Run the focused tests and smoke the e2e specs**
 
 Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/agent_deployments_activation_gate_test.rb`
@@ -555,6 +628,8 @@ bin/rails test test/models/agent_rpc_invocation_test.rb test/integration/agent_r
 
 PARALLEL_WORKERS=1 bin/rails test test/services/agent_rpc/lifecycle_caller_test.rb test/integration/run_draft_finalization_test.rb
 
+cd agents/default && bundle exec ruby -Itest test/unit/manifest_test.rb test/integration/rpc_contract_test.rb
+
 bunx playwright test test/e2e/settings.spec.ts test/e2e/programmable_agent_registration.spec.ts
 ```
 
@@ -562,5 +637,7 @@ Expected:
 
 - Rails targeted suites pass with `0 failures, 0 errors`
 - programmable-agent replay/binding suites stay green
+- the bundled default agent package tests pass as a standalone program
 - deployment disconnect / stale-session behavior is covered explicitly
 - e2e coverage confirms the default external agent and fork flow in the UI
+- milestone 1 acceptance is judged against general-assistant + light-coding behavior, while remaining reference classes are recorded as explicit post-cut challenge suites
