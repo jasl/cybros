@@ -33,6 +33,7 @@ class OfficialComposeTemplateTest < ActiveSupport::TestCase
   test "production docker image seeds the managed agent workspace volume" do
     dockerfile = Rails.root.join("Dockerfile").read
 
+    assert_includes dockerfile, "apt-get install --no-install-recommends -y curl git libjemalloc2 libvips postgresql-client"
     assert_includes dockerfile, "mkdir -p /rails/agent-workspace /rails/storage"
     assert_includes dockerfile, "touch /rails/agent-workspace/.keep"
     assert_includes dockerfile, "chown -R rails:rails /rails/agent-workspace /rails/storage"
