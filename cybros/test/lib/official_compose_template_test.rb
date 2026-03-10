@@ -22,6 +22,10 @@ class OfficialComposeTemplateTest < ActiveSupport::TestCase
     ].each do |key|
       assert environment.fetch(key).start_with?("${#{key}:-compose-local-")
     end
+
+    agent_deployments_depends_on = compose.fetch("services").fetch("agent_deployments").fetch("depends_on")
+    assert_equal ["db"], agent_deployments_depends_on.keys
+    assert_equal "service_healthy", agent_deployments_depends_on.dig("db", "condition")
   end
 
   test "production docker image seeds the managed agent workspace volume" do
