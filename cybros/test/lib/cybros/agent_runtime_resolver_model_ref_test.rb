@@ -71,6 +71,23 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
     assert_equal "cybros.llm.model_not_found", error.code
   end
 
+  test "api_model-shaped openrouter model_ref suggests the canonical model_ref" do
+    LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "k1")
+
+    conversation = create_conversation!
+    node =
+      build_pending_agent_node(
+        conversation: conversation,
+        metadata: { "llm" => { "model_ref" => "openrouter/openai/gpt-5.4" } },
+      )
+
+    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.runtime_for(node: node) }
+    assert_equal "cybros.llm.model_not_found", error.code
+    assert_equal "openrouter/openai-gpt-5.4", error.details[:suggested_model_ref]
+    assert_match(/use model_ref 'openrouter\/openai-gpt-5\.4'/, error.message)
+  end
+
   test "explicit codex_subscription model_ref builds responses provider with bearer headers" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(

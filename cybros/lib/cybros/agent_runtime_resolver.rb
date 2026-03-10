@@ -43,12 +43,9 @@ module Cybros
     rescue AgentCore::ValidationError
       raise
     rescue StandardError
-      if conversation&.metadata&.dig("llm", "model_ref").to_s.strip.present?
-        AgentCore::ValidationError.raise!(
-          "Selected model is no longer available. Please reselect a model.",
-          code: "cybros.llm.model_not_found",
-          details: {},
-        )
+      requested_model_ref = conversation&.metadata&.dig("llm", "model_ref").to_s.strip
+      if requested_model_ref.present?
+        raise_model_not_found!(model_ref: requested_model_ref)
       end
       { provider: nil, model: nil, preferred_models: [], matched_preference: false, provider_name: nil }
     end
@@ -82,11 +79,7 @@ module Cybros
       model_key = model_key.to_s.strip
 
       if provider_key.empty? || model_key.empty?
-        AgentCore::ValidationError.raise!(
-          "Selected model is no longer available. Please reselect a model.",
-          code: "cybros.llm.model_not_found",
-          details: { model_ref: ref },
-        )
+        raise_model_not_found!(model_ref: ref, provider_key: provider_key, model_key: model_key)
       end
 
       catalog = Cybros::LLM::Catalog.effective
@@ -123,11 +116,7 @@ module Cybros
 
       { provider_key: provider_key, model_key: model_key }
     rescue KeyError
-      AgentCore::ValidationError.raise!(
-        "Selected model is no longer available. Please reselect a model.",
-        code: "cybros.llm.model_not_found",
-        details: { provider_key: provider_key, model_key: model_key, model_ref: ref },
-      )
+      raise_model_not_found!(model_ref: ref, provider_key: provider_key, model_key: model_key, catalog: catalog)
     end
 
     def default_model_ref_for(agent_metadata:, agent_program: nil, catalog: Cybros::LLM::Catalog.effective)
@@ -262,6 +251,59 @@ module Cybros
       false
     end
     private_class_method :model_ref_in_catalog?
+
+    def raise_model_not_found!(model_ref:, provider_key: nil, model_key: nil, catalog: Cybros::LLM::Catalog.effective, details: {})
+      ref = normalize_model_ref(model_ref: model_ref)
+      resolved_provider_key, resolved_model_key = ref.split("/", 2).map(&:to_s)
+      provider_key = provider_key.presence || resolved_provider_key
+      model_key = model_key.presence || resolved_model_key
+
+      suggestion = suggested_model_ref_for(provider_key: provider_key, model_key: model_key, catalog: catalog)
+      message = +"Selected model is no longer available. Please reselect a model."
+      if suggestion
+        message << " If you meant api_model '#{suggestion.fetch(:api_model)}', use model_ref '#{suggestion.fetch(:model_ref)}'."
+      end
+
+      AgentCore::ValidationError.raise!(
+        message,
+        code: "cybros.llm.model_not_found",
+        details: {
+          provider_key: provider_key,
+          model_key: model_key,
+          model_ref: ref,
+          suggested_model_ref: suggestion&.fetch(:model_ref, nil),
+          suggested_api_model: suggestion&.fetch(:api_model, nil),
+        }.merge(details),
+      )
+    end
+    private_class_method :raise_model_not_found!
+
+    def suggested_model_ref_for(provider_key:, model_key:, catalog:)
+      return nil if provider_key.blank? || model_key.blank?
+
+      provider_spec = catalog.provider(provider_key)
+      return nil unless provider_spec.is_a?(Hash)
+
+      models = provider_spec.fetch("models", {})
+      return nil unless models.is_a?(Hash)
+
+      matches =
+        models.filter_map do |candidate_model_key, model_spec|
+          next unless model_spec.is_a?(Hash)
+
+          api_model = model_spec.fetch("api_model", "").to_s
+          next unless api_model == model_key
+
+          { model_ref: "#{provider_key}/#{candidate_model_key}", api_model: api_model }
+        end
+
+      return nil unless matches.one?
+
+      matches.first
+    rescue KeyError
+      nil
+    end
+    private_class_method :suggested_model_ref_for
 
     def phase_0_tool_policy(base_tool_policy: AgentCore::Resources::Tools::Policy::ConfirmAll.new)
       AgentCore::Resources::Tools::Policy::Ruleset.new(
@@ -710,10 +752,11 @@ module Cybros
         context_window_tokens: model_spec.fetch("context_window_tokens"),
       }
     rescue KeyError => e
-      AgentCore::ValidationError.raise!(
-        "Selected model is no longer available. Please reselect a model.",
-        code: "cybros.llm.model_not_found",
-        details: { provider_key: provider_key, model_key: model_key, error: e.message },
+      raise_model_not_found!(
+        model_ref: model_ref,
+        provider_key: provider_key,
+        model_key: model_key,
+        details: { error: e.message },
       )
     end
     private_class_method :build_llm_selection
