@@ -19,20 +19,28 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  # Specify which files should be added to the gem when it is released.
-  # The `git ls-files -z` loads the files in the RubyGem that have been added into git.
   gemspec = File.basename(__FILE__)
-  spec.files = IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
-    ls.readlines("\x0", chomp: true).reject do |f|
-      (f == gemspec) ||
-        f.start_with?(".") ||
-        f.start_with?(
-          *%w[Gemfile bin/ test/ docs/ tmp/]
-        ) ||
-        (f.end_with?(".md") &&
-          !%w[README.md].include?(f)
-        )
+  tracked_files = begin
+    IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
+      ls.readlines("\x0", chomp: true)
     end
+  rescue Errno::ENOENT
+    nil
+  end
+
+  tracked_files ||= Dir.glob("**/*", File::FNM_DOTMATCH, base: __dir__).reject do |path|
+    path == "." || File.directory?(File.join(__dir__, path))
+  end
+
+  spec.files = tracked_files.reject do |f|
+    (f == gemspec) ||
+      f.start_with?(".") ||
+      f.start_with?(
+        *%w[Gemfile bin/ test/ docs/ tmp/]
+      ) ||
+      (f.end_with?(".md") &&
+        !%w[README.md].include?(f)
+      )
   end
   spec.bindir = "exe"
   spec.executables = spec.files.grep(%r{\Aexe/}) { |f| File.basename(f) }
