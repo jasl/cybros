@@ -443,6 +443,72 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     end
   end
 
+  test "runtime_for registers compact_context canonically but only exposes it when budget policy advises compaction" do
+    with_catalog_yaml(
+      <<~YAML
+        version: 1
+        default_model_ref: "dev/mock-model"
+        providers:
+          dev:
+            display_name: "Dev"
+            enabled: true
+            adapter_key: "dev"
+            base_url: "http://localhost:3000/mock_llm/v1"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            models:
+              mock-model:
+                display_name: "Mock"
+                api_model: "mock-model"
+                context_window_tokens: 20000
+                capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+      YAML
+    ) do
+      node =
+        build_pending_agent_node(
+          metadata: {
+            "agent" => { "agent_profile" => "coding" },
+            "llm" => { "model_ref" => "dev/mock-model" },
+          },
+        )
+
+      runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+
+      assert runtime.tools_registry.include?("compact_context")
+
+      definitions = runtime.tools_registry.definitions
+      normal_visible =
+        runtime.tool_policy.filter(
+          tools: definitions,
+          context: AgentCore::ExecutionContext.new(attributes: { context_budget: { budget_action: "none" } }),
+        )
+      advise_visible =
+        runtime.tool_policy.filter(
+          tools: definitions,
+          context: AgentCore::ExecutionContext.new(attributes: { context_budget: { budget_action: "advise_compact" } }),
+        )
+      enqueue_visible =
+        runtime.tool_policy.filter(
+          tools: definitions,
+          context: AgentCore::ExecutionContext.new(attributes: { context_budget: { budget_action: "enqueue_compact" } }),
+        )
+
+      tool_name = lambda { |tool|
+        tool[:name] || tool["name"] || tool.dig(:function, :name) || tool.dig("function", "name")
+      }
+
+      normal_names = normal_visible.map(&tool_name)
+      advise_names = advise_visible.map(&tool_name)
+      enqueue_names = enqueue_visible.map(&tool_name)
+
+      refute_includes normal_names, "compact_context"
+      assert_includes advise_names, "compact_context"
+      refute_includes enqueue_names, "compact_context"
+    end
+  end
+
   private
 
     def with_catalog_yaml(yaml)

@@ -1650,6 +1650,114 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "context budget guidance exposes compact_context only after visibility masking when bundled policy advises compaction" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d113a"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need a lot of context #{'x' * 200}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "Ok."),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "echo",
+        description: "Echo",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "text" => { "type" => "string" } },
+          required: ["text"],
+        },
+      ) do |args, **|
+        AgentCore::Resources::Tools::ToolResult.success(text: args.fetch("text"))
+      end
+    )
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["*"],
+            hidden: ["compact_context"],
+            context_allowed: lambda { |context|
+              if context&.attributes&.dig(:context_budget, :budget_action).to_s == "advise_compact"
+                ["compact_context"]
+              else
+                []
+              end
+            },
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 5000,
+        context_soft_limit_tokens: 1,
+        token_counter: AgentCore::Resources::TokenCounter::HeuristicWithOverhead.new(
+          chars_per_token: 1.0,
+          non_ascii_chars_per_token: 1.0,
+          per_message_overhead: 0,
+        ),
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      first_call = provider.calls.fetch(0)
+      tool_names = Array(first_call.fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
+      assert_includes tool_names, "compact_context"
+
+      system_prompt = first_call.fetch(:messages).first.text
+      assert_includes system_prompt, "\"budget_state\":\"soft_limit_reached\""
+      assert_includes system_prompt, "\"compact_context_available\":true"
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
   test "streaming: MessageComplete without TextDelta still persists final content" do
     conversation = create_conversation!
     graph = conversation.dag_graph

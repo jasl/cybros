@@ -3,22 +3,24 @@ module AgentCore
     module Tools
       module Policy
         class Profiled < Base
-          def initialize(allowed:, delegate:, tool_groups: nil)
+          def initialize(allowed:, delegate:, tool_groups: nil, hidden: [], context_allowed: nil)
             @tool_groups = coerce_tool_groups(tool_groups)
             @allowed = expand_allowed(Array(allowed))
+            @hidden = expand_allowed(Array(hidden))
+            @context_allowed = context_allowed
             @delegate = delegate
           end
 
           def filter(tools:, context:)
             tools = Array(tools)
-            visible = tools.select { |t| allowed_tool_definition?(t) }
+            visible = tools.select { |t| allowed_tool_definition?(t, context: context) }
             @delegate.filter(tools: visible, context: context)
           rescue StandardError
             []
           end
 
           def authorize(name:, arguments:, context:)
-            if allowed_tool_name?(name)
+            if allowed_tool_name?(name, context: context)
               @delegate.authorize(name: name, arguments: arguments, context: context)
             else
               Decision.deny(reason: "tool_not_in_profile")
@@ -54,37 +56,60 @@ module AgentCore
               patterns
             end
 
-            def allowed_tool_definition?(tool_def)
+            def allowed_tool_definition?(tool_def, context:)
               name = tool_name_from_definition(tool_def)
               return false if name.to_s.strip.empty?
 
-              allowed_tool_name?(name)
+              allowed_tool_name?(name, context: context)
             rescue StandardError
               false
             end
 
-            def allowed_tool_name?(name)
+            def allowed_tool_name?(name, context:)
               name = name.to_s
-              return true if @allowed.any? { |p| p.to_s == "*" }
+              context_allowed = expand_context_allowed(context)
+              hidden = @hidden
+              explicitly_allowed = context_allowed.any? { |pattern| pattern_match?(pattern, name) }
 
-              @allowed.any? do |pattern|
-                case pattern
-                when Regexp
-                  pattern.match?(name)
-                else
-                  str = pattern.to_s
-                  if str.end_with?("*") && str.count("*") == 1
-                    prefix = str.delete_suffix("*")
-                    name.start_with?(prefix)
-                  elsif str.include?("*")
-                    false
-                  else
-                    name == str
-                  end
-                end
-              end
+              return false if hidden.any? { |pattern| pattern_match?(pattern, name) } && !explicitly_allowed
+
+              effective_allowed = @allowed + context_allowed
+              return true if effective_allowed.any? { |p| p.to_s == "*" }
+
+              effective_allowed.any? { |pattern| pattern_match?(pattern, name) }
             rescue StandardError
               false
+            end
+
+            def expand_context_allowed(context)
+              value =
+                case @context_allowed
+                when Proc
+                  @context_allowed.call(context)
+                else
+                  @context_allowed
+                end
+
+              expand_allowed(Array(value))
+            rescue StandardError
+              []
+            end
+
+            def pattern_match?(pattern, name)
+              case pattern
+              when Regexp
+                pattern.match?(name)
+              else
+                str = pattern.to_s
+                if str.end_with?("*") && str.count("*") == 1
+                  prefix = str.delete_suffix("*")
+                  name.start_with?(prefix)
+                elsif str.include?("*")
+                  false
+                else
+                  name == str
+                end
+              end
             end
 
             def tool_name_from_definition(tool_def)

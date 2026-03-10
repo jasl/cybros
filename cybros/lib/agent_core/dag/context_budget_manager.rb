@@ -1,6 +1,7 @@
 require "digest"
 require "json"
 require "set"
+require_relative "../../cybros/context_budget/default_policy"
 
 module AgentCore
   module DAG
@@ -46,6 +47,7 @@ module AgentCore
             prepared: prepared,
             context_nodes: context_nodes,
           )
+        build = apply_context_budget_policy(build, prepared: prepared)
         build = apply_prepare_turn(build, limit: effective_token_limit)
 
         metadata = budget_metadata(build, prepared: prepared)
@@ -316,12 +318,54 @@ module AgentCore
 
         def budget_metadata(build, prepared:)
           limit = effective_token_limit
+          budget_facts = budget_facts_for(build: build, limit: limit)
+          budget_action = budget_action_for(budget_state: budget_facts.fetch(:budget_state))
 
           {
+            "context_budget" => {
+              "budget_state" => budget_facts.fetch(:budget_state),
+              "budget_action" => budget_action,
+            },
             "context_cost" => context_cost_report(build, prepared: prepared, limit: limit),
           }
         rescue StandardError
           {}
+        end
+
+        def apply_context_budget_policy(build, prepared:)
+          limit = effective_token_limit
+          budget_facts = budget_facts_for(build: build, limit: limit)
+          budget_action = budget_action_for(budget_state: budget_facts.fetch(:budget_state))
+          return build unless budget_action == "advise_compact"
+
+          budget_execution_context =
+            ExecutionContext.from(
+              @execution_context,
+              context_budget: {
+                budget_action: budget_action,
+                budget_state: budget_facts.fetch(:budget_state),
+                effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
+                effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
+                estimated_tokens: estimated_total(build.estimate),
+              }.compact,
+            )
+          budget_prompt =
+            PromptAssembly.new(runtime: @runtime, execution_context: budget_execution_context).build(
+              context_nodes: build.context_nodes,
+              memory_results: build.memory_dropped ? [] : Array(prepared.memory_results),
+              prompt_injection_items: prepared.prompt_injection_items,
+            )
+          budget_estimate = budget_prompt.estimate_tokens(token_counter: @runtime.token_counter)
+          return build if !limit.nil? && !within_budget?(budget_estimate, limit: limit)
+
+          @execution_context = budget_execution_context
+          rebuild_build(
+            build,
+            built_prompt: budget_prompt,
+            estimate: budget_estimate,
+          )
+        rescue StandardError
+          build
         end
 
         def apply_prepare_turn(build, limit:)
@@ -909,6 +953,12 @@ module AgentCore
 
             %w[drop_memory_results prune_tool_outputs shrink_turns].include?(decision.fetch("type", nil).to_s)
           end
+        end
+
+        def budget_action_for(budget_state:)
+          ::Cybros::ContextBudget::DefaultPolicy.action_for(budget_state: budget_state)
+        rescue StandardError
+          "none"
         end
 
         def try_auto_compact!(from_context_nodes:, to_context_nodes:)

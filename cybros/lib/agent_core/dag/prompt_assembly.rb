@@ -1,6 +1,16 @@
+require "json"
+
 module AgentCore
   module DAG
     class PromptAssembly
+      VisibleToolsRegistry =
+        Data.define(:definitions_list) do
+          def definitions(format: :generic)
+            _ = format
+            definitions_list
+          end
+        end
+
       Prepared =
         Data.define(
           :latest_user_message,
@@ -33,17 +43,19 @@ module AgentCore
 
         prompt_injection_items = build_prompt_injection_items(latest_user_message) if prompt_injection_items == :auto
         prompt_injection_items = Array(prompt_injection_items)
+        visible_tools = visible_tool_definitions
+        prompt_injection_items += context_budget_prompt_injection_items(visible_tools: visible_tools)
 
         prompt_context =
           PromptBuilder::Context.new(
             system_prompt: adapted.system_prompt,
             chat_history: adapted.messages,
-            tools_registry: @runtime.tools_registry,
+            tools_registry: tools_registry_for_prompt(visible_tools),
             memory_results: memory_results,
             user_message: nil,
             variables: variables_from_context,
             agent_config: { llm_options: @runtime.llm_options },
-            tool_policy: @runtime.tool_policy,
+            tool_policy: tool_policy_for_prompt(visible_tools),
             execution_context: @execution_context,
             skills_store: @runtime.skills_store,
             include_skill_locations: @runtime.include_skill_locations,
@@ -100,6 +112,77 @@ module AgentCore
           vars.is_a?(Hash) ? vars : {}
         rescue StandardError
           {}
+        end
+
+        def visible_tool_definitions
+          return nil unless @runtime.tools_registry
+
+          policy = @runtime.tool_policy || AgentCore::Resources::Tools::Policy::DenyAll.new
+          tools = @runtime.tools_registry.definitions
+          Array(policy.filter(tools: tools, context: @execution_context))
+        rescue StandardError
+          []
+        end
+
+        def tools_registry_for_prompt(visible_tools)
+          return @runtime.tools_registry if visible_tools.nil?
+
+          VisibleToolsRegistry.new(definitions_list: visible_tools)
+        end
+
+        def tool_policy_for_prompt(visible_tools)
+          return @runtime.tool_policy if visible_tools.nil?
+
+          AgentCore::Resources::Tools::Policy::AllowAll.new
+        end
+
+        def context_budget_prompt_injection_items(visible_tools:)
+          payload = context_budget_prompt_payload(visible_tools: visible_tools)
+          return [] unless payload
+
+          [
+            AgentCore::Resources::PromptInjections::Item.new(
+              target: :system_section,
+              id: "context_budget_guidance",
+              order: 875,
+              content: "<context_budget_guidance>\n#{JSON.generate(payload)}\n</context_budget_guidance>",
+              metadata: { source: "context_budget" },
+            ),
+          ]
+        rescue StandardError
+          []
+        end
+
+        def context_budget_prompt_payload(visible_tools:)
+          budget = @execution_context.attributes.fetch(:context_budget, nil)
+          return nil unless budget.is_a?(Hash)
+          return nil unless budget.fetch(:budget_action, budget.fetch("budget_action", nil)).to_s == "advise_compact"
+
+          payload = {
+            effective_prompt_budget_tokens: budget.fetch(:effective_prompt_budget_tokens, budget.fetch("effective_prompt_budget_tokens", nil)),
+            effective_context_soft_limit_tokens: budget.fetch(:effective_context_soft_limit_tokens, budget.fetch("effective_context_soft_limit_tokens", nil)),
+            estimated_tokens: budget.fetch(:estimated_tokens, budget.fetch("estimated_tokens", nil)),
+            budget_state: budget.fetch(:budget_state, budget.fetch("budget_state", nil)),
+            compact_context_available: compact_context_visible?(visible_tools),
+          }.compact
+
+          payload.presence
+        rescue StandardError
+          nil
+        end
+
+        def compact_context_visible?(visible_tools)
+          Array(visible_tools).any? { |tool| tool_name_from_definition(tool) == "compact_context" }
+        rescue StandardError
+          false
+        end
+
+        def tool_name_from_definition(tool_def)
+          return "" unless tool_def.is_a?(Hash)
+
+          tool_def.fetch(:name, tool_def.fetch("name", tool_def.dig(:function, :name) || tool_def.dig("function", "name") || "")).to_s
+        rescue StandardError
+          ""
         end
     end
   end

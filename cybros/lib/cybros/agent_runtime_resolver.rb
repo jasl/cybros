@@ -3,6 +3,8 @@ module Cybros
     require_relative "llm/catalog"
     require_relative "llm/capability_gated_provider"
     require_relative "llm/codex_oauth"
+    require_relative "context_budget/default_policy"
+    require_relative "context_budget/tools"
     require_relative "programmable_agent_provider"
 
     MAX_CONTEXT_TURNS = 1000
@@ -392,6 +394,7 @@ module Cybros
             profiled_policy
           end
         end
+      tool_policy = context_budget_tool_policy(delegate: tool_policy)
 
       provider ||= programmable_provider || llm_selection.fetch(:provider)
       tools_registry ||= build_tools_registry
@@ -796,6 +799,7 @@ module Cybros
 
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
+      registry.register_many(Cybros::ContextBudget::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
 
       # Phase 0: always register native memory + skills tools.
@@ -818,6 +822,31 @@ module Cybros
 
       registry
     end
+
+    def context_budget_tool_policy(delegate:)
+      AgentCore::Resources::Tools::Policy::Profiled.new(
+        allowed: ["*"],
+        hidden: ["compact_context"],
+        context_allowed: lambda { |context|
+          context_budget_action(context) == "advise_compact" ? ["compact_context"] : []
+        },
+        delegate: delegate,
+        tool_groups: nil,
+      )
+    end
+    private_class_method :context_budget_tool_policy
+
+    def context_budget_action(context)
+      return nil unless context.respond_to?(:attributes)
+
+      budget = context.attributes.fetch(:context_budget, nil)
+      return nil unless budget.is_a?(Hash)
+
+      budget.fetch(:budget_action, budget.fetch("budget_action", nil)).to_s.presence
+    rescue StandardError
+      nil
+    end
+    private_class_method :context_budget_action
 
     def model_prefer_from_agent_metadata(agent_metadata)
       return [] unless agent_metadata.is_a?(Hash)
