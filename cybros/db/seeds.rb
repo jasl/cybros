@@ -12,6 +12,7 @@ Account.instance
 
 openai_api_key = ENV["OPENAI_API_KEY"].to_s.strip
 openrouter_api_key = ENV["OPENROUTER_API_KEY"].to_s.strip
+openrouter_api_key = ENV["SIMPLE_INFERENCE_API_KEY"].to_s.strip if openrouter_api_key.blank?
 
 if openai_api_key.present?
   record = LLMProvider.find_or_initialize_by(provider_key: "openai")
