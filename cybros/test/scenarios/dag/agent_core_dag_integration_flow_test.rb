@@ -1572,7 +1572,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need a lot of context #{'x' * 50}",
+          content: "Need a lot of context #{"x" * 50}",
           metadata: {},
         )
       agent =
@@ -1628,6 +1628,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 100,
         context_soft_limit_tokens: 40,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: RoleAwareTokenCounter.new,
       )
 
@@ -1692,7 +1693,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need a lot of context #{'x' * 200}",
+          content: "Need a lot of context #{"x" * 200}",
           metadata: {},
         )
       agent =
@@ -1753,6 +1754,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 5000,
         context_soft_limit_tokens: 1,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: AgentCore::Resources::TokenCounter::HeuristicWithOverhead.new(
           chars_per_token: 1.0,
           non_ascii_chars_per_token: 1.0,
@@ -1800,7 +1802,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need a lot of context #{'x' * 50}",
+          content: "Need a lot of context #{"x" * 50}",
           metadata: {},
         )
       agent =
@@ -1852,6 +1854,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 100,
         context_soft_limit_tokens: 40,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: RoleAwareTokenCounter.new,
       )
 
@@ -1908,7 +1911,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need room #{'x' * 90}",
+          content: "Need room #{"x" * 90}",
           metadata: {},
         )
       agent =
@@ -1973,6 +1976,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 100,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: RoleAwareTokenCounter.new,
       )
 
@@ -2027,7 +2031,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "History #{'x' * 40}",
+          content: "History #{"x" * 40}",
           metadata: {},
         )
       first_agent =
@@ -2035,7 +2039,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::FINISHED,
           metadata: {},
-          body_output: { "content" => "Earlier reply #{'y' * 40}" },
+          body_output: { "content" => "Earlier reply #{"y" * 40}" },
         )
       m.create_edge(from_node: history_user, to_node: first_agent, edge_type: DAG::Edge::SEQUENCE)
     end
@@ -2045,7 +2049,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need action #{'z' * 40}",
+          content: "Need action #{"z" * 40}",
           metadata: {},
         )
       agent =
@@ -2111,6 +2115,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 100,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: RoleAwareTokenCounter.new,
       )
 

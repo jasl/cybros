@@ -8,8 +8,8 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     RunDraft.delete_all
     Event.delete_all
     Conversation.delete_all
-    AgentRPCInvocation.delete_all
     AgentRPCSession.delete_all
+    AgentRPCInvocation.delete_all
     AgentDeployment.delete_all
     AgentProgram.delete_all
     Session.delete_all

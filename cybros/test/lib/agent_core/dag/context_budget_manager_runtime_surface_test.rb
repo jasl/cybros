@@ -2,6 +2,15 @@ require "test_helper"
 require "securerandom"
 
 class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::TestCase
+  class EnqueueOnSoftLimitPolicy
+    def self.action_for(budget_state:, compact_context_suppressed: false)
+      return "none" if compact_context_suppressed
+      return "enqueue_compact" if budget_state.to_s == "soft_limit_reached"
+
+      "none"
+    end
+  end
+
   class BudgetCapturingSurface < AgentCore::RuntimeSurface::Base
     class << self
       attr_accessor :last_input
@@ -179,6 +188,23 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
     assert_equal "normal", normal.metadata.fetch("context_cost").fetch("budget_state")
     assert_equal "soft_limit_reached", soft_limit_reached.metadata.fetch("context_cost").fetch("budget_state")
     assert_equal "near_hard_cap", near_hard_cap.metadata.fetch("context_cost").fetch("budget_state")
+  end
+
+  test "context budget manager consumes the runtime-injected budget policy" do
+    agent_node, graph = build_simple_turn!
+    estimate = estimate_for(agent_node, graph)
+
+    result =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: estimate + 200,
+        context_soft_limit_tokens: estimate,
+        context_budget_policy: EnqueueOnSoftLimitPolicy,
+      )
+
+    assert_equal "soft_limit_reached", result.metadata.dig("context_budget", "budget_state")
+    assert_equal "enqueue_compact", result.metadata.dig("context_budget", "budget_action")
   end
 
   private

@@ -149,7 +149,7 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need room #{'x' * 90}",
+          content: "Need room #{"x" * 90}",
           metadata: {},
         )
       agent =
@@ -170,6 +170,7 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
         context_window_tokens: 100,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
         token_counter: RoleAwareTokenCounter.new,
       )
 

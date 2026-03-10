@@ -506,6 +506,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
       refute_includes normal_names, "compact_context"
       assert_includes advise_names, "compact_context"
       refute_includes enqueue_names, "compact_context"
+      assert_equal Cybros::ContextBudget::DefaultPolicy, runtime.context_budget_policy
     end
   end
 

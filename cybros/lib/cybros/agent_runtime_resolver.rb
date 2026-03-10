@@ -440,6 +440,7 @@ module Cybros
       runtime_kwargs[:provider_context_window_tokens] = llm_selection.fetch(:provider_context_window_tokens, nil) if llm_selection.key?(:provider_context_window_tokens)
       runtime_kwargs[:context_soft_limit_tokens] = llm_selection.fetch(:context_soft_limit_tokens, nil) if llm_selection.key?(:context_soft_limit_tokens)
       runtime_kwargs[:context_soft_limit_ratio] = llm_selection.fetch(:context_soft_limit_ratio, nil) if llm_selection.key?(:context_soft_limit_ratio)
+      runtime_kwargs[:context_budget_policy] = llm_selection.fetch(:context_budget_policy, nil) if llm_selection.key?(:context_budget_policy)
       if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
         runtime_kwargs[:llm_options] = { runtime_governance: runtime_governance }
       end
@@ -769,6 +770,7 @@ module Cybros
         provider_context_window_tokens: provider_context_window_tokens,
         context_soft_limit_tokens: model_spec.fetch("context_soft_limit_tokens", nil),
         context_soft_limit_ratio: model_spec.fetch("context_soft_limit_ratio", nil),
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
       }
     rescue KeyError => e
       raise_model_not_found!(

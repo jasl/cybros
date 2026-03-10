@@ -21,6 +21,7 @@ module AgentCore
         :provider_context_window_tokens,
         :context_soft_limit_tokens,
         :context_soft_limit_ratio,
+        :context_budget_policy,
         :reserved_output_tokens,
         :llm_options,
         :directives_config,
@@ -71,6 +72,7 @@ module AgentCore
           provider_context_window_tokens: nil,
           context_soft_limit_tokens: nil,
           context_soft_limit_ratio: nil,
+          context_budget_policy: nil,
           reserved_output_tokens: 0,
           llm_options: {},
           directives_config: nil,
@@ -202,6 +204,14 @@ module AgentCore
             field: "context_soft_limit_ratio",
             code_prefix: "agent_core.dag.runtime.context_soft_limit_ratio",
           )
+
+          unless context_budget_policy.nil? || context_budget_policy.respond_to?(:action_for)
+            ValidationError.raise!(
+              "context_budget_policy must respond to #action_for",
+              code: "agent_core.dag.runtime.context_budget_policy_must_respond_to_action_for",
+              details: { context_budget_policy_class: context_budget_policy.class.name },
+            )
+          end
 
           raw_reserved_output_tokens = reserved_output_tokens
           reserved_output_tokens = Integer(raw_reserved_output_tokens, exception: false)
@@ -529,6 +539,7 @@ module AgentCore
             provider_context_window_tokens: provider_context_window_tokens,
             context_soft_limit_tokens: context_soft_limit_tokens,
             context_soft_limit_ratio: context_soft_limit_ratio,
+            context_budget_policy: context_budget_policy,
             reserved_output_tokens: reserved_output_tokens,
             llm_options: llm_options.freeze,
             directives_config: directives_config,

@@ -1,6 +1,5 @@
 require "digest"
 require "json"
-require_relative "../../cybros/context_budget/default_policy"
 
 module AgentCore
   module DAG
@@ -968,7 +967,10 @@ module AgentCore
         end
 
         def budget_action_for(budget_state:, budget_fingerprint:)
-          ::Cybros::ContextBudget::DefaultPolicy.action_for(
+          policy = @runtime.context_budget_policy
+          return "none" unless policy.respond_to?(:action_for)
+
+          policy.action_for(
             budget_state: budget_state,
             compact_context_suppressed: compact_context_suppressed?(budget_fingerprint: budget_fingerprint),
           )
