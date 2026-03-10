@@ -34,6 +34,27 @@ class AgentDeploymentTest < ActiveSupport::TestCase
     assert_predicate inactive, :valid?
   end
 
+  test "managed local http jsonrpc allocations require runtime config ownership metadata" do
+    deployment =
+      build_deployment(
+        transport_kind: "http_jsonrpc",
+        endpoint_url: "http://127.0.0.1:47101/rpc",
+        transport_config: { "port" => 47_101 },
+      )
+
+    refute_predicate deployment, :valid?
+    assert_includes deployment.errors[:transport_config], "must include runtime_config_path for managed local endpoints"
+
+    deployment.transport_config = {
+      "host" => "127.0.0.1",
+      "port" => 47_101,
+      "rpc_path" => "/rpc",
+      "runtime_config_path" => "/tmp/cybros-runtime-configs/deployment-v1.json",
+    }
+
+    assert_predicate deployment, :valid?
+  end
+
   private
 
   def build_deployment(attributes = {})
@@ -50,6 +71,7 @@ class AgentDeploymentTest < ActiveSupport::TestCase
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
         supported_methods: %w[initialize turn.prepare turn.compose],
+        transport_config: {},
         manifest_snapshot: { "name" => "Fixture" },
         schema_snapshot: { "protocol_version" => "agent_rpc.v1" },
         capability_snapshot: { "supports" => %w[turn.prepare] },

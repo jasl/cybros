@@ -18,15 +18,23 @@ module AgentDeployments
       end
 
       ActiveRecord::Base.transaction do
-        deployment.agent_program.agent_deployments.where(status: "active").where.not(id: deployment.id).update_all(
+        cutover_at = Time.current.change(usec: 0)
+        replaced_ids =
+          deployment.agent_program.agent_deployments.where(status: "active").where.not(id: deployment.id).lock.pluck(:id)
+
+        AgentRPCSession.where(agent_deployment_id: replaced_ids, status: "open").update_all(
+          status: "closed",
+          updated_at: cutover_at,
+        )
+        AgentDeployment.where(id: replaced_ids).update_all(
           status: "inactive",
-          deactivated_at: Time.current,
-          updated_at: Time.current,
+          deactivated_at: cutover_at,
+          updated_at: cutover_at,
         )
 
         deployment.update!(
           status: "active",
-          activated_at: Time.current,
+          activated_at: cutover_at,
           deactivated_at: nil,
         )
       end

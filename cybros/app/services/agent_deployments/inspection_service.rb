@@ -15,6 +15,7 @@ module AgentDeployments
       health_result = client.call("agent.health")
       schemas_result = client.call("agent.schemas.get")
 
+      health_status = health_status_for(health_result)
       deployment.update!(
         protocol_version: protocol_version,
         agent_sdk_version: identity["agent_sdk_version"],
@@ -33,11 +34,13 @@ module AgentDeployments
           "schemas" => normalize_hash(schemas_result),
           "identity" => identity,
         },
-        health_status: health_status_for(health_result),
+        health_status: health_status,
         last_inspected_at: Time.current,
         last_health_checked_at: Time.current,
       )
+      deployment.close_open_rpc_sessions! if health_status != "healthy"
     rescue Error => e
+      deployment.close_open_rpc_sessions!
       deployment.update!(
         status: "inactive",
         health_status: "unhealthy",
