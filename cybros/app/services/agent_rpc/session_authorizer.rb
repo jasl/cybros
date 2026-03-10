@@ -73,6 +73,7 @@ module AgentRPC
     def authorize_callback!
       session = find_session!
       ensure_open!(session)
+      ensure_current_binding!(session)
       ensure_scope!(session)
       ensure_method_allowed!(session)
       session
@@ -161,6 +162,30 @@ module AgentRPC
           "Callback method is not allowed for this session.",
           code: "cybros.agent_rpc.callback_method_not_allowed",
           details: { agent_rpc_session_id: session.id, method_name: method_name },
+        )
+      end
+
+      def ensure_current_binding!(session)
+        deployment = session.agent_deployment
+        activation_matches =
+          deployment.present? &&
+          deployment.status == "active" &&
+          deployment.health_status == "healthy" &&
+          deployment.deployment_fingerprint == session.deployment_fingerprint &&
+          deployment.activated_at&.change(usec: 0) == session.deployment_activated_at&.change(usec: 0)
+
+        return if activation_matches
+
+        session.update_columns(status: "closed", updated_at: Time.current)
+        AgentCore::ValidationError.raise!(
+          "Pinned deployment binding is no longer active and healthy.",
+          code: "cybros.agent_rpc.deployment_activation_drift",
+          details: {
+            agent_rpc_session_id: session.id,
+            agent_deployment_id: session.agent_deployment_id,
+            status: deployment&.status,
+            health_status: deployment&.health_status,
+          },
         )
       end
 

@@ -10,19 +10,41 @@
         <thead>
           <tr>
             <th>Program</th>
-            <th>Status</th>
+            <th>Source</th>
+            <th>Launch</th>
             <th>Health</th>
             <th>Endpoint</th>
+            <th>Source Path</th>
             <th></th>
           </tr>
         </thead>
         <tbody>
           <% @agent_deployments.each do |deployment| %>
             <tr class="hover:bg-base-200/50 transition-colors">
-              <td class="font-medium"><%= deployment.agent_program.name %></td>
-              <td><%= deployment.status %></td>
-              <td><%= deployment.health_status %></td>
-              <td class="font-mono text-xs"><%= deployment.endpoint_url %></td>
+              <td>
+                <div class="font-medium"><%= deployment.agent_program.name %></div>
+                <div class="font-mono text-xs opacity-70"><%= deployment.deployment_fingerprint %></div>
+              </td>
+              <td>
+                <div><%= agent_program_source_kind_label(deployment.agent_program) %></div>
+                <div class="text-xs opacity-70"><%= agent_program_lineage_label(deployment.agent_program) %>: <%= agent_program_lineage_value(deployment.agent_program) %></div>
+              </td>
+              <td>
+                <div><%= deployment_launch_status_label(deployment) %></div>
+                <div class="text-xs opacity-70"><%= deployment_launch_owner_label(deployment) %></div>
+              </td>
+              <td>
+                <div><%= deployment.health_status %></div>
+                <div class="text-xs opacity-70">Status: <%= deployment.status %></div>
+              </td>
+              <td class="font-mono text-xs">
+                <div><%= deployment.endpoint_url.presence || "n/a" %></div>
+                <div class="opacity-70">Port: <%= deployment.allocated_port || "n/a" %></div>
+              </td>
+              <td class="font-mono text-xs break-all">
+                <div><%= agent_program_source_root(deployment.agent_program) %></div>
+                <div class="opacity-70"><%= deployment.runtime_config_path || "n/a" %></div>
+              </td>
               <td class="text-right">
                 <%= link_to "View", system_settings_agent_deployment_path(deployment), class: "btn btn-ghost btn-sm" %>
               </td>

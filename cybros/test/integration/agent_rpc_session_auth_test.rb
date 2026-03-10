@@ -104,6 +104,24 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
     assert_equal "cybros.agent_rpc.callback_session_closed", error.code
   end
 
+  test "callback authorization rejects stale deployment activations and closes the callback session" do
+    session, callback_bearer = create_open_session!
+    session.agent_deployment.update!(activated_at: 1.minute.from_now.change(usec: 0))
+
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        AgentRPC::SessionAuthorizer.authorize_callback!(
+          bearer: callback_bearer,
+          method_name: "conversation.settings.get",
+          scope_type: session.scope_type,
+          scope_id: session.scope_id,
+        )
+      end
+
+    assert_equal "cybros.agent_rpc.deployment_activation_drift", error.code
+    assert_equal "closed", session.reload.status
+  end
+
   test "draft planning uses bounded agent_rpc session and invocation bookkeeping" do
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
     runtime = create_programmable_runtime!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://fixture")

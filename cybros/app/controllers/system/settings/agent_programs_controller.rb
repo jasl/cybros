@@ -1,7 +1,7 @@
 module System
   module Settings
     class AgentProgramsController < BaseController
-      before_action :set_agent_program, only: %i[show]
+      before_action :set_agent_program, only: %i[show fork]
 
       def index
         @q = params[:q].to_s.strip
@@ -40,6 +40,16 @@ module System
 
       def show
         @loaded = @agent_program.loaded_program
+      end
+
+      def fork
+        fork_name = params[:name].to_s.strip.presence || params.dig(:agent_program, :name).to_s.strip.presence
+        program = AgentPrograms::ForkService.call!(source_program: @agent_program, name: fork_name)
+        redirect_to system_settings_agent_program_path(program)
+      rescue ArgumentError, ActiveRecord::RecordInvalid => e
+        @loaded = @agent_program.loaded_program
+        flash.now[:alert] = e.message
+        render :show, status: :unprocessable_entity
       end
 
       private

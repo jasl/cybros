@@ -36,6 +36,8 @@ If any of those inputs becomes stale before finalization, Cybros must re-resolve
 
 Each conversation stores one top-level `AgentProgram`.
 
+The default interactive path is the bundled external agent with bundled key `default`. There is no builtin conversation-agent runtime fallback.
+
 The composer footer should surface that selection directly.
 
 Changing it updates `Conversation.agent_program_id` and affects future drafts only.
@@ -47,6 +49,10 @@ The user-facing selector chooses `AgentProgram`, not `AgentDeployment`.
 Cybros resolves the active deployment during planning.
 
 If no active healthy deployment exists, Cybros should surface a stale-selection warning and block new draft materialization until the operator fixes the deployment or the user chooses another program.
+
+Official local development and official compose wire the bundled default and forked custom paths through managed-local deployments that Cybros auto-launches from deployment-owned runtime config.
+
+Unsupported external deployment topologies stay explicit and operator-managed.
 
 ### Config Namespacing
 
@@ -124,6 +130,8 @@ If the selected deployment is unreachable, unhealthy, or host-failing:
 - work may park in durable `deployment_backoff`
 - operators may repair or replace the deployment
 - Cybros does not self-heal the deployment
+
+Managed-local launch failures must still surface as deployment failures on the same canonical loop. They do not unlock a builtin fallback.
 
 Transport replay, approval resume, and lost-reply recovery must follow the rules in `run_lifecycle.md` and `agent_rpc.md`.
 

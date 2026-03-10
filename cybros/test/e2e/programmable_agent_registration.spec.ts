@@ -37,16 +37,22 @@ test.describe("Programmable agent registration", () => {
     await page.getByRole("button", { name: "Register" }).click()
 
     await expect(page.getByRole("heading", { name: program.programName })).toBeVisible()
+    await expect(page.locator("main")).toContainText("Source kind")
+    await expect(page.locator("main")).toContainText("Custom")
+    await expect(page.locator("main")).toContainText("Launch owner")
+    await expect(page.locator("main")).toContainText("Operator-managed external deployment")
+    await expect(page.locator("main")).toContainText("Launch status")
+    await expect(page.locator("main")).toContainText("Registered endpoint")
     await expect(page.locator("main")).toContainText("inactive")
     await expect(page.locator("main")).toContainText("unknown")
     await expect(page.locator("main")).toContainText(fixtureUrl)
 
     await page.getByRole("button", { name: "Inspect" }).click()
     await expect(page.locator("main")).toContainText("healthy")
-    await expect(page.locator("main")).toContainText("turn.prepare")
 
     await page.getByRole("button", { name: "Activate" }).click()
     await expect(page.locator("main")).toContainText("active")
+    await expect(page.locator("main")).toContainText("Externally launched")
 
     await openNewConversation(page, `Programmable Registration ${suffix}`)
     await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", program.programName)

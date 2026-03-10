@@ -1145,7 +1145,8 @@ class Conversation < ApplicationRecord
     def assign_default_execution_target
       return if default_execution_target.present?
 
-      self.default_execution_target = ExecutionTarget.visible_for_runtime.order(:created_at).first
+      visible_targets = ExecutionTarget.visible_for_runtime.order(:created_at).limit(2).to_a
+      self.default_execution_target = visible_targets.first if visible_targets.one?
     end
 
     def enqueue_conversation_run!(agent_node:, selected_model_ref:, user_input:, debug:, error:)

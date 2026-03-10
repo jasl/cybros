@@ -320,6 +320,88 @@ export function programmableConversationState(conversationId: string) {
   `)
 }
 
+export function bundledDefaultRuntimeState() {
+  return railsJson<{
+    programId: string
+    programName: string
+    deploymentId: string | null
+    deploymentFingerprint: string | null
+    deploymentStatus: string | null
+    deploymentHealthStatus: string | null
+    executionTargetId: string | null
+    executionTargetName: string | null
+  }>(`
+    require "json"
+
+    program = AgentProgram.find_by!(bundled_agent_key: "default")
+    deployment = program.active_healthy_deployment
+    target = ExecutionTarget.visible_for_runtime.order(:created_at).first
+
+    puts JSON.generate({
+      programId: program.id,
+      programName: program.name,
+      deploymentId: deployment&.id,
+      deploymentFingerprint: deployment&.deployment_fingerprint,
+      deploymentStatus: deployment&.status,
+      deploymentHealthStatus: deployment&.health_status,
+      executionTargetId: target&.id,
+      executionTargetName: target&.name,
+    })
+  `)
+}
+
+export function ensureSingleBundledExecutionTarget() {
+  return railsJson<{
+    executionTargetId: string | null
+    executionTargetName: string | null
+  }>(`
+    require "json"
+
+    bundled_target = ExecutionTarget.find_by(name: "Bundled Default Target")
+
+    if bundled_target.present?
+      ExecutionTarget.where.not(id: bundled_target.id).update_all(status: "inactive", updated_at: Time.current)
+      bundled_target.update!(status: "active") unless bundled_target.status == "active"
+    end
+
+    puts JSON.generate({
+      executionTargetId: bundled_target&.id,
+      executionTargetName: bundled_target&.name,
+    })
+  `)
+}
+
+export function agentProgramStateByName(name: string) {
+  return railsJson<{
+    programId: string
+    programName: string
+    sourceKind: string
+    bundledAgentKey: string | null
+    forkedFromProgramId: string | null
+    forkedFromProgramName: string | null
+    activeDeploymentFingerprint: string | null
+    activeDeploymentStatus: string | null
+    activeDeploymentHealthStatus: string | null
+  }>(`
+    require "json"
+
+    program = AgentProgram.find_by!(name: ${JSON.stringify(name)})
+    deployment = program.active_healthy_deployment
+
+    puts JSON.generate({
+      programId: program.id,
+      programName: program.name,
+      sourceKind: program.source_kind,
+      bundledAgentKey: program.bundled_agent_key,
+      forkedFromProgramId: program.forked_from_agent_program_id,
+      forkedFromProgramName: program.forked_from_agent_program&.name,
+      activeDeploymentFingerprint: deployment&.deployment_fingerprint,
+      activeDeploymentStatus: deployment&.status,
+      activeDeploymentHealthStatus: deployment&.health_status,
+    })
+  `)
+}
+
 export function conversationIdFromUrl(page: Page): string {
   const match = page.url().match(/\/conversations\/([^/?#]+)/)
   if (!match) {
@@ -355,7 +437,7 @@ function conversationRuntimeOptionPersisted({
 
   switch (testId) {
     case "conversation-composer-agent-picker":
-      return state.agentProgramName === (label === "Built-in" ? null : label)
+      return state.agentProgramName === label
     case "conversation-composer-permission-picker":
       return state.permissionMode === PERMISSION_MODE_LABELS[label]
     case "conversation-composer-execution-target-picker":

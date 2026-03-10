@@ -6,8 +6,14 @@ services:
       context: ..
       dockerfile: .devcontainer/Dockerfile
 
+    environment:
+      CYBROS_MANAGED_AGENT_AUTOLAUNCH: "1"
+      CYBROS_AGENT_WORKSPACE_ROOT: /workspaces/agent-workspace
+      CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT: /workspaces/cybros/cybros
+
     volumes:
     - ../../cybros:/workspaces/cybros:cached
+    - agent-workspace:/workspaces/agent-workspace
 
     # Overrides default command so things don't shut down after the process ends.
     command: sleep infinity
@@ -38,3 +44,4 @@ services:
 
 volumes:
   postgres-data:
+  agent-workspace:

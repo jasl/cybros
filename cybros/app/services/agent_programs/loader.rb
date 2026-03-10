@@ -44,7 +44,7 @@ module AgentPrograms
       rescue StandardError
         {
           config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
-          status: "missing",
+          status: present ? "invalid" : "missing",
         }
       end
 

@@ -19,13 +19,16 @@ module AgentDeployments
 
       ActiveRecord::Base.transaction do
         cutover_at = Time.current.change(usec: 0)
+        reactivating_same_deployment = deployment.status == "active" && deployment.activated_at.present?
         replaced_ids =
           deployment.agent_program.agent_deployments.where(status: "active").where.not(id: deployment.id).lock.pluck(:id)
 
-        AgentRPCSession.where(agent_deployment_id: replaced_ids, status: "open").update_all(
-          status: "closed",
-          updated_at: cutover_at,
-        )
+        session_scope = AgentRPCSession.where(agent_deployment_id: replaced_ids, status: "open")
+        if reactivating_same_deployment
+          session_scope = session_scope.or(AgentRPCSession.where(agent_deployment_id: deployment.id, status: "open"))
+        end
+
+        session_scope.update_all(status: "closed", updated_at: cutover_at)
         AgentDeployment.where(id: replaced_ids).update_all(
           status: "inactive",
           deactivated_at: cutover_at,

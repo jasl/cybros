@@ -1,6 +1,12 @@
 <div class="space-y-6">
   <h2 class="text-lg font-semibold"><%= @agent_program.name %></h2>
 
+  <% if flash[:alert].present? %>
+    <div role="alert" class="alert alert-error">
+      <span><%= flash[:alert] %></span>
+    </div>
+  <% end %>
+
   <div class="card bg-base-200/30 border border-base-300 shadow-sm">
     <div class="card-body">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -33,4 +39,25 @@
       </div>
     </div>
   </div>
+
+  <% if @agent_program.bundled_source? %>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body space-y-3">
+        <div>
+          <h3 class="font-semibold">Copy as custom agent</h3>
+          <p class="text-sm opacity-70">Copy this bundled source into the configured agent workspace root and bootstrap it as a forked custom agent.</p>
+        </div>
+
+        <%= form_with url: fork_system_settings_agent_program_path(@agent_program), method: :post, class: "flex flex-col gap-3 max-w-lg" do |f| %>
+          <div>
+            <%= f.label :name, "Fork name", class: "label" %>
+            <%= f.text_field :name, required: true, class: "input input-bordered w-full" %>
+          </div>
+          <div>
+            <button type="submit" class="btn btn-primary">Copy as custom agent</button>
+          </div>
+        <% end %>
+      </div>
+    </div>
+  <% end %>
 </div>

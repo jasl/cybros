@@ -6,6 +6,8 @@ A programmable agent is a trusted out-of-process application that Cybros can reg
 
 It is the app layer on top of the Cybros kernel, not a second control plane beside it.
 
+The default interactive Cybros agent now follows this same model. The official bundled agent is keyed as `default`, ships under `agents/default`, and is bootstrapped as a normal `AgentProgram` plus `AgentDeployment`.
+
 ## V1 Constraints
 
 - self-hosted only
@@ -13,8 +15,17 @@ It is the app layer on top of the Cybros kernel, not a second control plane besi
 - out-of-process
 - Ruby-first implementation
 - language-agnostic protocol
+- no builtin conversation-agent runtime path
 
 Future Python or Rust implementations should use the same contract.
+
+## Source Ownership
+
+- bundled agent sources live under the Cybros app root in `agents/`
+- the official bundled default source lives at `agents/default`
+- custom agent sources live under the operator-configured agent workspace root
+- bundled and custom sources both resolve to ordinary `AgentProgram` records
+- `default-assistant` is migration-only trace data, not a runtime identity
 
 ## What The Agent Owns
 
@@ -61,7 +72,11 @@ That flexibility is allowed as long as it does not displace Cybros from the auth
 
 ### Start Deployment
 
-A deployment may be started outside Cybros or by another agent acting through normal execution capabilities.
+A deployment launch path must have an explicit owner.
+
+Official local development and official compose flows use a Cybros-managed local supervisor to auto-launch bundled and forked deployments from deployment-owned runtime config.
+
+Unsupported external topologies remain operator-managed.
 
 ### Register Deployment
 
@@ -120,7 +135,10 @@ Contract ownership rule:
 
 - the runnable binding is an `AgentDeployment`
 - a deployment may run on bare metal, in a container, or in any Cybros-reachable environment
-- that environment is not a separate canonical product model in v1
+- the official bundled default and official forked custom paths are managed-local deployments in local dev and official compose
+- managed-local deployments get their own allocated endpoint and generated runtime config outside the git-managed source tree
+- launch ownership belongs to the deployment layer, not the source tree
+- unsupported external topologies may still be operator-managed, but they do not reintroduce a builtin runtime path
 
 V1 recommendation:
 

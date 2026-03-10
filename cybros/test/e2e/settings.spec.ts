@@ -45,7 +45,7 @@ test.describe("System Settings", () => {
     await page.goto("/system/settings/llm_providers")
 
     await expect(page.getByRole("heading", { name: "LLM Providers" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "New provider" })).toBeVisible()
+    await expect(page.getByRole("button", { name: "Save default" })).toBeVisible()
   })
 
   test("LLM providers page shows table", async ({ page }) => {
@@ -65,6 +65,6 @@ test.describe("System Settings", () => {
     await page.goto("/system/settings/agent_programs")
 
     await expect(page.getByRole("table")).toBeVisible()
-    await expect(page.getByPlaceholder("Search name or profile")).toBeVisible()
+    await expect(page.getByPlaceholder("Search name or source")).toBeVisible()
   })
 })

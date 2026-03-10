@@ -27,8 +27,6 @@ if openrouter_api_key.present?
   record.save! if record.changed?
 end
 
-unless AgentProgram.exists?
-  if AgentPrograms::BundledSources.path_for("default")
-    AgentPrograms::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
-  end
+if AgentPrograms::BundledSources.path_for("default")
+  AgentPrograms::BootstrapBundledDefaultService.bootstrap!
 end

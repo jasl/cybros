@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+require_relative "../lib/cybros/managed_agent_deployments/supervisor"
+
+exit Cybros::ManagedAgentDeployments::CLI.run(ARGV)

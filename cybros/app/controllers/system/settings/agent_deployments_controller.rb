@@ -1,11 +1,19 @@
 module System
   module Settings
     class AgentDeploymentsController < BaseController
+      helper_method :agent_program_source_kind_label,
+        :agent_program_lineage_label,
+        :agent_program_lineage_value,
+        :agent_program_source_root,
+        :deployment_launch_owner_label,
+        :deployment_launch_status_label,
+        :deployment_active_timestamp
+
       before_action :set_agent_deployment, only: %i[show inspect activate]
       before_action :load_agent_programs, only: %i[index new create]
 
       def index
-        @agent_deployments = AgentDeployment.includes(:agent_program).order(created_at: :desc)
+        @agent_deployments = AgentDeployment.includes(agent_program: :forked_from_agent_program).order(created_at: :desc)
       end
 
       def new
@@ -69,11 +77,53 @@ module System
       private
 
         def set_agent_deployment
-          @agent_deployment = AgentDeployment.includes(:agent_program).find(params[:id])
+          @agent_deployment = AgentDeployment.includes(agent_program: :forked_from_agent_program).find(params[:id])
         end
 
         def load_agent_programs
           @agent_programs = AgentProgram.order(created_at: :asc)
+        end
+
+        def agent_program_source_kind_label(program)
+          program.bundled_source? ? "Bundled" : "Custom"
+        end
+
+        def agent_program_lineage_label(program)
+          program.bundled_source? ? "Bundled key" : "Fork origin"
+        end
+
+        def agent_program_lineage_value(program)
+          return program.bundled_agent_key if program.bundled_source?
+          return program.forked_from_agent_program.name if program.forked_from_agent_program.present?
+
+          "Standalone custom source"
+        end
+
+        def agent_program_source_root(program)
+          program.absolute_local_path.to_s
+        rescue StandardError
+          program.local_path.to_s.presence || "n/a"
+        end
+
+        def deployment_launch_owner_label(deployment)
+          deployment.managed_local_http_jsonrpc? ? "Cybros managed local supervisor" : "Operator-managed external deployment"
+        end
+
+        def deployment_launch_status_label(deployment)
+          if deployment.managed_local_http_jsonrpc?
+            return "Launched" if deployment.active? && deployment.health_status == "healthy"
+            return "Launch failed" if deployment.inspection_details.dig("supervisor", "failed_at").present?
+
+            "Launch pending"
+          elsif deployment.active? && deployment.health_status == "healthy"
+            "Externally launched"
+          else
+            "Registered endpoint"
+          end
+        end
+
+        def deployment_active_timestamp(deployment)
+          deployment.activated_at&.iso8601 || "n/a"
         end
     end
   end

@@ -17,6 +17,7 @@ The goal is to keep three concerns separate:
 - Cybros owns the canonical contract and the canonical run lifecycle.
 - Deployment inspection facts are never the source of truth for product semantics.
 - External agents may keep additional off-loop capabilities, but the canonical loop still passes through Cybros.
+- there is no builtin conversation-agent runtime fallback
 
 ## Product Entities
 
@@ -28,11 +29,18 @@ It owns:
 
 - display identity and operator-facing registration
 - source package or source reference
+- explicit source ownership metadata (`bundled` vs `custom`)
+- bundled key or fork ancestry
 - stable config namespace
 - operator-managed global config state
 - the currently published contract fingerprint
 
 Users, conversations, and automations select `AgentProgram`, not a deployment.
+
+The official bundled default identity is singular:
+
+- bundled key `default`
+- source root `agents/default`
 
 ### Agent Contract Version
 
@@ -57,6 +65,7 @@ It owns:
 
 - transport kind
 - endpoint or local invocation details
+- generated runtime-config location when the deployment is managed locally
 - deployment bearer secret reference
 - deployment fingerprint or resolved revision
 - activation and health state
@@ -81,6 +90,8 @@ At planning time Cybros resolves:
 3. the active healthy deployment that can satisfy that contract
 
 If no active healthy deployment exists, Cybros must block new draft materialization with an explicit stale-selection error instead of silently picking an arbitrary runtime.
+
+No execution-capable conversation may fall back to a nil-program builtin path.
 
 ## Contract Ownership
 
@@ -132,6 +143,15 @@ V1 activation requires:
 - deployment identity claims matching the registered binding
 
 Activation does not create a compatibility layer or routing matrix.
+
+## Deployment Launch Ownership
+
+Managed-local deployments are still ordinary `AgentDeployment` records. They differ only in who launches them:
+
+- official local development and official compose use a Cybros-managed local supervisor
+- launch state is derived from deployment facts such as allocated endpoint, generated runtime config, activation, and health
+- the source tree never becomes the authority for launch ownership
+- unsupported external topologies remain operator-managed rather than reintroducing a builtin path
 
 ## Deferred Direction
 

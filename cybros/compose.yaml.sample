@@ -8,11 +8,15 @@ x-app: &default-app
   environment:
     RAILS_DB_URL_BASE: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db
     RAILS_ENV: production
+    CYBROS_MANAGED_AGENT_AUTOLAUNCH: "1"
+    CYBROS_AGENT_WORKSPACE_ROOT: /rails/agent-workspace
+    CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT: /rails
     # Migrator specified
     SKIP_DEMO_DATA: 1
   entrypoint: []
   volumes:
     - app-storage:/rails/storage
+    - agent-workspace:/rails/agent-workspace
 
 services:
   db:
@@ -119,6 +123,31 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  agent_deployments:
+    <<: *default-app
+    depends_on:
+      db:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    command:
+      - "./bin/managed_agent_deployments"
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 256M
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
 volumes:
   postgres-data:
   app-storage:
+  agent-workspace:

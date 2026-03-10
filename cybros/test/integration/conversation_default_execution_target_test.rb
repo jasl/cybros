@@ -46,6 +46,19 @@ class ConversationDefaultExecutionTargetTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="conversation[default_execution_target_id]"] option', text: healthy_target.name
   end
 
+  test "new conversations do not auto-select an arbitrary execution target when multiple are visible" do
+    sign_in_owner!
+    create_execution_target!(name: "Current target")
+    create_execution_target!(name: "Alternate target")
+    Account.instance.update_llm_default_model_ref!("")
+    ensure_active_openai_credential!
+
+    post conversations_path, params: { conversation: { title: "Chat" } }
+
+    conversation = Conversation.order(:created_at).last
+    assert_nil conversation.default_execution_target_id
+  end
+
   private
 
     def sign_in_owner!
@@ -97,5 +110,19 @@ class ConversationDefaultExecutionTargetTest < ActionDispatch::IntegrationTest
         status: target_status,
         sandboxed: true,
       )
+    end
+
+    def ensure_active_openai_credential!
+      credential = LLMProviderCredential.find_or_initialize_by(provider_key: "openai", status: "active")
+      credential.assign_attributes(
+        credential_type: "api_key",
+        api_key: "sk-test",
+        max_concurrent_requests: 3,
+        requests_per_minute: 90,
+        tokens_per_minute: 180_000,
+        burst_limit: 6,
+        backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
+      )
+      credential.save!
     end
 end

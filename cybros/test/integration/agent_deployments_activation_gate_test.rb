@@ -1,4 +1,7 @@
 require "test_helper"
+require "fileutils"
+require "socket"
+require "tmpdir"
 
 class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
   test "activates an inspected healthy deployment when protocol and methods match exactly" do
@@ -179,6 +182,55 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
     candidate_server&.shutdown
   end
 
+  test "show surfaces bundled lineage and managed local launch facts after activation" do
+    sign_in_owner!
+    workspace_root = Dir.mktmpdir("cybros-agent-workspace-")
+    configure_agent_workspace_root!(workspace_root)
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    deployment = create_managed_local_deployment!(program:, workspace_root:, deployment_fingerprint: "fixture-bundled-managed-local-ui")
+    server =
+      Cybros::BundledAgentHost::Application.new(
+        source_root: program.absolute_local_path,
+        host: deployment.transport_config.fetch("host"),
+        port: deployment.transport_config.fetch("port"),
+        deployment_key: deployment.id,
+        deployment_fingerprint: deployment.deployment_fingerprint,
+        required_bearer: deployment.deployment_bearer_secret_ref,
+      ).start
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    post activate_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    deployment.reload
+
+    get system_settings_agent_deployment_path(deployment)
+
+    assert_response :success
+    assert_includes response.body, "Source kind"
+    assert_includes response.body, "Bundled"
+    assert_includes response.body, "Bundled key"
+    assert_includes response.body, "default"
+    assert_includes response.body, program.absolute_local_path.to_s
+    assert_includes response.body, "Allocated endpoint"
+    assert_includes response.body, deployment.endpoint_url
+    assert_includes response.body, "Allocated port"
+    assert_includes response.body, deployment.transport_config.fetch("port").to_s
+    assert_includes response.body, "Runtime config path"
+    assert_includes response.body, deployment.runtime_config_path
+    assert_includes response.body, "Launch owner"
+    assert_includes response.body, "Cybros managed local supervisor"
+    assert_includes response.body, "Launch status"
+    assert_includes response.body, "Launched"
+    assert_includes response.body, "Active since"
+    assert_includes response.body, deployment.activated_at.iso8601
+  ensure
+    server&.shutdown
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
+
   private
 
     def sign_in_owner!
@@ -282,5 +334,56 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
         expires_at: 5.minutes.from_now.change(usec: 0),
         status: "open",
       )
+    end
+
+    def configure_agent_workspace_root!(path)
+      runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
+      runtime_setting.assign_attributes(
+        default_worker_concurrency: RuntimeSetting::DEFAULT_WORKER_CONCURRENCY,
+        queue_overrides: {},
+        alert_thresholds: {},
+        agent_workspace_root: path,
+      )
+      runtime_setting.save!
+    end
+
+    def create_managed_local_deployment!(program:, workspace_root:, deployment_fingerprint:)
+      port = available_local_port
+      deployment_id = SecureRandom.uuid
+      runtime_config_path = File.join(workspace_root, ".cybros", "agent_deployments", deployment_id, "runtime.json")
+      deployment =
+        AgentDeployment.create!(
+          id: deployment_id,
+          agent_program: program,
+          transport_kind: "http_jsonrpc",
+          endpoint_url: AgentDeployment.local_endpoint_url(host: "127.0.0.1", port: port, rpc_path: "/rpc"),
+          deployment_bearer_secret_ref: "secret://bundled-managed-local",
+          contract_fingerprint: program.published_contract_fingerprint,
+          deployment_fingerprint: deployment_fingerprint,
+          status: "inactive",
+          health_status: "unknown",
+          protocol_version: "agent_rpc.v1",
+          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          transport_config: {
+            "host" => "127.0.0.1",
+            "port" => port,
+            "rpc_path" => "/rpc",
+            "runtime_config_path" => runtime_config_path,
+          },
+          manifest_snapshot: {},
+          schema_snapshot: {},
+          capability_snapshot: {},
+          inspection_details: {},
+        )
+
+      AgentDeployments::RuntimeConfigWriter.new(deployment: deployment).write!
+      deployment
+    end
+
+    def available_local_port
+      server = TCPServer.new("127.0.0.1", 0)
+      server.addr[1]
+    ensure
+      server&.close
     end
 end

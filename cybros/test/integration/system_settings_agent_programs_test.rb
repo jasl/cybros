@@ -42,8 +42,18 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
   test "show falls back to noop runtime surface for invalid config" do
     sign_in_owner!
 
-    rel_dir = File.join("storage", "agent_programs", "test-invalid-runtime-surface")
-    abs_dir = Rails.root.join(rel_dir)
+    workspace_root = Dir.mktmpdir("cybros-agent-workspace-")
+    runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
+    runtime_setting.assign_attributes(
+      default_worker_concurrency: 12,
+      queue_overrides: {},
+      alert_thresholds: {},
+      agent_workspace_root: workspace_root,
+    )
+    runtime_setting.save!
+
+    rel_dir = "test-invalid-runtime-surface"
+    abs_dir = Pathname.new(workspace_root).join(rel_dir)
     FileUtils.mkdir_p(abs_dir)
     File.write(abs_dir.join("agent.yml"), <<~YAML)
       name: invalid-runtime-surface
@@ -72,13 +82,24 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Fallback to safe no-op"
   ensure
     FileUtils.rm_rf(abs_dir)
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
   end
 
   test "show falls back to noop runtime surface when config is missing" do
     sign_in_owner!
 
-    rel_dir = File.join("storage", "agent_programs", "test-missing-runtime-surface")
-    abs_dir = Rails.root.join(rel_dir)
+    workspace_root = Dir.mktmpdir("cybros-agent-workspace-")
+    runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
+    runtime_setting.assign_attributes(
+      default_worker_concurrency: 12,
+      queue_overrides: {},
+      alert_thresholds: {},
+      agent_workspace_root: workspace_root,
+    )
+    runtime_setting.save!
+
+    rel_dir = "test-missing-runtime-surface"
+    abs_dir = Pathname.new(workspace_root).join(rel_dir)
     FileUtils.mkdir_p(abs_dir)
     File.write(abs_dir.join("agent.yml"), <<~YAML)
       name: missing-runtime-surface
@@ -97,5 +118,34 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_equal "missing", program.runtime_surface_status
   ensure
     FileUtils.rm_rf(abs_dir)
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
+
+  test "copy as custom agent creates a forked program and git repo" do
+    sign_in_owner!
+    root = Dir.mktmpdir("cybros-agent-workspace-")
+    runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
+    runtime_setting.assign_attributes(
+      default_worker_concurrency: 12,
+      queue_overrides: {},
+      alert_thresholds: {},
+      agent_workspace_root: root,
+    )
+    runtime_setting.save!
+    bundled = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+
+    assert_difference -> { AgentProgram.count }, +1 do
+      post fork_system_settings_agent_program_path(bundled), params: { name: "My assistant" }
+    end
+
+    forked = AgentProgram.find_by!(name: "My assistant")
+
+    assert_redirected_to system_settings_agent_program_path(forked)
+    assert_equal "custom", forked.source_kind
+    assert_equal bundled.id, forked.forked_from_agent_program_id
+    assert_equal true, forked.absolute_local_path.join(".git").directory?
+    refute_equal "default", forked.manifest_snapshot.fetch("agent_program_key")
+  ensure
+    FileUtils.rm_rf(root) if root.present?
   end
 end

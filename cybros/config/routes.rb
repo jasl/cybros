@@ -21,7 +21,9 @@ Rails.application.routes.draw do
       end
       resource :runtime_settings, only: %i[show edit update]
       resource :runtime_governance, only: :show, controller: "runtime_governance"
-      resources :agent_programs, only: %i[index new create show]
+      resources :agent_programs, only: %i[index new create show] do
+        post :fork, on: :member
+      end
       resources :agent_deployments, only: %i[index new create show] do
         post :inspect, on: :member
         post :activate, on: :member

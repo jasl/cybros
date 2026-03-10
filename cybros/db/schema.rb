@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_10_100000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_10_110000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -269,7 +269,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_10_100000) do
   create_table "conversations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.jsonb "agent_config", default: {}, null: false
     t.string "agent_config_schema_fingerprint"
-    t.uuid "agent_program_id"
+    t.uuid "agent_program_id", null: false
     t.datetime "created_at", null: false
     t.uuid "default_execution_target_id"
     t.uuid "forked_from_node_id"

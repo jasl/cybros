@@ -1,6 +1,6 @@
 class RuntimeSetting < ApplicationRecord
   DEFAULT_WORKER_CONCURRENCY = 12
-  DEFAULT_AGENT_WORKSPACE_ROOT = Rails.root.to_s
+  DEFAULT_AGENT_WORKSPACE_ROOT = ENV.fetch("CYBROS_AGENT_WORKSPACE_ROOT", Rails.root.to_s)
 
   before_validation :apply_scope_key
 

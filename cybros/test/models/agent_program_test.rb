@@ -57,11 +57,11 @@ class AgentProgramTest < ActiveSupport::TestCase
     assert_includes program.errors[:local_path], "must match the bundled source root for this key"
   end
 
-  test "custom programs require a relative local_path" do
+  test "custom programs auto-generate a relative local_path when blank" do
     program = build_program(local_path: "")
 
-    refute_predicate program, :valid?
-    assert_includes program.errors[:local_path], "can't be blank"
+    assert_predicate program, :valid?
+    assert_match(%r{\Astorage/agent_programs/}, program.local_path)
   end
 
   test "custom programs reject absolute local_path values" do

@@ -17,30 +17,70 @@
     </div>
   <% end %>
 
-  <div class="card bg-base-200/30 border border-base-300 shadow-sm">
-    <div class="card-body">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div>
-          <div class="text-xs opacity-60">Status</div>
-          <div><%= @agent_deployment.status %></div>
+  <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <h3 class="card-title text-base">Source</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-xs opacity-60">Source kind</div>
+            <div><%= agent_program_source_kind_label(@agent_deployment.agent_program) %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60"><%= agent_program_lineage_label(@agent_deployment.agent_program) %></div>
+            <div><%= agent_program_lineage_value(@agent_deployment.agent_program) %></div>
+          </div>
         </div>
-        <div>
-          <div class="text-xs opacity-60">Health</div>
-          <div><%= @agent_deployment.health_status %></div>
-        </div>
-        <div>
-          <div class="text-xs opacity-60">Endpoint</div>
-          <div class="font-mono text-sm"><%= @agent_deployment.endpoint_url %></div>
-        </div>
-        <div>
-          <div class="text-xs opacity-60">Protocol</div>
-          <div class="font-mono text-sm"><%= @agent_deployment.protocol_version %></div>
+
+        <div class="mt-4">
+          <div class="text-xs opacity-60">Source path</div>
+          <div class="font-mono text-sm break-all"><%= agent_program_source_root(@agent_deployment.agent_program) %></div>
         </div>
       </div>
+    </div>
 
-      <div class="mt-4">
-        <div class="text-xs opacity-60">Supported methods</div>
-        <div class="font-mono text-sm"><%= @agent_deployment.supported_methods.join(", ") %></div>
+    <div class="card bg-base-200/30 border border-base-300 shadow-sm">
+      <div class="card-body">
+        <h3 class="card-title text-base">Deployment</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <div class="text-xs opacity-60">Deployment status</div>
+            <div><%= @agent_deployment.status %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Deployment health</div>
+            <div><%= @agent_deployment.health_status %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Launch status</div>
+            <div><%= deployment_launch_status_label(@agent_deployment) %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Launch owner</div>
+            <div><%= deployment_launch_owner_label(@agent_deployment) %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Allocated endpoint</div>
+            <div class="font-mono text-sm break-all"><%= @agent_deployment.endpoint_url.presence || "n/a" %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Allocated port</div>
+            <div class="font-mono text-sm"><%= @agent_deployment.allocated_port || "n/a" %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Deployment fingerprint</div>
+            <div class="font-mono text-sm break-all"><%= @agent_deployment.deployment_fingerprint %></div>
+          </div>
+          <div>
+            <div class="text-xs opacity-60">Active since</div>
+            <div class="font-mono text-sm"><%= deployment_active_timestamp(@agent_deployment) %></div>
+          </div>
+        </div>
+
+        <div class="mt-4">
+          <div class="text-xs opacity-60">Runtime config path</div>
+          <div class="font-mono text-sm break-all"><%= @agent_deployment.runtime_config_path || "n/a" %></div>
+        </div>
       </div>
     </div>
   </div>
