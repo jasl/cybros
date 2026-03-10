@@ -292,4 +292,50 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       DAG.executor_registry = original_registry
     end
   end
+
+  test "product fork keeps lane state on a frozen snapshot instead of reading through the parent lane" do
+    root = create_conversation!(title: "Demo")
+    graph = root.root_graph
+
+    agent = nil
+    graph.mutate! do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+        )
+    end
+
+    LaneKVEntry.create!(
+      lane: root.chat_lane,
+      key: "shared.stage",
+      value: { "status" => "planned" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    LanePromptBufferEntry.create!(
+      lane: root.chat_lane,
+      buffer_name: "handoff",
+      seq: 10,
+      kind: "note",
+      content: "Parent handoff",
+      estimated_tokens: 7,
+    )
+
+    branch = root.create_child!(from_node_id: agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+
+    root.chat_lane.lane_kv_entries.find_by!(key: "shared.stage").update!(value: { "status" => "mutated" })
+    LanePromptBufferEntry.create!(
+      lane: root.chat_lane,
+      buffer_name: "handoff",
+      seq: 20,
+      kind: "note",
+      content: "Late parent note",
+      estimated_tokens: 6,
+    )
+
+    assert_equal({ "status" => "planned" }, branch.chat_lane.lane_kv_entries.find_by!(key: "shared.stage").value)
+    assert_equal ["Parent handoff"], branch.chat_lane.lane_prompt_buffer_entries.ordered.pluck(:content)
+  end
 end

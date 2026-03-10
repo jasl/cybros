@@ -26,6 +26,16 @@ class DAG::LaneTest < ActiveSupport::TestCase
     end
   end
 
+  test "lane exposes lane scoped state associations" do
+    kv_association = DAG::Lane.reflect_on_association(:lane_kv_entries)
+    prompt_buffer_association = DAG::Lane.reflect_on_association(:lane_prompt_buffer_entries)
+
+    assert_equal :has_many, kv_association.macro
+    assert_equal "LaneKVEntry", kv_association.class_name
+    assert_equal :has_many, prompt_buffer_association.macro
+    assert_equal "LanePromptBufferEntry", prompt_buffer_association.class_name
+  end
+
   test "root_node_id must belong to the lane" do
     conversation = create_conversation!
     graph = conversation.dag_graph

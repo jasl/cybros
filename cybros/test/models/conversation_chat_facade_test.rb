@@ -289,6 +289,122 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal child, lane.attachable
   end
 
+  test "create_child! snapshots lane scoped state into the child lane" do
+    conversation = create_conversation!(title: "Root")
+    graph = conversation.root_graph
+
+    agent = nil
+    graph.mutate! do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+        )
+    end
+
+    LaneKVEntry.create!(
+      lane: conversation.chat_lane,
+      key: "shared.stage",
+      value: { "status" => "planned" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    LanePromptBufferEntry.create!(
+      lane: conversation.chat_lane,
+      buffer_name: "summaries",
+      seq: 10,
+      kind: "summary",
+      content: "Parent summary",
+      estimated_tokens: 12,
+      metadata: { "source" => "test" },
+    )
+
+    child =
+      conversation.create_child!(
+        from_node_id: agent.id,
+        kind: "branch",
+        title: "Branch",
+        user_content: "What if?",
+      )
+
+    assert_equal(
+      [{ "key" => "shared.stage", "value" => { "status" => "planned" } }],
+      child.chat_lane.lane_kv_entries.order(:key).map { |entry| { "key" => entry.key, "value" => entry.value } },
+    )
+    assert_equal(
+      [{
+        "buffer_name" => "summaries",
+        "seq" => 10,
+        "kind" => "summary",
+        "content" => "Parent summary",
+        "estimated_tokens" => 12,
+      }],
+      child.chat_lane.lane_prompt_buffer_entries.ordered.map do |entry|
+        {
+          "buffer_name" => entry.buffer_name,
+          "seq" => entry.seq,
+          "kind" => entry.kind,
+          "content" => entry.content,
+          "estimated_tokens" => entry.estimated_tokens,
+        }
+      end,
+    )
+  end
+
+  test "child lane snapshot stays independent after parent lane state changes" do
+    conversation = create_conversation!(title: "Root")
+    graph = conversation.root_graph
+
+    agent = nil
+    graph.mutate! do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+        )
+    end
+
+    root_entry =
+      LaneKVEntry.create!(
+        lane: conversation.chat_lane,
+        key: "shared.stage",
+        value: { "status" => "planned" },
+        written_by_type: "Seed",
+        written_by_id: SecureRandom.uuid,
+      )
+    LanePromptBufferEntry.create!(
+      lane: conversation.chat_lane,
+      buffer_name: "working_notes",
+      seq: 10,
+      kind: "note",
+      content: "Before fork",
+      estimated_tokens: 8,
+    )
+
+    child =
+      conversation.create_child!(
+        from_node_id: agent.id,
+        kind: "branch",
+        title: "Branch",
+        user_content: "What if?",
+      )
+
+    root_entry.update!(value: { "status" => "updated-after-fork" })
+    LanePromptBufferEntry.create!(
+      lane: conversation.chat_lane,
+      buffer_name: "working_notes",
+      seq: 20,
+      kind: "note",
+      content: "After fork",
+      estimated_tokens: 9,
+    )
+
+    assert_equal({ "status" => "planned" }, child.chat_lane.lane_kv_entries.find_by!(key: "shared.stage").value)
+    assert_equal ["Before fork"], child.chat_lane.lane_prompt_buffer_entries.ordered.pluck(:content)
+  end
+
   test "edit_user_message! replaces the latest user turn and queues a regenerated assistant" do
     conversation = create_conversation!(title: "Chat")
 
