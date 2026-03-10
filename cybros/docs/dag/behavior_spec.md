@@ -190,11 +190,11 @@ Active 视图内必须保持一致（不允许 drift）：
 
 #### 2.5.3 NodeBody semantic hooks（规范性要求）
 
-里程碑 1 引入一组 **NodeBody 语义 hooks**（class-level），用于把 “哪些类型算 turn anchor / transcript 候选 / leaf terminal / 默认 leaf repair / content 写入落点 / mermaid snippet” 从 DAG 核心分支判断中抽离出来：
+里程碑 1 引入一组 **NodeBody 语义 hooks**（class-level），用于把 “哪些类型算 turn head / transcript 候选 / leaf terminal / 默认 leaf repair / content 写入落点 / mermaid snippet” 从 DAG 核心分支判断中抽离出来：
 
 - `node_type_key`：默认 `name.demodulize.underscore`
 - `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
-- `turn_anchor?`：默认 `false`（用于 `transcript_recent_turns` 的 turn SQL 预筛选）
+- `turn_head?`：默认 `false`（用于 `transcript_recent_turns` 的 turn SQL 预筛选）
 - `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选）
 - `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定）
 - `default_leaf_repair?`：默认 `false`（用于 leaf invariant repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true）
@@ -203,7 +203,7 @@ Active 视图内必须保持一致（不允许 drift）：
 引擎行为（normative）：
 
 - 对 conversation graphs（attachable 提供 `dag_node_body_namespace`）：
-  - 引擎会扫描该 namespace 下所有 `< DAG::NodeBody` 的子类，基于 hooks 计算 turn anchor / transcript candidates / leaf terminal types / default leaf repair type。
+  - 引擎会扫描该 namespace 下所有 `< DAG::NodeBody` 的子类，基于 hooks 计算 turn head / transcript candidates / leaf terminal types / default leaf repair type。
   - 这意味着：扩展新 node_type 时，除了提供 `node_type ↔ body` 的约定映射外，还应在对应 body 上声明必要的 hooks（而不是修改 DAG 核心）。
 - `dag_node_body_namespace` 缺失时，不保证 hooks 扫描与 leaf 修复等行为可用（因为该图本身被视为 misconfigured）。
 
@@ -324,39 +324,39 @@ retention 规则（normative；硬规则）：
 - Compression 不允许跨 lane 压缩；summary 节点必须继承被压缩子图的 `lane_id`。
 - Context/Transcript 输出必须携带 `lane_id`（用于 UI 染色与对话树展示）。
 
-#### 2.7.1 Lane turns（anchored_seq / anchored_turn_count / anchored_turn_page）
+#### 2.7.1 Lane turns（lane_seq / lane_turn_count / lane_turn_page）
 
 产品通常需要“在一条 lane 内按对话轮次（turn）展示与计数”，但引擎必须避免默认 O(n) 全量扫描。里程碑 1 将 turn 的“UI 序号/分页索引”物化在 `dag_turns`：
 
 - `dag_turns.id`（UUIDv7）：turn 的稳定排序/分页 key（推荐 keyset：`WHERE id < cursor ORDER BY id DESC LIMIT n`）。
-- `dag_turns.anchored_seq`（bigint；nullable）：该 turn 第一次出现 turn anchor 时被分配的 **1-based** 序号；只写一次，不回填、不重算。
-- `dag_lanes.next_anchored_seq`（bigint）：该 lane 的单调计数器，用于 O(1) 分配新 `anchored_seq`。
+- `dag_turns.lane_seq`（bigint；nullable）：该 turn 第一次出现 turn head 时被分配的 **1-based** 序号；只写一次，不回填、不重算。
+- `dag_lanes.next_lane_seq`（bigint）：该 lane 的单调计数器，用于 O(1) 分配新 `lane_seq`。
 
-turn anchors：
+turn heads：
 
-- 由 NodeBody hooks `turn_anchor?` 标记“哪些 node_type 代表一个 turn 的锚点”（conversation graphs 默认 `user_message/agent_message/character_message`）。
-- `graph.turn_anchor_node_types` 返回该图配置下的 turn anchor node types。
+- 由 NodeBody hooks `turn_head?` 标记“哪些 node_type 代表一个 turn 的 head”（conversation graphs 默认 `user_message/agent_message/character_message`）。
+- `graph.turn_head_node_types` 返回该图配置下的 turn head node types。
 
-anchor 选择与可见性（normative）：
+head 选择与可见性（normative）：
 
-- `dag_turns.anchor_node_id/anchor_created_at` 表示该 turn 当前“可见 anchor”（Active + 非 deleted）：
-  - 候选范围：同一 `graph+lane+turn` 内，`node_type IN graph.turn_anchor_node_types` 且 `compressed_at IS NULL AND deleted_at IS NULL`
+- `dag_turns.head_node_id/head_created_at` 表示该 turn 当前“可见 head”（Active + 非 deleted）：
+  - 候选范围：同一 `graph+lane+turn` 内，`node_type IN graph.turn_head_node_types` 且 `compressed_at IS NULL AND deleted_at IS NULL`
   - 选择规则：按 `(created_at ASC, id ASC)` 取最早者（稳定）
   - 若无候选：置为 NULL
-- `dag_turns.anchor_node_id_including_deleted/anchor_created_at_including_deleted` 表示包含软删除的 anchor（仍不含 compressed）：
-  - 候选范围：同一 `graph+lane+turn` 内，`node_type IN graph.turn_anchor_node_types` 且 `compressed_at IS NULL`
+- `dag_turns.head_node_id_including_deleted/head_created_at_including_deleted` 表示包含软删除的 head（仍不含 compressed）：
+  - 候选范围：同一 `graph+lane+turn` 内，`node_type IN graph.turn_head_node_types` 且 `compressed_at IS NULL`
   - 选择规则同上
   - 若无候选：置为 NULL
 
-anchored_seq 分配（normative）：
+lane_seq 分配（normative）：
 
-- 当任意 `turn_anchor?` 节点首次出现在某个 turn 时，若 `dag_turns.anchored_seq IS NULL`：
-  - 必须原子地将 `dag_lanes.next_anchored_seq += 1` 并用返回值写入 `dag_turns.anchored_seq`
-- 之后即使该 turn 的 anchor 被压缩/删除，`anchored_seq` 也不得变化。
+- 当任意 `turn_head?` 节点首次出现在某个 turn 时，若 `dag_turns.lane_seq IS NULL`：
+  - 必须原子地将 `dag_lanes.next_lane_seq += 1` 并用返回值写入 `dag_turns.lane_seq`
+- 之后即使该 turn 的 head 被压缩/删除，`lane_seq` 也不得变化。
 
-Turn anchor refresh（normative）：
+Turn head refresh（normative）：
 
-- `edit/retry/rerun/compress/soft_delete/restore` 等可能改变 turn 内 anchor 集合的操作，完成后 **必须**刷新该 turn 的 `dag_turns.anchor_*` 字段，确保 turn 不会因锚点变化而“意外消失”。
+- `edit/retry/rerun/compress/soft_delete/restore` 等可能改变 turn 内 head 集合的操作，完成后 **必须**刷新该 turn 的 `dag_turns.head_*` 字段，确保 turn 不会因 head 变化而“意外消失”。
 
 对外 API（Public API 约定）：
 
@@ -365,14 +365,14 @@ Turn anchor refresh（normative）：
   - 按 `dag_nodes.id` keyset（`before_message_id/after_message_id`）；属于 message 粒度分页（不保证按 turn 对齐）
   - 引擎内部会对扫描候选节点数做 hard cap（安全带），因此页可能少于 limit（极端情况下为空）
 - 聊天记录（面向真实产品 UI）：`lane.transcript_page(...)`
-  - 只返回 “可见 turns”（默认 `dag_turns.anchor_node_id IS NOT NULL`；`include_deleted: true` 用 `anchor_node_id_including_deleted`）
-  - turn 的 keyset 排序只按 `turn_id`（UUIDv7），不依赖 `anchor_created_at`
-- turn 序号/范围索引（面向压缩/定位）：`lane.anchored_turn_page(...) / anchored_turn_count / anchored_turn_seq_for(...)`
-  - `include_deleted: true` 可包含历史上出现过 `anchored_seq` 的 turns（即使当前无可见 anchor）
+  - 只返回 “可见 turns”（默认 `dag_turns.head_node_id IS NOT NULL`；`include_deleted: true` 用 `head_node_id_including_deleted`）
+  - turn 的 keyset 排序只按 `turn_id`（UUIDv7），不依赖 `head_created_at`
+- turn 序号/范围索引（面向压缩/定位）：`lane.lane_turn_page(...) / lane_turn_count / lane_turn_seq_for(...)`
+  - `include_deleted: true` 可包含历史上出现过 `lane_seq` 的 turns（即使当前无可见 head）
 
 Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/summary 策略）：
 
-- `lane.turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)`
+- `lane.turn_head_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 - `lane.turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 - `lane.node_ids_for_turn_ids(turn_ids:, include_compressed: false, include_deleted: true)`
 - `lane.node_ids_for_turn_seq_range(start_seq:, end_seq:, include_compressed: false, include_deleted: true)`
@@ -484,18 +484,18 @@ Lane 提供的 turn/子图原语（非规范；用于 app 自行实现压缩/sum
 
 节点选择（normative）：
 
-1) **核心窗口（最多 `limit_turns` 个 anchored turns）**
-   - anchored turns 指 `dag_turns.anchor_node_id IS NOT NULL` 的 turns（`include_deleted: true` 时用 `anchor_node_id_including_deleted`）
-   - anchored turns 使用 `dag_turns.id`（即 `turn_id`；UUIDv7）作为稳定 keyset 排序键（不依赖 `anchor_created_at`）
+1) **核心窗口（最多 `limit_turns` 个 lane-indexed turns）**
+   - lane-indexed turns 指 `dag_turns.head_node_id IS NOT NULL` 的 turns（`include_deleted: true` 时用 `head_node_id_including_deleted`）
+   - lane-indexed turns 使用 `dag_turns.id`（即 `turn_id`；UUIDv7）作为稳定 keyset 排序键（不依赖 `head_created_at`）
    - 窗口覆盖与 target 相关的 lanes：
      - target 所在 lane 的 parent_lane 链（每段只取到 fork 点）
      - target 的 incoming blocking 来源 nodes（`sequence/dependency`；merge 场景关键）的各自 lane，并同样取各自的 parent_lane 链
-   - 对每条 lane 链段，计算 cutoff（上界）为该链段 cutoff node 的 `turn_id`，并取该 lane 内 `turn_id <= cutoff_turn_id` 的 anchored turns（每段最多取 `limit_turns` 个候选）；合并后按 `turn_id` 取最近 `limit_turns`
+   - 对每条 lane 链段，计算 cutoff（上界）为该链段 cutoff node 的 `turn_id`，并取该 lane 内 `turn_id <= cutoff_turn_id` 的 lane-indexed turns（每段最多取 `limit_turns` 个候选）；合并后按 `turn_id` 取最近 `limit_turns`
 
 2) **强制 pin 的 turns（不计入 `limit_turns` 预算）**
    - 永远包含：
      - `target_node.turn_id`
-     - 每条 lane 链段的 cutoff node 的 `turn_id`（即使该 turn 没有 anchor；确保 fork/merge 关键点稳定进入 context）
+     - 每条 lane 链段的 cutoff node 的 `turn_id`（即使该 turn 没有 head；确保 fork/merge 关键点稳定进入 context）
 
 3) **强制 pin 的 nodes（跨窗口的少量关键节点）**
    - 全图 Active 的 `system_message` + `developer_message`（遵守 `include_excluded/include_deleted` 的输出过滤）
@@ -625,7 +625,7 @@ defer queue 的存储与应用规则（normative）：
 
 典型用法（非规范）：
 
-- 对 chatbot：保留 “用户输入（turn anchor）” + “当前采用版本的最终回复（agent_message）”，排除中间 task/草稿/中间消息等。
+- 对 chatbot：保留 “用户输入（turn head）” + “当前采用版本的最终回复（agent_message）”，排除中间 task/草稿/中间消息等。
 
 #### 4.5.1 Context 输出过滤（默认）
 
@@ -1015,7 +1015,7 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `active_edge_to_inactive_node`：active edge 指向 inactive node（修复：压缩该 edge）
 - `stale_visibility_patch`：patch 指向 inactive node（修复：删除 patch）
 - `leaf_invariant_violation`：Active 图 leaf 不合法（修复：调用 `validate_leaf_invariant!`）
-- `turn_anchor_drift`：`dag_turns.anchor_*` 与“按规则计算出的可见 anchor”不一致（修复：调用 `DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）
+- `turn_head_drift`：`dag_turns.head_*` 与“按规则计算出的可见 head”不一致（修复：调用 `DAG::TurnHeadMaintenance.refresh_for_turn_ids!`）
 - `stale_running_node`：running lease 过期（修复：running→errored，见 2.3.1）
 - `unknown_node_type`：Active node 的 `node_type` 无法映射到 NodeBody class（修复：无自动修复，仅用于诊断）
 - `node_type_maps_to_non_node_body`：`node_type` 映射到了非 NodeBody 的常量（修复：无自动修复，仅用于诊断）
@@ -1035,7 +1035,7 @@ Hooks 用于将 DAG 引擎的关键动作投影到外部系统（例如 `events`
 - `default_leaf_repair_not_executable`
 - `default_leaf_repair_not_leaf_terminal`
 - `invalid_created_content_destination`
-- `missing_turn_anchor_node_type`（warn）
+- `missing_turn_head_node_type`（warn）
 - `missing_transcript_candidate_node_type`（warn）
 
 Rake tasks（可选）：

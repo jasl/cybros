@@ -311,7 +311,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
     t.datetime "merged_at"
     t.uuid "merged_into_lane_id"
     t.jsonb "metadata", default: {}, null: false
-    t.bigint "next_anchored_seq", default: 0, null: false
+    t.bigint "next_lane_seq", default: 0, null: false
     t.uuid "parent_lane_id"
     t.string "role", null: false
     t.uuid "root_node_id"
@@ -412,27 +412,27 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
-    t.datetime "anchor_created_at"
-    t.datetime "anchor_created_at_including_deleted"
-    t.uuid "anchor_node_id"
-    t.uuid "anchor_node_id_including_deleted"
-    t.bigint "anchored_seq"
     t.datetime "created_at", null: false
     t.uuid "graph_id", null: false
+    t.datetime "head_created_at"
+    t.datetime "head_created_at_including_deleted"
+    t.uuid "head_node_id"
+    t.uuid "head_node_id_including_deleted"
     t.uuid "lane_id", null: false
+    t.bigint "lane_seq"
     t.jsonb "metadata", default: {}, null: false
     t.bigint "next_activity_seq", default: 0, null: false
     t.datetime "updated_at", null: false
-    t.index ["graph_id", "id"], name: "index_dag_turns_graph_visible", where: "(anchor_node_id IS NOT NULL)"
-    t.index ["graph_id", "lane_id", "anchored_seq"], name: "index_dag_turns_graph_lane_anchored_seq_unique", unique: true, where: "(anchored_seq IS NOT NULL)"
+    t.index ["graph_id", "id"], name: "index_dag_turns_graph_visible", where: "(head_node_id IS NOT NULL)"
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_id_unique", unique: true
-    t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible", where: "(anchor_node_id IS NOT NULL)"
+    t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible", where: "(head_node_id IS NOT NULL)"
+    t.index ["graph_id", "lane_id", "lane_seq"], name: "index_dag_turns_graph_lane_lane_seq_unique", unique: true, where: "(lane_seq IS NOT NULL)"
     t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane"
-    t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane_visible_including_deleted", where: "(anchor_node_id_including_deleted IS NOT NULL)"
+    t.index ["graph_id", "lane_id"], name: "index_dag_turns_graph_lane_visible_including_deleted", where: "(head_node_id_including_deleted IS NOT NULL)"
     t.index ["graph_id"], name: "index_dag_turns_on_graph_id"
-    t.check_constraint "(anchor_node_id IS NULL) = (anchor_created_at IS NULL)", name: "check_dag_turns_anchor_fields_consistent"
-    t.check_constraint "(anchor_node_id_including_deleted IS NULL) = (anchor_created_at_including_deleted IS NULL)", name: "check_dag_turns_anchor_including_deleted_fields_consistent"
-    t.check_constraint "anchored_seq IS NULL OR anchored_seq > 0", name: "check_dag_turns_anchored_seq_positive"
+    t.check_constraint "(head_node_id IS NULL) = (head_created_at IS NULL)", name: "check_dag_turns_head_fields_consistent"
+    t.check_constraint "(head_node_id_including_deleted IS NULL) = (head_created_at_including_deleted IS NULL)", name: "check_dag_turns_head_including_deleted_fields_consistent"
+    t.check_constraint "lane_seq IS NULL OR lane_seq > 0", name: "check_dag_turns_lane_seq_positive"
   end
 
   create_table "events", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|

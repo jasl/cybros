@@ -1,5 +1,5 @@
 module DAG
-  class TurnAnchorMaintenance
+  class TurnHeadMaintenance
     def self.refresh_for_turn_ids!(graph:, lane_id:, turn_ids:, now: Time.current)
       new(graph: graph).refresh_for_turn_ids!(lane_id: lane_id, turn_ids: turn_ids, now: now)
     end
@@ -12,8 +12,8 @@ module DAG
       turn_ids = Array(turn_ids).map(&:to_s).uniq
       return if turn_ids.empty?
 
-      anchor_types = @graph.turn_anchor_node_types
-      return if anchor_types.empty?
+      head_types = @graph.turn_head_node_types
+      return if head_types.empty?
 
       DAG::Turn.with_connection do |connection|
         graph_quoted = connection.quote(@graph.id)
@@ -26,7 +26,7 @@ module DAG
           end.join(",")
 
         type_list =
-          anchor_types.map do |type|
+          head_types.map do |type|
             connection.quote(type.to_s)
           end.join(",")
 
@@ -37,8 +37,8 @@ module DAG
           visible AS (
             SELECT DISTINCT ON (n.turn_id)
               n.turn_id,
-              n.id AS anchor_node_id,
-              n.created_at AS anchor_created_at
+              n.id AS head_node_id,
+              n.created_at AS head_created_at
             FROM dag_nodes n
             WHERE n.graph_id = #{graph_quoted}
               AND n.lane_id = #{lane_quoted}
@@ -51,8 +51,8 @@ module DAG
           including_deleted AS (
             SELECT DISTINCT ON (n.turn_id)
               n.turn_id,
-              n.id AS anchor_node_id,
-              n.created_at AS anchor_created_at
+              n.id AS head_node_id,
+              n.created_at AS head_created_at
             FROM dag_nodes n
             WHERE n.graph_id = #{graph_quoted}
               AND n.lane_id = #{lane_quoted}
@@ -64,19 +64,19 @@ module DAG
           updates AS (
             SELECT
               t.turn_id,
-              v.anchor_node_id AS visible_anchor_node_id,
-              v.anchor_created_at AS visible_anchor_created_at,
-              d.anchor_node_id AS including_deleted_anchor_node_id,
-              d.anchor_created_at AS including_deleted_anchor_created_at
+              v.head_node_id AS visible_head_node_id,
+              v.head_created_at AS visible_head_created_at,
+              d.head_node_id AS including_deleted_head_node_id,
+              d.head_created_at AS including_deleted_head_created_at
             FROM input_turn_ids t
             LEFT JOIN visible v ON v.turn_id = t.turn_id
             LEFT JOIN including_deleted d ON d.turn_id = t.turn_id
           )
           UPDATE dag_turns
-             SET anchor_node_id = updates.visible_anchor_node_id,
-                 anchor_created_at = updates.visible_anchor_created_at,
-                 anchor_node_id_including_deleted = updates.including_deleted_anchor_node_id,
-                 anchor_created_at_including_deleted = updates.including_deleted_anchor_created_at,
+             SET head_node_id = updates.visible_head_node_id,
+                 head_created_at = updates.visible_head_created_at,
+                 head_node_id_including_deleted = updates.including_deleted_head_node_id,
+                 head_created_at_including_deleted = updates.including_deleted_head_created_at,
                  updated_at = #{now_quoted}
            FROM updates
            WHERE dag_turns.graph_id = #{graph_quoted}

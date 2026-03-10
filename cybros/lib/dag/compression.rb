@@ -110,7 +110,7 @@ module DAG
         )
 
         turn_ids = nodes.map(&:turn_id).map(&:to_s).uniq
-        DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
           graph: @graph,
           lane_id: lane_ids.first,
           turn_ids: turn_ids

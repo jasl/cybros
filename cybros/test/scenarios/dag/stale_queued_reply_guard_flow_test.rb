@@ -8,27 +8,27 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
       _ = context
       _ = stream
 
-      expected_tail_anchor = node.metadata["expected_tail_anchor_node_id"].to_s
+      expected_tail_head = node.metadata["expected_tail_head_node_id"].to_s
       lane = node.lane
 
       tail_turn_id =
-        lane.anchored_turn_page(limit: 1, include_deleted: false).fetch("turns").last&.fetch("turn_id", nil).to_s
+        lane.lane_turn_page(limit: 1, include_deleted: false).fetch("turns").last&.fetch("turn_id", nil).to_s
 
-      actual_tail_anchor =
+      actual_tail_head =
         if tail_turn_id.present?
           lane.turns.find(tail_turn_id).start_message_node_id(include_deleted: false).to_s
         else
           ""
         end
 
-      if expected_tail_anchor.present? && actual_tail_anchor.present? && actual_tail_anchor != expected_tail_anchor
+      if expected_tail_head.present? && actual_tail_head.present? && actual_tail_head != expected_tail_head
         return DAG::ExecutionResult.stopped(
           reason: nil,
           metadata: {
             "stale" => true,
-            "stale_reason" => "expected_tail_anchor_mismatch",
-            "expected_tail_anchor_node_id" => expected_tail_anchor,
-            "actual_tail_anchor_node_id" => actual_tail_anchor,
+            "stale_reason" => "expected_tail_head_mismatch",
+            "expected_tail_head_node_id" => expected_tail_head,
+            "actual_tail_head_node_id" => actual_tail_head,
           },
           usage: { "total_tokens" => 0 }
         )
@@ -44,7 +44,7 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "stale queued reply guard: stale pending agent reply can stop silently based on lane tail anchor and not pollute subsequent context" do
+  test "stale queued reply guard: stale pending agent reply can stop silently based on lane tail head and not pollute subsequent context" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -71,7 +71,7 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
           state: DAG::Node::PENDING,
           metadata: {
             "reply" => "a1(stale)",
-            "expected_tail_anchor_node_id" => user_1.id,
+            "expected_tail_head_node_id" => user_1.id,
           }
         )
       m.create_edge(from_node: user_1, to_node: agent_stale, edge_type: DAG::Edge::SEQUENCE)
@@ -96,7 +96,7 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
           state: DAG::Node::PENDING,
           metadata: {
             "reply" => "a2",
-            "expected_tail_anchor_node_id" => user_2.id,
+            "expected_tail_head_node_id" => user_2.id,
           }
         )
 
@@ -104,7 +104,7 @@ class DAG::StaleQueuedReplyGuardFlowTest < ActiveSupport::TestCase
       m.create_edge(from_node: user_2, to_node: agent_2, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    tail_turn = lane.anchored_turn_page(limit: 1, include_deleted: false).fetch("turns").sole
+    tail_turn = lane.lane_turn_page(limit: 1, include_deleted: false).fetch("turns").sole
     assert_equal turn_2, tail_turn.fetch("turn_id")
 
     registry = DAG::ExecutorRegistry.new

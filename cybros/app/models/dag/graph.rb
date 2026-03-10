@@ -351,7 +351,7 @@ module DAG
 
       turn_ids =
         turns
-          .where.not((include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id) => nil)
+          .where.not((include_deleted ? :head_node_id_including_deleted : :head_node_id) => nil)
           .order(id: :desc)
           .limit(limit_turns)
           .pluck(:id)
@@ -408,8 +408,8 @@ module DAG
       )
     end
 
-    def turn_anchor_node_types
-      node_type_keys_for_hook(:turn_anchor?)
+    def turn_head_node_types
+      node_type_keys_for_hook(:turn_head?)
     end
 
     def transcript_candidate_node_types
@@ -440,7 +440,7 @@ module DAG
       applied = 0
       now = Time.current
       refresh_turn_ids_by_lane = Hash.new { |hash, key| hash[key] = [] }
-      turn_anchor_types = turn_anchor_node_types.map(&:to_s)
+      turn_head_types = turn_head_node_types.map(&:to_s)
 
       DAG::NodeVisibilityPatch.where(graph_id: id).order(:updated_at, :id).lock.find_each do |patch|
         node = nodes.find_by(id: patch.node_id)
@@ -477,7 +477,7 @@ module DAG
             updated_at: now
           )
 
-          if turn_anchor_types.include?(node.node_type.to_s) && from["deleted_at"] != to["deleted_at"]
+          if turn_head_types.include?(node.node_type.to_s) && from["deleted_at"] != to["deleted_at"]
             refresh_turn_ids_by_lane[node.lane_id.to_s] << node.turn_id.to_s
           end
 
@@ -498,7 +498,7 @@ module DAG
       end
 
       refresh_turn_ids_by_lane.each do |lane_id, turn_ids|
-        DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
           graph: self,
           lane_id: lane_id,
           turn_ids: turn_ids.uniq

@@ -143,8 +143,8 @@ module DAG
         clear_visibility_patch!
         emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "soft_delete")
 
-        if body&.class&.turn_anchor?
-          DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        if body&.class&.turn_head?
+          DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
             graph: graph,
             lane_id: lane_id,
             turn_ids: [turn_id]
@@ -171,8 +171,8 @@ module DAG
         clear_visibility_patch!
         emit_visibility_changed_event!(from: from, to: visibility_snapshot, source: "strict", action: "restore")
 
-        if body&.class&.turn_anchor?
-          DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+        if body&.class&.turn_head?
+          DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
             graph: graph,
             lane_id: lane_id,
             turn_ids: [turn_id]
@@ -716,11 +716,11 @@ module DAG
               graph.turns.create!(
                 id: turn_id,
                 lane_id: lane_id,
-                anchored_seq: nil,
-                anchor_node_id: nil,
-                anchor_created_at: nil,
-                anchor_node_id_including_deleted: nil,
-                anchor_created_at_including_deleted: nil,
+                lane_seq: nil,
+                head_node_id: nil,
+                head_created_at: nil,
+                head_node_id_including_deleted: nil,
+                head_created_at_including_deleted: nil,
                 metadata: {}
               )
           rescue ActiveRecord::RecordNotUnique
@@ -733,62 +733,62 @@ module DAG
           raise "turn.lane_id mismatch turn_id=#{turn_id} expected=#{lane_id} actual=#{turn.lane_id}"
         end
 
-        return unless body&.class&.turn_anchor?
+        return unless body&.class&.turn_head?
 
         turn.with_lock do
-          current_anchor_at = turn.anchor_created_at
-          current_anchor_id = turn.anchor_node_id
+          current_head_at = turn.head_created_at
+          current_head_id = turn.head_node_id
 
           if deleted_at.nil?
             replace_visible =
-              current_anchor_at.nil? ||
-                created_at < current_anchor_at ||
-                (created_at == current_anchor_at && id.to_s < current_anchor_id.to_s)
+              current_head_at.nil? ||
+                created_at < current_head_at ||
+                (created_at == current_head_at && id.to_s < current_head_id.to_s)
 
             if replace_visible
               turn.update_columns(
-                anchor_node_id: id,
-                anchor_created_at: created_at,
+                head_node_id: id,
+                head_created_at: created_at,
                 updated_at: Time.current
               )
             end
           end
 
-          current_anchor_at_including_deleted = turn.anchor_created_at_including_deleted
-          current_anchor_id_including_deleted = turn.anchor_node_id_including_deleted
+          current_head_at_including_deleted = turn.head_created_at_including_deleted
+          current_head_id_including_deleted = turn.head_node_id_including_deleted
 
           replace_including_deleted =
-            current_anchor_at_including_deleted.nil? ||
-              created_at < current_anchor_at_including_deleted ||
-              (created_at == current_anchor_at_including_deleted &&
-                id.to_s < current_anchor_id_including_deleted.to_s)
+            current_head_at_including_deleted.nil? ||
+              created_at < current_head_at_including_deleted ||
+              (created_at == current_head_at_including_deleted &&
+                id.to_s < current_head_id_including_deleted.to_s)
 
           if replace_including_deleted
             turn.update_columns(
-              anchor_node_id_including_deleted: id,
-              anchor_created_at_including_deleted: created_at,
+              head_node_id_including_deleted: id,
+              head_created_at_including_deleted: created_at,
               updated_at: Time.current
             )
           end
 
-          if turn.anchored_seq.nil?
-            seq = allocate_anchored_seq!
-            turn.update_columns(anchored_seq: seq, updated_at: Time.current)
+          if turn.lane_seq.nil?
+            seq = allocate_lane_seq!
+            turn.update_columns(lane_seq: seq, updated_at: Time.current)
           end
         end
       end
 
-      def allocate_anchored_seq!
+      def allocate_lane_seq!
         DAG::Lane.with_connection do |connection|
           graph_quoted = connection.quote(graph_id)
           lane_quoted = connection.quote(lane_id)
 
           sql = <<~SQL
             UPDATE dag_lanes
-               SET next_anchored_seq = next_anchored_seq + 1
+               SET next_lane_seq = next_lane_seq + 1
              WHERE graph_id = #{graph_quoted}
                AND id = #{lane_quoted}
-            RETURNING next_anchored_seq
+            RETURNING next_lane_seq
           SQL
 
           connection.select_value(sql).to_i

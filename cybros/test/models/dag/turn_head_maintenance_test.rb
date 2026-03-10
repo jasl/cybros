@@ -1,7 +1,7 @@
 require "test_helper"
 
-class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
-  test "edit replaces the turn anchor_node_id to point at the new visible anchor" do
+class DAG::TurnHeadMaintenanceTest < ActiveSupport::TestCase
+  test "edit replaces the turn head_node_id to point at the new visible head" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -29,20 +29,20 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
     graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
 
     turn = graph.turns.find(turn_id)
-    assert_equal user.id, turn.anchor_node_id
+    assert_equal user.id, turn.head_node_id
 
     edited = user.edit!(new_input: { "content" => "u1 edited" })
     assert_equal DAG::Node::FINISHED, edited.state
     assert_equal turn_id, edited.turn_id
 
     turn = graph.turns.find(turn_id)
-    assert_equal edited.id, turn.anchor_node_id
+    assert_equal edited.id, turn.head_node_id
 
     page = lane.transcript_page(limit_turns: 10)
     assert_includes page.fetch("turn_ids"), turn_id
   end
 
-  test "retry replaces the turn anchor_node_id when the previous anchor is archived" do
+  test "retry replaces the turn head_node_id when the previous head is archived" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -60,13 +60,13 @@ class DAG::TurnAnchorMaintenanceTest < ActiveSupport::TestCase
       )
 
     turn = graph.turns.find(turn_id)
-    assert_equal agent.id, turn.anchor_node_id
+    assert_equal agent.id, turn.head_node_id
 
     retried = agent.retry!
     assert_equal DAG::Node::PENDING, retried.state
     assert_equal turn_id, retried.turn_id
 
     turn = graph.turns.find(turn_id)
-    assert_equal retried.id, turn.anchor_node_id
+    assert_equal retried.id, turn.head_node_id
   end
 end

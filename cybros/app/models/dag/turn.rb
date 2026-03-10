@@ -14,9 +14,9 @@ module DAG
 
     def start_message_node_id(include_deleted: false)
       if include_deleted
-        anchor_node_id_including_deleted
+        head_node_id_including_deleted
       else
-        anchor_node_id
+        head_node_id
       end
     end
 
@@ -46,7 +46,71 @@ module DAG
       projection.project(node_records: node_records, mode: mode)
     end
 
+    def execution_status
+      execution_projection["status"]
+    end
+
+    def execution_phase
+      execution_projection["phase"]
+    end
+
+    def execution_diagnostic_level
+      execution_projection["diagnostic_level"]
+    end
+
+    def execution_event_cursor
+      execution_projection["event_cursor"]
+    end
+
+    def execution_summary
+      summary = execution_preview["summary"]
+      summary.is_a?(Hash) ? summary : {}
+    end
+
+    def execution_activity_count
+      execution_summary.fetch("activity_count", 0).to_i
+    end
+
+    def execution_preview_activities
+      Array(execution_preview["activities"]).select { |activity| activity.is_a?(Hash) }
+    end
+
+    def execution_updated_at
+      value = execution_projection["updated_at"]
+      return nil if value.blank?
+
+      Time.iso8601(value)
+    rescue ArgumentError
+      value
+    end
+
     private
+
+      def execution_projection
+        attachable = conversation_attachable
+        return {} if attachable.nil?
+
+        projection = attachable.turn_execution_for_turn_id(id)
+        projection.is_a?(Hash) ? projection : {}
+      end
+
+      def execution_preview
+        attachable = conversation_attachable
+        return {} if attachable.nil?
+
+        node_id = end_message_node_id(include_deleted: true) || start_message_node_id(include_deleted: true)
+        return {} if node_id.blank?
+
+        preview = attachable.send(:turn_execution_projector).run_state_for_node_id(node_id)
+        preview.is_a?(Hash) ? preview : {}
+      end
+
+      def conversation_attachable
+        attachable = graph.attachable
+        return nil unless attachable.is_a?(Conversation)
+
+        attachable
+      end
 
       def self.allocate_activity_sequence!(graph_id:, lane_id:, turn_id:)
         now = Time.current

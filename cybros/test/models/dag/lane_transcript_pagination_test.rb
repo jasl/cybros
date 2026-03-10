@@ -108,7 +108,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_includes error.message, "cursor"
   end
 
-  test "transcript_page respects include_deleted when turn has no visible anchor" do
+  test "transcript_page respects include_deleted when turn has no visible head" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane

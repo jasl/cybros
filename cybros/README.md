@@ -25,7 +25,7 @@ bin/ci
   - Each node belongs to exactly one lane (`dag_nodes.lane_id`).
   - `fork` creates a new `branch` lane + the first root node for that lane.
   - `merge` creates a pending join `agent_message` node in the target lane (source lanes are not auto-archived).
-  - Turns are ordered within a lane via `dag_turns.anchored_seq`.
+  - Turns are ordered within a lane via `dag_turns.lane_seq`.
 
 Design/spec docs:
 

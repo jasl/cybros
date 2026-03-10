@@ -50,7 +50,7 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     execution = conversation.turn_execution_for_turn_id(agent.turn_id)
 
     assert_equal agent.turn_id, execution.fetch("turn_id")
-    assert_equal agent.id, execution.fetch("anchor_node_id")
+    assert_equal first.fetch(:user_node).id, execution.fetch("head_node_id")
     assert_equal "running", execution.fetch("status")
     assert_equal "execution", execution.fetch("phase")
     assert_equal 3, execution.dig("summary", "activity_count")
@@ -201,6 +201,46 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
   end
 
+  test "message run_state keeps a bounded assistant-bubble preview while turn execution stays full" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    compact_task =
+      create_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::FINISHED,
+        name: "compact_context",
+      )
+
+    visible_tasks =
+      5.times.map do |index|
+        create_task!(
+          graph: graph,
+          lane_id: conversation.chat_lane.id,
+          turn_id: agent.turn_id,
+          state: index == 4 ? DAG::Node::RUNNING : DAG::Node::FINISHED,
+          name: "tool_#{index}",
+          tool_call_id: "tc_#{index}",
+        )
+      end
+
+    execution = conversation.turn_execution_for_turn_id(agent.turn_id)
+    message = conversation.message_for_node_id(node_id: agent.id, mode: :full)
+    run_state = message.fetch("run_state")
+
+    assert_equal 6, execution.fetch("activities").length
+    assert_equal 5, run_state.dig("summary", "activity_count")
+    assert_equal 3, run_state.fetch("activities").length
+    assert_equal visible_tasks.last(3).map(&:id), run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
+    refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
+  end
+
   test "activity output preview uses durable activity preview when projected result differs" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
@@ -246,6 +286,38 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     activity = execution.fetch("activities").sole
 
     assert_equal "operator-visible activity preview", activity.fetch("output_preview")
+  end
+
+  test "task-heavy turns expose execution rollups on dag_turns" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    task =
+      create_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::RUNNING,
+        name: "memory_search",
+        tool_call_id: "tc_rollup",
+      )
+
+    turn_record = graph.turns.find(agent.turn_id)
+    assert_equal "running", turn_record.execution_status
+    assert_equal 1, turn_record.execution_activity_count
+    assert turn_record.execution_updated_at.present?
+
+    task.mark_finished!(content: "done")
+    agent.mark_finished!(content: "All set")
+
+    turn_record.reload
+    assert_equal "completed", turn_record.execution_status
+    assert_equal 1, turn_record.execution_activity_count
+    assert turn_record.execution_updated_at.present?
   end
 
   private

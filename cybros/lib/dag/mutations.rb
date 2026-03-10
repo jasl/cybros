@@ -680,7 +680,7 @@ module DAG
 
       cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
 
-      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+      DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
         graph: @graph,
         lane_id: target.lane_id,
         turn_ids: [target.turn_id]
@@ -905,7 +905,7 @@ module DAG
           .group_by { |(lane_id, _turn_id)| lane_id.to_s }
           .each do |lane_id, rows|
             turn_ids = rows.map { |(_lane_id, turn_id)| turn_id.to_s }.uniq
-            DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+            DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
               graph: @graph,
               lane_id: lane_id,
               turn_ids: turn_ids
@@ -925,7 +925,7 @@ module DAG
 
       def cleanup_invalid_leaves_in_turn!(lane_id:, turn_id:, compressed_by_id:, now:)
         leaf_terminal_types = @graph.leaf_terminal_node_types
-        turn_anchor_types = @graph.turn_anchor_node_types
+        turn_head_types = @graph.turn_head_node_types
 
         loop do
           leaves =
@@ -944,10 +944,10 @@ module DAG
 
           break if invalid_leaves.empty?
 
-          if invalid_leaves.any? { |leaf| turn_anchor_types.include?(leaf.node_type.to_s) }
+          if invalid_leaves.any? { |leaf| turn_head_types.include?(leaf.node_type.to_s) }
                 OperationNotAllowedError.raise!(
-                  "cannot adopt version because it would invalidate turn anchors",
-                  code: "dag.mutations.cannot_adopt_version_because_it_would_invalidate_turn_anchors",
+                  "cannot adopt version because it would invalidate turn heads",
+                  code: "dag.mutations.cannot_adopt_version_because_it_would_invalidate_turn_heads",
                   details: { lane_id: lane_id.to_s, turn_id: turn_id.to_s },
                 )
           end

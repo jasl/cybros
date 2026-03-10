@@ -1534,7 +1534,7 @@ class Conversation < ApplicationRecord
         graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now)
       end
 
-      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+      DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
         graph: graph,
         lane_id: lane_id,
         turn_ids: [turn_id],
@@ -1793,7 +1793,7 @@ class Conversation < ApplicationRecord
 
       cancel_runs_for_node!(node)
 
-      DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+      DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
         graph: graph,
         lane_id: node.lane_id,
         turn_ids: [node.turn_id],

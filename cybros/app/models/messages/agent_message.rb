@@ -1,7 +1,7 @@
 module Messages
   class AgentMessage < ::DAG::NodeBody
     class << self
-      def turn_anchor?
+      def turn_head?
         true
       end
 

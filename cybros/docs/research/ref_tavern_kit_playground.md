@@ -93,7 +93,7 @@ Playground 的消息模型（简化理解）：
 
 - swipes ≈ DAG Node 的版本能力（retry/rerun/adopt_version/edit），但需要 UI 与 domain 约束：
   - “同一位置的多版本消息”在 DAG 里可以是“同 turn 的多 attempt nodes”，或“同 node 的 versions”
-- branching：DAG `fork_from!` 已提供（更通用），只需要把 UI/业务语义对齐（forked_from_message_id 类似 turn anchor）
+- branching：DAG `fork_from!` 已提供（更通用），只需要把 UI/业务语义对齐（forked_from_message_id 类似 turn head）
 
 ## 6) Auto / Auto-without-human：AI-to-AI 与人类代理
 

@@ -59,4 +59,34 @@ class DAG::ContextWindowAssemblyTest < ActiveSupport::TestCase
       end
     end
   end
+
+  test "context_for does not count context-excluded task nodes against the cap for a task-heavy turn" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+    lane = conversation.chat_lane
+
+    turn = conversation.append_user_message!(content: "Hello")
+    user = turn.fetch(:user_node)
+    agent = turn.fetch(:agent_node)
+
+    6.times do |index|
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: lane.id,
+        turn_id: agent.turn_id,
+        context_excluded_at: Time.current,
+        metadata: {},
+        body_input: {
+          "name" => "tool_#{index}",
+          "requested_name" => "tool_#{index}",
+        },
+      )
+    end
+
+    with_env("DAG_MAX_CONTEXT_NODES" => "4") do
+      context = lane.context_for(agent.id, limit_turns: 1)
+      assert_equal [user.id, agent.id], context.map { |node| node.fetch("node_id") }
+    end
+  end
 end

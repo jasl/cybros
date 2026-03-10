@@ -105,7 +105,7 @@ module DAG
       )
     end
 
-    def anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
+    def lane_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true)
       limit = coerce_integer_param(limit, field: "limit", code: "dag.lane.limit_must_be_an_integer")
       return { "turns" => [], "before_seq" => nil, "after_seq" => nil } if limit <= 0
 
@@ -132,66 +132,66 @@ module DAG
         )
       end
 
-      scope = turns.where.not(anchored_seq: nil)
-      scope = scope.where.not(anchor_node_id: nil) unless include_deleted
+      scope = turns.where.not(lane_seq: nil)
+      scope = scope.where.not(head_node_id: nil) unless include_deleted
 
       if before_seq.present?
-        scope = scope.where("anchored_seq < ?", before_seq).order(anchored_seq: :desc)
-        rows = scope.limit(limit).pluck(:id, :anchored_seq).reverse
+        scope = scope.where("lane_seq < ?", before_seq).order(lane_seq: :desc)
+        rows = scope.limit(limit).pluck(:id, :lane_seq).reverse
       elsif after_seq.present?
-        scope = scope.where("anchored_seq > ?", after_seq).order(anchored_seq: :asc)
-        rows = scope.limit(limit).pluck(:id, :anchored_seq)
+        scope = scope.where("lane_seq > ?", after_seq).order(lane_seq: :asc)
+        rows = scope.limit(limit).pluck(:id, :lane_seq)
       else
-        scope = scope.order(anchored_seq: :desc)
-        rows = scope.limit(limit).pluck(:id, :anchored_seq).reverse
+        scope = scope.order(lane_seq: :desc)
+        rows = scope.limit(limit).pluck(:id, :lane_seq).reverse
       end
 
       turns_payload =
-        rows.map do |turn_id, anchored_seq|
+        rows.map do |turn_id, lane_seq|
           {
             "turn_id" => turn_id.to_s,
-            "anchored_seq" => anchored_seq.to_i,
+            "lane_seq" => lane_seq.to_i,
           }
         end
 
       {
         "turns" => turns_payload,
-        "before_seq" => turns_payload.first&.fetch("anchored_seq", nil),
-        "after_seq" => turns_payload.last&.fetch("anchored_seq", nil),
+        "before_seq" => turns_payload.first&.fetch("lane_seq", nil),
+        "after_seq" => turns_payload.last&.fetch("lane_seq", nil),
       }
     end
 
-    def anchored_turn_count(include_deleted: true)
+    def lane_turn_count(include_deleted: true)
       if include_deleted
-        self.class.where(graph_id: graph_id, id: id).pick(:next_anchored_seq).to_i
+        self.class.where(graph_id: graph_id, id: id).pick(:next_lane_seq).to_i
       else
-        turns.where.not(anchored_seq: nil).where.not(anchor_node_id: nil).count
+        turns.where.not(lane_seq: nil).where.not(head_node_id: nil).count
       end
     end
 
-    def anchored_turn_seq_for(turn_id, include_deleted: true)
+    def lane_turn_seq_for(turn_id, include_deleted: true)
       turn_id = turn_id.to_s
       row =
         turns
           .where(id: turn_id)
-          .select(:anchored_seq, :anchor_node_id)
+          .select(:lane_seq, :head_node_id)
           .first
 
       return nil if row.nil?
-      return nil if row.anchored_seq.nil?
-      return nil if !include_deleted && row.anchor_node_id.nil?
+      return nil if row.lane_seq.nil?
+      return nil if !include_deleted && row.head_node_id.nil?
 
-      row.anchored_seq.to_i
+      row.lane_seq.to_i
     end
 
-    def turn_anchor_node_ids(turn_id, include_compressed: false, include_deleted: true)
-      turn_anchor_types = graph.turn_anchor_node_types
+    def turn_head_node_ids(turn_id, include_compressed: false, include_deleted: true)
+      turn_head_types = graph.turn_head_node_types
 
-      if turn_anchor_types.empty?
+      if turn_head_types.empty?
         []
       else
         scope = include_compressed ? nodes : nodes.active
-        scope = scope.where(turn_id: turn_id, node_type: turn_anchor_types)
+        scope = scope.where(turn_id: turn_id, node_type: turn_head_types)
         scope = scope.where(deleted_at: nil) unless include_deleted
 
         scope.order(:id).pluck(:id)
@@ -351,9 +351,9 @@ module DAG
 
       turn_ids =
         turns
-          .where.not(anchored_seq: nil)
-          .where(anchored_seq: start_seq..end_seq)
-          .order(:anchored_seq)
+          .where.not(lane_seq: nil)
+          .where(lane_seq: start_seq..end_seq)
+          .order(:lane_seq)
           .pluck(:id)
 
       node_ids_for_turn_ids(
@@ -502,7 +502,7 @@ module DAG
         )
       end
 
-        visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
+        visibility_column = include_deleted ? :head_node_id_including_deleted : :head_node_id
 
         visible_turns =
           graph.turns

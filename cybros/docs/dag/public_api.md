@@ -32,14 +32,14 @@
 - `DAG::Lane#transcript_page(limit_turns:, before_turn_id: nil, after_turn_id: nil, mode: :preview|:full, include_deleted: false)`
   - **用途**：按 turn 分页（ChatGPT-like 一轮交互展示/滚动加载）。
   - 返回：`{"turn_ids"=>[], "before_turn_id"=>..., "after_turn_id"=>..., "transcript"=>[...]}`（string keys）
-  - turn 的可见锚点由 `dag_turns.anchor_node_id` 维护；turn 的排序/分页按 `turn_id`（UUIDv7）
+  - turn 的可见 head 由 `dag_turns.head_node_id` 维护；turn 的排序/分页按 `turn_id`（UUIDv7）
 - Turn 索引/计数（面向压缩/定位；**不等价于 transcript 可见性**）：
-  - `DAG::Lane#anchored_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（按 `anchored_seq` keyset）
-  - `DAG::Lane#anchored_turn_count(include_deleted: true|false)`
-  - `DAG::Lane#anchored_turn_seq_for(turn_id, include_deleted: true|false)`
+  - `DAG::Lane#lane_turn_page(limit:, before_seq: nil, after_seq: nil, include_deleted: true|false)`（按 `lane_seq` keyset）
+  - `DAG::Lane#lane_turn_count(include_deleted: true|false)`
+  - `DAG::Lane#lane_turn_seq_for(turn_id, include_deleted: true|false)`
   - 说明（与实现一致）：
-    - `anchored_seq` 一旦分配就不会回填/重算；即使某个 turn 的所有 anchor nodes 都被压缩，turn 仍可能出现在 `anchored_turn_*` 的索引里。
-    - `transcript_page` 的 turn 可见性取决于 `dag_turns.anchor_node_id(_including_deleted)`；当可见锚点变为 `NULL`（例如该 turn 的所有 anchor nodes 都被压缩）时，该 turn 会从 `transcript_page` 中消失。
+    - `lane_seq` 一旦分配就不会回填/重算；即使某个 turn 的所有 head nodes 都被压缩，turn 仍可能出现在 `lane_turn_*` 的索引里。
+    - `transcript_page` 的 turn 可见性取决于 `dag_turns.head_node_id(_including_deleted)`；当可见 head 变为 `NULL`（例如该 turn 的所有 head nodes 都被压缩）时，该 turn 会从 `transcript_page` 中消失。
 - Turn/节点定位（面向 debug/压缩策略）：
   - `DAG::Lane#turn_node_ids(turn_id, include_compressed: false, include_deleted: true)`
 
@@ -68,7 +68,7 @@ LLM 用量统计（Lane-scoped；App-safe；可用于 tokscale-like 汇总/报�
 
 ### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
 
-- `DAG::Turn#start_message_node_id(include_deleted: false)`（turn anchor：通常为 `user_message`，也可能是 `agent_message/character_message`）
+- `DAG::Turn#start_message_node_id(include_deleted: false)`（turn head：通常为 `user_message`，也可能是 `agent_message/character_message`）
 - `DAG::Turn#end_message_node_id(include_deleted: false)`（按 `message_nodes` 投影后的最后一条 message；用于“运行中用 start、结束后用 end”的 UI 表示）
 - `DAG::Turn#message_nodes(mode: :preview|:full, include_deleted: false)`（只返回 transcript candidates + projection）
 
@@ -106,7 +106,7 @@ end
 引擎支持为每个 graph 注入一个可选的 policy，用于在引擎层对 **用户语义操作** 做兜底限制（防止绕过产品 facade 直接调用高阶写原语）。
 
 - 注入方式：`graph.attachable` 若实现 `dag_graph_policy`，则 `DAG::Graph#policy` 会使用其返回值；否则默认 `DAG::GraphPolicy::ALLOW_ALL`。
-- 本轮 gate 的范围（正交且不阻塞引擎）：只 gate fork/rerun/adopt/edit/visibility changes 等“用户语义操作”入口；不 gate `create_node/create_edge` 与 runner/leaf repair/turn anchor/patch apply 等引擎自动化维护路径。
+- 本轮 gate 的范围（正交且不阻塞引擎）：只 gate fork/rerun/adopt/edit/visibility changes 等“用户语义操作”入口；不 gate `create_node/create_edge` 与 runner/leaf repair/turn head/patch apply 等引擎自动化维护路径。
 
 ### 3.2 Mutations（结构性改图）
 

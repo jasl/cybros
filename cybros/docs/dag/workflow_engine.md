@@ -60,7 +60,7 @@
   - `forked_from_node_id`：该 branch 从哪个 node fork 出来（分支锚点）
   - `root_node_id`：fork 创建的第一条新 node（子图头）
   - `merged_into_lane_id/merged_at`：可选审计字段（例如产品在 merge 后选择归档 source lane 时，用于记录“归档并合并进哪个 lane”）
-  - `next_anchored_seq`：单调计数器（为 turn 的 `anchored_seq` 分配序号）
+  - `next_lane_seq`：单调计数器（为 turn 的 `lane_seq` 分配序号）
   - `attachable_type/attachable_id`：可选多态挂载（示例：app 层 `Conversation`）
   - `metadata`：JSONB 扩展点
 
@@ -74,9 +74,9 @@
 - 关键字段：
   - `id`：turn_id（UUIDv7）
   - `graph_id` / `lane_id`：turn 归属（一个 turn 必须属于某条 lane）
-  - `anchored_seq`：该 lane 内的 1-based 序号（物化；只写一次；不回填不重算）
-  - `anchor_node_id` / `anchor_created_at`：该 turn 的“可见锚点”（Active + 非 deleted；由 NodeBody hooks `turn_anchor?` 决定；用于 turn 可见性判定）
-  - `anchor_node_id_including_deleted` / `anchor_created_at_including_deleted`：包含 soft-delete 的锚点（仍不含 compressed）
+  - `lane_seq`：该 lane 内的 1-based 序号（物化；只写一次；不回填不重算）
+  - `head_node_id` / `head_created_at`：该 turn 的“可见 head”（Active + 非 deleted；由 NodeBody hooks `turn_head?` 决定；用于 turn 可见性判定）
+  - `head_node_id_including_deleted` / `head_created_at_including_deleted`：包含 soft-delete 的 head（仍不含 compressed）
   - `metadata`：JSONB 扩展点
 
 ### 节点：`DAG::Node`
@@ -134,7 +134,7 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 
 - `node_type_key`：默认 `name.demodulize.underscore`（约定 `node_type` ↔ body 类名一对一）
 - `created_content_destination`：默认 `[:output, "content"]`（用于 `Mutations#create_node(content: ...)` 的写入落点）
-- `turn_anchor?`：默认 `false`（用于 turn 锚点与 transcript 分页；conversation graphs 内置 `user_message/agent_message/character_message` 为 true）
+- `turn_head?`：默认 `false`（用于 turn head 与 transcript 分页；conversation graphs 内置 `user_message/agent_message/character_message` 为 true）
 - `transcript_candidate?`：默认 `false`（用于 `transcript_recent_turns` 的候选节点 SQL 预筛选；内置 `user/agent/character` 为 true）
 - `leaf_terminal?`：默认 `false`（用于 conversation graphs 的 leaf-valid 判定；内置 `agent_message/character_message` 为 true）
 - `default_leaf_repair?`：默认 `false`（用于 leaf repair 选择默认追加的 node_type；conversation graphs 要求 **必须且只能有一个** body 返回 true；内置 `agent_message` 为 true、`character_message` 显式为 false）
@@ -278,9 +278,9 @@ hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compre
 ### context_for（bounded window）
 
 - 选择与 target 相关的 lanes（target lane 的 parent chain + incoming blocking source nodes（`sequence/dependency`）所在 lanes 的 parent chain），并为每段 lane 计算 cutoff turn
-- 从每段 lane 中取 `turn_id <= cutoff_turn_id` 的 anchored turns（按 `dag_turns.id` keyset；可见性依赖 `dag_turns.anchor_node_id`），合并后取最近 `limit_turns`
+- 从每段 lane 中取 `turn_id <= cutoff_turn_id` 的 lane-indexed turns（按 `dag_turns.id` keyset；可见性依赖 `dag_turns.head_node_id`），合并后取最近 `limit_turns`
 - 强制 pin：
-  - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 anchor）
+  - `target.turn_id` 与各 lane 段 cutoff node 的 `turn_id`（即使该 turn 没有 head）
   - 全图 Active 的 `system_message/developer_message` 与最近 3 个 `summary`
 - 在选中的 nodes 子图内对 `sequence/dependency` 做稳定 topo sort，然后做输出过滤（见下）
 
@@ -323,7 +323,7 @@ Context 可见性（视图层）：
 
 - `graph.transcript_recent_turns(limit_turns:, mode: :preview, include_deleted: false)`
   - **graph-level**：会跨 lane 混合可见 turns；Lane-first 的产品 UI 通常不应直接使用（除非明确需要“全图最近记录”）。
-  - 读取 `dag_turns` 的 “可见 turn” 索引（`anchor_node_id` / `anchor_node_id_including_deleted`）
+  - 读取 `dag_turns` 的 “可见 turn” 索引（`head_node_id` / `head_node_id_including_deleted`）
   - SQL 预筛选：只会从这些 turns 内挑选 `transcript_candidate?` 的节点（默认 `user_message/agent_message/character_message`）
   - 最终输出仍会走 `graph.transcript_include?` / `graph.transcript_preview_override` 的 transcript 投影规则（与 `transcript_for` 一致）
   - 不依赖 `context_closure_for` 的祖先闭包（适合大图场景的 “最近记录” UI）
@@ -382,7 +382,7 @@ Context 可见性（视图层）：
    - 去重：按 `(from_node_id, edge_type)`（incoming）与 `(to_node_id, edge_type)`（outgoing）分组，每组只创建 1 条边
    - metadata：保留被分组边的“公共键值”（intersection），并写入 `metadata["replaces_edge_ids"]`（被合并的边 id 列表，排序后字符串化）
 4. emit hooks：`LANE_COMPRESSED`（`subject=summary_node`），particulars 中包含 `summary_node_id/replaces_node_ids/*_edge_ids`
-5. 刷新受影响 turns 的锚点（`DAG::TurnAnchorMaintenance.refresh_for_turn_ids!`）
+5. 刷新受影响 turns 的 heads（`DAG::TurnHeadMaintenance.refresh_for_turn_ids!`）
 
 ## 可视化（Mermaid）
 

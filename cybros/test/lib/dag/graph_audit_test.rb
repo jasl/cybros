@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::GraphAuditTest < ActiveSupport::TestCase
-  test "scan detects and repair! fixes turn anchor drift" do
+  test "scan detects and repair! fixes turn head drift" do
     conversation = create_conversation!
     graph = conversation.dag_graph
 
@@ -15,22 +15,22 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
 
     turn = graph.turns.find(node.turn_id)
     turn.update_columns(
-      anchor_node_id: nil,
-      anchor_created_at: nil,
-      anchor_node_id_including_deleted: nil,
-      anchor_created_at_including_deleted: nil,
+      head_node_id: nil,
+      head_created_at: nil,
+      head_node_id_including_deleted: nil,
+      head_created_at_including_deleted: nil,
       updated_at: Time.current
     )
 
-    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_HEAD_DRIFT])
     assert_equal [turn.id], issues.map { |issue| issue.fetch(:subject_id) }
 
-    result = DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
-    assert_equal 1, result.fetch(:repaired).fetch(DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT)
+    result = DAG::GraphAudit.repair!(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_HEAD_DRIFT])
+    assert_equal 1, result.fetch(:repaired).fetch(DAG::GraphAudit::ISSUE_TURN_HEAD_DRIFT)
 
-    assert_equal node.id, turn.reload.anchor_node_id
-    assert_equal node.id, turn.reload.anchor_node_id_including_deleted
-    assert_equal [], DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_ANCHOR_DRIFT])
+    assert_equal node.id, turn.reload.head_node_id
+    assert_equal node.id, turn.reload.head_node_id_including_deleted
+    assert_equal [], DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_TURN_HEAD_DRIFT])
   end
 
   test "scan detects and repair! compresses active edges pointing at inactive nodes" do

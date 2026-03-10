@@ -21,7 +21,7 @@ module DAG
         [:output, "content"]
       end
 
-      def turn_anchor?
+      def turn_head?
         false
       end
 

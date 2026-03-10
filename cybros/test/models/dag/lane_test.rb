@@ -87,7 +87,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
     lane = graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: main_lane.id, metadata: {})
     turn_id = "0194f3c0-0000-7000-8000-00000000d001"
 
-    anchor = graph.nodes.create!(
+    existing_node = graph.nodes.create!(
       node_type: Messages::AgentMessage.node_type_key,
       state: DAG::Node::PENDING,
       lane_id: lane.id,
@@ -100,7 +100,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
       created = m.create_node(node_type: Messages::Task.node_type_key, state: DAG::Node::PENDING, metadata: {})
     end
 
-    assert_equal anchor.lane_id, created.lane_id
+    assert_equal existing_node.lane_id, created.lane_id
   end
 
   test "fork creates a new branch lane and leaf repair stays within that lane" do

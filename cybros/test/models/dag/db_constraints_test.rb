@@ -112,7 +112,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
     end
   end
 
-  test "dag_turns anchor fields are constrained for consistency at the database layer" do
+  test "dag_turns head fields are constrained for consistency at the database layer" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -120,7 +120,7 @@ class DAG::DBConstraintsTest < ActiveSupport::TestCase
     turn = graph.turns.create!(lane_id: lane.id, metadata: {})
 
     assert_raises(ActiveRecord::StatementInvalid) do
-      turn.update_column(:anchor_node_id, SecureRandom.uuid)
+      turn.update_column(:head_node_id, SecureRandom.uuid)
     end
   end
 

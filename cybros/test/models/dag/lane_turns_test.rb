@@ -1,7 +1,7 @@
 require "test_helper"
 
 class DAG::LaneTurnsTest < ActiveSupport::TestCase
-  test "anchored_turn_count and anchored_turn_seq include compressed and soft-deleted turns" do
+  test "lane_turn_count and lane_turn_seq include compressed and soft-deleted turns" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -95,24 +95,24 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
     user_2.soft_delete!
     assert user_2.reload.deleted_at.present?
 
-    all_turns = lane.anchored_turn_page(limit: 10, include_deleted: true).fetch("turns")
+    all_turns = lane.lane_turn_page(limit: 10, include_deleted: true).fetch("turns")
     assert_equal 3, all_turns.length
     assert_equal [turn_1, turn_2, turn_3], all_turns.map { |row| row.fetch("turn_id") }
-    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch("anchored_seq") }
+    assert_equal [1, 2, 3], all_turns.map { |row| row.fetch("lane_seq") }
 
-    visible = lane.anchored_turn_page(limit: 10, include_deleted: false).fetch("turns")
+    visible = lane.lane_turn_page(limit: 10, include_deleted: false).fetch("turns")
     assert_equal [turn_2, turn_3], visible.map { |row| row.fetch("turn_id") }
-    assert_equal [2, 3], visible.map { |row| row.fetch("anchored_seq") }
+    assert_equal [2, 3], visible.map { |row| row.fetch("lane_seq") }
 
-    assert_equal 3, lane.anchored_turn_count(include_deleted: true)
-    assert_equal 2, lane.anchored_turn_count(include_deleted: false)
+    assert_equal 3, lane.lane_turn_count(include_deleted: true)
+    assert_equal 2, lane.lane_turn_count(include_deleted: false)
 
-    assert_equal 1, lane.anchored_turn_seq_for(turn_1, include_deleted: true)
-    assert_nil lane.anchored_turn_seq_for(turn_1, include_deleted: false)
-    assert_equal 2, lane.anchored_turn_seq_for(turn_2, include_deleted: false)
+    assert_equal 1, lane.lane_turn_seq_for(turn_1, include_deleted: true)
+    assert_nil lane.lane_turn_seq_for(turn_1, include_deleted: false)
+    assert_equal 2, lane.lane_turn_seq_for(turn_2, include_deleted: false)
   end
 
-  test "anchored_turn_page paginates by anchored_seq with before/after cursors" do
+  test "lane_turn_page paginates by lane_seq with before/after cursors" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     lane = graph.main_lane
@@ -181,39 +181,39 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
       )
     graph.edges.create!(from_node_id: user_3.id, to_node_id: agent_3.id, edge_type: DAG::Edge::SEQUENCE)
 
-    page = lane.anchored_turn_page(limit: 2, include_deleted: true)
+    page = lane.lane_turn_page(limit: 2, include_deleted: true)
     assert_equal [turn_2, turn_3], page.fetch("turns").map { |row| row.fetch("turn_id") }
     assert_equal 2, page.fetch("before_seq")
     assert_equal 3, page.fetch("after_seq")
 
-    older = lane.anchored_turn_page(limit: 2, before_seq: page.fetch("before_seq"), include_deleted: true)
+    older = lane.lane_turn_page(limit: 2, before_seq: page.fetch("before_seq"), include_deleted: true)
     assert_equal [turn_1], older.fetch("turns").map { |row| row.fetch("turn_id") }
     assert_equal 1, older.fetch("before_seq")
     assert_equal 1, older.fetch("after_seq")
 
-    newer = lane.anchored_turn_page(limit: 1, after_seq: older.fetch("after_seq"), include_deleted: true)
+    newer = lane.lane_turn_page(limit: 1, after_seq: older.fetch("after_seq"), include_deleted: true)
     assert_equal [turn_2], newer.fetch("turns").map { |row| row.fetch("turn_id") }
     assert_equal 2, newer.fetch("before_seq")
     assert_equal 2, newer.fetch("after_seq")
 
     assert_raises(DAG::PaginationError) do
-      lane.anchored_turn_page(limit: 1, before_seq: 1, after_seq: 2)
+      lane.lane_turn_page(limit: 1, before_seq: 1, after_seq: 2)
     end
 
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
-  test "anchored_turn_page validates limit and cursor types" do
+  test "lane_turn_page validates limit and cursor types" do
     conversation = create_conversation!
     lane = conversation.dag_graph.main_lane
 
-    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: "nope") }
+    error = assert_raises(DAG::PaginationError) { lane.lane_turn_page(limit: "nope") }
     assert_equal "dag.lane.limit_must_be_an_integer", error.code
 
-    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: 1, before_seq: "nope") }
+    error = assert_raises(DAG::PaginationError) { lane.lane_turn_page(limit: 1, before_seq: "nope") }
     assert_equal "dag.lane.before_seq_must_be_an_integer", error.code
 
-    error = assert_raises(DAG::PaginationError) { lane.anchored_turn_page(limit: 1, after_seq: "nope") }
+    error = assert_raises(DAG::PaginationError) { lane.lane_turn_page(limit: 1, after_seq: "nope") }
     assert_equal "dag.lane.after_seq_must_be_an_integer", error.code
   end
 end

@@ -6,7 +6,7 @@
       ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE = "active_edge_to_inactive_node"
       ISSUE_STALE_VISIBILITY_PATCH = "stale_visibility_patch"
       ISSUE_LEAF_INVARIANT_VIOLATION = "leaf_invariant_violation"
-      ISSUE_TURN_ANCHOR_DRIFT = "turn_anchor_drift"
+      ISSUE_TURN_HEAD_DRIFT = "turn_head_drift"
       ISSUE_STALE_RUNNING_NODE = "stale_running_node"
       ISSUE_UNKNOWN_NODE_TYPE = "unknown_node_type"
       ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY = "node_type_maps_to_non_node_body"
@@ -19,7 +19,7 @@
         ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE,
         ISSUE_STALE_VISIBILITY_PATCH,
         ISSUE_LEAF_INVARIANT_VIOLATION,
-        ISSUE_TURN_ANCHOR_DRIFT,
+        ISSUE_TURN_HEAD_DRIFT,
         ISSUE_STALE_RUNNING_NODE,
         ISSUE_UNKNOWN_NODE_TYPE,
         ISSUE_NODE_TYPE_MAPS_TO_NON_NODE_BODY,
@@ -89,19 +89,19 @@
           end
         end
 
-        if @types.include?(ISSUE_TURN_ANCHOR_DRIFT)
-          turn_anchor_drift_rows.each do |row|
+        if @types.include?(ISSUE_TURN_HEAD_DRIFT)
+          turn_head_drift_rows.each do |row|
             issues << issue_hash(
-              type: ISSUE_TURN_ANCHOR_DRIFT,
+              type: ISSUE_TURN_HEAD_DRIFT,
               severity: "error",
               subject_type: "DAG::Turn",
               subject_id: row.fetch("turn_id"),
               details: {
                 lane_id: row.fetch("lane_id"),
-                anchor_node_id: row.fetch("anchor_node_id"),
-                expected_anchor_node_id: row.fetch("expected_anchor_node_id"),
-                anchor_node_id_including_deleted: row.fetch("anchor_node_id_including_deleted"),
-                expected_anchor_node_id_including_deleted: row.fetch("expected_anchor_node_id_including_deleted"),
+                head_node_id: row.fetch("head_node_id"),
+                expected_head_node_id: row.fetch("expected_head_node_id"),
+                head_node_id_including_deleted: row.fetch("head_node_id_including_deleted"),
+                expected_head_node_id_including_deleted: row.fetch("expected_head_node_id_including_deleted"),
               }
             )
           end
@@ -177,13 +177,13 @@
             repaired[ISSUE_LEAF_INVARIANT_VIOLATION] = created ? 1 : 0
           end
 
-          if @types.include?(ISSUE_TURN_ANCHOR_DRIFT)
-            rows = turn_anchor_drift_rows
+          if @types.include?(ISSUE_TURN_HEAD_DRIFT)
+            rows = turn_head_drift_rows
             refresh_by_lane = rows.group_by { |row| row.fetch("lane_id") }
 
             refresh_by_lane.each do |lane_id, lane_rows|
               turn_ids = lane_rows.map { |row| row.fetch("turn_id") }
-              DAG::TurnAnchorMaintenance.refresh_for_turn_ids!(
+              DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
                 graph: @graph,
                 lane_id: lane_id,
                 turn_ids: turn_ids,
@@ -191,7 +191,7 @@
               )
             end
 
-            repaired[ISSUE_TURN_ANCHOR_DRIFT] = rows.length
+            repaired[ISSUE_TURN_HEAD_DRIFT] = rows.length
           end
 
           if @types.include?(ISSUE_UNKNOWN_NODE_TYPE)
@@ -377,8 +377,8 @@
         value == true
       end
 
-      def turn_anchor_for(body_class, problems:)
-        value, problem = safe_body_class_hook(body_class, :turn_anchor?)
+      def turn_head_for(body_class, problems:)
+        value, problem = safe_body_class_hook(body_class, :turn_head?)
         problems << problem if problem
         value == true
       end
@@ -521,19 +521,19 @@
       def transcript_recent_turn_support_problems(body_classes)
         problems = []
 
-        has_turn_anchor = false
+        has_turn_head = false
         has_transcript_candidate = false
 
         body_classes.each do |body_class|
-          has_turn_anchor ||= turn_anchor_for(body_class, problems: problems)
+          has_turn_head ||= turn_head_for(body_class, problems: problems)
           has_transcript_candidate ||= transcript_candidate_for(body_class, problems: problems)
         end
 
-        unless has_turn_anchor
+        unless has_turn_head
           problems << problem_hash(
-            code: "missing_turn_anchor_node_type",
+            code: "missing_turn_head_node_type",
             severity: "warn",
-            message: "no NodeBody classes have turn_anchor?==true (transcript_recent_turns will always be empty)",
+            message: "no NodeBody classes have turn_head?==true (transcript_recent_turns will always be empty)",
             extras: {}
           )
         end
@@ -623,14 +623,14 @@
             .pluck(:id)
         end
 
-        def turn_anchor_drift_rows
-          anchor_types = @graph.turn_anchor_node_types.map(&:to_s)
-          return [] if anchor_types.empty?
+        def turn_head_drift_rows
+          head_types = @graph.turn_head_node_types.map(&:to_s)
+          return [] if head_types.empty?
 
           DAG::Turn.with_connection do |connection|
             graph_quoted = connection.quote(@graph.id)
             type_list =
-              anchor_types.map do |type|
+              head_types.map do |type|
                 connection.quote(type.to_s)
               end.join(",")
 
@@ -638,8 +638,8 @@
 	            WITH expected_visible AS (
 	              SELECT DISTINCT ON (t.id)
 	                t.id AS turn_id,
-	                n.id AS expected_anchor_node_id,
-	                n.created_at AS expected_anchor_created_at
+	                n.id AS expected_head_node_id,
+	                n.created_at AS expected_head_created_at
 	              FROM dag_turns t
 	              LEFT JOIN dag_nodes n
 	                ON n.graph_id = t.graph_id
@@ -654,8 +654,8 @@
 	            expected_including_deleted AS (
 	              SELECT DISTINCT ON (t.id)
 	                t.id AS turn_id,
-	                n.id AS expected_anchor_node_id,
-	                n.created_at AS expected_anchor_created_at
+	                n.id AS expected_head_node_id,
+	                n.created_at AS expected_head_created_at
 	              FROM dag_turns t
 	              LEFT JOIN dag_nodes n
 	                ON n.graph_id = t.graph_id
@@ -669,23 +669,23 @@
 	            SELECT
 	              t.id AS turn_id,
 	              t.lane_id AS lane_id,
-	              t.anchor_node_id AS anchor_node_id,
-	              t.anchor_created_at AS anchor_created_at,
-	              ev.expected_anchor_node_id AS expected_anchor_node_id,
-	              ev.expected_anchor_created_at AS expected_anchor_created_at,
-	              t.anchor_node_id_including_deleted AS anchor_node_id_including_deleted,
-	              t.anchor_created_at_including_deleted AS anchor_created_at_including_deleted,
-	              ed.expected_anchor_node_id AS expected_anchor_node_id_including_deleted,
-	              ed.expected_anchor_created_at AS expected_anchor_created_at_including_deleted
+	              t.head_node_id AS head_node_id,
+	              t.head_created_at AS head_created_at,
+	              ev.expected_head_node_id AS expected_head_node_id,
+	              ev.expected_head_created_at AS expected_head_created_at,
+	              t.head_node_id_including_deleted AS head_node_id_including_deleted,
+	              t.head_created_at_including_deleted AS head_created_at_including_deleted,
+	              ed.expected_head_node_id AS expected_head_node_id_including_deleted,
+	              ed.expected_head_created_at AS expected_head_created_at_including_deleted
 	            FROM dag_turns t
 	            JOIN expected_visible ev ON ev.turn_id = t.id
 	            JOIN expected_including_deleted ed ON ed.turn_id = t.id
 	            WHERE t.graph_id = #{graph_quoted}
 	              AND (
-	                t.anchor_node_id IS DISTINCT FROM ev.expected_anchor_node_id OR
-	                t.anchor_created_at IS DISTINCT FROM ev.expected_anchor_created_at OR
-	                t.anchor_node_id_including_deleted IS DISTINCT FROM ed.expected_anchor_node_id OR
-	                t.anchor_created_at_including_deleted IS DISTINCT FROM ed.expected_anchor_created_at
+	                t.head_node_id IS DISTINCT FROM ev.expected_head_node_id OR
+	                t.head_created_at IS DISTINCT FROM ev.expected_head_created_at OR
+	                t.head_node_id_including_deleted IS DISTINCT FROM ed.expected_head_node_id OR
+	                t.head_created_at_including_deleted IS DISTINCT FROM ed.expected_head_created_at
 	              )
             SQL
 

@@ -29,7 +29,13 @@ module DAG
         )
 
       pinned_node_ids = pinned_node_ids_for_context
-      nodes = load_nodes(turn_ids: turn_ids, pinned_node_ids: pinned_node_ids)
+      nodes = load_nodes(
+        turn_ids: turn_ids,
+        pinned_node_ids: pinned_node_ids,
+        target_id: target.id,
+        include_excluded: include_excluded,
+        include_deleted: include_deleted,
+      )
       return [] if nodes.empty?
 
       edges = load_edges(node_ids: nodes.keys)
@@ -211,7 +217,7 @@ module DAG
 
         turn_ids =
           segments.flat_map do |segment|
-            anchored_turn_ids_for_segment(
+            lane_turn_ids_for_segment(
               segment,
               limit_turns: limit_turns,
               include_deleted: include_deleted,
@@ -226,11 +232,11 @@ module DAG
           .last(limit_turns)
       end
 
-      def anchored_turn_ids_for_segment(segment, limit_turns:, include_deleted:)
+      def lane_turn_ids_for_segment(segment, limit_turns:, include_deleted:)
         cutoff_turn_id = segment.cutoff_turn_id.to_s
         return [] if cutoff_turn_id.blank?
 
-        visibility_column = include_deleted ? :anchor_node_id_including_deleted : :anchor_node_id
+        visibility_column = include_deleted ? :head_node_id_including_deleted : :head_node_id
 
         @graph.turns
           .where(lane_id: segment.lane_id)
@@ -255,13 +261,16 @@ module DAG
         (pinned + summary_ids).uniq
       end
 
-      def load_nodes(turn_ids:, pinned_node_ids:)
+      def load_nodes(turn_ids:, pinned_node_ids:, target_id:, include_excluded:, include_deleted:)
         max_nodes = DAG::SafetyLimits.max_context_nodes
         node_records = []
 
+        turn_scope = @graph.nodes.active.where(turn_id: turn_ids)
+        turn_scope = turn_scope.where(context_excluded_at: nil) unless include_excluded
+        turn_scope = turn_scope.where(deleted_at: nil) unless include_deleted
+
         node_records.concat(
-          @graph.nodes.active
-            .where(turn_id: turn_ids)
+          turn_scope
             .limit(max_nodes + 1)
             .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
             .to_a
@@ -272,13 +281,23 @@ module DAG
         end
 
         if pinned_node_ids.any?
+          pinned_scope = @graph.nodes.active.where(id: pinned_node_ids)
+          pinned_scope = pinned_scope.where(context_excluded_at: nil) unless include_excluded
+          pinned_scope = pinned_scope.where(deleted_at: nil) unless include_deleted
+
           node_records.concat(
-            @graph.nodes.active
-              .where(id: pinned_node_ids)
+            pinned_scope
               .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
               .to_a
           )
         end
+
+        target =
+          @graph.nodes.active
+            .where(id: target_id)
+            .select(:id, :turn_id, :lane_id, :node_type, :state, :metadata, :body_id, :context_excluded_at, :deleted_at)
+            .first
+        node_records << target if target
 
         nodes = node_records.uniq { |node| node.id }
         if nodes.length > max_nodes

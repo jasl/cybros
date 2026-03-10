@@ -61,11 +61,11 @@ measure("setup_insert") do
         id: turn_id,
         graph_id: graph.id,
         lane_id: lane.id,
-        anchored_seq: i + 1,
-        anchor_node_id: user_node_id,
-        anchor_created_at: at,
-        anchor_node_id_including_deleted: user_node_id,
-        anchor_created_at_including_deleted: at,
+        lane_seq: i + 1,
+        head_node_id: user_node_id,
+        head_created_at: at,
+        head_node_id_including_deleted: user_node_id,
+        head_created_at_including_deleted: at,
         metadata: {},
         created_at: at,
         updated_at: at,
@@ -159,4 +159,4 @@ if last_agent_node_id
   end
 end
 
-lane.update!(next_anchored_seq: turns)
+lane.update!(next_lane_seq: turns)

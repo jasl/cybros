@@ -5,6 +5,7 @@ class Conversation::TurnExecutionProjector
   COMPOSER_ONLY = "composer_only"
   STANDARD_DIAGNOSTIC_LEVEL = "standard"
   DEBUG_DIAGNOSTIC_LEVEL = "debug"
+  RUN_STATE_ACTIVITY_PREVIEW_LIMIT = 3
 
   def initialize(conversation:)
     @conversation = conversation
@@ -16,23 +17,25 @@ class Conversation::TurnExecutionProjector
     turn_id = turn_id.to_s
     return nil if turn_id.blank?
 
+    turn = @graph.turns.find_by(id: turn_id)
     turn_nodes = scoped_nodes.where(turn_id: turn_id).includes(:body, :node_events).order(:id).to_a
     return nil if turn_nodes.empty?
 
-    anchor = anchor_node_for(turn_nodes)
-    diagnostic_level = diagnostic_level_for(anchor)
+    turn_head = turn_head_node_for(turn: turn, turn_nodes: turn_nodes)
+    execution_node = execution_node_for(turn_nodes)
+    diagnostic_level = diagnostic_level_for(execution_node)
     activities = project_activities(turn_nodes, diagnostic_level: diagnostic_level)
 
     {
       "turn_id" => turn_id,
-      "anchor_node_id" => anchor&.id,
-      "status" => reduce_status(anchor: anchor, activities: activities),
-      "phase" => reduce_phase(anchor: anchor, activities: activities),
+      "head_node_id" => turn_head&.id,
+      "status" => reduce_status(execution_node: execution_node, activities: activities),
+      "phase" => reduce_phase(execution_node: execution_node, activities: activities),
       "diagnostic_level" => diagnostic_level,
       "event_cursor" => event_cursor_for(turn_nodes),
       "started_at" => started_at_for(turn_nodes),
       "updated_at" => updated_at_for(turn_nodes),
-      "finished_at" => finished_at_for(anchor: anchor, activities: activities),
+      "finished_at" => finished_at_for(execution_node: execution_node, activities: activities),
       "summary" => summary_for(activities),
       "activities" => activities,
     }
@@ -54,6 +57,7 @@ class Conversation::TurnExecutionProjector
 
       all_activities = Array(execution.fetch("activities", []))
       visible_activities = assistant_bubble_activities(all_activities)
+      preview_activities = visible_activities.last(RUN_STATE_ACTIVITY_PREVIEW_LIMIT)
       hidden_summary = summary_for(all_activities - visible_activities)
       hidden_notice = hidden_summary.fetch("failed_count", 0).to_i.positive? || hidden_summary.fetch("awaiting_count", 0).to_i.positive?
 
@@ -66,7 +70,7 @@ class Conversation::TurnExecutionProjector
         "event_cursor" => execution["event_cursor"],
         "summary" => summary_for(visible_activities),
         "hidden_summary" => hidden_summary,
-        "activities" => visible_activities,
+        "activities" => preview_activities,
       }
     end
 
@@ -76,11 +80,28 @@ class Conversation::TurnExecutionProjector
       @graph.nodes.active.where(lane_id: @lane_id)
     end
 
-    def anchor_node_for(turn_nodes)
+    def turn_head_node_for(turn:, turn_nodes:)
+      head_id = turn&.start_message_node_id
+      if head_id.present?
+        matched = turn_nodes.find { |node| node.id.to_s == head_id.to_s }
+        return matched if matched
+      end
+
+      message_nodes = turn_nodes.select { |node| message_node?(node) }
+      return earliest_node(message_nodes) if message_nodes.any?
+
+      earliest_node(turn_nodes)
+    end
+
+    def execution_node_for(turn_nodes)
       message_nodes = turn_nodes.select { |node| message_node?(node) }
       return message_nodes.last if message_nodes.any?
 
       turn_nodes.last
+    end
+
+    def earliest_node(nodes)
+      Array(nodes).compact.min_by { |node| [node.created_at, node.id.to_s] }
     end
 
     def project_activities(turn_nodes, diagnostic_level:)
@@ -332,18 +353,18 @@ class Conversation::TurnExecutionProjector
       activity_error_for(task, status: status, last_payload: last_payload)
     end
 
-    def reduce_status(anchor:, activities:)
+    def reduce_status(execution_node:, activities:)
       statuses = Array(activities).map { |activity| activity.fetch("status") }
-      anchor_state = anchor&.state.to_s
+      execution_state = execution_node&.state.to_s
 
-      return "stopped" if anchor_state == DAG::Node::STOPPED || statuses.include?("stopped")
+      return "stopped" if execution_state == DAG::Node::STOPPED || statuses.include?("stopped")
       return "running" if statuses.include?("running")
       return "awaiting_approval" if statuses.include?("awaiting_approval")
       return "failed" if statuses.include?("failed")
       return "completed" if statuses.present? && statuses.all? { |status| terminal_activity_status?(status) }
       return "pending" if statuses.any? { |status| pending_activity_status?(status) }
 
-      case anchor_state
+      case execution_state
       when DAG::Node::RUNNING
         "running"
       when DAG::Node::PENDING
@@ -361,7 +382,7 @@ class Conversation::TurnExecutionProjector
       end
     end
 
-    def reduce_phase(anchor:, activities:)
+    def reduce_phase(execution_node:, activities:)
       active = Array(activities).reject { |activity| terminal_activity_status?(activity.fetch("status")) }
       running = active.select { |activity| activity.fetch("status") == "running" }
       return highest_precedence_phase_for(running) if running.any?
@@ -373,7 +394,7 @@ class Conversation::TurnExecutionProjector
 
       return "terminal" if Array(activities).any? && Array(activities).all? { |activity| terminal_activity_status?(activity.fetch("status")) }
 
-      case anchor&.state.to_s
+      case execution_node&.state.to_s
       when DAG::Node::AWAITING_APPROVAL
         "authorization"
       when DAG::Node::RUNNING
@@ -428,10 +449,10 @@ class Conversation::TurnExecutionProjector
       }.compact
     end
 
-    def diagnostic_level_for(anchor)
+    def diagnostic_level_for(execution_node)
       level =
-        if anchor&.metadata.is_a?(Hash)
-          anchor.metadata.dig("turn_execution", "diagnostic_level")
+        if execution_node&.metadata.is_a?(Hash)
+          execution_node.metadata.dig("turn_execution", "diagnostic_level")
         end
 
       level = level.to_s
@@ -472,7 +493,7 @@ class Conversation::TurnExecutionProjector
       turn_nodes.map(&:updated_at).compact.max&.iso8601
     end
 
-    def finished_at_for(anchor:, activities:)
+    def finished_at_for(execution_node:, activities:)
       return nil unless Array(activities).all? { |activity| terminal_activity_status?(activity.fetch("status")) }
 
       times =
@@ -482,7 +503,7 @@ class Conversation::TurnExecutionProjector
         rescue ArgumentError
           nil
         end
-      times << anchor.finished_at if anchor&.finished_at
+      times << execution_node.finished_at if execution_node&.finished_at
       times.compact.max&.iso8601
     end
 

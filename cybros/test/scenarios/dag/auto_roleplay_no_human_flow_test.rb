@@ -83,7 +83,7 @@ class DAG::AutoRoleplayNoHumanFlowTest < ActiveSupport::TestCase
       assert_equal 4, characters.length
       assert characters.all?(&:finished?)
 
-      assert_equal 4, lane.anchored_turn_count(include_deleted: true)
+      assert_equal 4, lane.lane_turn_count(include_deleted: true)
 
       page = lane.transcript_page(limit_turns: 2)
       assert_equal 2, page.fetch("turn_ids").length
