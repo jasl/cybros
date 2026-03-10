@@ -10,9 +10,9 @@
 
 account = Account.instance
 
-openai_api_key = ENV["OPENAI_API_KEY"].to_s.strip
-openrouter_api_key = ENV["OPENROUTER_API_KEY"].to_s.strip
-default_model_ref = ENV["DEFAULT_MODEL"].to_s.strip
+openai_api_key = Rails.app.creds.option(:openai_api_key).to_s.strip
+openrouter_api_key = Rails.app.creds.option(:openrouter_api_key).to_s.strip
+default_model_ref = Rails.app.creds.option(:default_model).to_s.strip
 
 if openai_api_key.present?
   record = LLMProviderCredential.find_or_initialize_by(provider_key: "openai")
