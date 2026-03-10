@@ -15,6 +15,7 @@
 **Files:**
 - Create: `db/migrate/20260310100000_add_agent_source_fields_and_workspace_root.rb`
 - Modify: `app/models/agent_program.rb`
+- Modify: `app/models/conversation.rb`
 - Modify: `app/models/runtime_setting.rb`
 - Modify: `app/controllers/system/settings/runtime_settings_controller.rb`
 - Modify: `app/views/system/settings/runtime_settings/_form.html.erb`
@@ -52,6 +53,13 @@ test "runtime setting accepts agent workspace root" do
 
   assert setting.valid?
 end
+
+test "execution-capable conversations require an agent program" do
+  conversation = Conversation.new(title: "Conversation", user: users(:owner))
+
+  assert_not conversation.valid?
+  assert_includes conversation.errors[:agent_program], "must exist"
+end
 ```
 
 **Step 2: Run the focused tests to verify they fail**
@@ -81,7 +89,12 @@ validates :bundled_agent_key, presence: true, if: -> { source_kind == "bundled" 
 validates :agent_workspace_root, presence: true
 ```
 
-Keep the first pass narrow: only add the fields, validations, controller coercion, and settings UI.
+Keep the first pass narrow, but include the owner boundary changes required by the design:
+
+- add explicit source-kind / fork metadata
+- add operator-configured workspace root
+- decide and implement how `AgentProgram` resolves bundled paths versus user-owned mounted paths
+- add the model/schema enforcement that execution-capable conversations cannot proceed without an `agent_program_id`
 
 **Step 4: Run the focused tests again**
 
@@ -146,6 +159,7 @@ Land the first milestone as:
 - `lib/cybros/bundled_agent_host/**` serves the required `agent_rpc` methods
 - `AgentPrograms::BundledSources` replaces bundled-profile discovery
 - `AgentPrograms::Creator` can create programs from bundled sources, not only copied no-op profiles
+- the bundled source carries an immutable official `agent_program_key`
 
 Use the current programmable-agent fixture behavior as the contract floor, not as a hidden runtime path.
 
@@ -195,6 +209,13 @@ test "registration allocates a unique port and writes runtime config" do
   assert File.exist?(deployment.transport_config.fetch("runtime_config_path"))
 end
 
+test "registration persists endpoint allocation without trusting a fixed port" do
+  deployment = agent_deployments(:inactive_default_assistant_candidate)
+
+  assert_nil deployment.transport_config["port"]
+  refute_equal "http://127.0.0.1:8001", deployment.endpoint_url
+end
+
 test "activation does not deactivate the old deployment before the new one is healthy" do
   old_deployment = agent_deployments(:active_default_assistant)
   new_deployment = agent_deployments(:inactive_default_assistant_candidate)
@@ -223,11 +244,13 @@ Implement services that:
 - persist the assigned endpoint in `AgentDeployment.transport_config`
 - generate a deployment-specific runtime config file outside the git-managed source tree
 - include deployment fingerprint and bearer-secret binding in that generated config
+- persist endpoint allocation with a collision-safe ownership rule instead of a best-effort port probe
 
 Keep the owner boundary clear:
 
 - source tree owns agent code and static source config
 - `transport_config` and generated runtime config own live endpoint binding
+- launch ownership belongs to the companion deployment layer, not the source tree
 
 **Step 4: Harden cutover rules**
 
@@ -237,6 +260,7 @@ Make sure activation semantics remain:
 - require matching identity and healthy status
 - only deactivate the old deployment after the new one is ready
 - never let an in-flight run silently reconnect to a replacement process on the same port
+- mark deployment-bound sessions stale when the underlying deployment dies or is replaced
 
 **Step 5: Run the focused tests again**
 
@@ -293,12 +317,18 @@ Implement an idempotent service that:
 - ensures the bundled default `AgentProgram` exists
 - registers a companion `AgentDeployment` with deployment-owned endpoint allocation
 - inspects and activates it when healthy
+- records whether the default deployment is merely registered or actually launched by the current environment wiring
 
 Then wire it into:
 
 - `SetupsController#create`
 - `Procfile.dev` so the host starts in local development
 - `compose.yaml.sample` and `.devcontainer/compose.yaml` so the host is present in container flows
+
+Be explicit in the code and tests about the promise level:
+
+- local development and official compose paths should produce a launched default deployment
+- if custom deployments are not yet auto-launched, the product must surface them as generated-config-ready rather than pretending they are already live
 
 **Step 4: Run the focused tests again**
 
@@ -360,6 +390,7 @@ Implement the cut in one pass:
 - remove the `Built-in` option from the conversation UI
 - delete `builtin_agent_program`, `builtin_agent_deployment`, and direct `ConversationRun.create!` fallback code
 - backfill legacy builtin conversations to the system-created bundled default program
+- backfill or normalize any legacy profile-based default-agent rows onto the new bundled identity
 
 Do not preserve a runtime compatibility branch.
 
@@ -416,6 +447,7 @@ Expected: missing route/action/service and no git bootstrap.
 Implement a product-managed flow that:
 
 - copies the bundled source tree into `RuntimeSetting.agent_workspace_root`
+- rewrites the copied source identity to a new `agent_program_key` owned by the forked program
 - initializes a git repository
 - creates an initial commit and import tag
 - creates a new `AgentProgram` with `source_kind: "custom"`
@@ -476,6 +508,7 @@ Expose durable facts only:
 - source path
 - allocated endpoint / port
 - generated runtime config path
+- launch status / launch owner
 - deployment health
 - deployment fingerprint
 - active deployment timestamp
@@ -520,6 +553,8 @@ PARALLEL_WORKERS=1 bin/rails test \
 
 bin/rails test test/models/agent_rpc_invocation_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/agent_rpc_activation_drift_test.rb
 
+PARALLEL_WORKERS=1 bin/rails test test/services/agent_rpc/lifecycle_caller_test.rb test/integration/run_draft_finalization_test.rb
+
 bunx playwright test test/e2e/settings.spec.ts test/e2e/programmable_agent_registration.spec.ts
 ```
 
@@ -527,4 +562,5 @@ Expected:
 
 - Rails targeted suites pass with `0 failures, 0 errors`
 - programmable-agent replay/binding suites stay green
+- deployment disconnect / stale-session behavior is covered explicitly
 - e2e coverage confirms the default external agent and fork flow in the UI

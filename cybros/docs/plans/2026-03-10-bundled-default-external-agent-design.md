@@ -133,6 +133,12 @@ That action:
 6. provisions a new companion `AgentDeployment`
 7. marks the new program as forked from the bundled source
 
+The fork must also get a new deployment identity namespace:
+
+- a copied agent must not retain the official bundled `agent_program_key`
+- the fork flow must rewrite the copied source identity to a new stable key owned by the new `AgentProgram`
+- the official bundled agent keeps its own immutable key
+
 This makes rollback straightforward:
 
 - runtime rollback: switch active deployment
@@ -160,8 +166,22 @@ The first milestone should assume:
 - the allocated port is written into the deployment-specific runtime config file
 - `AgentDeployment.transport_config` stores the durable control-plane copy of those settings
 - the host process starts from that generated runtime config, not from a hard-coded fixed port inside the agent source
+- endpoint allocation must be durable and collision-safe across concurrent registrations; a naive "scan for a free port" check is not sufficient by itself
+- process launch ownership must be explicit: the companion deployment layer, not the copied source tree, is responsible for starting the per-deployment process from that generated config
 
 This avoids both accidental collisions and a class of hijack risks where a fake process occupies a predictable port and is mistaken for the real deployment.
+
+## Launch Ownership
+
+The design now depends on a clear answer to "who actually starts deployment processes?"
+
+For milestone 1, that owner should be the companion deployment layer:
+
+- the default bundled deployment can be started by the local `Procfile.dev` entry and official compose templates
+- additional custom deployments must be started from the same companion-deployment contract, using deployment-specific generated config
+- Cybros may create deployment records and runtime config, but "copy as custom agent" is only considered runnable once the launch path for that deployment type is defined
+
+If milestone 1 cannot yet fully supervise arbitrary extra processes, the product must downgrade the promise from "immediately runnable" to "ready to launch with generated config". The design must not promise launched independent processes without assigning an owner.
 
 ## Deployment, Rollout, And Failure Model
 
@@ -185,6 +205,8 @@ Unexpected restart behavior must also stay explicit:
 - if a new version fails to boot because of bad code or port conflict, it remains `inactive` / `unhealthy`
 - the old active deployment stays active until a replacement passes activation
 - if an active deployment dies unexpectedly, in-flight runs fail or interrupt explicitly; they do not silently reconnect to whichever process later binds the same port
+- deployment-bound RPC sessions must become invalid once their deployment binding is no longer healthy or no longer active for new work
+- replacement processes must establish fresh deployment-bound sessions rather than resuming the old deployment identity
 
 ## Endpoint Authenticity And Port Hijack Mitigation
 
@@ -200,7 +222,15 @@ Cybros should trust a deployment only when all of these line up:
 
 This means a hostile or accidental replacement process that binds the same port is still not the same deployment unless it presents the expected identity and credential material.
 
-The deployment-specific runtime config file must therefore be product-owned or operator-owned runtime state, not something the agent can rewrite by editing its own source tree. That boundary reduces the risk that prompt hijacking or self-modification inside an agent repository can silently seize the live deployment identity.
+The deployment-specific runtime config file must therefore be product-owned or operator-owned runtime state, not something the agent can rewrite by editing its own source tree.
+
+That requires a stronger storage boundary than "not committed to git":
+
+- git-managed agent source and deployment-owned runtime config must live in different paths
+- the runtime-config path should be mounted or permissioned so the agent process cannot rewrite its own live deployment identity by ordinary source-edit actions
+- shared visibility between app and host is allowed; shared write authority is not
+
+That boundary reduces the risk that prompt hijacking or self-modification inside an agent repository can silently seize the live deployment identity.
 
 ## Setup And Operator UX
 
@@ -225,6 +255,13 @@ Operator surfaces should show real product identities:
 
 Operator surfaces should not show `Built-in` as an execution identity.
 
+They should also expose:
+
+- whether a deployment is official bundled or forked
+- the allocated endpoint
+- the generated runtime-config path
+- whether the deployment is merely registered or actually launched/healthy
+
 ## Migration Cut
 
 This should be a hard cut, not a long-lived compatibility layer.
@@ -234,7 +271,8 @@ This should be a hard cut, not a long-lived compatibility layer.
 3. Remove `Built-in` from conversation UI.
 4. Remove the builtin fallback code path.
 5. Backfill historical builtin conversations onto an explicit system-created default bundled `AgentProgram`.
-6. Keep only enough trace metadata to explain that those historical records originated on the legacy builtin path.
+6. Migrate or collapse legacy `profile_source: "default-assistant"` `AgentProgram` rows so there is only one official bundled default identity.
+7. Keep only enough trace metadata to explain that historical records originated on the legacy builtin path.
 
 After the cut, the product mental model is singular:
 
@@ -250,6 +288,8 @@ These assumptions are intentionally narrow so the first implementation lands qui
 - development bootstrap can rely on fixed local endpoint conventions via `Procfile.dev` and compose templates
 - the first operator-configured path is the user-owned agent workspace root
 - the first deployment config generator can live under the shared runtime-visible root as a deployment-owned file, rather than introducing a separate orchestration service
+- `AgentProgram` path handling may need to move from repo-relative `local_path` semantics to a path model that can represent mounted user-owned roots explicitly
+- if arbitrary custom deployments cannot yet be auto-launched, milestone 1 must explicitly scope them to generated-config readiness rather than false "immediately runnable" promises
 - deeper git automation, upstream merge flows, and multi-host orchestration stay out of scope
 
 ## Non-Goals
