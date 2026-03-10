@@ -433,6 +433,10 @@ module Cybros
 
       runtime_kwargs[:token_counter] = llm_selection.fetch(:token_counter, nil) if llm_selection.key?(:token_counter)
       runtime_kwargs[:context_window_tokens] = llm_selection.fetch(:context_window_tokens, nil) if llm_selection.key?(:context_window_tokens)
+      runtime_kwargs[:model_context_window_tokens] = llm_selection.fetch(:model_context_window_tokens, nil) if llm_selection.key?(:model_context_window_tokens)
+      runtime_kwargs[:provider_context_window_tokens] = llm_selection.fetch(:provider_context_window_tokens, nil) if llm_selection.key?(:provider_context_window_tokens)
+      runtime_kwargs[:context_soft_limit_tokens] = llm_selection.fetch(:context_soft_limit_tokens, nil) if llm_selection.key?(:context_soft_limit_tokens)
+      runtime_kwargs[:context_soft_limit_ratio] = llm_selection.fetch(:context_soft_limit_ratio, nil) if llm_selection.key?(:context_soft_limit_ratio)
       if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
         runtime_kwargs[:llm_options] = { runtime_governance: runtime_governance }
       end
@@ -724,6 +728,14 @@ module Cybros
       supports_tools = model_spec.dig("capabilities", "tools", "tool_calling") == true
       supports_images = model_spec.dig("capabilities", "input", "image") == true
       model_ref = "#{provider_key}/#{model_key}"
+      model_context_window_tokens = model_spec.fetch("context_window_tokens")
+      provider_context_window_tokens = provider_spec.fetch("context_window_tokens", nil)
+      effective_context_window_tokens =
+        if provider_context_window_tokens.nil? || provider_context_window_tokens == 0
+          model_context_window_tokens
+        else
+          [model_context_window_tokens, provider_context_window_tokens].min
+        end
 
       gated_provider =
         if built_provider
@@ -749,7 +761,11 @@ module Cybros
           provider_key: provider_key,
         }.compact,
         token_counter: token_counter,
-        context_window_tokens: model_spec.fetch("context_window_tokens"),
+        context_window_tokens: effective_context_window_tokens,
+        model_context_window_tokens: model_context_window_tokens,
+        provider_context_window_tokens: provider_context_window_tokens,
+        context_soft_limit_tokens: model_spec.fetch("context_soft_limit_tokens", nil),
+        context_soft_limit_ratio: model_spec.fetch("context_soft_limit_ratio", nil),
       }
     rescue KeyError => e
       raise_model_not_found!(

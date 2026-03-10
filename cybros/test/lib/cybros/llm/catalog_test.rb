@@ -197,6 +197,91 @@ class Cybros::LLM::CatalogTest < ActiveSupport::TestCase
     refute_includes prod, "dev"
   end
 
+  test "provider hard cap is optional and model soft limit fields are preserved" do
+    with_catalog_yaml(
+      <<~YAML
+        version: 1
+        default_model_ref: "openai/gpt-5.4"
+        providers:
+          openai:
+            display_name: "OpenAI"
+            enabled: true
+            adapter_key: "openai"
+            base_url: "https://api.openai.test"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            models:
+              gpt-5.4:
+                display_name: "GPT‑5.4"
+                api_model: "gpt-5.4"
+                context_window_tokens: 200000
+                context_soft_limit_tokens: 120000
+                context_soft_limit_ratio: 0.75
+                capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+          openrouter:
+            display_name: "OpenRouter"
+            enabled: true
+            adapter_key: "openai"
+            base_url: "https://openrouter.ai/api"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            context_window_tokens: 0
+            models:
+              openai-gpt-5.4:
+                display_name: "GPT‑5.4"
+                api_model: "openai/gpt-5.4"
+                context_window_tokens: 400000
+                capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+      YAML
+    ) do
+      cat = Cybros::LLM::Catalog.effective
+
+      refute cat.provider("openai").key?("context_window_tokens")
+      assert_equal 0, cat.provider("openrouter").fetch("context_window_tokens")
+      assert_equal 120000, cat.model("openai", "gpt-5.4").fetch("context_soft_limit_tokens")
+      assert_equal 0.75, cat.model("openai", "gpt-5.4").fetch("context_soft_limit_ratio")
+    end
+  end
+
+  test "catalog validates provider hard cap and model soft limit values" do
+    error =
+      assert_raises(Cybros::LLM::CatalogError) do
+        with_catalog_yaml(
+          <<~YAML
+            version: 1
+            default_model_ref: "openai/gpt-5.4"
+            providers:
+              openai:
+                display_name: "OpenAI"
+                enabled: true
+                adapter_key: "openai"
+                base_url: "https://api.openai.test"
+                headers: {}
+                requires_credential: false
+                wire_api: "chat_completions"
+                transport: "http"
+                context_window_tokens: -1
+                models:
+                  gpt-5.4:
+                    display_name: "GPT‑5.4"
+                    api_model: "gpt-5.4"
+                    context_window_tokens: 200000
+                    context_soft_limit_tokens: 0
+                    context_soft_limit_ratio: 1.5
+                    capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+          YAML
+        ) { flunk "expected catalog validation to fail" }
+      end
+
+    assert_includes error.details.fetch(:errors), ["$.providers.openai.context_window_tokens", "must be an integer >= 0"]
+    assert_includes error.details.fetch(:errors), ["$.providers.openai.models.gpt-5.4.context_soft_limit_tokens", "must be a positive integer"]
+    assert_includes error.details.fetch(:errors), ["$.providers.openai.models.gpt-5.4.context_soft_limit_ratio", "must be a number in (0, 1]"]
+  end
+
   test "deep-merges override file via CYBROS_LLM_CONFIG_PATH" do
     Dir.mktmpdir do |dir|
       override_path = File.join(dir, "providers.override.yml")

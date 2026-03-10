@@ -17,6 +17,10 @@ module AgentCore
         :token_counter,
         :context_turns,
         :context_window_tokens,
+        :model_context_window_tokens,
+        :provider_context_window_tokens,
+        :context_soft_limit_tokens,
+        :context_soft_limit_ratio,
         :reserved_output_tokens,
         :auto_compact,
         :summary_model,
@@ -66,6 +70,10 @@ module AgentCore
           token_counter: nil,
           context_turns: DEFAULT_CONTEXT_TURNS,
           context_window_tokens: nil,
+          model_context_window_tokens: nil,
+          provider_context_window_tokens: nil,
+          context_soft_limit_tokens: nil,
+          context_soft_limit_ratio: nil,
           reserved_output_tokens: 0,
           auto_compact: false,
           summary_model: nil,
@@ -176,6 +184,30 @@ module AgentCore
               ) if value <= 0
               value
             end
+
+          model_context_window_tokens = normalize_optional_positive_integer!(
+            model_context_window_tokens,
+            field: "model_context_window_tokens",
+            code_prefix: "agent_core.dag.runtime.model_context_window_tokens",
+          )
+
+          provider_context_window_tokens = normalize_optional_nonnegative_integer!(
+            provider_context_window_tokens,
+            field: "provider_context_window_tokens",
+            code_prefix: "agent_core.dag.runtime.provider_context_window_tokens",
+          )
+
+          context_soft_limit_tokens = normalize_optional_positive_integer!(
+            context_soft_limit_tokens,
+            field: "context_soft_limit_tokens",
+            code_prefix: "agent_core.dag.runtime.context_soft_limit_tokens",
+          )
+
+          context_soft_limit_ratio = normalize_optional_ratio!(
+            context_soft_limit_ratio,
+            field: "context_soft_limit_ratio",
+            code_prefix: "agent_core.dag.runtime.context_soft_limit_ratio",
+          )
 
           raw_reserved_output_tokens = reserved_output_tokens
           reserved_output_tokens = Integer(raw_reserved_output_tokens, exception: false)
@@ -515,6 +547,10 @@ module AgentCore
             token_counter: token_counter,
             context_turns: context_turns,
             context_window_tokens: context_window_tokens,
+            model_context_window_tokens: model_context_window_tokens,
+            provider_context_window_tokens: provider_context_window_tokens,
+            context_soft_limit_tokens: context_soft_limit_tokens,
+            context_soft_limit_ratio: context_soft_limit_ratio,
             reserved_output_tokens: reserved_output_tokens,
             auto_compact: auto_compact == true,
             summary_model: summary_model,
@@ -554,6 +590,60 @@ module AgentCore
           )
         rescue LoadError, StandardError
           AgentCore::Resources::TokenCounter::Heuristic.new
+        end
+
+        def normalize_optional_positive_integer!(value, field:, code_prefix:)
+          return nil if value.nil?
+
+          raw_value = value
+          normalized = Integer(raw_value, exception: false)
+          ValidationError.raise!(
+            "#{field} must be an Integer",
+            code: "#{code_prefix}_must_be_an_integer",
+            details: { value_class: raw_value.class.name },
+          ) unless normalized
+          ValidationError.raise!(
+            "#{field} must be > 0",
+            code: "#{code_prefix}_must_be_0",
+            details: { field.to_sym => normalized },
+          ) if normalized <= 0
+          normalized
+        end
+
+        def normalize_optional_nonnegative_integer!(value, field:, code_prefix:)
+          return nil if value.nil?
+
+          raw_value = value
+          normalized = Integer(raw_value, exception: false)
+          ValidationError.raise!(
+            "#{field} must be an Integer",
+            code: "#{code_prefix}_must_be_an_integer",
+            details: { value_class: raw_value.class.name },
+          ) unless normalized
+          ValidationError.raise!(
+            "#{field} must be >= 0",
+            code: "#{code_prefix}_must_be_0",
+            details: { field.to_sym => normalized },
+          ) if normalized.negative?
+          normalized
+        end
+
+        def normalize_optional_ratio!(value, field:, code_prefix:)
+          return nil if value.nil?
+
+          raw_value = value
+          normalized = Float(raw_value, exception: false)
+          ValidationError.raise!(
+            "#{field} must be numeric",
+            code: "#{code_prefix}_must_be_numeric",
+            details: { value_class: raw_value.class.name },
+          ) unless normalized
+          ValidationError.raise!(
+            "#{field} must be in (0, 1]",
+            code: "#{code_prefix}_must_be_between_0_and_1",
+            details: { field.to_sym => normalized },
+          ) unless normalized > 0 && normalized <= 1
+          normalized
         end
 
         def validate_tool_name_aliases!(tools_registry, merged_aliases)

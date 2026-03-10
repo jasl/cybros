@@ -82,6 +82,7 @@ providers:
     enabled: true
     adapter_key: openrouter
     base_url: "https://openrouter.ai/api/v1"
+    context_window_tokens: 1000000
     headers: {}
     requires_credential: true
     credential_type: api_key
@@ -189,3 +190,4 @@ providers:
           protocol: chat_completions
         tokenizer_hint: "gpt-5.4"
         context_window_tokens: 32000
+        context_soft_limit_ratio: 0.9

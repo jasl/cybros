@@ -133,6 +133,13 @@ module Cybros
             errors << ["#{pointer}.environments", "must be an array of strings when present"]
           end
 
+          provider_context_window_tokens = provider.fetch("context_window_tokens", :__missing__)
+          if provider_context_window_tokens != :__missing__ && !provider_context_window_tokens.nil?
+            unless provider_context_window_tokens.is_a?(Integer) && provider_context_window_tokens >= 0
+              errors << ["#{pointer}.context_window_tokens", "must be an integer >= 0"]
+            end
+          end
+
           if provider.key?("default_model")
             errors << ["#{pointer}.default_model", "is no longer supported; use $.default_model_ref instead"]
           end
@@ -174,6 +181,20 @@ module Cybros
             ctx = model["context_window_tokens"]
             unless ctx.is_a?(Integer) && ctx.positive?
               errors << ["#{mp}.context_window_tokens", "must be a positive integer"]
+            end
+
+            context_soft_limit_tokens = model.fetch("context_soft_limit_tokens", :__missing__)
+            if context_soft_limit_tokens != :__missing__ && !context_soft_limit_tokens.nil?
+              unless context_soft_limit_tokens.is_a?(Integer) && context_soft_limit_tokens.positive?
+                errors << ["#{mp}.context_soft_limit_tokens", "must be a positive integer"]
+              end
+            end
+
+            context_soft_limit_ratio = model.fetch("context_soft_limit_ratio", :__missing__)
+            if context_soft_limit_ratio != :__missing__ && !context_soft_limit_ratio.nil?
+              unless context_soft_limit_ratio.is_a?(Numeric) && context_soft_limit_ratio > 0 && context_soft_limit_ratio <= 1
+                errors << ["#{mp}.context_soft_limit_ratio", "must be a number in (0, 1]"]
+              end
             end
           end
         end

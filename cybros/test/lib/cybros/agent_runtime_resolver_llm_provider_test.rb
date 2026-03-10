@@ -233,4 +233,77 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     assert_equal "openai/gpt-5.4", runtime.provider.model_ref
     assert_equal "gpt-5.4", runtime.model
   end
+
+  test "runtime_for ignores missing or zero provider hard caps when computing the effective context window" do
+    {
+      "missing" => nil,
+      "zero" => 0,
+    }.each do |label, provider_context_window_tokens|
+      with_catalog_yaml(
+        <<~YAML
+          version: 1
+          default_model_ref: "dev/mock-model"
+          providers:
+            dev:
+              display_name: "Dev"
+              enabled: true
+              adapter_key: "dev"
+              base_url: "http://localhost:3000/mock_llm/v1"
+              headers: {}
+              requires_credential: false
+              wire_api: "chat_completions"
+              transport: "http"
+#{provider_context_window_tokens.nil? ? "" : "              context_window_tokens: #{provider_context_window_tokens}\n"}              models:
+                mock-model:
+                  display_name: "Mock"
+                  api_model: "mock-model"
+                  context_window_tokens: 20000
+                  context_soft_limit_ratio: 0.5
+                  capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+        YAML
+      ) do
+        conversation =
+          create_conversation!(
+            metadata: {
+              "agent" => { "agent_profile" => "coding" },
+              "llm" => { "model_ref" => "dev/mock-model" },
+            },
+          )
+        node = build_pending_agent_node(conversation: conversation)
+
+        runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+
+        assert_equal 20000, runtime.context_window_tokens, "#{label} provider cap should not reduce effective hard cap"
+        assert_equal 20000, runtime.model_context_window_tokens
+        if provider_context_window_tokens.nil?
+          assert_nil runtime.provider_context_window_tokens
+        else
+          assert_equal provider_context_window_tokens, runtime.provider_context_window_tokens
+        end
+        assert_equal 0.5, runtime.context_soft_limit_ratio
+      end
+    end
+  end
+
+  private
+
+    def with_catalog_yaml(yaml)
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "providers.test.yml")
+        File.write(path, yaml)
+
+        singleton = Cybros::LLM::Catalog.singleton_class
+        singleton.alias_method :__agent_runtime_resolver_llm_provider_test_original_resolve_sources, :resolve_sources
+        singleton.define_method(:resolve_sources) { [path] }
+
+        begin
+          Cybros::LLM::Catalog.reload!
+          yield
+        ensure
+          singleton.alias_method :resolve_sources, :__agent_runtime_resolver_llm_provider_test_original_resolve_sources
+          singleton.remove_method :__agent_runtime_resolver_llm_provider_test_original_resolve_sources
+          Cybros::LLM::Catalog.reload!
+        end
+      end
+    end
 end

@@ -399,7 +399,71 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal "cybros.agent_runtime_resolver.programmable_run_required", error.code
   end
 
+  test "runtime_for uses the stricter provider hard cap while preserving raw budget observability fields" do
+    with_catalog_yaml(
+      <<~YAML
+        version: 1
+        default_model_ref: "dev/mock-model"
+        providers:
+          dev:
+            display_name: "Dev"
+            enabled: true
+            adapter_key: "dev"
+            base_url: "http://localhost:3000/mock_llm/v1"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            context_window_tokens: 12000
+            models:
+              mock-model:
+                display_name: "Mock"
+                api_model: "mock-model"
+                context_window_tokens: 20000
+                context_soft_limit_tokens: 9000
+                context_soft_limit_ratio: 0.8
+                capabilities: { protocol: "chat_completions", tools: { tool_calling: true } }
+      YAML
+    ) do
+      node =
+        build_pending_agent_node(
+          metadata: {
+            "agent" => { "agent_profile" => "coding" },
+            "llm" => { "model_ref" => "dev/mock-model" },
+          },
+        )
+
+      runtime = build_runtime_for(node)
+
+      assert_equal 12000, runtime.context_window_tokens
+      assert_equal 20000, runtime.model_context_window_tokens
+      assert_equal 12000, runtime.provider_context_window_tokens
+      assert_equal 9000, runtime.context_soft_limit_tokens
+      assert_equal 0.8, runtime.context_soft_limit_ratio
+    end
+  end
+
   private
+
+    def with_catalog_yaml(yaml)
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, "providers.test.yml")
+        File.write(path, yaml)
+
+        singleton = Cybros::LLM::Catalog.singleton_class
+        singleton.alias_method :__agent_runtime_resolver_test_original_resolve_sources, :resolve_sources
+        singleton.define_method(:resolve_sources) { [path] }
+
+        begin
+          Cybros::LLM::Catalog.reload!
+          yield
+        ensure
+          singleton.alias_method :resolve_sources, :__agent_runtime_resolver_test_original_resolve_sources
+          singleton.remove_method :__agent_runtime_resolver_test_original_resolve_sources
+          Cybros::LLM::Catalog.reload!
+        end
+      end
+    end
 
     def build_pending_agent_node(metadata:, agent_program: :__default__)
       conversation = create_conversation!(metadata: metadata, agent_program: agent_program)
