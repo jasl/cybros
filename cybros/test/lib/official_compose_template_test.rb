@@ -13,6 +13,8 @@ class OfficialComposeTemplateTest < ActiveSupport::TestCase
     assert_equal "false", environment.fetch("RAILS_ASSUME_SSL")
     assert_equal "false", environment.fetch("RAILS_FORCE_SSL")
     assert_equal "1", environment.fetch("CYBROS_MANAGED_AGENT_AUTOLAUNCH")
+    assert_equal "agent_deployments", environment.fetch("CYBROS_MANAGED_AGENT_PUBLIC_HOST")
+    assert_equal "0.0.0.0", environment.fetch("CYBROS_MANAGED_AGENT_BIND_HOST")
     assert_equal "/rails/agent-workspace", environment.fetch("CYBROS_AGENT_WORKSPACE_ROOT")
 
     %w[

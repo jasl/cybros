@@ -74,7 +74,7 @@ That flexibility is allowed as long as it does not displace Cybros from the auth
 
 A deployment launch path must have an explicit owner.
 
-Official local development and official compose flows use a Cybros-managed local supervisor to auto-launch bundled and forked deployments from deployment-owned runtime config.
+Official local development and official compose flows use a Cybros-managed local supervisor to auto-launch bundled and forked deployments from deployment-owned runtime config. The official compose topology advertises managed deployments at the `agent_deployments` service address rather than container-local loopback.
 
 Unsupported external topologies remain operator-managed.
 

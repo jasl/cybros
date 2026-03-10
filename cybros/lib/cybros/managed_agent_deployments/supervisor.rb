@@ -184,11 +184,12 @@ module Cybros
 
         def spawn_command_for(deployment)
           transport = deployment.transport_config
+          bind_host = transport.fetch("bind_host", transport.fetch("host"))
           command = [
             RbConfig.ruby,
             server_command_for(deployment).to_s,
             "--host",
-            transport.fetch("host"),
+            bind_host,
             "--port",
             transport.fetch("port").to_s,
             "--source-root",

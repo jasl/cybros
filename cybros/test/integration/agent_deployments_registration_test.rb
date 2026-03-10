@@ -72,6 +72,7 @@ class AgentDeploymentsRegistrationTest < ActionDispatch::IntegrationTest
         assert_equal "unknown", deployment.health_status
         assert_equal "http://127.0.0.1:#{ports[index]}/rpc", deployment.endpoint_url
         assert_equal "127.0.0.1", deployment.transport_config.fetch("host")
+        assert_equal "127.0.0.1", deployment.transport_config.fetch("bind_host")
         assert_equal "/rpc", deployment.transport_config.fetch("rpc_path")
         assert File.exist?(runtime_config_path), "expected runtime config file to exist"
 
@@ -83,6 +84,37 @@ class AgentDeploymentsRegistrationTest < ActionDispatch::IntegrationTest
         assert_equal deployment.transport_config.fetch("port"), config_payload.dig("transport", "port")
         assert_equal program.absolute_local_path.to_s, config_payload.dig("agent_program", "source_root")
       end
+    end
+  end
+
+  test "registration honors compose managed local host overrides" do
+    sign_in_owner!
+    program = create_program!
+    fingerprint = "fixture-compose-managed-local-#{SecureRandom.hex(4)}"
+
+    Dir.mktmpdir("cybros-agent-runtime") do |workspace_root|
+      configure_agent_workspace_root!(workspace_root)
+
+      with_env(
+        "CYBROS_MANAGED_AGENT_PUBLIC_HOST" => "agent_deployments",
+        "CYBROS_MANAGED_AGENT_BIND_HOST" => "0.0.0.0",
+      ) do
+        post system_settings_agent_deployments_path, params: {
+          agent_deployment: {
+            agent_program_id: program.id,
+            transport_kind: "http_jsonrpc",
+            endpoint_url: "",
+            deployment_bearer_secret_ref: "secret://fixture-compose",
+            deployment_fingerprint: fingerprint,
+          },
+        }
+      end
+
+      deployment = AgentDeployment.find_by!(deployment_fingerprint: fingerprint)
+
+      assert_equal "http://agent_deployments:#{deployment.allocated_port}/rpc", deployment.endpoint_url
+      assert_equal "agent_deployments", deployment.transport_config.fetch("host")
+      assert_equal "0.0.0.0", deployment.transport_config.fetch("bind_host")
     end
   end
 
@@ -128,5 +160,17 @@ class AgentDeploymentsRegistrationTest < ActionDispatch::IntegrationTest
         alert_thresholds: {},
       )
       runtime_setting.save!
+    end
+
+    def with_env(values)
+      original = values.to_h { |key, _value| [key, ENV[key]] }
+      values.each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
+      yield
+    ensure
+      original.each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
     end
 end

@@ -65,6 +65,7 @@ module AgentDeployments
           "endpoint_url" => allocation.fetch("endpoint_url"),
           "transport_config" => {
             "host" => allocation.fetch("host"),
+            "bind_host" => allocation.fetch("bind_host"),
             "port" => allocation.fetch("port"),
             "rpc_path" => allocation.fetch("rpc_path"),
             "runtime_config_path" => runtime_config_path,

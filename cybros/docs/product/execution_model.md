@@ -50,7 +50,7 @@ Cybros resolves the active deployment during planning.
 
 If no active healthy deployment exists, Cybros should surface a stale-selection warning and block new draft materialization until the operator fixes the deployment or the user chooses another program.
 
-Official local development and official compose wire the bundled default and forked custom paths through managed-local deployments that Cybros auto-launches from deployment-owned runtime config.
+Official local development and official compose wire the bundled default and forked custom paths through managed-local deployments that Cybros auto-launches from deployment-owned runtime config. Local development uses loopback endpoints; official compose binds the agent process on `0.0.0.0` inside the supervisor container and advertises the `agent_deployments` service address to the rest of the stack.
 
 Unsupported external deployment topologies stay explicit and operator-managed.
 
