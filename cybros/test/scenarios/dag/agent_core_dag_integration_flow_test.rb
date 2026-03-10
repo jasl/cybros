@@ -1559,78 +1559,76 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
-  test "auto_compact: over-budget context triggers summarizer + graph.compress!" do
+  test "context budget does not keep advising compact_context after a same-fingerprint noop compaction" do
     conversation = create_conversation!
     graph = conversation.dag_graph
 
-    long = "x" * 600
+    turn_id = SecureRandom.uuid
+    user = nil
+    agent = nil
 
-    u1 = nil
-    a1 = nil
-    u2 = nil
-    a2 = nil
-    u3 = nil
-    a3 = nil
-    u4 = nil
-    a4 = nil
-
-    t1 = "0194f3c0-0000-7000-8000-00000000d110"
-    t2 = "0194f3c0-0000-7000-8000-00000000d111"
-    t3 = "0194f3c0-0000-7000-8000-00000000d112"
-    t4 = "0194f3c0-0000-7000-8000-00000000d113"
-
-    graph.mutate! do |m|
-      u1 = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t1, content: "u1 #{long}", metadata: {})
-      a1 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t1, body_output: { "content" => "a1 #{long}" }, metadata: {})
-      m.create_edge(from_node: u1, to_node: a1, edge_type: DAG::Edge::SEQUENCE)
-
-      u2 = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t2, content: "u2 #{long}", metadata: {})
-      a2 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t2, body_output: { "content" => "a2 #{long}" }, metadata: {})
-      m.create_edge(from_node: a1, to_node: u2, edge_type: DAG::Edge::SEQUENCE)
-      m.create_edge(from_node: u2, to_node: a2, edge_type: DAG::Edge::SEQUENCE)
-
-      u3 = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t3, content: "u3 #{long}", metadata: {})
-      a3 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t3, body_output: { "content" => "a3 #{long}" }, metadata: {})
-      m.create_edge(from_node: a2, to_node: u3, edge_type: DAG::Edge::SEQUENCE)
-      m.create_edge(from_node: u3, to_node: a3, edge_type: DAG::Edge::SEQUENCE)
-
-      u4 = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, turn_id: t4, content: "u4 #{long}", metadata: {})
-      a4 = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, turn_id: t4, metadata: {})
-      m.create_edge(from_node: a3, to_node: u4, edge_type: DAG::Edge::SEQUENCE)
-      m.create_edge(from_node: u4, to_node: a4, edge_type: DAG::Edge::SEQUENCE)
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need a lot of context #{'x' * 50}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
     provider =
       StubProvider.new(
         responses: [
           AgentCore::Resources::Provider::Response.new(
-            message: AgentCore::Message.new(role: :assistant, content: "summary"),
-            stop_reason: :end_turn,
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Compacting context",
+                tool_calls: [AgentCore::ToolCall.new(id: "tc_compact", name: "compact_context", arguments: { "reason" => "soft_limit_reached" })],
+              ),
+            stop_reason: :tool_use,
           ),
           AgentCore::Resources::Provider::Response.new(
-            message: AgentCore::Message.new(role: :assistant, content: "Ok."),
+            message: AgentCore::Message.new(role: :assistant, content: "Done."),
             stop_reason: :end_turn,
           ),
         ]
       )
 
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
     runtime =
       AgentCore::DAG::Runtime.new(
         provider: provider,
         model: "test-model",
-        tools_registry: AgentCore::Resources::Tools::Registry.new,
-        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["*"],
+            hidden: ["compact_context"],
+            context_allowed: lambda { |context|
+              if context&.attributes&.dig(:context_budget, :budget_action).to_s == "advise_compact"
+                ["compact_context"]
+              else
+                []
+              end
+            },
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
         llm_options: { stream: false },
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
-        context_window_tokens: 350,
-        reserved_output_tokens: 0,
-        auto_compact: true,
-        execution_context_attributes: {
-          runtime_governance: {
-            provider_credential_id: "cred-auto-compact",
-            provider_key: "openai",
-          },
-        },
+        context_window_tokens: 100,
+        context_soft_limit_tokens: 40,
+        token_counter: RoleAwareTokenCounter.new,
       )
 
     original_runtime_resolver = AgentCore::DAG.runtime_resolver
@@ -1644,28 +1642,38 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
 
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal [a4.id], claimed.map(&:id)
-      DAG::Runner.run_node!(a4.id)
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
 
-      summary_call_governance = provider.calls.fetch(0).dig(:options, :runtime_governance)
-      refute_nil summary_call_governance
-      assert_equal "cred-auto-compact", summary_call_governance[:provider_credential_id]
-      assert_equal "openai", summary_call_governance[:provider_key]
-      assert_equal "DAG::Node", summary_call_governance[:owner_type]
-      assert_equal a4.id, summary_call_governance[:owner_id]
-      assert_equal "#{t4}:#{a4.id}:summary", summary_call_governance[:request_namespace]
-      assert_equal "#{t4}:#{a4.id}:summary:attempt:1", summary_call_governance[:provider_request_id]
+      compact_task = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).sole
+      assert_equal "compact_context", compact_task.body_input["name"]
 
-      summary = graph.nodes.active.where(node_type: "summary").sole
-      assert_equal "auto_compact", summary.metadata.fetch("kind")
-      assert_equal "agent_core", summary.metadata.fetch("generated_by")
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test-task")
+      assert_equal [compact_task.id], claimed.map(&:id)
+      DAG::Runner.run_node!(compact_task.id)
 
-      [u1, a1, u2, a2, u3, a3].each do |node|
-        assert node.reload.compressed_at.present?
-      end
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test-next")
+      assert_equal 1, claimed.length
+      next_agent = claimed.sole
+      assert_equal Messages::AgentMessage.node_type_key, next_agent.node_type
+      DAG::Runner.run_node!(next_agent.id)
+      next_agent.reload
+      assert_equal 2, provider.calls.length, -> {
+        {
+          next_agent: next_agent.attributes.slice("id", "node_type", "state", "metadata", "body_output"),
+          active_nodes: graph.nodes.active.order(:created_at).map { |n| n.attributes.slice("id", "node_type", "state", "metadata", "body_input", "body_output") },
+        }.inspect
+      }
+
+      first_tool_names = Array(provider.calls.fetch(0).fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
+      second_tool_names = Array(provider.calls.fetch(1).fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
+
+      assert_includes first_tool_names, "compact_context"
+      refute_includes second_tool_names, "compact_context"
+      assert_equal "none", next_agent.metadata.dig("context_budget", "budget_action")
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
-  ensure
+    ensure
       AgentCore::DAG.runtime_resolver = original_runtime_resolver
       DAG.executor_registry = original_registry
     end
@@ -1872,7 +1880,8 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       compact_task = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).sole
       assert_equal DAG::Node::PENDING, compact_task.state
       assert_equal "compact_context", compact_task.body_input["name"]
-      assert_equal "native", compact_task.body_input["source"]
+      assert_equal "model_choice", compact_task.body_input["source"]
+      assert_equal agent.metadata.dig("context_budget", "budget_fingerprint"), compact_task.metadata.dig("context_budget", "budget_fingerprint")
 
       next_agent =
         graph.nodes.active

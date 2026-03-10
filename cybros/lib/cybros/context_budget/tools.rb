@@ -31,13 +31,6 @@ module Cybros
             Conversation::ContextCompactionPlan.plan(
               conversation: conversation,
               content: "",
-              input_policy: {
-                "oversize" => {
-                  "multi_message" => {
-                    "strategy" => "compact_context",
-                  },
-                },
-              },
               runtime_surface_resolution: runtime_surface_resolution_for(runtime),
             )
 
@@ -65,6 +58,10 @@ module Cybros
                 "reason" => reason,
                 "target" => target,
                 "noop" => true,
+                "prompt_projection" => {
+                  "text" => "ok",
+                  "include_tool_name_header" => false,
+                },
                 "compacted_turn_ids" => [],
                 "estimated_tokens_before" => plan.estimated_tokens,
                 "effective_prompt_budget_tokens" => plan.effective_prompt_budget_tokens,

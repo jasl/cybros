@@ -95,9 +95,10 @@
 上下文/预算：
 
 - `context_turns`：上下文 turn 窗口（默认 50）
-- `context_window_tokens` + `reserved_output_tokens`：启用 token budget（nil 表示不启用）
-- `auto_compact`：超预算时触发 DAG 压缩（summary 节点）
-- `summary_model` / `summary_max_tokens`：自动压缩 summarizer 配置
+- `context_window_tokens`：AgentCore 唯一生效的 hard cap；`ContextBudgetManager` 只消费这一项做 fit / overflow 判定
+- `model_context_window_tokens` / `provider_context_window_tokens`：原始观测值；仅用于 `context_cost` 可观测性，不参与第二套 hard-cap 判定
+- `context_soft_limit_tokens` / `context_soft_limit_ratio`：可选 soft-limit 输入；若两者同时存在，取更严格者，并 clamp 到有效 prompt budget
+- `reserved_output_tokens`：从 hard cap 中预留给输出，`effective_prompt_budget_tokens = max(context_window_tokens - reserved_output_tokens, 0)`
 
 执行安全阈值：
 
@@ -112,6 +113,14 @@ runtime surface 约束：
   - 静态 tool policy、schema 校验、审批、DAG invariants、sandbox ceilings 仍是最终 authority
   - runner 或 surface 出错时必须回退 runtime-owned default path
 - `execution_context_attributes[:runtime_surface]` 应只放安全归一化后的 metadata（如 `type/helpers/stage_limits`），不要放 raw script/source
+
+默认 context-budget 约定（Cybros app 侧）：
+
+- `Cybros::ContextBudget::DefaultPolicy` 是 bundled helper：把 `budget_state` 映射到 `none|advise_compact|enqueue_compact`
+- `compact_context` 始终存在于 canonical registry，但默认对模型隐藏
+- 当 bundled policy 产出 `advise_compact` 时，resolver / tool policy 会在该 step 解除 `compact_context` 的可见性掩码
+- prompt guidance 中的 `compact_context_available` 只在 tool visibility mask 已解析完成后写入
+- 当 bundled policy 产出 `enqueue_compact` 时，executor 会在当前 turn 内插入一个普通 `task(compact_context)`，而不是走额外特权通道
 
 LLM options：
 

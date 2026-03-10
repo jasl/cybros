@@ -22,9 +22,6 @@ module AgentCore
         :context_soft_limit_tokens,
         :context_soft_limit_ratio,
         :reserved_output_tokens,
-        :auto_compact,
-        :summary_model,
-        :summary_max_tokens,
         :llm_options,
         :directives_config,
         :agent_call_recovery_attempts,
@@ -75,9 +72,6 @@ module AgentCore
           context_soft_limit_tokens: nil,
           context_soft_limit_ratio: nil,
           reserved_output_tokens: 0,
-          auto_compact: false,
-          summary_model: nil,
-          summary_max_tokens: AgentCore::ContextManagement::Summarizer::DEFAULT_MAX_OUTPUT_TOKENS,
           llm_options: {},
           directives_config: nil,
           agent_call_recovery_attempts: 1,
@@ -515,22 +509,6 @@ module AgentCore
           tool_error_mode = tool_error_mode.to_s.strip.downcase.tr("-", "_").to_sym
           tool_error_mode = :safe unless %i[safe debug].include?(tool_error_mode)
 
-          summary_model = summary_model&.to_s&.strip
-          summary_model = nil if summary_model.to_s.empty?
-
-          raw_summary_max_tokens = summary_max_tokens
-          summary_max_tokens = Integer(raw_summary_max_tokens, exception: false)
-          ValidationError.raise!(
-            "summary_max_tokens must be an Integer",
-            code: "agent_core.dag.runtime.summary_max_tokens_must_be_an_integer",
-            details: { value_class: raw_summary_max_tokens.class.name },
-          ) unless summary_max_tokens
-          ValidationError.raise!(
-            "summary_max_tokens must be > 0",
-            code: "agent_core.dag.runtime.summary_max_tokens_must_be_0",
-            details: { summary_max_tokens: summary_max_tokens },
-          ) if summary_max_tokens <= 0
-
           super(
             provider: provider,
             model: model,
@@ -552,9 +530,6 @@ module AgentCore
             context_soft_limit_tokens: context_soft_limit_tokens,
             context_soft_limit_ratio: context_soft_limit_ratio,
             reserved_output_tokens: reserved_output_tokens,
-            auto_compact: auto_compact == true,
-            summary_model: summary_model,
-            summary_max_tokens: summary_max_tokens,
             llm_options: llm_options.freeze,
             directives_config: directives_config,
             agent_call_recovery_attempts: agent_call_recovery_attempts,

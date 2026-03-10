@@ -498,15 +498,17 @@ module AgentCore
             effective_prompt_budget_tokens = Integer(context_cost["effective_prompt_budget_tokens"], exception: false)
             effective_context_soft_limit_tokens = Integer(context_cost["effective_context_soft_limit_tokens"], exception: false)
             estimated_tokens = Integer(context_cost.dig("estimated_tokens", "total"), exception: false)
+            budget_fingerprint = context_budget["budget_fingerprint"].to_s.presence
 
             {
               budget_state: budget_state,
               budget_action: budget_action,
+              budget_fingerprint: budget_fingerprint,
               effective_prompt_budget_tokens: effective_prompt_budget_tokens,
               effective_context_soft_limit_tokens: effective_context_soft_limit_tokens,
               estimated_tokens: estimated_tokens,
             }.compact.tap do |attrs|
-              attrs[:budget_fingerprint] = budget_fingerprint_for(node: node, context_budget: attrs)
+              attrs[:budget_fingerprint] ||= budget_fingerprint_for(node: node, context_budget: attrs)
             end
           rescue StandardError
             {}
@@ -1345,6 +1347,13 @@ module AgentCore
 
                 case decision.outcome
                 when :allow
+                  task_source = compact_context_task_source(name: resolved_name, source: source)
+                  task_metadata = compact_context_task_metadata(
+                    execution_context: execution_context,
+                    source: task_source,
+                    arguments: arguments,
+                  )
+
                   if runtime.tool_call_repair_validate_schema
                     schema = visible_tool_schemas[resolved_name] || schema_from_registry(runtime.tools_registry.find(resolved_name))
                     schema = AgentCore::Resources::Tools::StrictJsonSchema.normalize(schema.is_a?(Hash) ? schema : {})
@@ -1416,7 +1425,7 @@ module AgentCore
                       state: ::DAG::Node::PENDING,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
-                      metadata: { "generated_by" => "agent_core", "source" => source },
+                      metadata: task_metadata,
                       body_input: task_input_hash(
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
@@ -1425,7 +1434,7 @@ module AgentCore
                         arguments: arguments,
                         arguments_resolution: arguments_resolution,
                         repair: repair,
-                        source: source,
+                        source: task_source,
                       ),
                     )
 
@@ -1435,6 +1444,13 @@ module AgentCore
 
                   tasks_created += 1
                 when :confirm
+                  task_source = compact_context_task_source(name: resolved_name, source: source)
+                  task_metadata = compact_context_task_metadata(
+                    execution_context: execution_context,
+                    source: task_source,
+                    arguments: arguments,
+                  )
+
                   if runtime.tool_call_repair_validate_schema
                     schema = visible_tool_schemas[resolved_name] || schema_from_registry(runtime.tools_registry.find(resolved_name))
                     schema = AgentCore::Resources::Tools::StrictJsonSchema.normalize(schema.is_a?(Hash) ? schema : {})
@@ -1516,7 +1532,7 @@ module AgentCore
                       state: ::DAG::Node::AWAITING_APPROVAL,
                       idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       lane_id: node.lane_id,
-                      metadata: { "generated_by" => "agent_core", "source" => source, "approval" => approval },
+                      metadata: task_metadata.merge("approval" => approval),
                       body_input: task_input_hash(
                         tool_call_id: tool_call_id,
                         requested_name: requested_name,
@@ -1525,7 +1541,7 @@ module AgentCore
                         arguments: arguments,
                         arguments_resolution: arguments_resolution,
                         repair: repair,
-                        source: source,
+                        source: task_source,
                       ),
                     )
 
@@ -1929,6 +1945,52 @@ module AgentCore
             }.tap do |input|
               input["repair"] = repair if repair.present?
             end
+          end
+
+          def compact_context_task_source(name:, source:)
+            return source.to_s unless name.to_s == "compact_context"
+            return source.to_s if source.to_s == "context_budget_policy"
+
+            "model_choice"
+          rescue StandardError
+            source.to_s
+          end
+
+          def compact_context_task_metadata(execution_context:, source:, arguments:)
+            metadata = {
+              "generated_by" => "agent_core",
+              "source" => source.to_s,
+            }
+            return metadata unless source.to_s == "model_choice"
+
+            context_budget = execution_context&.attributes&.fetch(:context_budget, nil)
+            context_budget = context_budget.is_a?(Hash) ? context_budget : {}
+
+            budget_fingerprint = context_budget[:budget_fingerprint].to_s.presence
+            return metadata if budget_fingerprint.blank?
+
+            reason =
+              if arguments.is_a?(Hash)
+                arguments["reason"].presence || arguments[:reason].presence
+              end
+            reason ||= context_budget[:budget_state].to_s.presence
+
+            metadata.merge(
+              "context_budget" => {
+                "reason" => reason,
+                "budget_state" => context_budget[:budget_state].to_s,
+                "budget_action" => context_budget[:budget_action].to_s,
+                "budget_fingerprint" => budget_fingerprint,
+                "effective_prompt_budget_tokens" => context_budget[:effective_prompt_budget_tokens],
+                "effective_context_soft_limit_tokens" => context_budget[:effective_context_soft_limit_tokens],
+                "estimated_tokens" => context_budget[:estimated_tokens],
+              }.compact,
+            )
+          rescue StandardError
+            {
+              "generated_by" => "agent_core",
+              "source" => source.to_s,
+            }
           end
 
           def repaired_argument_repairs_by_tool_call_id(original_tool_calls:, repaired_tool_calls:)

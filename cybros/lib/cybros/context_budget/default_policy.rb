@@ -8,7 +8,9 @@ module Cybros
         "forced_fit" => "enqueue_compact",
       }.freeze
 
-      def self.action_for(budget_state:)
+      def self.action_for(budget_state:, compact_context_suppressed: false)
+        return "none" if compact_context_suppressed
+
         ACTIONS.fetch(budget_state.to_s, "none")
       end
     end

@@ -78,6 +78,47 @@ class AgentCore::DAG::ContextAdapterProjectedToolResultTest < ActiveSupport::Tes
     assert_includes tool_message.content, "Tool not found: echo"
   end
 
+  test "context adapter honors compact prompt projection metadata when present" do
+    context =
+      AgentCore::DAG::ContextAdapter.new(
+        context_nodes: [
+          user_node("Compact if needed"),
+          {
+            "node_type" => Messages::Task.node_type_key,
+            "state" => DAG::Node::FINISHED,
+            "payload" => {
+              "input" => {
+                "name" => "compact_context",
+                "requested_name" => "compact_context",
+                "tool_call_id" => "tc_compact",
+              },
+              "output" => {
+                "result" => AgentCore::Resources::Tools::ToolResult.success(
+                  text: "Context already fits within the current prompt budget.",
+                  metadata: {
+                    "prompt_projection" => {
+                      "text" => "ok",
+                      "include_tool_name_header" => false,
+                    },
+                  },
+                ).to_h,
+              },
+              "output_preview" => {
+                "result" => "Context already fits within the current prompt budget.",
+              },
+            },
+            "metadata" => {},
+          },
+        ],
+      ).call
+
+    tool_message = context.messages.find { |message| message.role == :tool_result }
+
+    refute_nil tool_message
+    assert_equal "tc_compact", tool_message.tool_call_id
+    assert_equal "ok", tool_message.content
+  end
+
   private
 
     def user_node(content)

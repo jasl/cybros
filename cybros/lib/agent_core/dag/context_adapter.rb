@@ -162,14 +162,27 @@ module AgentCore
         end
 
         def tool_result_text_for_message(result, name:)
-          text = result.text.to_s
-          text = "[tool: #{name}]\n#{text}" unless name.to_s.strip.empty?
+          projection = prompt_projection_for(result)
+          text = projection.fetch("text", result.text.to_s).to_s
+          include_tool_name_header = projection.fetch("include_tool_name_header", true)
+
+          if include_tool_name_header && !name.to_s.strip.empty?
+            text = "[tool: #{name}]\n#{text}"
+          end
 
           if result.has_non_text_content?
             text << "\n\n[non-text tool output omitted]"
           end
 
           text
+        end
+
+        def prompt_projection_for(result)
+          metadata = result.respond_to?(:metadata) ? result.metadata : nil
+          projection = metadata.is_a?(Hash) ? metadata["prompt_projection"] : nil
+          projection.is_a?(Hash) ? projection : {}
+        rescue StandardError
+          {}
         end
     end
   end

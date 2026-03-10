@@ -1,119 +1,151 @@
-# AgentCore（DAG-first）上下文管理、runtime-surface prompt shaping 与自动压缩
+# AgentCore（DAG-first）上下文预算与 compaction 主路径
 
-本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 token budget 行为、runtime-surface `prepare_turn` / `compact_context` 接线、tool outputs pruning，以及 auto_compact 如何把历史 turns 压缩为 DAG `summary` 节点。
+本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 active budget 行为，以及 Cybros 如何把 `compact_context` 接到普通 DAG task/tool loop 中。
 
-实现落点：`lib/agent_core/dag/context_budget_manager.rb`。
+实现落点：
 
-更完整的 KM（Knowledge/Memory）方案与路线图，另见：
+- `lib/agent_core/dag/context_budget_manager.rb`
+- `lib/agent_core/dag/executors/agent_message_executor.rb`
+- `lib/cybros/context_budget/default_policy.rb`
+- `lib/cybros/context_budget/tools.rb`
 
-- `docs/agent_core/knowledge_context_memory_design.md`
-- `docs/agent_core/knowledge_context_memory_implementation_plan.md`
+相关文档：
 
----
-
-## 1) Context 组装（DAG → Prompt）
-
-### 1.1 Context source
-
-`AgentMessageExecutor` 声明 `context_mode = :full`，由 `DAG::Runner` 提供 `graph.context_for_full(node.id)` 的 context nodes。
-
-### 1.2 适配与注入
-
-- `ContextAdapter`：
-  - 将 `user_message/agent_message/task/summary` 映射为 `AgentCore::Message`
-  - 将 `system_message/developer_message` 合并为 base system prompt
-  - 将 `task` 映射为 projected `tool_result`（或 error tool_result）；raw result 不直接回灌模型
-- `PromptAssembly` / `PromptBuilder::SimplePipeline`：
-  - system prompt 由 `PromptBuilder::SystemPromptSectionsBuilder` 章节化组装，并显式区分：
-    - **prefix（尽量跨 turn 稳定）**：`base_system_prompt` + `<safety>` + `<tooling>` + `<workspace>` + `<available_skills>` + `system_section` injections（默认）
-    - **tail（每 turn 可能变化）**：`<time>` +（可选）`<channel>` + `<relevant_context>`（memory；强制 tail）+ stability=tail 的 injections
-    - `prompt_mode=:minimal` 默认仅包含 safety（不包含 tooling/workspace/time/channel/skills；memory 仅当显式提供）
-    - `<channel>` 来源：优先 `node.metadata["routing"]["channel"]`，否则 `conversation.metadata["routing"]["channel"]`；不存在则省略
-  - 注入 prompt_injections（sources.items；按 `prompt_mode` 过滤）
-  - 注入 memory：`<relevant_context> ... </relevant_context>`（条数由 `runtime.memory_search_limit` 控制；强制进入 tail）
-  - 注入 skills fragment：`<available_skills ... />`（默认仅 full mode）
-  - 过滤 tools：`tool_policy.filter`
-
-### 1.3 `prepare_turn`
-
-当 built prompt 已经 fit 到 token budget 后，`ContextBudgetManager` 会执行 `runtime_surface.prepare_turn(input:)`：
-
-- 只能改写 prompt view，不改变 DAG durable history
-- 改写后的 prompt 必须再次通过同一 token budget 校验
-- surface runner 超时、超输出或抛错时，会回退到 runtime 原始 prompt
+- `docs/agent_core/public_api.md`
+- `docs/agent_core/behavior_spec.md`
+- `docs/agent_core/node_payloads.md`
 
 ---
 
-## 2) Token budget（context_window_tokens）
+## 1) Effective limits
 
-当 `runtime.context_window_tokens` 为非 nil 时启用预算：
-
-- `limit = context_window_tokens - reserved_output_tokens`（小于 0 时按 0 处理）
-- 估算使用 `BuiltPrompt#estimate_tokens(token_counter:)`（token_counter 来自 `runtime.token_counter`）
-
-当超预算时，依次执行：
-
-1) **丢弃 memory_results**（保留 prompt injections 与 history）
-2) **裁剪旧 tool outputs**（只影响本次 prompt view，不写回 DAG）：
-   - 仅处理 `tool_result` 消息与 `"[tool:"` 前缀的 system-tool 兜底消息（user/assistant 永不改写）
-   - 保护边界：
-     - 保护最近 `recent_turns` 个 user turns（默认 2）
-     - 保护最近 `keep_last_assistant_messages` 条 assistant messages（默认 3）
-     - bootstrap safety：first user message 之前不裁剪
-   - 工具选择：支持按 tool name `allow/deny` glob（`*` 通配、大小写不敏感、deny wins；allow 为空=全允许）
-   - 策略：
-     - `soft_trim`：对超长 tool output 保留 head+tail+marker，并追加 size note
-     - `hard_clear`：若 soft_trim 后仍超预算，对更旧 tool outputs 替换为 placeholder（增量直到 fit）
-   - 若在 shrink-loop 中多次尝试 pruning，`context_cost.decisions` 会出现多个 `prune_tool_outputs`，并用 `attempt` 标注次序
-3) **缩小历史窗口**：递减 `limit_turns`，重取 `graph.context_for_full(node.id, limit_turns:)`（每次 shrink 后若仍超预算，会再次尝试 pruning）
-4) 若 `auto_compact=true`：在首次“缩窗后刚好 fit”的时刻尝试压缩（见第 3 节；压缩后会重新 estimate，必要时再 pruning）
-
-若缩到 `limit_turns=1` 仍超预算：
-
-- 抛出 `AgentCore::ContextWindowExceededError`
-- executor 将 `agent_message` 标记为 `errored`
-- metadata 写入 `context_cost`（至少包含 limit 与最后一次估算 tokens）
-
-每次调用（含成功与 `ContextWindowExceededError` 失败路径）都会写入：
-
-- `agent_message.metadata["context_cost"]`：预算、估算 tokens（final prompt），以及发生过的降级决策（drop memory / prune tool outputs / shrink turns / auto_compact）。
+- `runtime.context_window_tokens` 是唯一生效的 hard cap
+- `effective_prompt_budget_tokens = max(context_window_tokens - reserved_output_tokens, 0)`
+- `model_context_window_tokens` / `provider_context_window_tokens` 只是观测字段，会写入 `context_cost`
+- soft limit 来自：
+  - `context_soft_limit_tokens`
+  - `context_soft_limit_ratio * effective_prompt_budget_tokens`
+- 若两者同时存在，取更严格者；最终结果 clamp 到 `effective_prompt_budget_tokens`
 
 ---
 
-## 3) auto_compact（DAG summary 节点）
+## 2) Prompt fit 顺序
 
-在 Cybros app 层，context compaction 还会经过 `Conversation::ContextCompactionPlan` + `runtime_surface.compact_context(input:)`：
+`ContextBudgetManager` 在真正调用 provider 前按如下顺序做 fit：
 
-- app/runtime 先生成默认 compaction 候选（要压缩的 turns、默认 summary text、预算）
-- surface 可以建议保留部分 items、替换 summary text，或直接 pass
-- 若 surface 产物超预算、格式非法或 runner 失败，则回退默认 compaction plan
-- durable preflight activity 仍由 runtime/app materialize；surface 只决定 execution view，不直接 author DAG summary nodes
-- `TurnExecutionProjector` 继续把这些 preflight 活动作为 durable truth 投影，并保持 `composer_only` 可见性语义
+1. 组装 full prompt（history + visible tools + injections + memory）
+2. 若超 hard cap，先移除 memory results
+3. 若仍超 hard cap，对旧 tool outputs 做 prompt-only pruning
+4. 若仍超 hard cap，递减 `limit_turns` 并重建 context
+5. 若缩到 `limit_turns=1` 仍无法 fit，则抛出 `ContextWindowExceededError`
 
-当 `auto_compact=true` 且预算迫使 `limit_turns` 下降时：
-
-1) 计算“被缩窗丢弃的 nodes”（同 lane、finished、非 system/developer/summary）
-2) 将这些 nodes 渲染为简短 transcript（User/Assistant/Tool 行）
-3) 调用 summarizer（LLM，同步）生成 summary text
-4) 调用 `graph.compress!(node_ids: dropped, summary_content: ...)`
-   - 被压缩 nodes/incident edges 标记 `compressed_at`
-   - 生成一个 `summary` 节点替代该子图
-
-后续 context 组装时：
-
-- `summary` 节点会被 `ContextAdapter` 渲染为系统消息：
-  - `Message(role: :system, content: "<summary>...</summary>")`
-
-约束（由 DAG 压缩机制保证）：
-
-- 只能压缩 finished 节点
-- 不能压缩跨 lane 的节点集合
-- summary node 不能成为 leaf（必须保留向外的 blocking edges）
+这些 fit tactics 只负责让 prompt 满足 hard cap，不会自动产出 durable compaction。
 
 ---
 
-## 4) 与 DAG Safety Limits 的关系
+## 3) Budget states
 
-`graph.context_for_full` 自身有硬性安全上限（nodes/edges window）。
+在 prompt fit 之后，manager 会继续计算：
 
-若超过 DAG safety limits，将抛出 `DAG::SafetyLimits::Exceeded`（由调用方处理/降级）。
+- `normal`
+- `soft_limit_reached`
+- `near_hard_cap`
+- `forced_fit`
+
+判定原则：
+
+- 只要为了 fit 应用了 drop-memory / prune-tool-outputs / shrink-turns，就记为 `forced_fit`
+- 否则当 estimate 穿过 soft limit 时记为 `soft_limit_reached`
+- 否则当 estimate 穿过内部 near-hard-cap 阈值时记为 `near_hard_cap`
+
+写入位置：
+
+- `agent_message.metadata["context_budget"]`
+  - `budget_state`
+  - `budget_action`
+  - `budget_fingerprint`
+- `agent_message.metadata["context_cost"]`
+  - effective / raw hard-limit facts
+  - effective / raw soft-limit facts
+  - estimated token breakdown
+  - fit decisions
+
+---
+
+## 4) Bundled default policy
+
+kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros::ContextBudget::DefaultPolicy` 提供：
+
+- `normal -> none`
+- `soft_limit_reached -> advise_compact`
+- `near_hard_cap -> enqueue_compact`
+- `forced_fit -> enqueue_compact`
+
+`AgentMessageExecutor` 只消费 helper 输出，不内嵌这张决策表。
+
+---
+
+## 5) `compact_context` 的 active path
+
+`compact_context` 是 canonical native tool，不是额外特权通道：
+
+- 默认注册在完整工具集合里
+- 默认对模型隐藏
+- 当 `budget_action=advise_compact` 时，tool visibility mask 才会把它暴露给当前 step
+- prompt guidance 中的 `compact_context_available` 也是在 mask 解析完成后才写入
+
+两种进入方式：
+
+1. `advise_compact`
+   - prompt 收到最小 budget guidance
+   - 模型可自行调用 `compact_context`
+   - 生成普通 `task(compact_context)`，source=`model_choice`
+2. `enqueue_compact`
+   - executor 在当前 turn 内先插入普通 `task(compact_context)`
+   - source=`context_budget_policy`
+   - 完成后再继续 next agent step
+
+无论哪种方式，`compact_context` 都按普通 task/tool-call 语义参与：
+
+- 审批/可见性/统计
+- turn execution projection
+- provider prompt history
+
+---
+
+## 6) Loop suppression
+
+重复 compaction 必须可抑制。
+
+为此，manager 会为每个 turn step 计算一个 `budget_fingerprint`，它只反映：
+
+- 当前 turn / lane
+- effective prompt budget
+- effective soft limit
+- 标准化后的底层上下文节点集合
+
+它不会把 compaction 自己产生的 bookkeeping 视为“新的业务上下文变化”。
+
+当同一 fingerprint 下已经存在成功或 noop 的 `compact_context` task 时：
+
+- `advise_compact` 会被抑制
+- `enqueue_compact` 也会被抑制
+
+这能避免同一 turn 因为 compaction 自身的 assistant/tool bookkeeping 而反复提示或反复插入 compaction。
+
+---
+
+## 7) `runtime_surface.compact_context`
+
+`compact_context` 工具内部仍复用 app 侧 compaction plan：
+
+- `Conversation::ContextCompactionPlan`
+- `runtime_surface.compact_context(input:)`
+
+surface 负责建议保留项、summary text 与预算内安全改写；executor / app 负责：
+
+- 生成普通 DAG task
+- 落 durable metadata
+- 应用 context visibility mutation
+
+当前 shipped 主路径不再依赖额外的 conversation-entry compaction 或单独的 durable summary 预处理步骤。

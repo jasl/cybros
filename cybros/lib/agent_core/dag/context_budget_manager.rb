@@ -1,6 +1,5 @@
 require "digest"
 require "json"
-require "set"
 require_relative "../../cybros/context_budget/default_policy"
 
 module AgentCore
@@ -21,7 +20,6 @@ module AgentCore
           :memory_dropped,
           :decisions,
           :limit_turns,
-          :auto_compacted,
           :fit_tactics_applied,
         )
 
@@ -101,7 +99,6 @@ module AgentCore
               memory_dropped: false,
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
-              auto_compacted: false,
               fit_tactics_applied: false,
             )
           end
@@ -125,7 +122,6 @@ module AgentCore
               memory_dropped: memory_dropped,
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
-              auto_compacted: false,
               fit_tactics_applied: memory_dropped,
             )
           end
@@ -146,7 +142,6 @@ module AgentCore
               memory_dropped: memory_dropped,
               decisions: decisions,
               limit_turns: current_limit_turns(context_nodes),
-              auto_compacted: false,
               fit_tactics_applied: memory_dropped || fit_decisions_applied?(decisions),
             )
           end
@@ -176,15 +171,11 @@ module AgentCore
             memory_dropped: false,
             decisions: [],
             limit_turns: current_limit_turns(context_nodes),
-            auto_compacted: false,
             fit_tactics_applied: false,
           )
         end
 
         def shrink_turns_until_fit(prompt_assembly:, prepared:, initial_context_nodes:, limit:, memory_dropped:, decisions:)
-          auto_compact = @runtime.auto_compact
-          auto_compacted = false
-
           limit_turns = current_limit_turns(initial_context_nodes)
           initial_limit_turns = limit_turns
 
@@ -212,33 +203,7 @@ module AgentCore
               next unless within_budget?(estimate, limit: limit)
             end
 
-            if auto_compact && !auto_compacted
-              auto_compacted = try_auto_compact!(from_context_nodes: initial_context_nodes, to_context_nodes: context_nodes)
-              if auto_compacted
-                context_nodes = without_target_node(@graph.context_for_full(@node.id, limit_turns: limit_turns))
-                built_prompt = prompt_assembly.build(
-                  context_nodes: context_nodes,
-                  memory_results: [],
-                  prompt_injection_items: prepared.prompt_injection_items,
-                )
-                estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-
-                unless within_budget?(estimate, limit: limit)
-                  built_prompt, estimate =
-                    maybe_prune_tool_outputs(
-                      built_prompt,
-                      estimate,
-                      limit: limit,
-                      decisions: decisions,
-                    )
-
-                  next unless within_budget?(estimate, limit: limit)
-                end
-              end
-            end
-
             decisions << { "type" => "shrink_turns", "limit_turns" => limit_turns } if limit_turns != initial_limit_turns
-            decisions << { "type" => "auto_compact", "triggered" => auto_compacted } if auto_compact
 
             return Build.new(
               built_prompt: built_prompt,
@@ -247,7 +212,6 @@ module AgentCore
               memory_dropped: memory_dropped,
               decisions: decisions,
               limit_turns: limit_turns,
-              auto_compacted: auto_compacted,
               fit_tactics_applied: true,
             )
           end
@@ -272,7 +236,6 @@ module AgentCore
 
           if within_budget?(estimate, limit: limit)
             decisions << { "type" => "shrink_turns", "limit_turns" => 1 } if 1 != initial_limit_turns
-            decisions << { "type" => "auto_compact", "triggered" => auto_compacted } if auto_compact
 
             return Build.new(
               built_prompt: built_prompt,
@@ -281,7 +244,6 @@ module AgentCore
               memory_dropped: memory_dropped,
               decisions: decisions,
               limit_turns: 1,
-              auto_compacted: auto_compacted,
               fit_tactics_applied: true,
             )
           end
@@ -320,12 +282,17 @@ module AgentCore
         def budget_metadata(build, prepared:)
           limit = effective_token_limit
           budget_facts = budget_facts_for(build: build, limit: limit)
-          budget_action = effective_budget_action_for(budget_state: budget_facts.fetch(:budget_state))
+          budget_fingerprint = budget_fingerprint_for(build: build, budget_facts: budget_facts)
+          budget_action = effective_budget_action_for(
+            budget_state: budget_facts.fetch(:budget_state),
+            budget_fingerprint: budget_fingerprint,
+          )
 
           {
             "context_budget" => {
               "budget_state" => budget_facts.fetch(:budget_state),
               "budget_action" => budget_action,
+              "budget_fingerprint" => budget_fingerprint,
             },
             "context_cost" => context_cost_report(build, prepared: prepared, limit: limit),
           }
@@ -336,7 +303,11 @@ module AgentCore
         def apply_context_budget_policy(build, prepared:)
           limit = effective_token_limit
           budget_facts = budget_facts_for(build: build, limit: limit)
-          budget_action = budget_action_for(budget_state: budget_facts.fetch(:budget_state))
+          budget_fingerprint = budget_fingerprint_for(build: build, budget_facts: budget_facts)
+          budget_action = budget_action_for(
+            budget_state: budget_facts.fetch(:budget_state),
+            budget_fingerprint: budget_fingerprint,
+          )
           @execution_context =
             ExecutionContext.from(
               @execution_context,
@@ -344,6 +315,7 @@ module AgentCore
                 build: build,
                 budget_facts: budget_facts,
                 budget_action: budget_action,
+                budget_fingerprint: budget_fingerprint,
               ),
             )
           return build unless budget_action == "advise_compact"
@@ -355,6 +327,7 @@ module AgentCore
                 build: build,
                 budget_facts: budget_facts,
                 budget_action: budget_action,
+                budget_fingerprint: budget_fingerprint,
               ),
             )
           budget_prompt =
@@ -374,6 +347,7 @@ module AgentCore
                   build: build,
                   budget_facts: budget_facts,
                   budget_action: @context_budget_action_override,
+                  budget_fingerprint: budget_fingerprint,
                 ),
               )
             return build
@@ -381,7 +355,10 @@ module AgentCore
 
           rebuilt = rebuild_build(build, built_prompt: budget_prompt, estimate: budget_estimate)
           rebuilt_budget_facts = budget_facts_for(build: rebuilt, limit: limit)
-          rebuilt_budget_action = budget_action_for(budget_state: rebuilt_budget_facts.fetch(:budget_state))
+          rebuilt_budget_action = budget_action_for(
+            budget_state: rebuilt_budget_facts.fetch(:budget_state),
+            budget_fingerprint: budget_fingerprint,
+          )
 
           if rebuilt_budget_action != "advise_compact"
             @context_budget_action_override = rebuilt_budget_action
@@ -392,6 +369,7 @@ module AgentCore
                   build: build,
                   budget_facts: budget_facts,
                   budget_action: rebuilt_budget_action,
+                  budget_fingerprint: budget_fingerprint,
                 ),
               )
             return build
@@ -514,7 +492,6 @@ module AgentCore
             memory_dropped: build.memory_dropped,
             decisions: decisions,
             limit_turns: build.limit_turns,
-            auto_compacted: build.auto_compacted,
             fit_tactics_applied: build.fit_tactics_applied,
           )
         end
@@ -990,163 +967,153 @@ module AgentCore
           end
         end
 
-        def budget_action_for(budget_state:)
-          ::Cybros::ContextBudget::DefaultPolicy.action_for(budget_state: budget_state)
+        def budget_action_for(budget_state:, budget_fingerprint:)
+          ::Cybros::ContextBudget::DefaultPolicy.action_for(
+            budget_state: budget_state,
+            compact_context_suppressed: compact_context_suppressed?(budget_fingerprint: budget_fingerprint),
+          )
         rescue StandardError
           "none"
         end
 
-        def effective_budget_action_for(budget_state:)
+        def effective_budget_action_for(budget_state:, budget_fingerprint:)
           override = @context_budget_action_override.to_s
           return override if override.present?
 
-          budget_action_for(budget_state: budget_state)
+          budget_action_for(budget_state: budget_state, budget_fingerprint: budget_fingerprint)
         rescue StandardError
           "none"
         end
 
-        def context_budget_attributes_for(build:, budget_facts:, budget_action:)
+        def context_budget_attributes_for(build:, budget_facts:, budget_action:, budget_fingerprint:)
           {
             budget_action: budget_action,
             budget_state: budget_facts.fetch(:budget_state),
+            budget_fingerprint: budget_fingerprint,
             effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
             effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
             estimated_tokens: estimated_total(build.estimate),
           }.compact
         end
 
-        def try_auto_compact!(from_context_nodes:, to_context_nodes:)
-          dropped = dropped_node_ids(from_context_nodes: from_context_nodes, to_context_nodes: to_context_nodes)
-          return false if dropped.empty?
+        def budget_fingerprint_for(build:, budget_facts:)
+          relevant_context_node_ids =
+            Array(build.context_nodes)
+              .reject { |node| compact_context_budget_bookkeeping_node?(node) }
+              .map { |node| node.fetch("node_id").to_s }
+              .reject(&:empty?)
+              .sort
 
-          transcript = transcript_for_node_ids(from_context_nodes, dropped)
-          return false if transcript.strip.empty?
+          payload = {
+            graph_id: @node.graph_id.to_s,
+            lane_id: @node.lane_id.to_s,
+            turn_id: @node.turn_id.to_s,
+            effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
+            effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
+            context_node_ids: relevant_context_node_ids,
+          }.compact
 
-          summary = summarize_transcript(transcript)
-          return false if summary.strip.empty?
+          Digest::SHA256.hexdigest(JSON.generate(payload))
+        rescue StandardError
+          Digest::SHA256.hexdigest("#{@node.graph_id}:#{@node.turn_id}:context_budget")
+        end
 
-          @graph.compress!(
-            node_ids: dropped,
-            summary_content: summary,
-            summary_metadata: { "generated_by" => "agent_core", "kind" => "auto_compact" }
-          )
+        def compact_context_node?(node)
+          return false unless node.is_a?(Hash)
+          return false unless node.fetch("node_type", "").to_s == "task"
 
-          true
+          input = node.dig("payload", "input")
+          input = input.is_a?(Hash) ? input : {}
+
+          input.fetch("name", input.fetch("requested_name", "")).to_s == "compact_context"
         rescue StandardError
           false
         end
 
-        def dropped_node_ids(from_context_nodes:, to_context_nodes:)
-          to_ids = Array(to_context_nodes).map { |n| n.fetch("node_id").to_s }.to_set
-          lane_id = @node.lane_id.to_s
+        def compact_context_budget_bookkeeping_node?(node)
+          compact_context_node?(node) || compact_context_invocation_message_node?(node)
+        rescue StandardError
+          false
+        end
 
-          dropped =
-            Array(from_context_nodes).filter_map do |n|
-              id = n.fetch("node_id").to_s
-              next if to_ids.include?(id)
-              next unless n.fetch("lane_id", "").to_s == lane_id
+        def compact_context_invocation_message_node?(node)
+          return false unless node.is_a?(Hash)
 
-              node_type = n.fetch("node_type").to_s
-              next if %w[system_message developer_message summary].include?(node_type)
+          node_type = node.fetch("node_type", "").to_s
+          return false unless %w[agent_message character_message].include?(node_type)
 
-              state = n.fetch("state").to_s
-              next unless state == ::DAG::Node::FINISHED
+          tool_names =
+            compact_context_invocation_tool_calls_for(node)
+              .map { |tool_call| tool_call_name_for_fingerprint(tool_call) }
+              .reject(&:empty?)
+              .uniq
 
-              id
-            end
+          tool_names == ["compact_context"]
+        rescue StandardError
+          false
+        end
 
-          dropped.uniq
+        def compact_context_invocation_tool_calls_for(node)
+          output = node.dig("payload", "output")
+          output = output.is_a?(Hash) ? output : {}
+
+          direct_tool_calls = output["tool_calls"]
+          return Array(direct_tool_calls) if direct_tool_calls.is_a?(Array)
+
+          message = output["message"]
+          message = JSON.parse(message) if message.is_a?(String)
+          message = message.is_a?(Hash) ? message : {}
+
+          Array(message["tool_calls"])
         rescue StandardError
           []
         end
 
-        def transcript_for_node_ids(context_nodes, node_ids)
-          ids = node_ids.to_set
-
-          lines = []
-
-          Array(context_nodes).each do |n|
-            next unless ids.include?(n.fetch("node_id").to_s)
-
-            payload = n.fetch("payload") { {} }
-            input = payload.fetch("input") { {} }
-            output = payload.fetch("output") { {} }
-            metadata = n.fetch("metadata") { {} }
-
-            node_type = n.fetch("node_type").to_s
-            state = n.fetch("state").to_s
-
-            case node_type
-            when "user_message"
-              content = input.is_a?(Hash) ? input.fetch("content", "").to_s : ""
-              lines << "User: #{content}".strip
-            when "agent_message", "character_message"
-              content = output.is_a?(Hash) ? output.fetch("content", "").to_s : ""
-              lines << "Assistant: #{content}".strip
-            when "task"
-              name = input.is_a?(Hash) ? input.fetch("name", "").to_s : ""
-              if state == ::DAG::Node::FINISHED && output.is_a?(Hash) && output.key?("result")
-                result_text =
-                  begin
-                    result = AgentCore::Resources::Tools::ToolResult.from_h(output.fetch("result"))
-                    result.text
-                  rescue StandardError
-                    output.fetch("result").to_s
-                  end
-
-                lines << "Tool(#{name}): #{result_text}".strip
-              elsif state == ::DAG::Node::ERRORED
-                error = metadata.is_a?(Hash) ? metadata.fetch("error", "").to_s : ""
-                lines << "Tool(#{name}) errored: #{error}".strip
-              else
-                lines << "Tool(#{name}) state=#{state}".strip
-              end
-            end
+        def tool_call_name_for_fingerprint(tool_call)
+          case tool_call
+          when Hash
+            tool_call.fetch("name", tool_call.fetch(:name, "")).to_s
+          else
+            tool_call.respond_to?(:name) ? tool_call.name.to_s : ""
           end
-
-          lines.reject(&:empty?).join("\n")
         rescue StandardError
           ""
         end
 
-        def summarize_transcript(transcript)
-          model = @runtime.summary_model || @runtime.model
-          summarizer = AgentCore::ContextManagement::Summarizer.new(provider: @runtime.provider, model: model)
-          summarizer.summarize(
-            previous_summary: nil,
-            transcript: transcript,
-            max_output_tokens: @runtime.summary_max_tokens,
-            runtime_governance: summary_runtime_governance,
-          )
-        end
+        def compact_context_suppressed?(budget_fingerprint:)
+          return false if budget_fingerprint.to_s.strip.empty?
 
-        def summary_runtime_governance
-          raw = @execution_context&.attributes&.fetch(:runtime_governance, nil)
-          return nil unless raw.is_a?(Hash)
+          @graph.nodes.active.where(
+            turn_id: @node.turn_id,
+            lane_id: @node.lane_id,
+            node_type: "task",
+          ).any? do |task|
+            next false unless compact_context_task?(task)
+            next false unless task.metadata.is_a?(Hash)
+            next false unless task.metadata.dig("context_budget", "budget_fingerprint").to_s == budget_fingerprint
 
-          governance = AgentCore::Utils.deep_symbolize_keys(raw)
-          namespace = summary_request_namespace
-          owner_id = @execution_context&.attributes&.dig(:dag, :node_id).to_s.strip
-          owner_id = @execution_context&.run_id.to_s.strip if owner_id.empty?
-          governance[:request_namespace] = namespace if governance[:request_namespace].to_s.strip.empty? && namespace.present?
-          if governance[:provider_request_id].to_s.strip.empty? && namespace.present?
-            governance[:provider_request_id] = "#{namespace}:attempt:1"
+            compact_context_success?(task)
           end
-          governance[:owner_type] = "DAG::Node" if governance[:owner_type].to_s.strip.empty?
-          governance[:owner_id] = owner_id if governance[:owner_id].to_s.strip.empty? && owner_id.present?
-          governance[:instrumenter] ||= @execution_context&.instrumenter
-          governance[:estimated_tokens] = @runtime.summary_max_tokens unless governance.key?(:estimated_tokens)
-          governance
         rescue StandardError
-          nil
+          false
         end
 
-        def summary_request_namespace
-          [
-            @execution_context&.run_id.to_s.strip.presence,
-            @execution_context&.attributes&.dig(:dag, :node_id).to_s.strip.presence,
-            "summary",
-          ].compact.join(":")
+        def compact_context_task?(task)
+          input = task.body_input.is_a?(Hash) ? task.body_input : {}
+          input.fetch("name", input.fetch("requested_name", "")).to_s == "compact_context"
+        rescue StandardError
+          false
+        end
+
+        def compact_context_success?(task)
+          return false unless task.finished?
+
+          result_hash = task.body_output["raw_result"] || task.body_output["result"]
+          return false unless result_hash.is_a?(Hash)
+
+          !AgentCore::Resources::Tools::ToolResult.from_h(result_hash).error?
+        rescue StandardError
+          false
         end
     end
   end

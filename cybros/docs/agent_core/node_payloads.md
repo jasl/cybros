@@ -46,17 +46,33 @@
 
 ### 1.3 metadata（`node.metadata`）
 
-AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `ContextWindowExceededError` 失败路径都有）：
+AgentCore 会在每次 LLM 调用写入：
+
+- `metadata["context_budget"]`：最小 budget 控制面
+- `metadata["context_cost"]`：完整可观测账本（成功与 `ContextWindowExceededError` 失败路径都有）
+
+示例：
 
 ```json
 {
+  "context_budget": {
+    "budget_state": "soft_limit_reached",
+    "budget_action": "advise_compact",
+    "budget_fingerprint": "sha256..."
+  },
   "context_cost": {
     "context_window_tokens": 8192,
-    "reserved_output_tokens": 0,
-    "limit": 8192,
+    "effective_context_window_tokens": 8192,
+    "model_context_window_tokens": 8192,
+    "provider_context_window_tokens": 0,
+    "reserved_output_tokens": 512,
+    "effective_prompt_budget_tokens": 7680,
+    "context_soft_limit_tokens": 6000,
+    "context_soft_limit_ratio": 0.8,
+    "effective_context_soft_limit_tokens": 6000,
+    "budget_state": "soft_limit_reached",
     "memory_dropped": false,
     "limit_turns": 12,
-    "auto_compact": true,
     "estimated_tokens": { "total": 1234, "messages": 900, "tools": 334 },
     "estimated_tokens_coarse": {
       "tools_schema": 334,
@@ -91,8 +107,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
         "hard_clear": { "enabled": true, "min_total_chars": 50000, "placeholder_chars": 31, "cleared_count": 0, "chars_saved": 0, "triggered": false },
         "chars_saved_total": 12000
       },
-      { "type": "shrink_turns", "limit_turns": 5 },
-      { "type": "auto_compact", "triggered": false }
+      { "type": "shrink_turns", "limit_turns": 5 }
     ]
   }
 }
@@ -100,6 +115,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
 
 说明：
 
+- `context_budget` 是 executor / prompt-visibility / loop-suppression 使用的最小控制面。
 - `estimated_tokens` 是最终 prompt 的估算（messages + tools）。
 - `estimated_tokens_coarse` 是粗粒度拆分（不要求与 total 严格相加一致）。
 - `prompt_sections` 是章节级可观测信息（metadata-only），用于区分 system prompt 的 `prefix`/`tail` 与各段占比；不记录任何 prompt 文本内容。
@@ -247,7 +263,7 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
     "tool_name": true,
     "arguments": false
   },
-  "source": "native|mcp|skills|policy|invalid_args"
+  "source": "native|mcp|skills|policy|invalid_args|context_budget_policy|model_choice|manual"
 }
 ```
 
@@ -267,6 +283,10 @@ AgentCore 会在每次 LLM 调用写入 `metadata["context_cost"]`（成功与 `
   - `arguments=true`：发生过 ToolCallRepairLoop
   - 这里只记录 **自动** repair loop 的归因；手动 rerun/retry 不写进 `repair`，而是生成新的 `task` 节点并由统计层作为新的尝试处理
 - `source`：来源分类（用于可观测/安全策略）
+  - `compact_context` 的 active path 约定为：
+    - `context_budget_policy`：bundled default policy 自动插入
+    - `model_choice`：模型在 `advise_compact` guidance 下主动调用
+    - `manual`：未来显式人工/API 触发的 durable compaction
 
 这些字段是 runtime 统计的 durable per-task 归因基础，后续 `Statistics::ToolCallFact` / `Cybros::Statistics::ToolReliabilityStats` 会基于它们区分 first-pass success 与 repair-assisted success。
 

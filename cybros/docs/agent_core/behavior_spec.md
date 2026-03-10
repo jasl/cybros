@@ -27,7 +27,7 @@
 
 - `Messages::AgentMessage` / `Messages::CharacterMessage`：一次 LLM 调用（可扩展出 tool loop）
 - `Messages::Task`：一次工具调用（native/MCP/skills）
-- `Messages::Summary`：压缩后的摘要节点（由 auto_compact 产生）
+- `Messages::Summary`：历史或离线压缩产物；当前 active context-budget 主路径不会自动生成这类节点
 
 执行由 DAG 引擎驱动：
 
@@ -284,8 +284,13 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 - Strict schema：发送给模型前，对 tool schema 做保守 strict 化（缺失时补 `additionalProperties:false` 等），降低参数漂移（见 `StrictJsonSchema`）
 - Runtime surface：
   - `prepare_turn` 在预算 fit 后、真正调用 provider 前对 prompt view 做最后一次受限重写
-  - `compact_context` 通过 app 层 compaction plan 参与摘要/保留项决策，但 durable preflight activity 仍由 runtime/app 持有
-- Token budget：当启用 `context_window_tokens` 时，超预算会按顺序 drop memory / prune tool outputs / shrink turns / auto_compact，并写入 `context_cost` 便于回放审计（详见 `docs/agent_core/context_management.md`）
+  - `compact_context` 通过 app 层 compaction plan + `runtime_surface.compact_context(input:)` 参与摘要/保留项决策；一旦进入 active path，会 materialize 为普通 `task` 节点
+- Token budget：当启用 `context_window_tokens` 时，`ContextBudgetManager` 先做 drop memory / prune tool outputs / shrink turns 以满足 hard cap，再计算 `budget_state = normal|soft_limit_reached|near_hard_cap|forced_fit`
+- Bundled default compact behavior：`Cybros::ContextBudget::DefaultPolicy` 把 `budget_state` 映射到 `none|advise_compact|enqueue_compact`
+  - `advise_compact`：只向 prompt 注入最小预算 guidance；模型可见性掩码决定 `compact_context_available`
+  - `enqueue_compact`：executor 在当前 turn 内插入普通 `task(compact_context)`，source=`context_budget_policy`
+  - 模型主动调用 `compact_context` 时，task source=`model_choice`，并带 budget fingerprint metadata 参与 loop suppression
+- Loop suppression：同一 turn 内，成功或 noop 的 `compact_context` 会基于标准化后的 `budget_fingerprint` 抑制重复建议/重复插入
 - Memory：
   - 注入：`runtime.memory_store` + `runtime.memory_search_limit` 控制 `<relevant_context>` 注入
   - 工具化：注册 memory tools 后，模型可显式调用 `memory_search/memory_store/memory_forget`

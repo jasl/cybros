@@ -3,6 +3,27 @@ require "test_helper"
 class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
+  class RoleAwareTokenCounter < AgentCore::Resources::TokenCounter::Base
+    def count_text(text)
+      text.to_s.length
+    end
+
+    def count_messages(messages, per_message_overhead: 0)
+      _ = per_message_overhead
+
+      Array(messages).sum do |message|
+        next 0 if message.respond_to?(:system?) && message.system?
+
+        message.respond_to?(:text) ? message.text.to_s.length : 0
+      end
+    end
+
+    def count_tools(tools)
+      _ = tools
+      0
+    end
+  end
+
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
@@ -116,7 +137,85 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
     refute graph_tasks_for(conversation: conversation, turn_id: agent_node.turn_id).any? { |task| task.body_input["name"] == "compact_context" }
   end
 
+  test "noop compact_context result suppresses same-fingerprint near-hard-cap enqueue" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d210"
+
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need room #{'x' * 90}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: NullProvider.new,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 100,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    initial_budget = build_budget_for(agent: agent, runtime: runtime)
+    assert_equal "near_hard_cap", initial_budget.metadata.dig("context_budget", "budget_state")
+    assert_equal "enqueue_compact", initial_budget.metadata.dig("context_budget", "budget_action")
+
+    graph.nodes.create!(
+      node_type: Messages::Task.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: conversation.chat_lane.id,
+      turn_id: agent.turn_id,
+      metadata: {
+        "source" => "context_budget_policy",
+        "context_budget" => {
+          "budget_fingerprint" => initial_budget.metadata.dig("context_budget", "budget_fingerprint"),
+        },
+      },
+      body_input: {
+        "name" => "compact_context",
+        "requested_name" => "compact_context",
+        "source" => "context_budget_policy",
+        "arguments" => {},
+        "arguments_summary" => "{}",
+      },
+      body_output: {
+        "result" => AgentCore::Resources::Tools::ToolResult.success(text: "noop", metadata: { "noop" => true }).to_h,
+      },
+    )
+
+    suppressed_budget = build_budget_for(agent: agent, runtime: runtime)
+
+    assert_equal initial_budget.metadata.dig("context_budget", "budget_fingerprint"), suppressed_budget.metadata.dig("context_budget", "budget_fingerprint")
+    assert_equal "near_hard_cap", suppressed_budget.metadata.dig("context_budget", "budget_state")
+    assert_equal "none", suppressed_budget.metadata.dig("context_budget", "budget_action")
+  end
+
   private
+
+    class NullProvider < AgentCore::Resources::Provider::Base
+      def name = "null_provider"
+
+      def chat(**)
+        raise "null provider should not be called"
+      end
+    end
 
     def create_finished_turn!(graph:, lane:, user_content:, agent_content:, sequence_parent:)
       turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
@@ -202,5 +301,14 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
 
     def graph_tasks_for(conversation:, turn_id:)
       conversation.dag_graph.nodes.active.where(turn_id: turn_id, node_type: Messages::Task.node_type_key).to_a
+    end
+
+    def build_budget_for(agent:, runtime:)
+      execution_context = AgentCore::DAG::ExecutionContextBuilder.build(node: agent, runtime: runtime)
+      AgentCore::DAG::ContextBudgetManager.new(
+        node: agent,
+        runtime: runtime,
+        execution_context: execution_context,
+      ).build_prompt(context_nodes: agent.graph.context_for_full(agent.id))
     end
 end
