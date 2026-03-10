@@ -1,3 +1,4 @@
+require "digest"
 require "json"
 
 module AgentCore
@@ -23,6 +24,7 @@ module AgentCore
             dag: { graph_id: node.graph_id.to_s, node_id: node.id.to_s, turn_id: node.turn_id.to_s },
           ) do
             budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context)
+            execution_context = execution_context_with_context_budget(execution_context, metadata: budget.metadata, node: node)
 
             llm =
               call_llm_with_recovery(
@@ -465,6 +467,66 @@ module AgentCore
               runtime: runtime,
               execution_context: execution_context,
             ).build_prompt(context_nodes: context_nodes)
+          end
+
+          def execution_context_with_context_budget(execution_context, metadata:, node:)
+            context_budget = context_budget_attributes_from(metadata: metadata, node: node)
+            return execution_context if context_budget.empty?
+
+            existing = execution_context.attributes[:context_budget]
+            existing = existing.is_a?(Hash) ? existing.dup : {}
+
+            ExecutionContext.from(
+              execution_context,
+              context_budget: existing.merge(context_budget),
+            )
+          rescue StandardError
+            execution_context
+          end
+
+          def context_budget_attributes_from(metadata:, node:)
+            metadata = metadata.is_a?(Hash) ? metadata.deep_stringify_keys : {}
+            context_budget = metadata.fetch("context_budget", {})
+            context_budget = context_budget.is_a?(Hash) ? context_budget : {}
+            context_cost = metadata.fetch("context_cost", {})
+            context_cost = context_cost.is_a?(Hash) ? context_cost : {}
+
+            budget_state = context_budget["budget_state"].to_s.presence
+            budget_action = context_budget["budget_action"].to_s.presence
+            return {} if budget_state.blank? && budget_action.blank?
+
+            effective_prompt_budget_tokens = Integer(context_cost["effective_prompt_budget_tokens"], exception: false)
+            effective_context_soft_limit_tokens = Integer(context_cost["effective_context_soft_limit_tokens"], exception: false)
+            estimated_tokens = Integer(context_cost.dig("estimated_tokens", "total"), exception: false)
+
+            {
+              budget_state: budget_state,
+              budget_action: budget_action,
+              effective_prompt_budget_tokens: effective_prompt_budget_tokens,
+              effective_context_soft_limit_tokens: effective_context_soft_limit_tokens,
+              estimated_tokens: estimated_tokens,
+            }.compact.tap do |attrs|
+              attrs[:budget_fingerprint] = budget_fingerprint_for(node: node, context_budget: attrs)
+            end
+          rescue StandardError
+            {}
+          end
+
+          def budget_fingerprint_for(node:, context_budget:)
+            payload = {
+              graph_id: node.graph_id.to_s,
+              lane_id: node.lane_id.to_s,
+              turn_id: node.turn_id.to_s,
+              budget_state: context_budget[:budget_state].to_s,
+              budget_action: context_budget[:budget_action].to_s,
+              effective_prompt_budget_tokens: context_budget[:effective_prompt_budget_tokens],
+              effective_context_soft_limit_tokens: context_budget[:effective_context_soft_limit_tokens],
+              estimated_tokens: context_budget[:estimated_tokens],
+            }
+
+            Digest::SHA256.hexdigest(JSON.generate(payload))
+          rescue StandardError
+            Digest::SHA256.hexdigest("#{node.graph_id}:#{node.turn_id}:context_budget")
           end
 
           def llm_options_with_runtime_governance(base_options:, runtime:, execution_context:, purpose:, estimated_tokens: nil, attempt: nil)
@@ -972,6 +1034,7 @@ module AgentCore
             graph = node.graph
             tool_policy = runtime.tool_policy
             diagnostic_level = diagnostic_level_for(node)
+            budget_compact_task = enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
 
             tool_calls = message.tool_calls
             tool_loop_metadata = {}
@@ -1067,6 +1130,23 @@ module AgentCore
                   metadata: { "generated_by" => "agent_core.tool_loop" },
                   lane_id: node.lane_id,
                 )
+
+              if budget_compact_task
+                task =
+                  m.create_node(
+                    node_type: "task",
+                    state: ::DAG::Node::PENDING,
+                    idempotency_key: budget_compact_task.fetch(:idempotency_key),
+                    lane_id: node.lane_id,
+                    metadata: budget_compact_task.fetch(:metadata),
+                    body_input: budget_compact_task.fetch(:body_input),
+                  )
+
+                m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                tasks_created += 1
+              end
 
               tool_calls.each do |tool_call|
                 tool_call_id = tool_call.id.to_s
@@ -1929,13 +2009,51 @@ module AgentCore
 
           def activity_kind_for_task(task)
             name = task.body_input.fetch("name", task.body_input.fetch("requested_name", "")).to_s
-            %w[compress_input compact_context].include?(name) ? "preflight_task" : "tool_call"
+            name == "compress_input" ? "preflight_task" : "tool_call"
           rescue StandardError
             "tool_call"
           end
 
           def planned_phase_for(task)
             activity_kind_for_task(task) == "preflight_task" ? "preflight" : "planning"
+          end
+
+          def enqueued_budget_compact_task_for(node:, execution_context:)
+            context_budget = execution_context&.attributes&.fetch(:context_budget, nil)
+            context_budget = context_budget.is_a?(Hash) ? context_budget : {}
+            return nil unless context_budget[:budget_action].to_s == "enqueue_compact"
+
+            reason = context_budget[:budget_state].to_s.presence || "context_budget"
+            budget_fingerprint = context_budget[:budget_fingerprint].to_s.presence || budget_fingerprint_for(node: node, context_budget: context_budget)
+            tool_call_id = "budget_compact:#{budget_fingerprint.first(12)}"
+            arguments = { "reason" => reason, "target" => "older_turns" }
+
+            {
+              idempotency_key: "agent_core.context_budget:#{node.id}:#{budget_fingerprint}",
+              metadata: {
+                "generated_by" => "agent_core",
+                "source" => "context_budget_policy",
+                "context_budget" => {
+                  "reason" => reason,
+                  "budget_state" => context_budget[:budget_state].to_s,
+                  "budget_action" => context_budget[:budget_action].to_s,
+                  "budget_fingerprint" => budget_fingerprint,
+                  "effective_prompt_budget_tokens" => context_budget[:effective_prompt_budget_tokens],
+                  "effective_context_soft_limit_tokens" => context_budget[:effective_context_soft_limit_tokens],
+                  "estimated_tokens" => context_budget[:estimated_tokens],
+                }.compact,
+              },
+              body_input: task_input_hash(
+                tool_call_id: tool_call_id,
+                requested_name: "compact_context",
+                name: "compact_context",
+                name_resolution: :exact,
+                arguments: arguments,
+                source: "context_budget_policy",
+              ),
+            }
+          rescue StandardError
+            nil
           end
 
           def summarize_arguments(arguments)

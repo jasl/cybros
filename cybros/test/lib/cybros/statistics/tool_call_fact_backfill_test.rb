@@ -44,7 +44,7 @@ class Statistics::ToolCallFactBackfillTest < ActiveSupport::TestCase
         result: AgentCore::Resources::Tools::ToolResult.error(text: "upstream exploded"),
       )
 
-    preflight_task =
+    compact_task =
       create_connected_task!(
         graph: graph,
         from_node: agent,
@@ -52,22 +52,23 @@ class Statistics::ToolCallFactBackfillTest < ActiveSupport::TestCase
         turn_id: turn_id,
         state: DAG::Node::FINISHED,
         name: "compact_context",
-        tool_call_id: "tc_preflight",
-        source: "system",
+        tool_call_id: "tc_compact",
+        source: "context_budget_policy",
       )
 
     Statistics::ToolCallFact.delete_all
-    scope = DAG::Node.where(id: [success_task.id, failure_task.id, preflight_task.id])
+    scope = DAG::Node.where(id: [success_task.id, failure_task.id, compact_task.id])
 
     result = Statistics::ToolCallFactBackfill.backfill!(scope: scope)
 
     assert_equal 3, result.fetch(:scanned)
-    assert_equal 2, result.fetch(:projected)
-    assert_equal 1, result.fetch(:skipped)
-    assert_equal 2, Statistics::ToolCallFact.count
+    assert_equal 3, result.fetch(:projected)
+    assert_equal 0, result.fetch(:skipped)
+    assert_equal 3, Statistics::ToolCallFact.count
 
     success_fact = Statistics::ToolCallFact.find_by!(task_node_id: success_task.id)
     failure_fact = Statistics::ToolCallFact.find_by!(task_node_id: failure_task.id)
+    compact_fact = Statistics::ToolCallFact.find_by!(task_node_id: compact_task.id)
 
     assert_equal "runtime", success_fact.sample_origin
     assert_equal "success", success_fact.tool_outcome
@@ -76,7 +77,9 @@ class Statistics::ToolCallFactBackfillTest < ActiveSupport::TestCase
     assert_equal "failed", failure_fact.tool_outcome
     assert_equal "unknown", failure_fact.failure_class
 
-    assert_nil Statistics::ToolCallFact.find_by(task_node_id: preflight_task.id)
+    assert_equal "compact_context", compact_fact.resolved_name
+    assert_equal "context_budget_policy", compact_fact.source
+    assert_equal "success", compact_fact.tool_outcome
 
     assert_no_difference("Statistics::ToolCallFact.count") do
       rerun = Statistics::ToolCallFactBackfill.backfill!(scope: scope)

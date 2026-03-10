@@ -1,7 +1,7 @@
 require "test_helper"
 
 class Conversation::TurnExecutionProjectionVisibilityTest < ActiveSupport::TestCase
-  test "assistant bubble projection excludes composer_only activities" do
+  test "assistant bubble projection includes compact_context alongside ordinary tool activity" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
 
@@ -32,10 +32,10 @@ class Conversation::TurnExecutionProjectionVisibilityTest < ActiveSupport::TestC
     run_state = projector.run_state_for_node_id(agent.id)
 
     assert_equal [compact_task.id, tool_task.id], execution.fetch("activities").map { |activity| activity.fetch("source_node_id") }
-    assert_equal ["composer_only", "assistant_bubble"], execution.fetch("activities").map { |activity| activity.fetch("visibility") }
+    assert_equal ["assistant_bubble", "assistant_bubble"], execution.fetch("activities").map { |activity| activity.fetch("visibility") }
 
-    assert_equal [tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
-    assert_equal ["assistant_bubble"], run_state.fetch("activities").map { |activity| activity.fetch("visibility") }
+    assert_equal [compact_task.id, tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
+    assert_equal ["assistant_bubble", "assistant_bubble"], run_state.fetch("activities").map { |activity| activity.fetch("visibility") }
   end
 
   test "run_state is nil for non assistant messages even when the turn has activities" do

@@ -25,6 +25,7 @@ module Cybros
           conversation = conversation_for!(task_node)
           graph = task_node.graph
           lane = graph.lanes.find(task_node.lane_id)
+          runtime = AgentCore::DAG.runtime_for(node: task_node)
 
           plan =
             Conversation::ContextCompactionPlan.plan(
@@ -37,6 +38,7 @@ module Cybros
                   },
                 },
               },
+              runtime_surface_resolution: runtime_surface_resolution_for(runtime),
             )
 
           reason = args.fetch("reason", nil).to_s.presence || "manual"
@@ -107,6 +109,19 @@ module Cybros
         lane.send(:apply_compact_context_visibility!, keep_nodes: [], exclude_nodes: nodes, at: at, now: at)
       end
       private_class_method :apply_compaction!
+
+      def runtime_surface_resolution_for(runtime)
+        return nil if runtime.nil?
+        return nil if runtime.runtime_surface.nil? || runtime.runtime_surface_runner.nil?
+
+        {
+          runtime_surface: runtime.runtime_surface,
+          runtime_surface_runner: runtime.runtime_surface_runner,
+        }
+      rescue StandardError
+        nil
+      end
+      private_class_method :runtime_surface_resolution_for
     end
   end
 end

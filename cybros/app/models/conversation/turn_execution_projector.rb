@@ -1,5 +1,5 @@
 class Conversation::TurnExecutionProjector
-  PREFLIGHT_TASK_NAMES = %w[compress_input compact_context].freeze
+  PREFLIGHT_TASK_NAMES = %w[compress_input].freeze
   SUBAGENT_TOOL_NAMES = %w[subagent_run subagent_wait].freeze
   ASSISTANT_BUBBLE = "assistant_bubble"
   COMPOSER_ONLY = "composer_only"

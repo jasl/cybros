@@ -81,7 +81,7 @@ class ConversationExecutionProgressUiTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Partial answer"
   end
 
-  test "running assistant bubble shows a bounded hidden failure summary for composer-only activity failures" do
+  test "running assistant bubble shows compact_context failures as visible task activity" do
     user = create_user!
     sign_in!(user)
 
@@ -112,14 +112,14 @@ class ConversationExecutionProgressUiTest < ActionDispatch::IntegrationTest
 
     DAG::NodeEventStream.new(node: task).activity_planned!(
       activity_id: "task:#{task.id}",
-      activity_kind: "preflight_task",
-      phase: "preflight",
+      activity_kind: "tool_call",
+      phase: "planning",
       diagnostic_level: "debug",
     )
     DAG::NodeEventStream.new(node: task).activity_failed!(
       activity_id: "task:#{task.id}",
-      activity_kind: "preflight_task",
-      phase: "preflight",
+      activity_kind: "tool_call",
+      phase: "execution",
       diagnostic_level: "debug",
       data: { "error" => "Compaction failed" },
     )
@@ -128,9 +128,10 @@ class ConversationExecutionProgressUiTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_select '[data-role="run-state"]', count: 1
-    assert_select '[data-role="run-state-hidden-summary"]', count: 1
-    assert_select '[data-role="run-state-activity"]', count: 0
-    assert_includes response.body, "1 hidden failure"
+    assert_select '[data-role="run-state-hidden-summary"]', count: 0
+    assert_select '[data-role="run-state-activity"]', count: 1
+    assert_includes response.body, "compact_context"
+    assert_includes response.body, "Compaction failed"
     assert_includes response.body, "Partial answer"
   end
 

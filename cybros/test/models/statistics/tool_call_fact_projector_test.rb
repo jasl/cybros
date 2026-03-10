@@ -95,7 +95,7 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     assert_equal 1, Statistics::ToolCallFact.where(task_node_id: task.id).count
   end
 
-  test "ignores preflight tasks and derives non-executable readiness states" do
+  test "projects compact_context and derives non-executable readiness states" do
     conversation = create_conversation!
     graph = conversation.root_graph
     lane_id = graph.main_lane.id
@@ -110,7 +110,7 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
         model_ref: "openai/gpt-5.4",
       )
 
-    assert_no_difference("Statistics::ToolCallFact.count") do
+    compact_context =
       create_connected_task!(
         graph: graph,
         from_node: agent,
@@ -119,10 +119,9 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
         state: DAG::Node::FINISHED,
         name: "compact_context",
         requested_name: "compact_context",
-        tool_call_id: "tc_preflight",
-        source: "system",
+        tool_call_id: "tc_compact",
+        source: "context_budget_policy",
       )
-    end
 
     invalid_args =
       create_connected_task!(
@@ -172,9 +171,16 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
         },
       )
 
+    compact_fact = Statistics::ToolCallFact.find_by!(task_node_id: compact_context.id)
     invalid_fact = Statistics::ToolCallFact.find_by!(task_node_id: invalid_args.id)
     policy_fact = Statistics::ToolCallFact.find_by!(task_node_id: policy_denied.id)
     approval_fact = Statistics::ToolCallFact.find_by!(task_node_id: approval.id)
+
+    assert_equal "compact_context", compact_fact.resolved_name
+    assert_equal "context_budget_policy", compact_fact.source
+    assert_equal "executable", compact_fact.execution_readiness
+    assert_equal "success", compact_fact.tool_outcome
+    assert_equal false, compact_fact.entered_execution
 
     assert_equal "invalid_args", invalid_fact.execution_readiness
     assert_equal false, invalid_fact.entered_execution

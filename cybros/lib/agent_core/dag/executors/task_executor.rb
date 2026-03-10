@@ -102,7 +102,7 @@ module AgentCore
         private
 
           def activity_kind_for(node, tool_name:)
-            if %w[compress_input compact_context].include?(tool_name.to_s)
+            if tool_name.to_s == "compress_input"
               "preflight_task"
             else
               "tool_call"

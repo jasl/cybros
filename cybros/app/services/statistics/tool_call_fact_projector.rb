@@ -4,7 +4,7 @@ module Statistics
       Messages::AgentMessage.node_type_key,
       Messages::CharacterMessage.node_type_key,
     ].freeze
-    PREFLIGHT_TOOL_NAMES = %w[compress_input compact_context].freeze
+    EXCLUDED_TOOL_NAMES = %w[compress_input].freeze
     TOOL_ARGUMENT_RESOLUTION_VALUES = %w[original repaired invalid].freeze
 
     class << self
@@ -67,7 +67,7 @@ module Statistics
         return false unless task.is_a?(DAG::Node)
         return false unless task.node_type.to_s == Messages::Task.node_type_key
         return false unless conversation
-        return false if preflight_task?
+        return false if excluded_task?
 
         true
       end
@@ -77,9 +77,9 @@ module Statistics
         nil
       end
 
-      def preflight_task?
+      def excluded_task?
         names = [resolved_name, requested_name, body_input["name"]].compact.map(&:to_s)
-        names.any? { |name| PREFLIGHT_TOOL_NAMES.include?(name) }
+        names.any? { |name| EXCLUDED_TOOL_NAMES.include?(name) }
       end
 
       def conversation

@@ -36,6 +36,7 @@ module AgentCore
 
       def build_prompt(context_nodes:)
         @execution_context = with_system_prompt_now_utc(@execution_context)
+        @context_budget_action_override = nil
         prompt_assembly = PromptAssembly.new(runtime: @runtime, execution_context: @execution_context)
 
         context_nodes = without_target_node(normalize_initial_context(context_nodes))
@@ -319,7 +320,7 @@ module AgentCore
         def budget_metadata(build, prepared:)
           limit = effective_token_limit
           budget_facts = budget_facts_for(build: build, limit: limit)
-          budget_action = budget_action_for(budget_state: budget_facts.fetch(:budget_state))
+          budget_action = effective_budget_action_for(budget_state: budget_facts.fetch(:budget_state))
 
           {
             "context_budget" => {
@@ -336,18 +337,25 @@ module AgentCore
           limit = effective_token_limit
           budget_facts = budget_facts_for(build: build, limit: limit)
           budget_action = budget_action_for(budget_state: budget_facts.fetch(:budget_state))
+          @execution_context =
+            ExecutionContext.from(
+              @execution_context,
+              context_budget: context_budget_attributes_for(
+                build: build,
+                budget_facts: budget_facts,
+                budget_action: budget_action,
+              ),
+            )
           return build unless budget_action == "advise_compact"
 
           budget_execution_context =
             ExecutionContext.from(
               @execution_context,
-              context_budget: {
+              context_budget: context_budget_attributes_for(
+                build: build,
+                budget_facts: budget_facts,
                 budget_action: budget_action,
-                budget_state: budget_facts.fetch(:budget_state),
-                effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
-                effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
-                estimated_tokens: estimated_total(build.estimate),
-              }.compact,
+              ),
             )
           budget_prompt =
             PromptAssembly.new(runtime: @runtime, execution_context: budget_execution_context).build(
@@ -356,14 +364,41 @@ module AgentCore
               prompt_injection_items: prepared.prompt_injection_items,
             )
           budget_estimate = budget_prompt.estimate_tokens(token_counter: @runtime.token_counter)
-          return build if !limit.nil? && !within_budget?(budget_estimate, limit: limit)
+
+          if !limit.nil? && !within_budget?(budget_estimate, limit: limit)
+            @context_budget_action_override = "enqueue_compact"
+            @execution_context =
+              ExecutionContext.from(
+                @execution_context,
+                context_budget: context_budget_attributes_for(
+                  build: build,
+                  budget_facts: budget_facts,
+                  budget_action: @context_budget_action_override,
+                ),
+              )
+            return build
+          end
+
+          rebuilt = rebuild_build(build, built_prompt: budget_prompt, estimate: budget_estimate)
+          rebuilt_budget_facts = budget_facts_for(build: rebuilt, limit: limit)
+          rebuilt_budget_action = budget_action_for(budget_state: rebuilt_budget_facts.fetch(:budget_state))
+
+          if rebuilt_budget_action != "advise_compact"
+            @context_budget_action_override = rebuilt_budget_action
+            @execution_context =
+              ExecutionContext.from(
+                @execution_context,
+                context_budget: context_budget_attributes_for(
+                  build: build,
+                  budget_facts: budget_facts,
+                  budget_action: rebuilt_budget_action,
+                ),
+              )
+            return build
+          end
 
           @execution_context = budget_execution_context
-          rebuild_build(
-            build,
-            built_prompt: budget_prompt,
-            estimate: budget_estimate,
-          )
+          rebuilt
         rescue StandardError
           build
         end
@@ -959,6 +994,25 @@ module AgentCore
           ::Cybros::ContextBudget::DefaultPolicy.action_for(budget_state: budget_state)
         rescue StandardError
           "none"
+        end
+
+        def effective_budget_action_for(budget_state:)
+          override = @context_budget_action_override.to_s
+          return override if override.present?
+
+          budget_action_for(budget_state: budget_state)
+        rescue StandardError
+          "none"
+        end
+
+        def context_budget_attributes_for(build:, budget_facts:, budget_action:)
+          {
+            budget_action: budget_action,
+            budget_state: budget_facts.fetch(:budget_state),
+            effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
+            effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
+            estimated_tokens: estimated_total(build.estimate),
+          }.compact
         end
 
         def try_auto_compact!(from_context_nodes:, to_context_nodes:)

@@ -56,10 +56,10 @@ class Conversation::MessageRunStateProjectionTest < ActiveSupport::TestCase
       assert_equal "execution", run_state.fetch("phase")
       assert_equal "debug", run_state.fetch("diagnostic_level")
       assert_equal last_event.id, run_state.fetch("event_cursor")
-      assert_equal 1, run_state.dig("summary", "activity_count")
-      assert_equal [tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
-      refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
-      assert_equal "activity_started", run_state.dig("activities", 0, "diagnostics", "last_event_kind")
+      assert_equal 2, run_state.dig("summary", "activity_count")
+      assert_equal [compact_task.id, tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
+      assert_equal "compact_context", run_state.dig("activities", 0, "title")
+      assert_equal "activity_started", run_state.dig("activities", 1, "diagnostics", "last_event_kind")
     end
   end
 end

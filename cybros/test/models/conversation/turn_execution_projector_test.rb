@@ -61,7 +61,7 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
 
     assert_equal(
       [
-        ["preflight_task", "completed"],
+        ["tool_call", "completed"],
         ["tool_call", "completed"],
         ["tool_call", "running"],
       ],
@@ -196,9 +196,8 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     assert_equal "running", run_state.fetch("status")
     assert_equal "execution", run_state.fetch("phase")
     assert_equal "standard", run_state.fetch("diagnostic_level")
-    assert_equal 1, run_state.dig("summary", "activity_count")
-    assert_equal [tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
-    refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
+    assert_equal 2, run_state.dig("summary", "activity_count")
+    assert_equal [compact_task.id, tool_task.id], run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
   end
 
   test "message run_state keeps a bounded assistant-bubble preview while turn execution stays full" do
@@ -235,10 +234,9 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     run_state = message.fetch("run_state")
 
     assert_equal 6, execution.fetch("activities").length
-    assert_equal 5, run_state.dig("summary", "activity_count")
+    assert_equal 6, run_state.dig("summary", "activity_count")
     assert_equal 3, run_state.fetch("activities").length
     assert_equal visible_tasks.last(3).map(&:id), run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }
-    refute_includes run_state.fetch("activities").map { |activity| activity.fetch("source_node_id") }, compact_task.id
   end
 
   test "activity output preview uses durable activity preview when projected result differs" do
@@ -360,16 +358,16 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     agent = turn.fetch(:agent_node)
     agent.mark_running!
 
-    compact_task =
+    preflight_task =
       create_task!(
         graph: graph,
         lane_id: conversation.chat_lane.id,
         turn_id: agent.turn_id,
         state: DAG::Node::FINISHED,
-        name: "compact_context",
+        name: "compress_input",
       )
-    DAG::NodeEventStream.new(node: compact_task).activity_finished!(
-      activity_id: "task:#{compact_task.id}",
+    DAG::NodeEventStream.new(node: preflight_task).activity_finished!(
+      activity_id: "task:#{preflight_task.id}",
       activity_kind: "preflight_task",
       phase: "preflight",
     )

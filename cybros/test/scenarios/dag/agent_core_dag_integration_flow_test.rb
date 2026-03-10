@@ -80,6 +80,27 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
+  class RoleAwareTokenCounter < AgentCore::Resources::TokenCounter::Base
+    def count_text(text)
+      text.to_s.length
+    end
+
+    def count_messages(messages, per_message_overhead: 0)
+      _ = per_message_overhead
+
+      Array(messages).sum do |message|
+        next 0 if message.respond_to?(:system?) && message.system?
+
+        message.respond_to?(:text) ? message.text.to_s.length : 0
+      end
+    end
+
+    def count_tools(tools)
+      _ = tools
+      0
+    end
+  end
+
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
@@ -1752,6 +1773,362 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       system_prompt = first_call.fetch(:messages).first.text
       assert_includes system_prompt, "\"budget_state\":\"soft_limit_reached\""
       assert_includes system_prompt, "\"compact_context_available\":true"
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "context budget soft limit lets the model call compact_context as a normal task" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d113b"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need a lot of context #{'x' * 50}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Compacting context",
+                tool_calls: [AgentCore::ToolCall.new(id: "tc_compact", name: "compact_context", arguments: { "reason" => "soft_limit_reached" })],
+              ),
+            stop_reason: :tool_use,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["*"],
+            hidden: ["compact_context"],
+            context_allowed: lambda { |context|
+              if context&.attributes&.dig(:context_budget, :budget_action).to_s == "advise_compact"
+                ["compact_context"]
+              else
+                []
+              end
+            },
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 100,
+        context_soft_limit_tokens: 40,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal "soft_limit_reached", agent.metadata.dig("context_budget", "budget_state")
+      assert_equal "advise_compact", agent.metadata.dig("context_budget", "budget_action")
+
+      first_call = provider.calls.fetch(0)
+      tool_names = Array(first_call.fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
+      assert_includes tool_names, "compact_context"
+
+      compact_task = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).sole
+      assert_equal DAG::Node::PENDING, compact_task.state
+      assert_equal "compact_context", compact_task.body_input["name"]
+      assert_equal "native", compact_task.body_input["source"]
+
+      next_agent =
+        graph.nodes.active
+          .where(node_type: Messages::AgentMessage.node_type_key, turn_id: agent.turn_id, state: DAG::Node::PENDING)
+          .where.not(id: agent.id)
+          .sole
+      assert next_agent.present?
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "context budget near hard cap enqueues compact_context inside the current tool loop" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    turn_id = "0194f3c0-0000-7000-8000-00000000d113c"
+
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need room #{'x' * 90}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Calling echo",
+                tool_calls: [AgentCore::ToolCall.new(id: "tc_echo", name: "echo", arguments: { "text" => "hi" })],
+              ),
+            stop_reason: :tool_use,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "echo",
+        description: "Echo",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "text" => { "type" => "string" } },
+          required: ["text"],
+        },
+      ) do |args, **|
+        AgentCore::Resources::Tools::ToolResult.success(text: args.fetch("text"))
+      end
+    )
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["*"],
+            hidden: ["compact_context"],
+            context_allowed: lambda { |context|
+              if context&.attributes&.dig(:context_budget, :budget_action).to_s == "advise_compact"
+                ["compact_context"]
+              else
+                []
+              end
+            },
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 100,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal "near_hard_cap", agent.metadata.dig("context_budget", "budget_state")
+      assert_equal "enqueue_compact", agent.metadata.dig("context_budget", "budget_action")
+
+      first_call = provider.calls.fetch(0)
+      tool_names = Array(first_call.fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
+      refute_includes tool_names, "compact_context"
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).order(:created_at, :id).to_a
+      assert_equal ["compact_context", "echo"], tasks.map { |task| task.body_input["name"] }
+
+      compact_task = tasks.first
+      assert_equal DAG::Node::PENDING, compact_task.state
+      assert_equal "context_budget_policy", compact_task.body_input["source"]
+      assert_equal "near_hard_cap", compact_task.body_input.dig("arguments", "reason")
+      assert compact_task.metadata.dig("context_budget", "budget_fingerprint").present?
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
+  test "context budget forced fit enqueues compact_context after trimming history to fit" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    first_turn_id = "0194f3c0-0000-7000-8000-00000000d113d"
+    second_turn_id = "0194f3c0-0000-7000-8000-00000000d113e"
+
+    first_agent = nil
+    user = nil
+    agent = nil
+
+    graph.mutate!(turn_id: first_turn_id) do |m|
+      history_user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "History #{'x' * 40}",
+          metadata: {},
+        )
+      first_agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+          body_output: { "content" => "Earlier reply #{'y' * 40}" },
+        )
+      m.create_edge(from_node: history_user, to_node: first_agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    graph.mutate!(turn_id: second_turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need action #{'z' * 40}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: first_agent, to_node: user, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message:
+              AgentCore::Message.new(
+                role: :assistant,
+                content: "Calling echo",
+                tool_calls: [AgentCore::ToolCall.new(id: "tc_echo", name: "echo", arguments: { "text" => "fit" })],
+              ),
+            stop_reason: :tool_use,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "echo",
+        description: "Echo",
+        parameters: {
+          type: "object",
+          additionalProperties: false,
+          properties: { "text" => { "type" => "string" } },
+          required: ["text"],
+        },
+      ) do |args, **|
+        AgentCore::Resources::Tools::ToolResult.success(text: args.fetch("text"))
+      end
+    )
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy:
+          AgentCore::Resources::Tools::Policy::Profiled.new(
+            allowed: ["*"],
+            hidden: ["compact_context"],
+            context_allowed: lambda { |context|
+              if context&.attributes&.dig(:context_budget, :budget_action).to_s == "advise_compact"
+                ["compact_context"]
+              else
+                []
+              end
+            },
+            delegate: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          ),
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 100,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal "forced_fit", agent.metadata.dig("context_budget", "budget_state")
+      assert_equal "enqueue_compact", agent.metadata.dig("context_budget", "budget_action")
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).order(:created_at, :id).to_a
+      assert_equal ["compact_context", "echo"], tasks.map { |task| task.body_input["name"] }
+
+      compact_task = tasks.first
+      assert_equal "forced_fit", compact_task.body_input.dig("arguments", "reason")
+      assert_equal "context_budget_policy", compact_task.body_input["source"]
     ensure
       AgentCore::DAG.runtime_resolver = original_runtime_resolver
       DAG.executor_registry = original_registry
