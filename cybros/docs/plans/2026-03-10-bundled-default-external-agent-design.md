@@ -42,7 +42,8 @@ Bundled agents may have bootstrap and operator-UX conveniences, but they must no
 6. Source ownership is explicit:
    - bundled sources live under `cybros/agents`
    - user custom sources live under a separate user-owned workspace root
-7. Deployment changes are rollout events, not hidden hot patches.
+7. Deployment endpoint assignment is per deployment; there are no trusted fixed well-known ports.
+8. Deployment changes are rollout events, not hidden hot patches.
 
 ## Target Architecture
 
@@ -116,6 +117,7 @@ Bundled and custom sources must not share the same directory semantics.
 - configured by the operator
 - shared between the Cybros app and the companion host
 - on containers, mounted from the host so copies survive resets
+- may also contain deployment-owned generated runtime config, but that config must live outside the git-managed source tree
 
 ### Copy-As-Custom Flow
 
@@ -138,12 +140,36 @@ This makes rollback straightforward:
 
 Cybros does not become a git control plane. It only provides the initial repository bootstrap and enough metadata for operators to understand fork lineage and current source state.
 
+## Deployment Config And Endpoint Allocation
+
+Every `AgentDeployment` remains a separate process, but endpoint assignment belongs to the deployment layer, not to shared source.
+
+The product should generate a deployment-specific runtime config file for each deployment. That file should contain at least:
+
+- the allocated port or endpoint binding
+- the deployment bearer secret reference or resolved credential input
+- the deployment fingerprint
+- the source path the companion host should load
+- any other per-deployment transport settings
+
+That file is runtime authority. It must not overwrite the git-managed agent source tree or the bundled-source `agent.yml`.
+
+The first milestone should assume:
+
+- Cybros allocates or confirms an available port for each deployment
+- the allocated port is written into the deployment-specific runtime config file
+- `AgentDeployment.transport_config` stores the durable control-plane copy of those settings
+- the host process starts from that generated runtime config, not from a hard-coded fixed port inside the agent source
+
+This avoids both accidental collisions and a class of hijack risks where a fake process occupies a predictable port and is mistaken for the real deployment.
+
 ## Deployment, Rollout, And Failure Model
 
 Source and deployment are separate authorities.
 
 - source changes do not become live until a deployment restart or replacement occurs
 - the product does not promise in-process hot reload
+- a new deployment receives its own endpoint binding and generated runtime config
 - a new deployment only becomes active after passing inspection and health gates
 - existing `ConversationRun` records remain pinned to the deployment selected at finalization time
 - a broken new version is an acceptable operator error; Cybros only needs to preserve the ability to switch back to an older deployment or git-reverted source
@@ -153,6 +179,28 @@ This keeps rollout semantics aligned with the current deployment-binding model:
 - new runs use the new active deployment
 - old runs remain bound to the old deployment
 - rollout is visible and explicit
+
+Unexpected restart behavior must also stay explicit:
+
+- if a new version fails to boot because of bad code or port conflict, it remains `inactive` / `unhealthy`
+- the old active deployment stays active until a replacement passes activation
+- if an active deployment dies unexpectedly, in-flight runs fail or interrupt explicitly; they do not silently reconnect to whichever process later binds the same port
+
+## Endpoint Authenticity And Port Hijack Mitigation
+
+Port numbers are connection coordinates, not deployment identity.
+
+Cybros should trust a deployment only when all of these line up:
+
+- the configured endpoint from `transport_config`
+- the deployment bearer secret
+- the `deployment_fingerprint`
+- the expected `agent_program_key`
+- the inspected protocol version and supported method set
+
+This means a hostile or accidental replacement process that binds the same port is still not the same deployment unless it presents the expected identity and credential material.
+
+The deployment-specific runtime config file must therefore be product-owned or operator-owned runtime state, not something the agent can rewrite by editing its own source tree. That boundary reduces the risk that prompt hijacking or self-modification inside an agent repository can silently seize the live deployment identity.
 
 ## Setup And Operator UX
 
@@ -201,6 +249,7 @@ These assumptions are intentionally narrow so the first implementation lands qui
 - the first official companion host can be implemented in Ruby by evolving the existing programmable-agent fixture semantics into a real out-of-process executable
 - development bootstrap can rely on fixed local endpoint conventions via `Procfile.dev` and compose templates
 - the first operator-configured path is the user-owned agent workspace root
+- the first deployment config generator can live under the shared runtime-visible root as a deployment-owned file, rather than introducing a separate orchestration service
 - deeper git automation, upstream merge flows, and multi-host orchestration stay out of scope
 
 ## Non-Goals

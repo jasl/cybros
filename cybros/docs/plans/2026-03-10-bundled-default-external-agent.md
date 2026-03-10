@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the builtin conversation-agent runtime with a bundled default external programmable agent, then add a copy-as-custom workflow that preserves capability parity.
+**Goal:** Replace the builtin conversation-agent runtime with a bundled default external programmable agent, then add a copy-as-custom workflow that preserves capability parity, restart safety, and per-deployment endpoint isolation.
 
-**Architecture:** Add explicit bundled/custom source ownership to `AgentProgram`, ship a real bundled default agent plus an out-of-process companion host, bootstrap a default program/deployment during setup, delete the builtin conversation fallback, and add a product-managed fork flow that copies source into a user-owned git repository and provisions a normal deployment.
+**Architecture:** Add explicit bundled/custom source ownership to `AgentProgram`, ship a real bundled default agent plus an out-of-process companion host, generate deployment-specific runtime config with allocated endpoints and bearer credentials, bootstrap a default program/deployment during setup, delete the builtin conversation fallback, and add a product-managed fork flow that copies source into a user-owned git repository and provisions a normal deployment.
 
 **Tech Stack:** Ruby on Rails, ActiveRecord migrations, Hotwire/ERB, JSON-RPC `agent_rpc`, git CLI, Procfile.dev, Docker Compose
 
@@ -162,7 +162,96 @@ git add agents/default-assistant/agent.yml agents/default-assistant/README.md bi
 git commit -m "feat: add bundled default external agent host"
 ```
 
-### Task 3: Bootstrap The Default Program And Deployment
+### Task 3: Allocate Endpoints And Generate Deployment Runtime Config
+
+**Files:**
+- Create: `app/services/agent_deployments/endpoint_allocator.rb`
+- Create: `app/services/agent_deployments/runtime_config_writer.rb`
+- Modify: `app/services/agent_deployments/registration_service.rb`
+- Modify: `app/services/agent_deployments/inspection_service.rb`
+- Modify: `app/services/agent_deployments/activation_service.rb`
+- Modify: `app/models/agent_deployment.rb`
+- Test: `test/models/agent_deployment_test.rb`
+- Test: `test/integration/agent_deployments_registration_test.rb`
+- Test: `test/integration/agent_deployments_activation_gate_test.rb`
+
+**Step 1: Write the failing endpoint-allocation and restart-safety tests**
+
+Add assertions like:
+
+```ruby
+test "registration allocates a unique port and writes runtime config" do
+  program = agent_programs(:default_assistant)
+
+  deployment = AgentDeployments::RegistrationService.new(
+    agent_program: program,
+    transport_kind: "http_jsonrpc",
+    endpoint_url: "",
+    deployment_bearer_secret_ref: "secret://deployment-one",
+    deployment_fingerprint: "deployment:test-one"
+  ).register!
+
+  assert deployment.transport_config["port"].present?
+  assert File.exist?(deployment.transport_config.fetch("runtime_config_path"))
+end
+
+test "activation does not deactivate the old deployment before the new one is healthy" do
+  old_deployment = agent_deployments(:active_default_assistant)
+  new_deployment = agent_deployments(:inactive_default_assistant_candidate)
+
+  new_deployment.update!(health_status: "unhealthy")
+
+  assert_raises(AgentDeployments::ActivationError) do
+    AgentDeployments::ActivationService.new(deployment: new_deployment).activate!
+  end
+
+  assert_equal "active", old_deployment.reload.status
+end
+```
+
+**Step 2: Run the focused tests to verify they fail**
+
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb`
+
+Expected: no endpoint allocator, no generated runtime config path, and no explicit restart-safety guarantees.
+
+**Step 3: Implement deployment-owned endpoint allocation**
+
+Implement services that:
+
+- allocate a free port per deployment
+- persist the assigned endpoint in `AgentDeployment.transport_config`
+- generate a deployment-specific runtime config file outside the git-managed source tree
+- include deployment fingerprint and bearer-secret binding in that generated config
+
+Keep the owner boundary clear:
+
+- source tree owns agent code and static source config
+- `transport_config` and generated runtime config own live endpoint binding
+
+**Step 4: Harden cutover rules**
+
+Make sure activation semantics remain:
+
+- inspect first
+- require matching identity and healthy status
+- only deactivate the old deployment after the new one is ready
+- never let an in-flight run silently reconnect to a replacement process on the same port
+
+**Step 5: Run the focused tests again**
+
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb`
+
+Expected: PASS.
+
+**Step 6: Commit**
+
+```bash
+git add app/services/agent_deployments/endpoint_allocator.rb app/services/agent_deployments/runtime_config_writer.rb app/services/agent_deployments/registration_service.rb app/services/agent_deployments/inspection_service.rb app/services/agent_deployments/activation_service.rb app/models/agent_deployment.rb test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb
+git commit -m "feat: add deployment endpoint allocation"
+```
+
+### Task 4: Bootstrap The Default Program And Deployment
 
 **Files:**
 - Create: `app/services/agent_programs/bootstrap_bundled_default_service.rb`
@@ -202,7 +291,7 @@ Expected: setup does not create a bundled program/deployment yet.
 Implement an idempotent service that:
 
 - ensures the bundled default `AgentProgram` exists
-- registers a companion `AgentDeployment` against the conventional local endpoint
+- registers a companion `AgentDeployment` with deployment-owned endpoint allocation
 - inspects and activates it when healthy
 
 Then wire it into:
@@ -224,7 +313,7 @@ git add app/services/agent_programs/bootstrap_bundled_default_service.rb app/con
 git commit -m "feat: bootstrap bundled default agent"
 ```
 
-### Task 4: Cut The Builtin Conversation Path
+### Task 5: Cut The Builtin Conversation Path
 
 **Files:**
 - Create: `db/migrate/20260310110000_backfill_legacy_builtin_conversations.rb`
@@ -287,7 +376,7 @@ git add db/migrate/20260310110000_backfill_legacy_builtin_conversations.rb app/m
 git commit -m "feat: remove builtin conversation agent path"
 ```
 
-### Task 5: Add Copy-As-Custom And Git Bootstrap
+### Task 6: Add Copy-As-Custom And Git Bootstrap
 
 **Files:**
 - Create: `app/services/agent_programs/git_bootstrap.rb`
@@ -330,7 +419,7 @@ Implement a product-managed flow that:
 - initializes a git repository
 - creates an initial commit and import tag
 - creates a new `AgentProgram` with `source_kind: "custom"`
-- provisions a normal `AgentDeployment`
+- provisions a normal `AgentDeployment` with its own generated runtime config and allocated endpoint
 
 Keep Cybros out of ongoing git workflows after the initial bootstrap.
 
@@ -347,7 +436,7 @@ git add app/services/agent_programs/git_bootstrap.rb app/services/agent_programs
 git commit -m "feat: add bundled agent fork flow"
 ```
 
-### Task 6: Surface Deployment Lineage And Update Docs
+### Task 7: Surface Deployment Lineage And Update Docs
 
 **Files:**
 - Modify: `app/views/system/settings/agent_deployments/index.html.erb`
@@ -385,6 +474,8 @@ Expose durable facts only:
 - source kind
 - bundled key or fork origin
 - source path
+- allocated endpoint / port
+- generated runtime config path
 - deployment health
 - deployment fingerprint
 - active deployment timestamp
@@ -414,6 +505,7 @@ Run the implementation branch through the targeted verification suite before cla
 PARALLEL_WORKERS=1 bin/rails test \
   test/models/agent_program_test.rb \
   test/models/runtime_setting_test.rb \
+  test/models/agent_deployment_test.rb \
   test/models/conversation_chat_facade_test.rb \
   test/integration/setup_and_sessions_test.rb \
   test/integration/agent_programs_test.rb \
