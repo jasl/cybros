@@ -54,7 +54,11 @@ class ConversationRunTest < ActiveSupport::TestCase
         effective_agent_config: { "mode" => "coding" },
         agent_config_schema_fingerprint: "config:v1",
         effective_policy: { "tools" => "allow" },
-        runtime_governors: { "provider_key" => "openai" },
+        runtime_governors: runtime_governors_snapshot(
+          provider_credential: credential,
+          selected_model_ref: "openai/gpt-5.4",
+          execution_target: target,
+        ),
         snapshot: { "agent" => { "program_id" => program.id } },
       )
 
@@ -79,6 +83,121 @@ class ConversationRunTest < ActiveSupport::TestCase
     assert_includes run.errors[:agent_program], "can't be blank"
     assert_includes run.errors[:contract_fingerprint], "can't be blank"
     assert_includes run.errors[:agent_deployment], "can't be blank"
+  end
+
+  test "requires a provider governor snapshot when a model or credential is selected" do
+    conversation = create_conversation!
+    program = AgentProgram.create!(
+      name: "Fixture Program",
+      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+      published_contract_fingerprint: "contract:v1",
+      manifest_snapshot: {},
+      global_config: {},
+      global_config_schema: { "type" => "object" },
+      conversation_config_schema: { "type" => "object" },
+      config_schema_fingerprint: "config:v1",
+    )
+    deployment = AgentDeployment.create!(
+      agent_program: program,
+      transport_kind: "websocket",
+      endpoint_url: "http://127.0.0.1:4319/rpc",
+      deployment_bearer_secret_ref: "secret://fixture",
+      contract_fingerprint: "contract:v1",
+      deployment_fingerprint: "deployment:v1",
+      status: "active",
+      health_status: "healthy",
+      protocol_version: "agent_rpc.v1",
+      agent_sdk_version: "fixture-ruby-sdk/1.0",
+      supported_methods: %w[initialize turn.prepare turn.compose],
+      manifest_snapshot: {},
+      schema_snapshot: {},
+      capability_snapshot: {},
+      inspection_details: {},
+    )
+    credential = LLMProviderCredential.create!(provider_key: "fixture-#{SecureRandom.hex(4)}", credential_type: "api_key")
+
+    run =
+      ConversationRun.new(
+        conversation: conversation,
+        dag_node_id: SecureRandom.uuid,
+        state: "queued",
+        queued_at: Time.current.change(usec: 0),
+        snapshot_version: 1,
+        initiated_by_user: conversation.user,
+        effective_permission_mode: "default",
+        agent_program: program,
+        contract_fingerprint: "contract:v1",
+        agent_deployment: deployment,
+        deployment_fingerprint: "deployment:v1",
+        deployment_activated_at: Time.current.change(usec: 0),
+        provider_credential: credential,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {},
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: {},
+      )
+
+    refute_predicate run, :valid?
+    assert_includes run.errors[:runtime_governors], "must include a provider_limiter snapshot"
+  end
+
+  test "requires an execution governor snapshot when an execution target is selected" do
+    conversation = create_conversation!
+    program = AgentProgram.create!(
+      name: "Fixture Program",
+      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+      published_contract_fingerprint: "contract:v1",
+      manifest_snapshot: {},
+      global_config: {},
+      global_config_schema: { "type" => "object" },
+      conversation_config_schema: { "type" => "object" },
+      config_schema_fingerprint: "config:v1",
+    )
+    deployment = AgentDeployment.create!(
+      agent_program: program,
+      transport_kind: "websocket",
+      endpoint_url: "http://127.0.0.1:4319/rpc",
+      deployment_bearer_secret_ref: "secret://fixture",
+      contract_fingerprint: "contract:v1",
+      deployment_fingerprint: "deployment:v1",
+      status: "active",
+      health_status: "healthy",
+      protocol_version: "agent_rpc.v1",
+      agent_sdk_version: "fixture-ruby-sdk/1.0",
+      supported_methods: %w[initialize turn.prepare turn.compose],
+      manifest_snapshot: {},
+      schema_snapshot: {},
+      capability_snapshot: {},
+      inspection_details: {},
+    )
+    target = create_execution_target!
+
+    run =
+      ConversationRun.new(
+        conversation: conversation,
+        dag_node_id: SecureRandom.uuid,
+        state: "queued",
+        queued_at: Time.current.change(usec: 0),
+        snapshot_version: 1,
+        initiated_by_user: conversation.user,
+        effective_permission_mode: "default",
+        agent_program: program,
+        contract_fingerprint: "contract:v1",
+        agent_deployment: deployment,
+        deployment_fingerprint: "deployment:v1",
+        deployment_activated_at: Time.current.change(usec: 0),
+        execution_target: target,
+        effective_public_settings: {},
+        effective_agent_config: {},
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: {},
+      )
+
+    refute_predicate run, :valid?
+    assert_includes run.errors[:runtime_governors], "must include an execution_capacity snapshot"
   end
 
   test "keeps runtime snapshot fields immutable after creation" do
@@ -128,7 +247,7 @@ class ConversationRunTest < ActiveSupport::TestCase
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
-        runtime_governors: {},
+        runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4"),
         snapshot: { "deployment" => { "fingerprint" => "deployment:v1" } },
       )
 
@@ -192,7 +311,7 @@ class ConversationRunTest < ActiveSupport::TestCase
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
-        runtime_governors: {},
+        runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4"),
         snapshot: {},
       )
 
@@ -275,7 +394,7 @@ class ConversationRunTest < ActiveSupport::TestCase
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
-        runtime_governors: {},
+        runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4"),
         snapshot: {},
       )
 

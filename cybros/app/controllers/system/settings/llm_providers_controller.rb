@@ -90,7 +90,7 @@ module System
         if status == :authorized
           tokens = result.fetch(:tokens)
 
-          cred = LLMProvider.find_by(provider_key: @provider_key) || LLMProvider.new(provider_key: @provider_key, credential_type: "oauth_codex")
+          cred = LLMProviderCredential.find_by(provider_key: @provider_key) || LLMProviderCredential.new(provider_key: @provider_key, credential_type: "oauth_codex")
           cred.credential_type = "oauth_codex"
           cred.access_token = tokens.fetch("access_token")
           cred.refresh_token = tokens.fetch("refresh_token", cred.refresh_token)
@@ -128,8 +128,8 @@ module System
 
         def set_llm_provider
           @llm_provider =
-            LLMProvider.find_by(provider_key: @provider_key) ||
-              LLMProvider.new(provider_key: @provider_key, credential_type: credential_type_from_spec, status: "active")
+            LLMProviderCredential.find_by(provider_key: @provider_key) ||
+              LLMProviderCredential.new(provider_key: @provider_key, credential_type: credential_type_from_spec, status: "active")
         end
 
         def credential_type_from_spec
@@ -205,7 +205,7 @@ module System
           @providers =
             provider_keys.map do |provider_key|
               spec = @catalog.provider(provider_key)
-              cred = LLMProvider.find_by(provider_key: provider_key)
+              cred = LLMProviderCredential.find_by(provider_key: provider_key)
               {
                 provider_key: provider_key,
                 spec: spec,

@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "json"
 require "net/http"
 require "securerandom"
@@ -41,7 +39,7 @@ module TestSupport
           Port: 0,
           BindAddress: "127.0.0.1",
           Logger: WEBrick::Log.new(File::NULL, WEBrick::Log::FATAL),
-          AccessLog: [],
+          AccessLog: []
         )
       @server.mount "/rpc", Servlet, self
       @thread = Thread.new { @server.start }
@@ -82,116 +80,117 @@ module TestSupport
           "jsonrpc" => "2.0",
           "id" => payload.fetch("id"),
           "result" => result_for(method_name, params),
-        },
+        }
       )
     rescue KeyError => e
-      write_json(res, jsonrpc_error(code: -32600, message: e.message), status: 400)
+      write_json(res, jsonrpc_error(code: -32_600, message: e.message), status: 400)
     rescue StandardError => e
-      write_json(res, jsonrpc_error(code: -32000, message: e.message), status: 500)
+      write_json(res, jsonrpc_error(code: -32_000, message: e.message), status: 500)
     end
 
     private
 
-      def result_for(method_name, params)
-        case method_name
-        when "conversation.settings.update", "conversation.config.update"
-          { "status" => "staged", "operation_id" => params["operation_id"] }
-        when "conversation.kv.set", "conversation.kv.delete"
-          { "status" => "staged", "operation_id" => params["operation_id"] }
-        when "conversation.kv.get"
-          { "value" => nil }
-        when "conversation.kv.list"
-          { "entries" => [] }
-        when "execution_target.list"
-          { "targets" => deep_copy(targets) }
-        when "execution_target.get"
-          { "target" => deep_copy(targets.find { |target| target["id"] == params["execution_target_id"] }) }
-        when "execution_target.propose"
-          {
-            "switch_decision" => {
-              "decision" => @proposal_decision,
-              "execution_target_id" => params["execution_target_id"],
-            },
-          }
-        else
-          raise KeyError, "unsupported callback method: #{method_name}"
-        end
-      end
-
-      def jsonrpc_error(code:, message:)
+    def result_for(method_name, params)
+      case method_name
+      when "conversation.settings.update", "conversation.config.update"
+        { "status" => "staged", "operation_id" => params["operation_id"] }
+      when "conversation.kv.set", "conversation.kv.delete"
+        { "status" => "staged", "operation_id" => params["operation_id"] }
+      when "conversation.kv.get"
+        { "value" => nil }
+      when "conversation.kv.list"
+        { "entries" => [] }
+      when "execution_target.list"
+        { "targets" => deep_copy(targets) }
+      when "execution_target.get"
+        { "target" => deep_copy(targets.find { |target| target["id"] == params["execution_target_id"] }) }
+      when "execution_target.propose"
         {
-          "jsonrpc" => "2.0",
-          "id" => nil,
-          "error" => {
-            "code" => code,
-            "message" => message,
+          "switch_decision" => {
+            "decision" => @proposal_decision,
+            "execution_target_id" => params["execution_target_id"],
           },
         }
+      else
+        raise KeyError, "unsupported callback method: #{method_name}"
+      end
+    end
+
+    def jsonrpc_error(code:, message:)
+      {
+        "jsonrpc" => "2.0",
+        "id" => nil,
+        "error" => {
+          "code" => code,
+          "message" => message,
+        },
+      }
+    end
+
+    def ensure_authorized!(req)
+      header = req["Authorization"].to_s
+      return if header == "Bearer #{required_bearer}"
+
+      raise "invalid bearer"
+    end
+
+    def write_json(res, body, status: 200)
+      res.status = status
+      res["Content-Type"] = "application/json"
+      res.body = JSON.generate(body)
+    end
+
+    def wait_until_ready!
+      40.times do
+        return if ready?
+
+        sleep 0.05
       end
 
-      def ensure_authorized!(req)
-        header = req["Authorization"].to_s
-        return if header == "Bearer #{required_bearer}"
+      raise "callback harness did not become ready"
+    end
 
-        raise "invalid bearer"
-      end
+    def ready?
+      uri = URI(rpc_url)
+      request = Net::HTTP::Post.new(uri)
+      request["Content-Type"] = "application/json"
+      request["Authorization"] = "Bearer #{required_bearer}"
+      request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid,
+                                     "method" => "conversation.kv.list", "params" => {} })
 
-      def write_json(res, body, status: 200)
-        res.status = status
-        res["Content-Type"] = "application/json"
-        res.body = JSON.generate(body)
-      end
+      response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+      response.is_a?(Net::HTTPSuccess)
+    rescue StandardError
+      false
+    end
 
-      def wait_until_ready!
-        40.times do
-          return if ready?
+    def bound_port
+      @server&.config&.fetch(:Port)
+    end
 
-          sleep 0.05
-        end
+    def default_targets
+      [
+        {
+          "id" => "target-primary",
+          "name" => "Project Primary",
+          "status" => "active",
+          "sandboxed" => true,
+        },
+        {
+          "id" => "target-alternate",
+          "name" => "Project Alternate",
+          "status" => "active",
+          "sandboxed" => true,
+        },
+      ]
+    end
 
-        raise "callback harness did not become ready"
-      end
+    def deep_copy(value)
+      JSON.parse(JSON.generate(value))
+    end
 
-      def ready?
-        uri = URI(rpc_url)
-        request = Net::HTTP::Post.new(uri)
-        request["Content-Type"] = "application/json"
-        request["Authorization"] = "Bearer #{required_bearer}"
-        request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid, "method" => "conversation.kv.list", "params" => {} })
-
-        response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
-        response.is_a?(Net::HTTPSuccess)
-      rescue StandardError
-        false
-      end
-
-      def bound_port
-        @server&.config&.fetch(:Port)
-      end
-
-      def default_targets
-        [
-          {
-            "id" => "target-primary",
-            "name" => "Project Primary",
-            "status" => "active",
-            "sandboxed" => true,
-          },
-          {
-            "id" => "target-alternate",
-            "name" => "Project Alternate",
-            "status" => "active",
-            "sandboxed" => true,
-          },
-        ]
-      end
-
-      def deep_copy(value)
-        JSON.parse(JSON.generate(value))
-      end
-
-      def normalize_hash(value)
-        value.is_a?(Hash) ? deep_copy(value) : {}
-      end
+    def normalize_hash(value)
+      value.is_a?(Hash) ? deep_copy(value) : {}
+    end
   end
 end

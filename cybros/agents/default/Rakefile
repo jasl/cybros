@@ -1,8 +1,7 @@
-# frozen_string_literal: true
-
 task default: :test
 
 desc "Run the bundled default agent tests"
-task :test do
-  ruby "-Itest", "-e", "ARGV.each { |path| load File.expand_path(path) }", "test/unit/manifest_test.rb", "test/integration/rpc_contract_test.rb"
+task test: :environment do
+  ruby "-Itest", "-e", "ARGV.each { |path| load File.expand_path(path) }", "test/unit/manifest_test.rb",
+       "test/integration/rpc_contract_test.rb"
 end

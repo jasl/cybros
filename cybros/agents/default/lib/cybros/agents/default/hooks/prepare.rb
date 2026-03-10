@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module Agents
     module Default
@@ -45,12 +43,14 @@ module Cybros
           end
 
           def stage_state(callback_session)
-            callback_rpc(callback_session, "conversation.settings.update", { "operation_id" => "fixture-settings", "patch" => { "tone" => "concise" } })
-            callback_rpc(callback_session, "conversation.config.update", { "operation_id" => "fixture-config", "patch" => { "mode" => "review" } })
+            callback_rpc(callback_session, "conversation.settings.update",
+                         { "operation_id" => "fixture-settings", "patch" => { "tone" => "concise" } })
+            callback_rpc(callback_session, "conversation.config.update",
+                         { "operation_id" => "fixture-config", "patch" => { "mode" => "review" } })
             callback_rpc(
               callback_session,
               "conversation.kv.set",
-              { "operation_id" => "fixture-kv", "key" => "shared.fixture.plan", "value" => { "status" => "planned" } },
+              { "operation_id" => "fixture-kv", "key" => "shared.fixture.plan", "value" => { "status" => "planned" } }
             )
           end
 
@@ -59,7 +59,8 @@ module Cybros
               callback_rpc(
                 callback_session,
                 "conversation.kv.set",
-                { "operation_id" => "fixture-kv-replay", "key" => "shared.fixture.replay", "value" => { "status" => "deduped" } },
+                { "operation_id" => "fixture-kv-replay", "key" => "shared.fixture.replay",
+                  "value" => { "status" => "deduped" } }
               )
             end
           end
@@ -75,7 +76,7 @@ module Cybros
               callback_rpc(
                 callback_session,
                 "execution_target.propose",
-                { "operation_id" => "fixture-target-switch", "execution_target_id" => alternate_target.fetch("id") },
+                { "operation_id" => "fixture-target-switch", "execution_target_id" => alternate_target.fetch("id") }
               )
             return unless proposal.dig("switch_decision", "decision").to_s == "confirm"
 
@@ -113,7 +114,8 @@ module Cybros
             request = Net::HTTP::Post.new(uri)
             request["Content-Type"] = "application/json"
             request["Authorization"] = "Bearer #{callback_session.fetch("bearer")}"
-            request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid, "method" => method_name, "params" => params })
+            request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid, "method" => method_name,
+                                           "params" => params })
 
             response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") { |http| http.request(request) }
             raise "callback #{response.code}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)

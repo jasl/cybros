@@ -244,7 +244,11 @@ class RuntimeGovernance::RuntimeWaitsTest < ActiveSupport::TestCase
           effective_agent_config: {},
           agent_config_schema_fingerprint: program.config_schema_fingerprint,
           effective_policy: {},
-          runtime_governors: {},
+          runtime_governors: runtime_governors_snapshot(
+            provider_credential: credential,
+            selected_model_ref: "openai/gpt-5.4",
+            execution_target: target,
+          ),
           snapshot: { "execution_target_id" => target.id },
         )
 

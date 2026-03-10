@@ -52,7 +52,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for selects model_ref preference when available in YAML catalog" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     conversation =
@@ -78,7 +78,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for ignores preferences for providers requiring missing credentials" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     conversation =
       create_conversation!(
@@ -96,7 +96,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for uses site default when agent prefer is absent" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-or-test")
     Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4")
 
@@ -115,7 +115,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for falls back to catalog default when site default no longer exists" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
     Account.instance.update_llm_default_model_ref!("openai/does-not-exist")
 
@@ -134,7 +134,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for hard-errors when site default exists but is not currently usable" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
 
     conversation =
@@ -152,7 +152,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
   end
 
   test "runtime_for selects programmable turn compose provider when a materialized programmable run exists" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     program =

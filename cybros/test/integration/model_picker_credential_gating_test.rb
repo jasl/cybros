@@ -18,7 +18,7 @@ class ModelPickerCredentialGatingTest < ActionDispatch::IntegrationTest
   end
 
   test "model picker hides openrouter models when api_key is missing" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     user = sign_in!(email: "a@example.com")
     conversation = Conversation.create!(user: user, title: "Chat", metadata: { "agent" => { "agent_profile" => "coding" } })
 

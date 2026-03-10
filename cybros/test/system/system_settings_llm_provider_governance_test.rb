@@ -5,7 +5,7 @@ class SystemSettingsLlmProviderGovernanceSystemTest < ApplicationSystemTestCase
     ProviderBudgetReservation.delete_all
     ConversationRun.update_all(provider_credential_id: nil)
     RunDraft.update_all(provider_credential_id: nil)
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
   end
 
   test "owner can edit api key limiter settings from the browser" do
@@ -34,7 +34,7 @@ class SystemSettingsLlmProviderGovernanceSystemTest < ApplicationSystemTestCase
     assert_field "Tokens per minute", with: "360000"
     assert_field "Burst limit", with: "10"
 
-    provider = LLMProvider.find_by!(provider_key: "openai")
+    provider = LLMProviderCredential.find_by!(provider_key: "openai")
     assert_equal 6, provider.max_concurrent_requests
     assert_equal({ "kind" => "exponential", "base_delay_ms" => 900, "max_delay_ms" => 60_000 }, provider.backoff_policy)
   end
@@ -75,7 +75,7 @@ class SystemSettingsLlmProviderGovernanceSystemTest < ApplicationSystemTestCase
     assert_text "Connected"
     assert_button "Start"
 
-    provider = LLMProvider.find_by!(provider_key: "codex_subscription")
+    provider = LLMProviderCredential.find_by!(provider_key: "codex_subscription")
     assert_equal 2, provider.max_concurrent_requests
     assert_equal "access-token", provider.access_token
     assert_equal({ "kind" => "linear", "base_delay_ms" => 1250, "max_delay_ms" => 20_000 }, provider.backoff_policy)

@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module Agents
     module Default
@@ -29,7 +27,9 @@ module Cybros
           private
 
           def latest_user_message(params)
-            user_message = Array(params.dig("provider_input", "messages")).reverse.find { |message| message.is_a?(Hash) && message["role"].to_s == "user" }
+            user_message = Array(params.dig("provider_input", "messages")).reverse.find do |message|
+              message.is_a?(Hash) && message["role"].to_s == "user"
+            end
             user_message.to_h["content"].to_s.strip
           end
         end

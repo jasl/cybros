@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 require "test_helper"
 
 class RPCContractTest < Minitest::Test
@@ -38,14 +36,14 @@ class RPCContractTest < Minitest::Test
             "endpoint" => callback.rpc_url,
             "bearer" => callback.required_bearer,
           },
-        },
+        }
       )
 
     result = payload.fetch("result")
 
     assert_equal(
       %w[stage-state replay-kv switch-target approval],
-      result.dig("prepared_plan", "fixture_scenarios"),
+      result.dig("prepared_plan", "fixture_scenarios")
     )
     assert_equal "pending_confirmation", result.dig("approval_state", "status")
     assert_equal "target_switch", result.dig("approval_state", "reason")
@@ -63,11 +61,11 @@ class RPCContractTest < Minitest::Test
         "execution_target.list",
         "execution_target.propose",
       ],
-      callback.calls.map { |call| call.fetch("method") },
+      callback.calls.map { |call| call.fetch("method") }
     )
     assert_equal(
-      ["fixture-kv", "fixture-kv-replay", "fixture-kv-replay"],
-      callback.received("conversation.kv.set").map { |call| call.dig("params", "operation_id") },
+      %w[fixture-kv fixture-kv-replay fixture-kv-replay],
+      callback.received("conversation.kv.set").map { |call| call.dig("params", "operation_id") }
     )
   ensure
     host&.shutdown
@@ -92,7 +90,7 @@ class RPCContractTest < Minitest::Test
               { "role" => "user", "content" => "Can you summarize what you are about to do?" },
             ],
           },
-        },
+        }
       )
     handle_error_payload =
       rpc_json(
@@ -112,7 +110,7 @@ class RPCContractTest < Minitest::Test
             "class" => "RuntimeError",
             "message" => "tool execution crashed",
           },
-        },
+        }
       )
 
     compose_content = compose_payload.dig("result", "output", "content").to_s
@@ -128,25 +126,25 @@ class RPCContractTest < Minitest::Test
 
   private
 
-    def build_host
-      Cybros::Agents::Default::Application.new(
-        source_root: TestPaths.source_root,
-        host: "127.0.0.1",
-        port: 0,
-        deployment_fingerprint: "deployment:test-default",
-        required_bearer: "secret://agent",
-      )
-    end
+  def build_host
+    Cybros::Agents::Default::Application.new(
+      source_root: TestPaths.source_root,
+      host: "127.0.0.1",
+      port: 0,
+      deployment_fingerprint: "deployment:test-default",
+      required_bearer: "secret://agent"
+    )
+  end
 
-    def rpc_json(url, id:, method:, params:)
-      uri = URI(url)
-      request = Net::HTTP::Post.new(uri)
-      request["Content-Type"] = "application/json"
-      request["Authorization"] = "Bearer secret://agent"
-      request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params })
+  def rpc_json(url, id:, method:, params:)
+    uri = URI(url)
+    request = Net::HTTP::Post.new(uri)
+    request["Content-Type"] = "application/json"
+    request["Authorization"] = "Bearer secret://agent"
+    request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params })
 
-      response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
-      assert_equal "200", response.code
-      JSON.parse(response.body)
-    end
+    response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
+    assert_equal "200", response.code
+    JSON.parse(response.body)
+  end
 end

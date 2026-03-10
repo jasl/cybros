@@ -95,6 +95,8 @@ class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
           metadata: {},
         )
 
+      credential = LLMProviderCredential.find_by!(provider_key: "openai", status: "active")
+
       conversation_run =
         ConversationRun.create!(
           conversation: conversation,
@@ -108,14 +110,18 @@ class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
           agent_deployment: deployment,
           deployment_fingerprint: deployment.deployment_fingerprint,
           deployment_activated_at: deployment.activated_at,
-          provider_credential: LLMProviderCredential.find_by!(provider_key: "openai", status: "active"),
+          provider_credential: credential,
           execution_target: target,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
           agent_config_schema_fingerprint: program.config_schema_fingerprint,
           effective_policy: {},
-          runtime_governors: {},
+          runtime_governors: runtime_governors_snapshot(
+            provider_credential: credential,
+            selected_model_ref: "openai/gpt-5.4",
+            execution_target: target,
+          ),
           snapshot: { "draft" => { "id" => SecureRandom.uuid } },
         )
 

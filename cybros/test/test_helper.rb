@@ -79,19 +79,47 @@ module ActiveSupport
       User.create!(identity: identity, role: role)
     end
 
-    def create_conversation!(user: nil, title: "Chat", metadata: nil, default_execution_target: :__default__)
+    def create_conversation!(user: nil, title: "Chat", metadata: nil, default_execution_target: :__default__, agent_program: :__default__)
       user ||= create_user!
       metadata ||= { "agent" => { "agent_profile" => "coding" } }
       if default_execution_target == :__default__
         default_execution_target = ensure_default_execution_target!
       end
 
-      Conversation.create!(
+      if agent_program == :__default__
+        agent_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+      end
+
+      attributes = {
         user: user,
         title: title,
         metadata: metadata,
         default_execution_target: default_execution_target,
-      )
+      }
+      if agent_program.present?
+        attributes[:agent_program] = agent_program
+        attributes[:agent_config_schema_fingerprint] = agent_program.config_schema_fingerprint
+      end
+
+      Conversation.create!(attributes)
+    end
+
+    def runtime_governors_snapshot(provider_credential: nil, selected_model_ref: nil, execution_target: nil)
+      {}.tap do |snapshot|
+        provider_snapshot = provider_limiter_snapshot(provider_credential: provider_credential, selected_model_ref: selected_model_ref)
+        snapshot["provider_limiter"] = provider_snapshot if provider_snapshot.any?
+        if execution_target.present?
+          snapshot["execution_capacity"] = RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: execution_target)
+        end
+      end
+    end
+
+    def provider_limiter_snapshot(provider_credential: nil, selected_model_ref: nil)
+      {}.tap do |snapshot|
+        provider_key = selected_model_ref.to_s.split("/", 2).first.to_s
+        snapshot["provider_key"] = provider_key if provider_key.present?
+        snapshot["provider_credential_id"] = provider_credential.id if provider_credential.present?
+      end
     end
 
     def ensure_default_execution_target!
@@ -125,12 +153,12 @@ module ActiveSupport
     def ensure_llm_provider!(provider_key:, credential_type:, **attributes)
       attrs = { credential_type: credential_type }.merge(attributes)
 
-      provider = LLMProvider.find_or_initialize_by(provider_key: provider_key)
+      provider = LLMProviderCredential.find_or_initialize_by(provider_key: provider_key)
       provider.assign_attributes(attrs)
       provider.save!
       provider
     rescue ActiveRecord::RecordInvalid, ActiveRecord::RecordNotUnique
-      provider = LLMProvider.find_by!(provider_key: provider_key)
+      provider = LLMProviderCredential.find_by!(provider_key: provider_key)
       provider.update!(attrs)
       provider
     end

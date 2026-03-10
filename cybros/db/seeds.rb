@@ -8,24 +8,30 @@
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
 
-Account.instance
+account = Account.instance
 
 openai_api_key = ENV["OPENAI_API_KEY"].to_s.strip
 openrouter_api_key = ENV["OPENROUTER_API_KEY"].to_s.strip
-openrouter_api_key = ENV["SIMPLE_INFERENCE_API_KEY"].to_s.strip if openrouter_api_key.blank?
+default_model_ref = ENV["DEFAULT_MODEL"].to_s.strip
 
 if openai_api_key.present?
-  record = LLMProvider.find_or_initialize_by(provider_key: "openai")
+  record = LLMProviderCredential.find_or_initialize_by(provider_key: "openai")
   record.credential_type = "api_key"
   record.api_key = openai_api_key
   record.save! if record.changed?
 end
 
 if openrouter_api_key.present?
-  record = LLMProvider.find_or_initialize_by(provider_key: "openrouter")
+  record = LLMProviderCredential.find_or_initialize_by(provider_key: "openrouter")
   record.credential_type = "api_key"
   record.api_key = openrouter_api_key
   record.save! if record.changed?
+end
+
+if default_model_ref.present?
+  normalized_model_ref = Cybros::AgentRuntimeResolver.normalize_model_ref(model_ref: default_model_ref)
+  Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: normalized_model_ref)
+  account.update_llm_default_model_ref!(normalized_model_ref)
 end
 
 if AgentPrograms::BundledSources.path_for("default")

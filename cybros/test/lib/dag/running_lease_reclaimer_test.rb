@@ -145,6 +145,10 @@ class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
           agent_config_schema_fingerprint: program.config_schema_fingerprint,
           effective_policy: {},
           runtime_governors: {
+            "provider_limiter" => provider_limiter_snapshot(
+              provider_credential: credential,
+              selected_model_ref: "openai/gpt-5.4",
+            ),
             "execution_capacity" => capacity_snapshot,
           },
           snapshot: { "execution_target_id" => target.id },

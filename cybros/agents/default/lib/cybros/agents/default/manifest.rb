@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module Agents
     module Default
@@ -19,7 +17,8 @@ module Cybros
 
         def self.load!(source_root:)
           root = Pathname.new(source_root.to_s)
-          data = YAML.safe_load(root.join("agent.yml").read, permitted_classes: [], permitted_symbols: [], aliases: false)
+          data = YAML.safe_load(root.join("agent.yml").read, permitted_classes: [], permitted_symbols: [],
+                                                             aliases: false)
           manifest = deep_stringify(data)
           missing = REQUIRED_KEYS.reject { |key| manifest.key?(key) }
           raise KeyError, "agent.yml missing required keys: #{missing.join(", ")}" if missing.any?

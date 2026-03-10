@@ -2,7 +2,7 @@ require "test_helper"
 
 class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::IntegrationTest
   setup do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
   end
 
   test "owner can update limiter fields for api key providers" do
@@ -23,7 +23,7 @@ class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::Integ
 
     assert_redirected_to edit_system_settings_llm_provider_path("openai")
 
-    provider = LLMProvider.find_by!(provider_key: "openai")
+    provider = LLMProviderCredential.find_by!(provider_key: "openai")
     assert_equal "api_key", provider.credential_type
     assert_equal "sk-governed", provider.api_key
     assert_equal 7, provider.max_concurrent_requests
@@ -61,7 +61,7 @@ class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::Integ
 
     assert_redirected_to edit_system_settings_llm_provider_path("openai")
 
-    provider = LLMProvider.find_by!(provider_key: "openai")
+    provider = LLMProviderCredential.find_by!(provider_key: "openai")
     assert_equal "sk-existing", provider.api_key
     assert_equal 6, provider.max_concurrent_requests
     assert_equal 180, provider.requests_per_minute
@@ -98,7 +98,7 @@ class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::Integ
 
     assert_redirected_to edit_system_settings_llm_provider_path("codex_subscription")
 
-    provider = LLMProvider.find_by!(provider_key: "codex_subscription")
+    provider = LLMProviderCredential.find_by!(provider_key: "codex_subscription")
     assert_equal "oauth_codex", provider.credential_type
     assert_equal "access-token", provider.access_token
     assert_equal "refresh-token", provider.refresh_token
@@ -127,7 +127,7 @@ class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::Integ
     assert_includes response.body, "Backoff policy must be a JSON object"
     assert_includes response.body, 'value="9"'
     assert_includes response.body, "[1,2,3]"
-    assert_nil LLMProvider.find_by(provider_key: "openai")
+    assert_nil LLMProviderCredential.find_by(provider_key: "openai")
   end
 
   test "member cannot update provider governance" do
@@ -145,7 +145,7 @@ class SystemSettingsLlmProviderGovernanceIntegrationTest < ActionDispatch::Integ
     }
 
     assert_response :forbidden
-    assert_nil LLMProvider.find_by(provider_key: "openai")
+    assert_nil LLMProviderCredential.find_by(provider_key: "openai")
   end
 
   private

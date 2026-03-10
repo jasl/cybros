@@ -2,7 +2,7 @@ require "test_helper"
 
 class LlmProvidersTest < ActionDispatch::IntegrationTest
   setup do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
   end
 
   def with_stubbed_singleton_method(obj, method_name, value:)
@@ -72,9 +72,9 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
 
   test "update stores encrypted api_key credential (provider_key keyed)" do
     sign_in_owner!
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
-    assert_difference -> { LLMProvider.count }, +1 do
+    assert_difference -> { LLMProviderCredential.count }, +1 do
       patch system_settings_llm_provider_path("openai"), params: {
         llm_provider: {
           api_key: "sk-test",
@@ -82,16 +82,16 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
       }
     end
 
-    provider = LLMProvider.find_by!(provider_key: "openai")
+    provider = LLMProviderCredential.find_by!(provider_key: "openai")
     assert_redirected_to edit_system_settings_llm_provider_path("openai")
     assert_equal "sk-test", provider.api_key
     assert_equal "api_key", provider.credential_type
 
     raw =
-      LLMProvider.lease_connection.select_value(
-        LLMProvider.send(
+      LLMProviderCredential.lease_connection.select_value(
+        LLMProviderCredential.send(
           :sanitize_sql_array,
-          ["SELECT api_key FROM #{LLMProvider.table_name} WHERE provider_key = ?", "openai"],
+          ["SELECT api_key FROM #{LLMProviderCredential.table_name} WHERE provider_key = ?", "openai"],
         ),
       ).to_s
     refute_equal "sk-test", raw
@@ -141,7 +141,7 @@ class LlmProvidersTest < ActionDispatch::IntegrationTest
   test "index flags a stored site default that is not currently usable" do
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     get system_settings_llm_providers_path
     assert_response :success

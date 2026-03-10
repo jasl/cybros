@@ -296,7 +296,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
         effective_agent_config: {},
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
         effective_policy: {},
-        runtime_governors: {},
+        runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4"),
         snapshot: { "origin" => "dag_runner_test" },
         debug: {},
         error: {},

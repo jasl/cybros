@@ -352,7 +352,7 @@ Example minimal regression:
 ```ruby
 ENV["OPENROUTER_API_KEY"] = "sk-test"
 load Rails.root.join("db/seeds.rb")
-assert LLMProvider.find_by(provider_key: "openrouter")
+assert LLMProviderCredential.find_by(provider_key: "openrouter")
 ```
 
 **Step 2: Run test to verify it fails**

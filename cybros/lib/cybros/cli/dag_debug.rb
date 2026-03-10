@@ -155,11 +155,14 @@ module Cybros
         def smoke_conversation_inline(conversation_id:, prompt:, model_ref:)
           source_conversation = Conversation.find(conversation_id)
 
-          with_inline_jobs do
+          with_queue_adapter(:test) do
             conversation =
               Conversation.create!(
                 user: source_conversation.user,
                 title: "Debug smoke #{Time.current.to_i}",
+                agent_program: source_conversation.agent_program,
+                agent_config_schema_fingerprint: source_conversation.agent_config_schema_fingerprint,
+                default_execution_target: source_conversation.default_execution_target,
                 metadata:
                   source_conversation.metadata.deep_dup.deep_merge(
                     "statistics" => {
@@ -173,7 +176,7 @@ module Cybros
 
             begin
               result = conversation.append_user_message!(content: prompt, model_ref: model_ref)
-              agent = result.fetch(:agent_node).reload
+              agent, = execute_inline(result.fetch(:agent_node).reload, mode: "smoke_inline")
 
               {
                 "conversation" => {
@@ -187,6 +190,15 @@ module Cybros
                 "agent_node" => node_summary(agent),
               }
             ensure
+              invocation_scope = AgentRPCInvocation.where(conversation_id: conversation.id)
+              session_scope = AgentRPCSession.where(conversation_id: conversation.id)
+
+              invocation_scope.update_all(last_session_id: nil)
+              session_scope.update_all(agent_rpc_invocation_id: nil)
+              AgentRPCOperationReceipt.where(agent_rpc_invocation_id: invocation_scope.select(:id)).delete_all
+              session_scope.delete_all
+              invocation_scope.delete_all
+              RunDraft.where(conversation_id: conversation.id).delete_all
               ConversationRun.where(conversation_id: conversation.id).delete_all
               conversation.destroy! if conversation.persisted?
             end

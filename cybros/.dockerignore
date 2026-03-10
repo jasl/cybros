@@ -119,3 +119,6 @@
 
 # Local resources
 /resources
+
+# App specifics
+/.cybros/

@@ -6,10 +6,12 @@ class CreateAutomationsAndAutomationRuns < ActiveRecord::Migration[8.2]
       t.references :execution_target, null: false, type: :uuid, foreign_key: true
       t.string :permission_mode, null: false, default: "full_access"
       t.string :status, null: false, default: "active"
-      t.string :schedule_kind, null: false
+      t.string :schedule_kind
       t.string :schedule_rrule
       t.string :schedule_timezone
       t.jsonb :task_payload, null: false, default: {}
+      t.string :trigger_kind
+      t.jsonb :trigger_payload, null: false, default: {}
       t.timestamps
     end
 

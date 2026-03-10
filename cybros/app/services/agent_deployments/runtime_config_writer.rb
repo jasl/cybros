@@ -32,11 +32,7 @@ module AgentDeployments
       attr_reader :deployment
 
       def runtime_root
-        root =
-          RuntimeSetting.find_by(scope_key: "instance")&.agent_workspace_root.to_s.presence ||
-            RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT
-
-        Pathname.new(root)
+        RuntimeSetting.instance_agent_workspace_root_path
       end
 
       def runtime_payload

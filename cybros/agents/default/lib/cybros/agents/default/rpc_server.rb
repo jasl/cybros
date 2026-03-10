@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module Agents
     module Default
@@ -37,7 +35,7 @@ module Cybros
               Port: @port,
               BindAddress: @host,
               Logger: WEBrick::Log.new(File::NULL, WEBrick::Log::FATAL),
-              AccessLog: [],
+              AccessLog: []
             )
           @server.mount "/health", Servlet, self
           @server.mount "/rpc", Servlet, self
@@ -71,15 +69,15 @@ module Cybros
           result =
             @application.call(
               method_name: payload.fetch("method"),
-              params: payload.fetch("params", {}),
+              params: payload.fetch("params", {})
             )
           write_json(res, { "jsonrpc" => "2.0", "id" => payload.fetch("id"), "result" => result })
         rescue KeyError => e
-          write_json(res, jsonrpc_error(code: -32601, message: e.message), status: 404)
+          write_json(res, jsonrpc_error(code: -32_601, message: e.message), status: 404)
         rescue JSON::ParserError => e
-          write_json(res, jsonrpc_error(code: -32700, message: e.message), status: 400)
+          write_json(res, jsonrpc_error(code: -32_700, message: e.message), status: 400)
         rescue StandardError => e
-          write_json(res, jsonrpc_error(code: -32000, message: e.message), status: 500)
+          write_json(res, jsonrpc_error(code: -32_000, message: e.message), status: 500)
         end
 
         private
@@ -106,7 +104,8 @@ module Cybros
           request = Net::HTTP::Post.new(uri)
           request["Content-Type"] = "application/json"
           request["Authorization"] = "Bearer #{@required_bearer}" if @required_bearer
-          request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid, "method" => "agent.health", "params" => {} })
+          request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid, "method" => "agent.health",
+                                         "params" => {} })
           response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
           response.is_a?(Net::HTTPSuccess)
         rescue StandardError

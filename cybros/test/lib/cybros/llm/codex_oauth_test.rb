@@ -98,7 +98,7 @@ class Cybros::LLM::CodexOAuthTest < ActiveSupport::TestCase
 
   test "refresh_if_needed! refreshes expired credential and persists new tokens" do
     credential =
-      LLMProvider.create!(
+      LLMProviderCredential.create!(
         provider_key: "codex_subscription",
         credential_type: "oauth_codex",
         access_token: "old-at",
@@ -128,7 +128,7 @@ class Cybros::LLM::CodexOAuthTest < ActiveSupport::TestCase
 
   test "refresh_if_needed! does not refresh a still-valid ActiveSupport time credential" do
     credential =
-      LLMProvider.create!(
+      LLMProviderCredential.create!(
         provider_key: "codex_subscription",
         credential_type: "oauth_codex",
         access_token: "still-valid-at",

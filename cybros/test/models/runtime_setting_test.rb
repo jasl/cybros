@@ -1,6 +1,10 @@
 require "test_helper"
 
 class RuntimeSettingTest < ActiveSupport::TestCase
+  setup do
+    RuntimeSetting.delete_all
+  end
+
   test "requires positive worker concurrency" do
     settings = build_settings(default_worker_concurrency: 0)
 
@@ -45,6 +49,18 @@ class RuntimeSettingTest < ActiveSupport::TestCase
 
     refute_predicate settings, :valid?
     assert_includes settings.errors[:agent_workspace_root], "must be an absolute path"
+  end
+
+  test "returns the normalized configured workspace root path" do
+    settings = build_settings(agent_workspace_root: "/srv/cybros-agents/../custom-agents")
+
+    assert_equal Pathname.new("/srv/custom-agents"), settings.agent_workspace_root_path
+  end
+
+  test "returns the default workspace root path when instance settings are absent" do
+    RuntimeSetting.delete_all
+
+    assert_equal Pathname.new(RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT).cleanpath, RuntimeSetting.instance_agent_workspace_root_path
   end
 
   private

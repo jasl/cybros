@@ -40,7 +40,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit model_ref hard-errors when provider credential is missing" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation, metadata: { "llm" => { "model_ref" => "openai/gpt-5.4" } })
@@ -50,7 +50,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "conversation-level stored model_ref applies when node metadata has no explicit llm selection" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     conversation = create_conversation!(metadata: { "llm" => { "model_ref" => "openai/gpt-5.4" } })
@@ -61,7 +61,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit model_ref hard-errors when model_ref is invalid" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     conversation = create_conversation!
@@ -72,7 +72,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit codex_subscription model_ref builds responses provider with bearer headers" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(
       provider_key: "codex_subscription",
       credential_type: "oauth_codex",
@@ -103,7 +103,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit codex_subscription model_ref rejects tool calls at capability gate" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(
       provider_key: "codex_subscription",
       credential_type: "oauth_codex",
@@ -154,7 +154,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit codex_subscription model_ref accepts image input and serializes responses image content" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(
       provider_key: "codex_subscription",
       credential_type: "oauth_codex",
@@ -218,7 +218,7 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
   end
 
   test "explicit codex_subscription model_ref hard-errors when oauth refresh fails" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
     ensure_llm_provider!(
       provider_key: "codex_subscription",
       credential_type: "oauth_codex",

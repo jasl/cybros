@@ -82,7 +82,7 @@ class CodexDeviceFlowTest < ActionDispatch::IntegrationTest
 
     assert_redirected_to edit_system_settings_llm_provider_path("codex_subscription")
 
-    cred = LLMProvider.find_by!(provider_key: "codex_subscription")
+    cred = LLMProviderCredential.find_by!(provider_key: "codex_subscription")
     assert_equal "oauth_codex", cred.credential_type
     assert_equal "at", cred.access_token
     assert_equal "rt", cred.refresh_token

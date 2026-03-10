@@ -4,7 +4,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
 
   setup do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
   end
 
   def sign_in_owner!
@@ -60,7 +60,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   test "create redirects to llm settings when no usable default model exists" do
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("")
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     assert_no_difference -> { Conversation.count } do
       post conversations_path, params: { conversation: { title: "New convo" } }
@@ -309,7 +309,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
   test "show keeps stale model selection in reselect state instead of auto-falling back" do
     user = sign_in_owner!
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     conversation =
       create_conversation!(
@@ -377,7 +377,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   test "show requires reselection when default model is unusable and conversation has no stored model_ref" do
     user = sign_in_owner!
     Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     conversation =
       create_conversation!(

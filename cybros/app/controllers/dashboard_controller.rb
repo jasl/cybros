@@ -7,7 +7,7 @@ class DashboardController < AgentController
     providers =
       provider_keys.map do |provider_key|
         spec = catalog.provider(provider_key)
-        cred = LLMProvider.find_by(provider_key: provider_key)
+        cred = LLMProviderCredential.find_by(provider_key: provider_key)
         {
           provider_key: provider_key,
           spec: spec,

@@ -33,7 +33,16 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
   end
 
   test "admit! requires an execution capacity snapshot" do
-    run = create_conversation_run!(runtime_governors: {})
+    run = create_conversation_run!
+    ConversationRun.where(id: run.id).update_all(
+      runtime_governors: {
+        "provider_limiter" => provider_limiter_snapshot(
+          provider_credential: run.provider_credential,
+          selected_model_ref: run.selected_model_ref,
+        ),
+      },
+    )
+    run.reload
 
     error =
       assert_raises(AgentCore::ValidationError) do
@@ -56,7 +65,11 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
         status: "active",
         api_key: "sk-test",
       )
-    runtime_governors ||= { "execution_capacity" => RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: execution_target) }
+    runtime_governors ||= runtime_governors_snapshot(
+      provider_credential: credential,
+      selected_model_ref: "openai/gpt-5.4",
+      execution_target: execution_target,
+    )
 
     ConversationRun.create!(
       conversation: conversation,

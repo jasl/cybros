@@ -126,7 +126,7 @@ Implement selector logic that derives the matrix from:
 - `Cybros::LLM::Catalog`
 - `config/llm/providers.yml`
 - current environment
-- `LLMProvider` credential presence
+- `LLMProviderCredential` credential presence
 
 Make sure the selector returns explicit skip reasons for non-runnable models.
 

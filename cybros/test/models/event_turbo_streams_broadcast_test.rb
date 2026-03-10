@@ -5,18 +5,21 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
   include ActionCable::TestHelper
 
   teardown do
-    ConversationRun.delete_all
-    Event.delete_all
-    Conversation.delete_all
-    Session.delete_all
-    User.delete_all
-    Identity.delete_all
+    ActiveRecord::Base.lease_connection.disable_referential_integrity do
+      RunDraft.delete_all
+      ConversationRun.delete_all
+      Event.delete_all
+      Conversation.delete_all
+      Session.delete_all
+      User.delete_all
+      Identity.delete_all
 
-    DAG::NodeEvent.delete_all
-    DAG::Edge.delete_all
-    DAG::Node.delete_all
-    DAG::NodeBody.delete_all
-    DAG::Graph.delete_all
+      DAG::NodeEvent.delete_all
+      DAG::Edge.delete_all
+      DAG::Node.delete_all
+      DAG::NodeBody.delete_all
+      DAG::Graph.delete_all
+    end
   end
 
   test "terminal node_state_changed broadcasts turbo replaces for the agent message and transcript list" do
@@ -92,8 +95,7 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
     first = conversation.append_user_message!(content: "first request")
     first_agent = first.fetch(:agent_node)
 
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test")
-    assert_equal [first_agent.id], claimed.map(&:id)
+    first_agent.mark_running!
     assert_equal DAG::Node::RUNNING, first_agent.reload.state
 
     conversation.append_user_message!(content: "queued follow up")

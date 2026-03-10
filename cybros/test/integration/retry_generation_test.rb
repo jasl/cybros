@@ -1,6 +1,10 @@
 require "test_helper"
 
 class RetryGenerationTest < ActionDispatch::IntegrationTest
+  def agent_metadata(extra = {})
+    { "llm" => { "model_ref" => Account.instance.llm_default_model_ref } }.deep_merge(extra)
+  end
+
   def sign_in_owner!
     identity =
       Identity.create!(
@@ -40,7 +44,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::ERRORED,
-          metadata: {},
+          metadata: agent_metadata,
         )
 
       m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
@@ -95,7 +99,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          metadata: {},
+          metadata: agent_metadata,
         )
     end
 
@@ -126,13 +130,13 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::ERRORED,
-          metadata: {},
+          metadata: agent_metadata,
         )
       queued_retry =
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING,
-          metadata: { "retry_of_node_id" => failed.id },
+          metadata: agent_metadata("retry_of_node_id" => failed.id),
         )
 
       m.create_edge(from_node: user, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
@@ -167,7 +171,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::ERRORED,
-          metadata: {},
+          metadata: agent_metadata,
         )
       downstream =
         m.create_node(
@@ -229,7 +233,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
             state: DAG::Node::STOPPED,
             lane_id: conversation.chat_lane.id,
             retry_of_id: previous&.id,
-            metadata: { "reason" => "attempt_#{index}" },
+            metadata: agent_metadata("reason" => "attempt_#{index}"),
           )
         ancestors << node
         previous = node
@@ -241,7 +245,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
           state: DAG::Node::ERRORED,
           lane_id: conversation.chat_lane.id,
           retry_of_id: ancestors.last.id,
-          metadata: { "error" => "boom" },
+          metadata: agent_metadata("error" => "boom"),
         )
 
       m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
@@ -287,7 +291,7 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::STOPPED,
           body_output: { "content" => "partial" },
-          metadata: { "reason" => "interrupt_new_turn" },
+          metadata: agent_metadata("reason" => "interrupt_new_turn"),
         )
 
       m.create_edge(from_node: user_node, to_node: stopped, edge_type: DAG::Edge::SEQUENCE)

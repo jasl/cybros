@@ -1,4 +1,6 @@
 class ConversationRun < ApplicationRecord
+  include RuntimeGovernorSnapshotConsistency
+
   STATES = %w[queued running succeeded failed canceled].freeze
   SNAPSHOT_FIELDS = %i[
     snapshot_version

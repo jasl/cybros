@@ -1,5 +1,3 @@
-# frozen_string_literal: true
-
 module Cybros
   module Agents
     module Default
@@ -24,7 +22,8 @@ module Cybros
         end
 
         def start
-          @rpc_server ||= RPCServer.new(application: self, host: host, port: port, required_bearer: @required_bearer).start
+          @rpc_server ||= RPCServer.new(application: self, host: host, port: port,
+                                        required_bearer: @required_bearer).start
           self
         end
 
@@ -45,7 +44,7 @@ module Cybros
           @identity ||= Identity.new(
             manifest: manifest,
             deployment_key: @deployment_key,
-            deployment_fingerprint: @deployment_fingerprint,
+            deployment_fingerprint: @deployment_fingerprint
           ).to_h
         end
 
@@ -109,13 +108,20 @@ module Cybros
               port: options[:port],
               deployment_key: options[:deployment_key],
               deployment_fingerprint: options[:deployment_fingerprint],
-              required_bearer: options[:required_bearer],
+              required_bearer: options[:required_bearer]
             ).start
 
-          puts "bundled default agent listening on #{application.rpc_url}"
+          logger = defined?(Rails) && Rails.respond_to?(:logger) ? Rails.logger : nil
+          logger&.debug("bundled default agent listening on #{application.rpc_url}")
 
-          Signal.trap("INT") { application.shutdown; exit 0 }
-          Signal.trap("TERM") { application.shutdown; exit 0 }
+          Signal.trap("INT") do
+            application.shutdown
+            exit 0
+          end
+          Signal.trap("TERM") do
+            application.shutdown
+            exit 0
+          end
           sleep
         ensure
           application&.shutdown

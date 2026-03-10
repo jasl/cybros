@@ -2,7 +2,7 @@ require "test_helper"
 
 class UiSmokeTest < ActionDispatch::IntegrationTest
   setup do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
   end
 
   def sign_in!(user: nil, password: "Passw0rd")

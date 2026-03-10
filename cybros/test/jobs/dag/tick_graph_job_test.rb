@@ -8,13 +8,16 @@ class DAG::TickGraphJobTest < ActiveJob::TestCase
   self.use_transactional_tests = false
 
   teardown do
-    Event.delete_all
-    ConversationRun.delete_all
-    DAG::Edge.delete_all
-    DAG::Node.delete_all
-    DAG::NodeBody.delete_all
-    DAG::Graph.delete_all
-    Conversation.delete_all
+    ActiveRecord::Base.lease_connection.disable_referential_integrity do
+      RunDraft.delete_all
+      Event.delete_all
+      ConversationRun.delete_all
+      DAG::Edge.delete_all
+      DAG::Node.delete_all
+      DAG::NodeBody.delete_all
+      DAG::Graph.delete_all
+      Conversation.delete_all
+    end
   end
 
   setup do

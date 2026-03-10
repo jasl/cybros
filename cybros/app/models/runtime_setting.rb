@@ -12,6 +12,23 @@ class RuntimeSetting < ApplicationRecord
   validate :agent_workspace_root_must_be_absolute
   validate :singleton_row
 
+  def self.instance_agent_workspace_root_path
+    find_by(scope_key: "instance")&.agent_workspace_root_path || normalize_agent_workspace_root_path(DEFAULT_AGENT_WORKSPACE_ROOT)
+  end
+
+  def self.normalize_agent_workspace_root_path(value)
+    root = value.to_s.strip
+    root = DEFAULT_AGENT_WORKSPACE_ROOT if root.empty?
+    raise ArgumentError, "agent workspace root must be absolute" unless root.start_with?(File::SEPARATOR)
+
+    components = root.split(File::SEPARATOR).reject(&:blank?)
+    Pathname.new(File::SEPARATOR).join(*components).cleanpath
+  end
+
+  def agent_workspace_root_path
+    self.class.normalize_agent_workspace_root_path(agent_workspace_root)
+  end
+
   private
 
     def apply_scope_key
@@ -27,10 +44,10 @@ class RuntimeSetting < ApplicationRecord
     end
 
     def agent_workspace_root_must_be_absolute
-      root = agent_workspace_root.to_s.strip
-      return if root.blank?
-      return if Pathname.new(root).absolute?
+      return if agent_workspace_root.to_s.strip.blank?
 
+      agent_workspace_root_path
+    rescue ArgumentError
       errors.add(:agent_workspace_root, "must be an absolute path")
     end
 

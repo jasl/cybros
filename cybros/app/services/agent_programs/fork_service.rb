@@ -73,8 +73,7 @@ module AgentPrograms
       attr_reader :source_program, :name
 
       def configured_workspace_root
-        RuntimeSetting.find_by(scope_key: "instance")&.agent_workspace_root&.then { |path| Pathname.new(path) } ||
-          Pathname.new(RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT)
+        RuntimeSetting.instance_agent_workspace_root_path
       end
 
       def unique_relative_local_path

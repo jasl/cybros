@@ -52,5 +52,5 @@ module RuntimeGovernance
       def normalize_hash(value)
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
       end
-    end
+  end
 end

@@ -1,6 +1,4 @@
 #!/usr/bin/env ruby
-# frozen_string_literal: true
-
 root = File.expand_path("..", __dir__)
 tests = [
   File.join(root, "test/unit/manifest_test.rb"),
@@ -14,5 +12,5 @@ exec(
   "-I#{File.join(root, "test")}",
   "-e",
   "ARGV.each { |path| load File.expand_path(path) }",
-  *tests,
+  *tests
 )

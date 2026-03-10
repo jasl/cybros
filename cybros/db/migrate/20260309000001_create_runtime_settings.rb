@@ -5,6 +5,7 @@ class CreateRuntimeSettings < ActiveRecord::Migration[8.2]
       t.integer :default_worker_concurrency, null: false, default: 8
       t.jsonb :queue_overrides, null: false, default: {}
       t.jsonb :alert_thresholds, null: false, default: {}
+      t.string :agent_workspace_root
       t.timestamps
     end
 

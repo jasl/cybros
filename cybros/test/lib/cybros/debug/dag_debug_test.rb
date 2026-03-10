@@ -158,6 +158,7 @@ class Cybros::CLI::DAGDebugTest < ActiveSupport::TestCase
   def create_agent_pair(conversation:, agent_state:, user_content: "Hello", agent_metadata: {})
     graph = conversation.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    model_ref = Account.instance.llm_default_model_ref
 
     user = nil
     agent = nil
@@ -175,7 +176,7 @@ class Cybros::CLI::DAGDebugTest < ActiveSupport::TestCase
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: agent_state,
-          metadata: agent_metadata,
+          metadata: { "llm" => { "model_ref" => model_ref } }.deep_merge(agent_metadata),
         )
 
       m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)

@@ -2,7 +2,7 @@ require "test_helper"
 
 class ConversationLlmResolutionWarningTest < ActiveSupport::TestCase
   test "append_user_message! hard-errors when preferred model is unavailable" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     conversation =
       create_conversation!(

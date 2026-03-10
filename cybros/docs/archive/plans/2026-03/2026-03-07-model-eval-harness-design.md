@@ -154,7 +154,7 @@ Instead, it should derive its Tier B model matrix from:
 - `config/llm/providers.yml`
 - `Cybros::LLM::Catalog`
 - current environment gating
-- current credential presence in `LLMProvider`
+- current credential presence in `LLMProviderCredential`
 
 ### Tier B default model set
 

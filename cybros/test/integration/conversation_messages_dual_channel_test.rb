@@ -5,19 +5,25 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
   self.use_transactional_tests = false
 
   teardown do
-    LLMProvider.delete_all
-    ConversationRun.delete_all
-    Event.delete_all
-    Conversation.delete_all
-    Session.delete_all
-    User.delete_all
-    Identity.delete_all
+    ActiveRecord::Base.lease_connection.disable_referential_integrity do
+      LLMProviderCredential.delete_all
+      AgentRPCOperationReceipt.delete_all
+      AgentRPCInvocation.delete_all
+      AgentRPCSession.delete_all
+      RunDraft.delete_all
+      ConversationRun.delete_all
+      Event.delete_all
+      Conversation.delete_all
+      Session.delete_all
+      User.delete_all
+      Identity.delete_all
 
-    DAG::NodeEvent.delete_all
-    DAG::Edge.delete_all
-    DAG::Node.delete_all
-    DAG::NodeBody.delete_all
-    DAG::Graph.delete_all
+      DAG::NodeEvent.delete_all
+      DAG::Edge.delete_all
+      DAG::Node.delete_all
+      DAG::NodeBody.delete_all
+      DAG::Graph.delete_all
+    end
   end
 
   def sign_in!(user, password: "Passw0rd")
@@ -57,7 +63,7 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
   end
 
   test "create returns 422 when preferred model is unavailable" do
-    LLMProvider.delete_all
+    LLMProviderCredential.delete_all
 
     user = create_user!
     sign_in!(user)
