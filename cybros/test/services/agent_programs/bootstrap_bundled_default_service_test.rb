@@ -35,7 +35,7 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
 
   test "bootstrap skips managed local deployment when no workspace root is configured and autolaunch is disabled" do
     RuntimeSetting.delete_all
-    AgentDeployment.delete_all
+    clear_agent_deployments!
 
     with_default_agent_workspace_root("") do
       with_env("CYBROS_AGENT_WORKSPACE_ROOT" => nil, "CYBROS_MANAGED_AGENT_AUTOLAUNCH" => nil) do
@@ -52,7 +52,7 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
 
   test "bootstrap raises a clear error when autolaunch is enabled without a configured workspace root" do
     RuntimeSetting.delete_all
-    AgentDeployment.delete_all
+    clear_agent_deployments!
 
     with_default_agent_workspace_root("") do
       with_env("CYBROS_AGENT_WORKSPACE_ROOT" => nil, "CYBROS_MANAGED_AGENT_AUTOLAUNCH" => "1") do
@@ -69,6 +69,16 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
   end
 
   private
+
+    def clear_agent_deployments!
+      # Some tests disable transactions and can leave deployment-linked rows behind.
+      AgentRPCOperationReceipt.delete_all
+      AgentRPCSession.delete_all
+      AgentRPCInvocation.delete_all
+      RunDraft.delete_all
+      ConversationRun.delete_all
+      AgentDeployment.delete_all
+    end
 
     def with_stubbed_rails_env(env_name)
       replacement = ActiveSupport::StringInquirer.new(env_name)

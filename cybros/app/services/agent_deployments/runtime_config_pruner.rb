@@ -66,7 +66,7 @@ module AgentDeployments
       end
 
       def referenced_deployment_ids(runtime_root:)
-        prefix = "#{runtime_root.to_s}#{File::SEPARATOR}"
+        prefix = "#{runtime_root}#{File::SEPARATOR}"
 
         AgentDeployment.find_each.each_with_object(Set.new) do |deployment, ids|
           path = deployment.runtime_config_path.to_s
