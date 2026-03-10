@@ -8,11 +8,15 @@
 #     MovieGenre.find_or_create_by!(name: genre_name)
 #   end
 
+def seed_value(env_key, *creds_path)
+  ENV[env_key].to_s.strip.presence || Rails.app.creds.option(*creds_path).to_s.strip.presence
+end
+
 account = Account.instance
 
-openai_api_key = Rails.app.creds.option(:openai_api_key).to_s.strip
-openrouter_api_key = Rails.app.creds.option(:openrouter_api_key).to_s.strip
-default_model_ref = Rails.app.creds.option(:default_model).to_s.strip
+openai_api_key = seed_value("OPENAI_API_KEY", :openai_api_key)
+openrouter_api_key = seed_value("OPENROUTER_API_KEY", :openrouter_api_key)
+default_model_ref = seed_value("DEFAULT_MODEL", :default_model)
 
 if openai_api_key.present?
   record = LLMProviderCredential.find_or_initialize_by(provider_key: "openai")

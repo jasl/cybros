@@ -58,6 +58,7 @@ module DAG
     before_validation :ensure_body
     after_create :ensure_turn_record!
     after_commit :project_tool_call_fact_after_commit, on: %i[create update]
+    after_commit :refresh_execution_rollup_after_commit, on: %i[create update]
 
     def terminal?
       TERMINAL_STATES.include?(state)
@@ -267,7 +268,7 @@ module DAG
         metadata: self.metadata.merge(metadata),
       }
 
-      transitioned = transition_to!(FINISHED, from_states: [RUNNING], **updates)
+      transitioned = transition_to!(FINISHED, from_states: [RUNNING], refresh_execution_rollup: false, **updates)
 
       if transitioned
         if payload.is_a?(Hash)
@@ -285,6 +286,7 @@ module DAG
           updated_at: Time.current
         )
         project_tool_call_fact_if_needed
+        refresh_execution_rollup_if_needed!
       end
 
       transitioned
@@ -1079,7 +1081,32 @@ module DAG
         Statistics::ToolCallFactProjector.project!(self)
       end
 
-      def transition_to!(to_state, from_states:, **attributes)
+      def refresh_execution_rollup_after_commit
+        refresh_execution_rollup_if_needed!
+      end
+
+      def refresh_execution_rollup_if_needed!
+        return if graph.blank? || lane_id.blank? || turn_id.blank?
+        return unless graph.attachable.is_a?(Conversation)
+        return unless turn_execution_rollup_relevant?
+
+        DAG::Turn.refresh_execution_rollups!(graph: graph, lane_id: lane_id, turn_ids: [turn_id])
+      end
+
+      def turn_execution_rollup_relevant?
+        return true if node_type.to_s == Messages::Task.node_type_key
+
+        node_type.to_s.in?(
+          [
+            Messages::UserMessage.node_type_key,
+            Messages::AgentMessage.node_type_key,
+            Messages::CharacterMessage.node_type_key,
+            Messages::ProductMessage.node_type_key,
+          ],
+        )
+      end
+
+      def transition_to!(to_state, from_states:, refresh_execution_rollup: true, **attributes)
         now = Time.current
         updates = attributes.merge(state: to_state, updated_at: now)
         affected_rows = self.class.where(id: id, state: from_states).update_all(updates)
@@ -1087,6 +1114,7 @@ module DAG
         if affected_rows == 1
           reload
           project_tool_call_fact_if_needed
+          refresh_execution_rollup_if_needed! if refresh_execution_rollup
           true
         else
           false

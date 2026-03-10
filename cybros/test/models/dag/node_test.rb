@@ -201,6 +201,51 @@ class DAG::NodeTest < ActiveSupport::TestCase
     assert_match(/retriable/, error.message)
   end
 
+  test "mark_finished! refreshes turn execution rollup once after final task output is written" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    task =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::RUNNING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        metadata: {},
+        body_input: {
+          "name" => "memory_search",
+          "requested_name" => "memory_search",
+          "tool_call_id" => "tc_finish",
+          "arguments" => {},
+          "arguments_summary" => "{}",
+        },
+      )
+
+    refreshes = []
+    original_refresh = DAG::Turn.method(:refresh_execution_rollups!)
+
+    DAG::Turn.define_singleton_method(:refresh_execution_rollups!) do |**kwargs|
+      refreshes << kwargs
+      original_refresh.call(**kwargs)
+    end
+
+    task.mark_finished!(
+      content: "Done",
+      payload: {
+        "result" => AgentCore::Resources::Tools::ToolResult.success(text: "safe summary").to_h,
+        "activity_preview" => "safe summary",
+      },
+    )
+
+    assert_equal 1, refreshes.length
+  ensure
+    DAG::Turn.define_singleton_method(:refresh_execution_rollups!, original_refresh)
+  end
+
   test "edit! rejects attempts when downstream nodes are pending or running" do
     conversation = create_conversation!
     graph = conversation.dag_graph

@@ -413,6 +413,15 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
+    t.integer "execution_activity_count", default: 0, null: false
+    t.string "execution_diagnostic_level"
+    t.uuid "execution_event_cursor"
+    t.jsonb "execution_hidden_summary", default: {}, null: false
+    t.string "execution_phase"
+    t.jsonb "execution_preview_activities", default: [], null: false
+    t.string "execution_status"
+    t.jsonb "execution_summary", default: {}, null: false
+    t.datetime "execution_updated_at"
     t.uuid "graph_id", null: false
     t.datetime "head_created_at"
     t.datetime "head_created_at_including_deleted"

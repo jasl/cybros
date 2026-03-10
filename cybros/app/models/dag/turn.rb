@@ -47,70 +47,88 @@ module DAG
     end
 
     def execution_status
-      execution_projection["status"]
+      self[:execution_status].to_s.presence
     end
 
     def execution_phase
-      execution_projection["phase"]
+      self[:execution_phase].to_s.presence
     end
 
     def execution_diagnostic_level
-      execution_projection["diagnostic_level"]
+      self[:execution_diagnostic_level].to_s.presence
     end
 
     def execution_event_cursor
-      execution_projection["event_cursor"]
+      self[:execution_event_cursor]
     end
 
     def execution_summary
-      summary = execution_preview["summary"]
+      summary = self[:execution_summary]
+      summary.is_a?(Hash) ? summary : {}
+    end
+
+    def execution_hidden_summary
+      summary = self[:execution_hidden_summary]
       summary.is_a?(Hash) ? summary : {}
     end
 
     def execution_activity_count
-      execution_summary.fetch("activity_count", 0).to_i
+      self[:execution_activity_count].to_i
     end
 
     def execution_preview_activities
-      Array(execution_preview["activities"]).select { |activity| activity.is_a?(Hash) }
+      Array(self[:execution_preview_activities]).select { |activity| activity.is_a?(Hash) }
     end
 
     def execution_updated_at
-      value = execution_projection["updated_at"]
-      return nil if value.blank?
-
-      Time.iso8601(value)
-    rescue ArgumentError
-      value
+      self[:execution_updated_at]
     end
 
     private
 
-      def execution_projection
-        attachable = conversation_attachable
-        return {} if attachable.nil?
+      def self.refresh_execution_rollups!(graph:, lane_id:, turn_ids:)
+        turn_ids = Array(turn_ids).map(&:to_s).uniq
+        return if turn_ids.empty?
 
-        projection = attachable.turn_execution_for_turn_id(id)
-        projection.is_a?(Hash) ? projection : {}
+        projector =
+          if graph.attachable.is_a?(Conversation)
+            Conversation::TurnExecutionProjector.new(graph: graph, lane_id: lane_id)
+          end
+        now = Time.current
+
+        turn_ids.each do |turn_id|
+          attrs = projector ? projector.execution_rollup_for_turn_id(turn_id) : empty_execution_rollup_attributes
+
+          where(graph_id: graph.id, lane_id: lane_id, id: turn_id).update_all(
+            attrs.merge(updated_at: now),
+          )
+        end
       end
 
-      def execution_preview
-        attachable = conversation_attachable
-        return {} if attachable.nil?
+      def self.advance_execution_event_cursor!(graph:, lane_id:, turn_id:, event_id:)
+        return if turn_id.blank? || event_id.blank?
 
-        node_id = end_message_node_id(include_deleted: true) || start_message_node_id(include_deleted: true)
-        return {} if node_id.blank?
-
-        preview = attachable.send(:turn_execution_projector).run_state_for_node_id(node_id)
-        preview.is_a?(Hash) ? preview : {}
+        where(graph_id: graph.id, lane_id: lane_id, id: turn_id).update_all(
+          execution_event_cursor: event_id,
+          updated_at: Time.current,
+        )
       end
 
-      def conversation_attachable
-        attachable = graph.attachable
-        return nil unless attachable.is_a?(Conversation)
-
-        attachable
+      def self.empty_execution_rollup_attributes
+        {
+          execution_activity_count: 0,
+          execution_status: nil,
+          execution_phase: nil,
+          execution_diagnostic_level: nil,
+          execution_event_cursor: nil,
+          execution_summary: {},
+          execution_hidden_summary: {},
+          execution_preview_activities: [],
+          execution_updated_at: nil,
+        }
       end
+
+      public_class_method :refresh_execution_rollups!, :advance_execution_event_cursor!, :empty_execution_rollup_attributes
 
       def self.allocate_activity_sequence!(graph_id:, lane_id:, turn_id:)
         now = Time.current

@@ -320,6 +320,68 @@ class Conversation::TurnExecutionProjectorTest < ActiveSupport::TestCase
     assert turn_record.execution_updated_at.present?
   end
 
+  test "run_state preview does not require full turn execution drill-down" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    create_task!(
+      graph: graph,
+      lane_id: conversation.chat_lane.id,
+      turn_id: agent.turn_id,
+      state: DAG::Node::RUNNING,
+      name: "memory_search",
+      tool_call_id: "tc_preview",
+    )
+
+    projector = Conversation::TurnExecutionProjector.new(conversation: conversation)
+    execution = projector.turn_execution_for_turn_id(agent.turn_id)
+    assert_equal 1, execution.fetch("activities").length
+
+    preview_projector = Conversation::TurnExecutionProjector.new(conversation: conversation)
+    preview_projector.define_singleton_method(:turn_execution_for_turn_id) do |_turn_id|
+      raise "preview should not depend on full drill-down"
+    end
+
+    run_state = preview_projector.run_state_for_node_id(agent.id)
+    assert_equal "running", run_state.fetch("status")
+    assert_equal 1, run_state.dig("summary", "activity_count")
+    assert_equal 1, run_state.fetch("activities").length
+  end
+
+  test "run_state nil does not require full turn execution drill-down when rollup has no visible activity" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    compact_task =
+      create_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::FINISHED,
+        name: "compact_context",
+      )
+    DAG::NodeEventStream.new(node: compact_task).activity_finished!(
+      activity_id: "task:#{compact_task.id}",
+      activity_kind: "preflight_task",
+      phase: "preflight",
+    )
+
+    preview_projector = Conversation::TurnExecutionProjector.new(conversation: conversation)
+    preview_projector.define_singleton_method(:turn_execution_for_turn_id) do |_turn_id|
+      raise "empty run_state should not depend on full drill-down"
+    end
+
+    assert_nil preview_projector.run_state_for_node_id(agent.id)
+  end
+
   private
 
     def create_task!(graph:, lane_id:, turn_id:, state:, name:, tool_call_id: nil)

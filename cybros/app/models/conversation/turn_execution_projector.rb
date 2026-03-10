@@ -6,11 +6,15 @@ class Conversation::TurnExecutionProjector
   STANDARD_DIAGNOSTIC_LEVEL = "standard"
   DEBUG_DIAGNOSTIC_LEVEL = "debug"
   RUN_STATE_ACTIVITY_PREVIEW_LIMIT = 3
+  NO_RUN_STATE = :no_run_state
 
-  def initialize(conversation:)
+  def initialize(conversation: nil, graph: nil, lane_id: nil)
     @conversation = conversation
-    @graph = conversation.root_graph
-    @lane_id = conversation.chat_lane.id
+    @graph = graph || conversation&.root_graph
+    @lane_id = lane_id || conversation&.chat_lane&.id
+
+    raise ArgumentError, "graph is required" if @graph.nil?
+    raise ArgumentError, "lane_id is required" if @lane_id.blank?
   end
 
   def turn_execution_for_turn_id(turn_id)
@@ -48,31 +52,58 @@ class Conversation::TurnExecutionProjector
     turn_execution_for_turn_id(node.turn_id)
   end
 
-    def run_state_for_node_id(node_id)
-      node = scoped_nodes.find_by(id: node_id.to_s)
-      return nil unless assistant_message_node?(node)
+  def execution_rollup_for_turn_id(turn_id)
+    execution = turn_execution_for_turn_id(turn_id)
+    return DAG::Turn.empty_execution_rollup_attributes unless execution.is_a?(Hash)
 
-      execution = turn_execution_for_turn_id(node.turn_id)
-      return nil unless execution.is_a?(Hash)
+    all_activities = Array(execution.fetch("activities", []))
+    visible_activities = assistant_bubble_activities(all_activities)
+    preview_activities = visible_activities.last(RUN_STATE_ACTIVITY_PREVIEW_LIMIT)
+    hidden_activities = all_activities.reject { |activity| preview_activities.include?(activity) }
 
-      all_activities = Array(execution.fetch("activities", []))
-      visible_activities = assistant_bubble_activities(all_activities)
-      preview_activities = visible_activities.last(RUN_STATE_ACTIVITY_PREVIEW_LIMIT)
-      hidden_summary = summary_for(all_activities - visible_activities)
-      hidden_notice = hidden_summary.fetch("failed_count", 0).to_i.positive? || hidden_summary.fetch("awaiting_count", 0).to_i.positive?
+    {
+      execution_activity_count: visible_activities.length,
+      execution_status: execution.fetch("status", nil),
+      execution_phase: execution.fetch("phase", nil),
+      execution_diagnostic_level: execution.fetch("diagnostic_level", nil),
+      execution_event_cursor: execution.fetch("event_cursor", nil),
+      execution_summary: summary_for(visible_activities),
+      execution_hidden_summary: summary_for(hidden_activities),
+      execution_preview_activities: preview_activities,
+      execution_updated_at: iso8601_time(execution.fetch("updated_at", nil)),
+    }
+  end
 
-      return nil if visible_activities.empty? && !hidden_notice
+  def run_state_for_node_id(node_id)
+    node = scoped_nodes.find_by(id: node_id.to_s)
+    return nil unless assistant_message_node?(node)
 
-      {
-        "status" => execution.fetch("status"),
-        "phase" => execution.fetch("phase"),
-        "diagnostic_level" => execution.fetch("diagnostic_level"),
-        "event_cursor" => execution["event_cursor"],
-        "summary" => summary_for(visible_activities),
-        "hidden_summary" => hidden_summary,
-        "activities" => preview_activities,
-      }
-    end
+    turn = @graph.turns.find_by(id: node.turn_id)
+    rollup = run_state_rollup_for(turn)
+    return nil if rollup == NO_RUN_STATE
+    return rollup if rollup
+
+    execution = turn_execution_for_turn_id(node.turn_id)
+    return nil unless execution.is_a?(Hash)
+
+    all_activities = Array(execution.fetch("activities", []))
+    visible_activities = assistant_bubble_activities(all_activities)
+    preview_activities = visible_activities.last(RUN_STATE_ACTIVITY_PREVIEW_LIMIT)
+    hidden_summary = summary_for(all_activities.reject { |activity| preview_activities.include?(activity) })
+    hidden_notice = hidden_notice?(hidden_summary)
+
+    return nil if visible_activities.empty? && !hidden_notice
+
+    {
+      "status" => execution.fetch("status"),
+      "phase" => execution.fetch("phase"),
+      "diagnostic_level" => execution.fetch("diagnostic_level"),
+      "event_cursor" => execution["event_cursor"],
+      "summary" => summary_for(visible_activities),
+      "hidden_summary" => hidden_summary,
+      "activities" => preview_activities,
+    }
+  end
 
   private
 
@@ -168,6 +199,50 @@ class Conversation::TurnExecutionProjector
 
     def assistant_bubble_activities(activities)
       Array(activities).select { |activity| activity["visibility"] == ASSISTANT_BUBBLE }
+    end
+
+    def hidden_notice?(hidden_summary)
+      hidden_summary.fetch("failed_count", 0).to_i.positive? || hidden_summary.fetch("awaiting_count", 0).to_i.positive?
+    end
+
+    def run_state_rollup_for(turn)
+      return nil if turn.nil?
+      return nil unless turn.has_attribute?(:execution_status)
+
+      preview_activities = turn.execution_preview_activities
+      hidden_summary = turn.execution_hidden_summary
+      hidden_notice = hidden_notice?(hidden_summary)
+      return NO_RUN_STATE if rollup_authoritative?(turn: turn, preview_activities: preview_activities, hidden_summary: hidden_summary) && preview_activities.empty? && !hidden_notice
+      return nil if preview_activities.empty? && !hidden_notice
+
+      {
+        "status" => turn.execution_status,
+        "phase" => turn.execution_phase,
+        "diagnostic_level" => turn.execution_diagnostic_level || STANDARD_DIAGNOSTIC_LEVEL,
+        "event_cursor" => turn.execution_event_cursor,
+        "summary" => turn.execution_summary,
+        "hidden_summary" => hidden_summary,
+        "activities" => preview_activities,
+      }
+    end
+
+    def rollup_authoritative?(turn:, preview_activities:, hidden_summary:)
+      preview_activities.any? ||
+        hidden_summary.any? ||
+        turn.execution_summary.any? ||
+        turn.execution_status.present? ||
+        turn.execution_phase.present? ||
+        turn.execution_diagnostic_level.present? ||
+        turn.execution_event_cursor.present? ||
+        turn.execution_updated_at.present?
+    end
+
+    def iso8601_time(value)
+      return nil if value.blank?
+
+      Time.iso8601(value)
+    rescue ArgumentError
+      nil
     end
 
     def activity_kind_for(task)
@@ -474,10 +549,21 @@ class Conversation::TurnExecutionProjector
     def event_cursor_for(turn_nodes)
       event_ids =
         turn_nodes.flat_map do |node|
-          node.node_events.map(&:id)
+          node.node_events.filter_map do |event|
+            event.id if execution_cursor_event?(node: node, event: event)
+          end
         end
 
       event_ids.max
+    end
+
+    def execution_cursor_event?(node:, event:)
+      return false if node.nil? || event.nil?
+
+      kind = event.kind.to_s
+      return true if node.node_type.to_s == Messages::Task.node_type_key && DAG::NodeEvent::ACTIVITY_EVENT_KINDS.include?(kind)
+
+      assistant_message_node?(node) && kind.in?([DAG::NodeEvent::OUTPUT_DELTA, DAG::NodeEvent::OUTPUT_COMPACTED])
     end
 
     def started_at_for(turn_nodes)

@@ -303,4 +303,39 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     )
     assert_equal 1, transcript.last.dig("run_state", "summary", "activity_count")
   end
+
+  test "conversation transcript_recent_turns does not require full turn execution drill-down" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    graph.nodes.create!(
+      node_type: Messages::Task.node_type_key,
+      state: DAG::Node::RUNNING,
+      lane_id: conversation.chat_lane.id,
+      turn_id: agent.turn_id,
+      metadata: {},
+      body_input: {
+        "name" => "memory_search",
+        "requested_name" => "memory_search",
+        "tool_call_id" => "tc_split",
+        "arguments" => {},
+        "arguments_summary" => "{}",
+      },
+    )
+
+    projector = Conversation::TurnExecutionProjector.new(conversation: conversation)
+    projector.define_singleton_method(:turn_execution_for_turn_id) do |_turn_id|
+      raise "transcript preview should not depend on full drill-down"
+    end
+    conversation.instance_variable_set(:@turn_execution_projector, projector)
+
+    transcript = conversation.transcript_recent_turns(limit_turns: 1, mode: :preview)
+    assert_equal [turn.fetch(:user_node).id, agent.id], transcript.map { |node| node.fetch("node_id") }
+    assert_equal "running", transcript.last.dig("run_state", "status")
+    assert_equal 1, transcript.last.dig("run_state", "summary", "activity_count")
+  end
 end

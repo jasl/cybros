@@ -115,6 +115,11 @@ module DAG
           lane_id: lane_ids.first,
           turn_ids: turn_ids
         )
+        DAG::Turn.refresh_execution_rollups!(
+          graph: @graph,
+          lane_id: lane_ids.first,
+          turn_ids: turn_ids
+        )
 
         summary_node
       end

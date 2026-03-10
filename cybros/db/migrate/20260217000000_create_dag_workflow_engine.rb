@@ -188,6 +188,16 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.bigint :next_activity_seq, null: false, default: 0
 
+      t.integer :execution_activity_count, null: false, default: 0
+      t.string :execution_status
+      t.string :execution_phase
+      t.string :execution_diagnostic_level
+      t.uuid :execution_event_cursor
+      t.jsonb :execution_summary, null: false, default: {}
+      t.jsonb :execution_hidden_summary, null: false, default: {}
+      t.jsonb :execution_preview_activities, null: false, default: []
+      t.datetime :execution_updated_at
+
       t.jsonb :metadata, null: false, default: {}
 
       t.timestamps

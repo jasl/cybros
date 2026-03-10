@@ -28,6 +28,7 @@ module DAG
     validates :kind, presence: true
 
     before_validation :normalize_payload
+    after_create_commit :refresh_turn_execution_rollup
     after_create_commit :broadcast_to_conversation
 
     scope :ordered, -> { order(:id) }
@@ -59,6 +60,38 @@ module DAG
         else
           self.payload = {}
         end
+      end
+
+      def refresh_turn_execution_rollup
+        return if turn_id.blank?
+        return unless graph&.attachable.is_a?(::Conversation)
+        return unless execution_rollup_relevant_event?
+
+        if activity_rollup_event?
+          DAG::Turn.refresh_execution_rollups!(graph: graph, lane_id: node.lane_id, turn_ids: [turn_id])
+        elsif assistant_output_replay_event?
+          DAG::Turn.advance_execution_event_cursor!(graph: graph, lane_id: node.lane_id, turn_id: turn_id, event_id: id)
+        end
+      end
+
+      def execution_rollup_relevant_event?
+        activity_rollup_event? || assistant_output_replay_event?
+      end
+
+      def activity_rollup_event?
+        ACTIVITY_EVENT_KINDS.include?(kind.to_s)
+      end
+
+      def assistant_output_replay_event?
+        return false unless kind.to_s.in?([OUTPUT_DELTA, OUTPUT_COMPACTED])
+
+        node_type = node&.node_type.to_s
+        node_type.in?(
+          [
+            Messages::AgentMessage.node_type_key,
+            Messages::CharacterMessage.node_type_key,
+          ],
+        )
       end
   end
 end
