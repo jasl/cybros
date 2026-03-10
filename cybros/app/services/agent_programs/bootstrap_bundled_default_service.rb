@@ -50,7 +50,15 @@ module AgentPrograms
 
       return ensure_test_runtime!(program:) if Rails.env.test?
 
-      ensure_runtime_setting!
+      runtime_setting = ensure_runtime_setting!
+      if runtime_setting.nil?
+        if self.class.managed_local_autolaunch_enabled?
+          raise RuntimeSetting::InvalidAgentWorkspaceRoot, "Agent workspace root must be configured before enabling managed agent autolaunch"
+        end
+
+        return program.reload
+      end
+
       ensure_default_execution_target! if self.class.managed_local_autolaunch_enabled?
 
       deployment =

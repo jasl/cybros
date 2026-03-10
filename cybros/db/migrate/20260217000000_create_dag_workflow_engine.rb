@@ -83,6 +83,12 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
 
       t.datetime :claimed_at
       t.string :claimed_by
+
+      t.datetime :claim_after_at
+      t.index %i[graph_id state claim_after_at],
+              where: "compressed_at IS NULL AND state = 'pending'",
+              name: "index_dag_nodes_claim_after"
+
       t.datetime :lease_expires_at
       t.datetime :heartbeat_at
       t.index %i[graph_id lease_expires_at], where: "compressed_at IS NULL AND state = 'running'",
@@ -153,7 +159,6 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
                     primary_key: %i[graph_id id],
                     name: "fk_dag_nodes_lane_graph_scoped"
 
-
     create_table :dag_turns, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :graph, null: false, type: :uuid,
                    foreign_key: { to_table: :dag_graphs, on_delete: :cascade }
@@ -180,6 +185,8 @@ class CreateDAGWorkflowEngine < ActiveRecord::Migration[8.2]
         "((anchor_node_id_including_deleted IS NULL) = (anchor_created_at_including_deleted IS NULL))",
         name: "check_dag_turns_anchor_including_deleted_fields_consistent"
       )
+
+      t.bigint :next_activity_seq, null: false, default: 0
 
       t.jsonb :metadata, null: false, default: {}
 

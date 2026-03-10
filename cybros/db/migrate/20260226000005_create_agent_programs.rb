@@ -3,10 +3,8 @@ class CreateAgentPrograms < ActiveRecord::Migration[8.2]
     create_table :agent_programs, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.string :name, null: false
       t.text :description
-      t.string :profile_source
       t.string :local_path
       t.jsonb :args, null: false, default: {}
-      t.string :active_persona
       t.string :source_kind, null: false, default: "custom"
       t.string :bundled_agent_key
       t.uuid :forked_from_agent_program_id

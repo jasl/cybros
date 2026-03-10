@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_10_000014) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_09_000012) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -289,7 +289,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_10_000014) do
     t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
     t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
-    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying::text, 'dependency'::character varying::text, 'branch'::character varying::text])", name: "check_dag_edges_edge_type_enum"
+    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying, 'dependency'::character varying, 'branch'::character varying]::text[])", name: "check_dag_edges_edge_type_enum"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
   end
 
@@ -326,7 +326,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_10_000014) do
     t.index ["graph_id"], name: "index_dag_lanes_on_graph_id"
     t.check_constraint "merged_into_lane_id IS NULL OR merged_into_lane_id <> id", name: "check_dag_lanes_no_self_merge"
     t.check_constraint "parent_lane_id IS NULL OR parent_lane_id <> id", name: "check_dag_lanes_no_self_parent"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_dag_lanes_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_dag_lanes_role_enum"
   end
 
   create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -406,9 +406,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_10_000014) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying::text, 'awaiting_approval'::character varying::text, 'running'::character varying::text, 'finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'awaiting_approval'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|

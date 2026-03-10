@@ -77,6 +77,7 @@ class CreateProgrammableAgentRuntimeState < ActiveRecord::Migration[8.2]
       t.references :initiated_by_user, type: :uuid, foreign_key: { to_table: :users }
       t.string :status, null: false, default: "open"
       t.string :permission_mode, null: false
+      t.string :agent_config_schema_fingerprint, null: false
       t.jsonb :trigger_snapshot, null: false, default: {}
       t.references :agent_program, null: false, type: :uuid, foreign_key: true
       t.string :contract_fingerprint, null: false

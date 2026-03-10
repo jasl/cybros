@@ -33,7 +33,51 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
     end
   end
 
+  test "bootstrap skips managed local deployment when no workspace root is configured and autolaunch is disabled" do
+    RuntimeSetting.delete_all
+    AgentDeployment.delete_all
+
+    with_default_agent_workspace_root("") do
+      with_env("CYBROS_AGENT_WORKSPACE_ROOT" => nil, "CYBROS_MANAGED_AGENT_AUTOLAUNCH" => nil) do
+        with_stubbed_rails_env("development") do
+          program = AgentPrograms::BootstrapBundledDefaultService.bootstrap!
+
+          assert_predicate program, :persisted?
+          assert_equal 0, program.agent_deployments.count
+          assert_nil RuntimeSetting.find_by(scope_key: "instance")
+        end
+      end
+    end
+  end
+
+  test "bootstrap raises a clear error when autolaunch is enabled without a configured workspace root" do
+    RuntimeSetting.delete_all
+    AgentDeployment.delete_all
+
+    with_default_agent_workspace_root("") do
+      with_env("CYBROS_AGENT_WORKSPACE_ROOT" => nil, "CYBROS_MANAGED_AGENT_AUTOLAUNCH" => "1") do
+        with_stubbed_rails_env("development") do
+          error =
+            assert_raises(RuntimeSetting::InvalidAgentWorkspaceRoot) do
+              AgentPrograms::BootstrapBundledDefaultService.bootstrap!
+            end
+
+          assert_equal "Agent workspace root must be configured before enabling managed agent autolaunch", error.message
+        end
+      end
+    end
+  end
+
   private
+
+    def with_stubbed_rails_env(env_name)
+      replacement = ActiveSupport::StringInquirer.new(env_name)
+      original = Rails.method(:env)
+      Rails.define_singleton_method(:env) { replacement }
+      yield
+    ensure
+      Rails.define_singleton_method(:env) { original.call }
+    end
 
     def with_env(values)
       original = values.to_h { |key, _value| [key, ENV[key]] }
