@@ -5,8 +5,13 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     # Some tests disable transactions and can leave rows behind; this suite needs a truly empty
     # "fresh install" state (no identities) without tripping foreign keys.
     ConversationRun.delete_all
+    RunDraft.delete_all
     Event.delete_all
     Conversation.delete_all
+    AgentRPCInvocation.delete_all
+    AgentRPCSession.delete_all
+    AgentDeployment.delete_all
+    AgentProgram.delete_all
     Session.delete_all
     User.delete_all
     Identity.delete_all
@@ -62,6 +67,12 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     follow_redirect!
     assert_response :success
     assert_includes response.body, 'data-layout="agent"'
+
+    program = AgentProgram.find_by!(bundled_agent_key: "default")
+    deployment = program.active_healthy_deployment
+    assert_equal "bundled", program.source_kind
+    assert_equal "healthy", deployment&.health_status
+    assert_equal "active", deployment&.status
   end
 
   test "setup wizard is not accessible after initial identity exists" do

@@ -5,8 +5,12 @@
     <div class="card-body">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div>
-          <div class="text-xs opacity-60">Profile</div>
-          <div class="font-mono text-sm"><%= @agent_program.profile_source %></div>
+          <div class="text-xs opacity-60">Source kind</div>
+          <div class="font-mono text-sm"><%= @agent_program.source_kind %></div>
+        </div>
+        <div>
+          <div class="text-xs opacity-60">Bundled key</div>
+          <div class="font-mono text-sm"><%= @agent_program.bundled_agent_key.presence || "n/a" %></div>
         </div>
         <div>
           <div class="text-xs opacity-60">Local path</div>

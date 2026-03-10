@@ -1,0 +1,6 @@
+#!/usr/bin/env ruby
+
+require_relative "../config/environment"
+require_relative "../lib/cybros/bundled_agent_host/application"
+
+exit Cybros::BundledAgentHost::CLI.run(ARGV)

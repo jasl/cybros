@@ -69,20 +69,36 @@ class ConversationAgentProgramSelectionTest < ActionDispatch::IntegrationTest
     assert_equal healthy_program.id, conversation.reload.agent_program_id
   end
 
-  test "builtin fallback runs do not add a selectable programmable agent" do
-    user = sign_in_owner!
+  test "new conversations default to the bundled default agent and do not show a built-in option" do
+    sign_in_owner!
+    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
     healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
     activate_program!(healthy_program)
-    conversation = create_conversation!(user: user, title: "Chat")
+    Account.instance.update_llm_default_model_ref!("")
     ensure_active_openai_credential!
-
-    conversation.append_user_message!(content: "Hello", model_ref: "openai/gpt-5.4")
+    post conversations_path, params: { conversation: { title: "Chat" } }
+    conversation = Conversation.order(:created_at).last
 
     get conversation_path(conversation)
 
     assert_response :success
+    assert_equal default_program.id, conversation.agent_program_id
     assert_select 'select[name="conversation[agent_program_id]"] option', text: healthy_program.name
-    assert_select 'select[name="conversation[agent_program_id]"] option', text: "Built-in Agent", count: 0
+    assert_select 'select[name="conversation[agent_program_id]"] option', text: "Built-in", count: 0
+    assert_select 'select[name="conversation[agent_program_id]"] option[selected]', text: default_program.name
+  end
+
+  test "rejects clearing the conversation agent selection" do
+    user = sign_in_owner!
+    healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
+    activate_program!(healthy_program)
+    conversation = create_conversation!(user: user, title: "Chat")
+    conversation.update!(agent_program: healthy_program, agent_config_schema_fingerprint: healthy_program.config_schema_fingerprint)
+
+    patch conversation_path(conversation), params: { conversation: { agent_program_id: "" } }
+
+    assert_response :unprocessable_entity
+    assert_equal healthy_program.id, conversation.reload.agent_program_id
   end
 
   private

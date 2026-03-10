@@ -4,7 +4,7 @@ module AgentPrograms
   class Loader
     DEFAULT_TIMEOUT_S = 5
 
-    Loaded = Data.define(:runtime_surface_config, :runtime_surface_status)
+    Loaded = Data.define(:runtime_surface_config, :runtime_surface_status, :manifest)
 
     def initialize(base_dir:, timeout_s: DEFAULT_TIMEOUT_S)
       @base_dir = Pathname.new(base_dir.to_s)
@@ -19,12 +19,14 @@ module AgentPrograms
         Loaded.new(
           runtime_surface_config: runtime_surface.fetch(:config),
           runtime_surface_status: runtime_surface.fetch(:status),
+          manifest: data_hash(agent_yml),
         )
       end
     rescue StandardError
       Loaded.new(
         runtime_surface_config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
         runtime_surface_status: "missing",
+        manifest: {},
       )
     end
 
@@ -44,6 +46,10 @@ module AgentPrograms
           config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
           status: "missing",
         }
+      end
+
+      def data_hash(value)
+        value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(value) : {}
       end
 
       def safe_yaml(rel)

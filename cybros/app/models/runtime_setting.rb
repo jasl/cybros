@@ -9,6 +9,7 @@ class RuntimeSetting < ApplicationRecord
   validates :agent_workspace_root, presence: true
   validate :queue_overrides_must_be_object
   validate :alert_thresholds_must_be_object
+  validate :agent_workspace_root_must_be_absolute
   validate :singleton_row
 
   private
@@ -23,6 +24,14 @@ class RuntimeSetting < ApplicationRecord
 
     def alert_thresholds_must_be_object
       errors.add(:alert_thresholds, "must be a hash") unless alert_thresholds.is_a?(Hash)
+    end
+
+    def agent_workspace_root_must_be_absolute
+      root = agent_workspace_root.to_s.strip
+      return if root.blank?
+      return if Pathname.new(root).absolute?
+
+      errors.add(:agent_workspace_root, "must be an absolute path")
     end
 
     def singleton_row

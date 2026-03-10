@@ -49,6 +49,18 @@ module ActiveSupport
 
     setup do
       Account.instance.update_llm_default_model_ref!("dev/mock-model")
+      AgentPrograms::BootstrapBundledDefaultService.ensure_test_runtime!
+      ensure_llm_provider!(
+        provider_key: "dev",
+        credential_type: "api_key",
+        status: "active",
+        api_key: "sk-test",
+        max_concurrent_requests: 3,
+        requests_per_minute: 90,
+        tokens_per_minute: 180_000,
+        burst_limit: 6,
+        backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
+      )
     end
 
     # Add more helper methods to be used by all tests here...
@@ -67,10 +79,47 @@ module ActiveSupport
       User.create!(identity: identity, role: role)
     end
 
-    def create_conversation!(user: nil, title: "Chat", metadata: nil)
+    def create_conversation!(user: nil, title: "Chat", metadata: nil, default_execution_target: :__default__)
       user ||= create_user!
       metadata ||= { "agent" => { "agent_profile" => "coding" } }
-      Conversation.create!(user: user, title: title, metadata: metadata)
+      if default_execution_target == :__default__
+        default_execution_target = ensure_default_execution_target!
+      end
+
+      Conversation.create!(
+        user: user,
+        title: title,
+        metadata: metadata,
+        default_execution_target: default_execution_target,
+      )
+    end
+
+    def ensure_default_execution_target!
+      location =
+        ExecutionLocation.find_or_create_by!(name: "Default test host") do |record|
+          record.kind = "host"
+          record.platform = "macos_arm64"
+          record.status = "active"
+          record.trust_group = "operator"
+          record.environment = "test"
+          record.tags = ["fixture"]
+          record.max_concurrent_tasks = 4
+          record.max_queued_tasks = 16
+          record.default_timeout_s = 900
+        end
+      workspace =
+        Workspace.find_or_create_by!(execution_location: location, name: "Default test workspace") do |record|
+          record.root_path = "/tmp/cybros-default-test-workspace"
+          record.workspace_type = "git"
+          record.status = "active"
+          record.capability_tags = ["git", "shell"]
+          record.tags = ["fixture"]
+        end
+
+      ExecutionTarget.find_or_create_by!(execution_location: location, workspace: workspace, name: "Default test target") do |record|
+        record.status = "active"
+        record.sandboxed = true
+      end
     end
 
     def ensure_llm_provider!(provider_key:, credential_type:, **attributes)

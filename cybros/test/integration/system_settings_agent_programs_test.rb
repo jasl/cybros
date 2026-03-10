@@ -19,8 +19,8 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
 
   test "index supports search" do
     sign_in_owner!
-    AgentProgram.create!(name: "Alpha", profile_source: "bundled:coding", local_path: "agents/alpha")
-    AgentProgram.create!(name: "Beta", profile_source: "bundled:coding", local_path: "agents/beta")
+    AgentProgram.create!(name: "Alpha", source_kind: "custom", local_path: "storage/agent_programs/alpha")
+    AgentProgram.create!(name: "Beta", source_kind: "custom", local_path: "storage/agent_programs/beta")
 
     get system_settings_agent_programs_path, params: { q: "alp" }
     assert_response :success
@@ -28,15 +28,15 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_not_includes response.body, "Beta"
   end
 
-  test "create validates name and profile" do
+  test "create validates name and bundled source" do
     sign_in_owner!
 
     get new_system_settings_agent_program_path
     assert_response :success
 
-    post system_settings_agent_programs_path, params: { agent_program: { name: "", profile_source: "" } }
+    post system_settings_agent_programs_path, params: { agent_program: { name: "", bundled_agent_key: "" } }
     assert_response :unprocessable_entity
-    assert_includes response.body, "Name and profile are required"
+    assert_includes response.body, "Name and bundled source are required"
   end
 
   test "show falls back to noop runtime surface for invalid config" do
@@ -53,7 +53,7 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
           exec: true
     YAML
 
-    program = AgentProgram.create!(name: "Invalid runtime surface", profile_source: "custom", local_path: rel_dir)
+    program = AgentProgram.create!(name: "Invalid runtime surface", source_kind: "custom", local_path: rel_dir)
 
     assert_equal(
       {
@@ -84,7 +84,7 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
       name: missing-runtime-surface
     YAML
 
-    program = AgentProgram.create!(name: "Missing runtime surface", profile_source: "custom", local_path: rel_dir)
+    program = AgentProgram.create!(name: "Missing runtime surface", source_kind: "custom", local_path: rel_dir)
 
     assert_equal(
       {

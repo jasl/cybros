@@ -1,0 +1,19 @@
+# frozen_string_literal: true
+
+require "json"
+require "net/http"
+require "optparse"
+require "pathname"
+require "securerandom"
+require "uri"
+require "webrick"
+require "yaml"
+
+require_relative "default/manifest"
+require_relative "default/identity"
+require_relative "default/rpc_dispatcher"
+require_relative "default/rpc_server"
+require_relative "default/application"
+require_relative "default/hooks/prepare"
+require_relative "default/hooks/compose"
+require_relative "default/hooks/handle_error"

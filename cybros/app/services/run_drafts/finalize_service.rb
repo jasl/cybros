@@ -112,11 +112,12 @@ module RunDrafts
         deployment = reload_record(draft.agent_deployment)
         target = reload_record(draft.proposed_execution_target)
         resolved = resolve_current_binding!(target: target)
+        resolved_provider_credential = resolved.fetch(:provider_credential)
         fresh =
           deployment_fresh?(deployment) &&
             target.present? &&
             RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(target) &&
-            resolved.fetch(:provider_credential).id.to_s == draft.provider_credential_id.to_s &&
+            resolved_provider_credential&.id.to_s == draft.provider_credential_id.to_s &&
             resolved.fetch(:proposed_execution_target).id.to_s == draft.proposed_execution_target_id.to_s &&
             resolved.fetch(:runtime_governors) == draft.runtime_governors
 

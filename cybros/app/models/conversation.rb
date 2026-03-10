@@ -43,6 +43,8 @@ class Conversation < ApplicationRecord
 
   before_validation :assign_root_conversation, on: :create
   before_validation :ensure_statistics_sample_origin, on: :create
+  before_validation :assign_default_agent_program, on: :create
+  before_validation :assign_default_execution_target, on: :create
   before_validation :normalize_runtime_settings
   after_create :set_root_conversation_to_self, if: :root?
 
@@ -1132,91 +1134,35 @@ class Conversation < ApplicationRecord
       self.agent_config = self[:agent_config].is_a?(Hash) ? self[:agent_config].deep_stringify_keys : {}
     end
 
+    def assign_default_agent_program
+      return if agent_program.present?
+
+      program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+      self.agent_program = program
+      self.agent_config_schema_fingerprint ||= program.config_schema_fingerprint
+    end
+
+    def assign_default_execution_target
+      return if default_execution_target.present?
+
+      self.default_execution_target = ExecutionTarget.visible_for_runtime.order(:created_at).first
+    end
+
     def enqueue_conversation_run!(agent_node:, selected_model_ref:, user_input:, debug:, error:)
-      if agent_program.present?
-        result =
-          RunDrafts::ConversationTurnOrchestrator.enqueue!(
-            conversation: self,
-            initiated_by_user: user,
-            selected_model_ref: selected_model_ref.to_s,
-            trigger_snapshot: {
-              "kind" => "user_turn",
-              "dag_node_id" => agent_node.id,
-              "user_input" => user_input.to_s,
-            },
-            debug: debug,
-            error: error,
-          )
-        return result.fetch(:conversation_run).present?
-      end
-
-      ConversationRun.create!(
-        conversation: self,
-        dag_node_id: agent_node.id,
-        state: "queued",
-        queued_at: Time.current,
-        snapshot_version: 1,
-        effective_permission_mode: permission_mode,
-        agent_program: builtin_agent_program,
-        contract_fingerprint: builtin_agent_program.published_contract_fingerprint,
-        agent_deployment: builtin_agent_deployment,
-        deployment_fingerprint: builtin_agent_deployment.deployment_fingerprint,
-        deployment_activated_at: builtin_agent_deployment.activated_at,
-        selected_model_ref: selected_model_ref.to_s.presence,
-        effective_public_settings: public_settings,
-        effective_agent_config: {},
-        agent_config_schema_fingerprint: builtin_agent_program.config_schema_fingerprint,
-        effective_policy: builtin_effective_policy_summary,
-        runtime_governors: {},
-        snapshot: { "origin" => "builtin_fallback" },
-        debug: debug,
-        error: error,
-      )
-      true
-    end
-
-    def builtin_agent_program
-      @builtin_agent_program ||=
-        AgentProgram.find_or_create_by!(config_namespace: "cybros.builtin.agent") do |program|
-          program.name = "Built-in Agent"
-          program.published_contract_fingerprint = "contract:cybros:builtin:v1"
-          program.manifest_snapshot = { "name" => "Built-in Agent", "agent_program_key" => "cybros-builtin" }
-          program.global_config = {}
-          program.global_config_schema = { "type" => "object" }
-          program.conversation_config_schema = { "type" => "object" }
-          program.config_schema_fingerprint = "config:cybros:builtin:v1"
-        end
-    end
-
-    def builtin_agent_deployment
-      @builtin_agent_deployment ||=
-        AgentDeployment.find_or_initialize_by(
-          agent_program: builtin_agent_program,
-          deployment_fingerprint: "deployment:cybros:builtin:v1",
-        ).tap do |deployment|
-          deployment.transport_kind = "builtin"
-          deployment.endpoint_url = "builtin://local"
-          deployment.deployment_bearer_secret_ref = "builtin://local"
-          deployment.contract_fingerprint = builtin_agent_program.published_contract_fingerprint
-          deployment.status = "inactive"
-          deployment.health_status = "healthy"
-          deployment.protocol_version = AgentDeployments::SUPPORTED_PROTOCOL_VERSION
-          deployment.agent_sdk_version = "cybros-builtin/1.0"
-          deployment.supported_methods = ["local.execute"]
-          deployment.manifest_snapshot = builtin_agent_program.manifest_snapshot
-          deployment.schema_snapshot = {}
-          deployment.capability_snapshot = { "builtin" => true }
-          deployment.inspection_details = {}
-          deployment.activated_at ||= Time.current.change(usec: 0)
-          deployment.save! if deployment.changed?
-        end
-    end
-
-    def builtin_effective_policy_summary
-      Cybros::Permissions::BundleCompiler.compile(
-        permission_mode: permission_mode,
-        tools_registry: Cybros::AgentRuntimeResolver.build_tools_registry,
-      ).fetch(:summary)
+      result =
+        RunDrafts::ConversationTurnOrchestrator.enqueue!(
+          conversation: self,
+          initiated_by_user: user,
+          selected_model_ref: selected_model_ref.to_s,
+          trigger_snapshot: {
+            "kind" => "user_turn",
+            "dag_node_id" => agent_node.id,
+            "user_input" => user_input.to_s,
+          },
+          debug: debug,
+          error: error,
+        )
+      result.fetch(:conversation_run).present?
     end
 
     def turn_execution_projector

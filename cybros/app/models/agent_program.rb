@@ -16,8 +16,10 @@ class AgentProgram < ApplicationRecord
   validates :config_schema_fingerprint, presence: true
   validates :source_kind, inclusion: { in: SOURCE_KINDS }
   validates :bundled_agent_key, presence: true, if: :bundled_source?
+  validates :local_path, presence: true, if: :custom_source?
   validate :bundled_source_must_resolve
   validate :local_path_must_match_bundled_source, if: :bundled_source?
+  validate :custom_local_path_must_stay_within_workspace_root, if: :custom_source?
 
   scope :selectable_for_conversations, -> { joins(:agent_deployments).merge(AgentDeployment.active_healthy).distinct.order(:name) }
 
@@ -81,7 +83,7 @@ class AgentProgram < ApplicationRecord
     if bundled_source?
       AgentPrograms::BundledSources.path_for(bundled_agent_key)
     else
-      configured_agent_workspace_root.join(local_path.to_s)
+      resolved_custom_local_path!
     end
   end
 
@@ -94,6 +96,7 @@ class AgentProgram < ApplicationRecord
       self.conversation_config_schema = normalize_hash_attribute(self[:conversation_config_schema])
 
       self.config_namespace = generated_config_namespace if config_namespace.blank?
+      self.local_path = generated_local_path if custom_source? && local_path.to_s.strip.blank?
       self.config_schema_fingerprint = generated_config_schema_fingerprint if config_schema_fingerprint.blank?
       self.published_contract_fingerprint = generated_contract_fingerprint if published_contract_fingerprint.blank?
     end
@@ -114,6 +117,12 @@ class AgentProgram < ApplicationRecord
         "conversation_config_schema" => normalize_hash_attribute(self[:conversation_config_schema]),
       }
       "config:sha256:#{Digest::SHA256.hexdigest(payload.to_json)}"
+    end
+
+    def generated_local_path
+      base = config_namespace.to_s.parameterize(separator: "-")
+      base = "agent-program" if base.blank?
+      File.join("storage", "agent_programs", base)
     end
 
     def generated_contract_fingerprint
@@ -170,5 +179,24 @@ class AgentProgram < ApplicationRecord
           RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT
 
       Pathname.new(root)
+    end
+
+    def custom_local_path_must_stay_within_workspace_root
+      return if local_path.to_s.strip.blank?
+
+      resolved_custom_local_path!
+    rescue ArgumentError
+      errors.add(:local_path, "must stay within the configured agent workspace root")
+    end
+
+    def resolved_custom_local_path!
+      root = configured_agent_workspace_root.expand_path
+      candidate = Pathname.new(local_path.to_s)
+      raise ArgumentError, "local_path must be relative" if candidate.absolute?
+
+      expanded = root.join(candidate).expand_path
+      return expanded if expanded == root || expanded.to_s.start_with?(root.to_s + File::SEPARATOR)
+
+      raise ArgumentError, "local_path escapes agent workspace root"
     end
 end

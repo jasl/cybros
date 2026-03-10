@@ -16,10 +16,10 @@
     </div>
 
     <div>
-      <%= f.label :profile_source, class: "label" do %>
-        <span class="label-text">Bundled profile</span>
+      <%= f.label :bundled_agent_key, class: "label" do %>
+        <span class="label-text">Bundled source</span>
       <% end %>
-      <%= f.select :profile_source, @profiles, {}, class: "select select-bordered w-full" %>
+      <%= f.select :bundled_agent_key, @bundled_sources, {}, class: "select select-bordered w-full" %>
     </div>
 
     <div class="flex items-center gap-3">

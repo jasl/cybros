@@ -45,6 +45,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("")
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
 
     assert_difference -> { Conversation.count }, +1 do
       post conversations_path, params: { conversation: { title: "New convo" } }
@@ -53,6 +54,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation_path(conversation)
     assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
+    assert_equal default_program.id, conversation.agent_program_id
   end
 
   test "create redirects to llm settings when no usable default model exists" do
@@ -417,6 +419,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
   test "create uses site default model when configured" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
+    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
     Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-pro")
 
     assert_difference -> { Conversation.count }, +1 do
@@ -426,6 +429,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     conversation = Conversation.order(:created_at).last
     assert_equal user.id, conversation.user_id
     assert_equal "openrouter/openai-gpt-5.4-pro", conversation.metadata.dig("llm", "model_ref")
+    assert_equal default_program.id, conversation.agent_program_id
   end
 
   test "create_message appends a finished user_message and leaves a pending agent_message leaf" do

@@ -23,6 +23,34 @@ class AgentDeploymentsInspectionTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
+  test "inspects the bundled default deployment through the bundled host" do
+    sign_in_owner!
+    program = AgentPrograms::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
+    host =
+      Cybros::BundledAgentHost::Application.new(
+        source_root: Rails.root.join("agents/default"),
+        deployment_fingerprint: "bundled-default-test",
+        required_bearer: "secret://bundled",
+      ).start
+    deployment = create_registered_deployment!(
+      program: program,
+      endpoint_url: host.rpc_url,
+      deployment_fingerprint: "bundled-default-test",
+      deployment_bearer_secret_ref: "secret://bundled",
+    )
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    deployment.reload
+    assert_equal "healthy", deployment.health_status
+    assert_includes deployment.supported_methods, "turn.prepare"
+    assert_equal "default", deployment.manifest_snapshot.dig("identity", "agent_program_key")
+  ensure
+    host&.shutdown
+  end
+
   test "rejects inspection when deployment identity claims do not match the registered binding" do
     sign_in_owner!
     program = create_program!
@@ -96,12 +124,12 @@ class AgentDeploymentsInspectionTest < ActionDispatch::IntegrationTest
       )
     end
 
-    def create_registered_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1")
+    def create_registered_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1", deployment_bearer_secret_ref: "secret://fixture")
       AgentDeployment.create!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
-        deployment_bearer_secret_ref: "secret://fixture",
+        deployment_bearer_secret_ref: deployment_bearer_secret_ref,
         contract_fingerprint: program.published_contract_fingerprint,
         deployment_fingerprint: deployment_fingerprint,
         status: "inactive",

@@ -2,7 +2,8 @@
   <div class="flex items-start justify-between gap-4">
     <div>
       <h1 class="text-2xl font-semibold"><%= @agent_program.name %></h1>
-      <p class="opacity-70 text-sm">Profile: <span class="font-mono"><%= @agent_program.profile_source %></span></p>
+      <p class="opacity-70 text-sm">Source kind: <span class="font-mono"><%= @agent_program.source_kind %></span></p>
+      <p class="opacity-70 text-sm">Bundled key: <span class="font-mono"><%= @agent_program.bundled_agent_key.presence || "n/a" %></span></p>
       <p class="opacity-70 text-sm">Local path: <span class="font-mono text-xs"><%= @agent_program.local_path %></span></p>
     </div>
     <%= link_to "Back", agent_programs_path, class: "btn btn-ghost" %>

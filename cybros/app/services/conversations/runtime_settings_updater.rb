@@ -32,7 +32,7 @@ module Conversations
       def apply_agent_program_selection!
         program = resolve_agent_program(attributes.fetch(:agent_program_id))
         conversation.agent_program = program
-        conversation.agent_config_schema_fingerprint = program&.config_schema_fingerprint
+        conversation.agent_config_schema_fingerprint = program.config_schema_fingerprint
       end
 
       def apply_execution_target_selection!
@@ -41,7 +41,12 @@ module Conversations
 
       def resolve_agent_program(raw_id)
         id = raw_id.to_s.strip
-        return nil if id.empty?
+        if id.empty?
+          AgentCore::ValidationError.raise!(
+            "Agent selection is required.",
+            code: "cybros.conversations.agent_program_required",
+          )
+        end
         return conversation.agent_program if conversation.agent_program_id.to_s == id
 
         program = AgentProgram.find_by(id: id)

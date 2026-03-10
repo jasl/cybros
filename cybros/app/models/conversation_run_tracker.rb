@@ -42,7 +42,8 @@ class ConversationRunTracker
 
       def record_automation_execution!(run:, status:, failure: nil)
         conversation = run.conversation
-        return unless conversation&.automation_id.present?
+        return unless conversation&.respond_to?(:automation_id)
+        return unless conversation.automation_id.present?
 
         case status
         when :running

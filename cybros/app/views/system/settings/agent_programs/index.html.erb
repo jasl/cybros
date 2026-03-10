@@ -9,7 +9,7 @@
       type="search"
       name="q"
       value="<%= @q %>"
-      placeholder="Search name or profile"
+      placeholder="Search name or source"
       class="input input-bordered input-sm w-full max-w-md" />
     <button type="submit" class="btn btn-ghost btn-sm">Search</button>
   <% end %>
@@ -20,7 +20,7 @@
         <thead>
           <tr>
             <th>Name</th>
-            <th>Profile</th>
+            <th>Source</th>
             <th>Local path</th>
             <th></th>
           </tr>
@@ -29,7 +29,7 @@
           <% @agent_programs.each do |program| %>
             <tr class="hover:bg-base-200/50 transition-colors">
               <td class="font-medium"><%= program.name %></td>
-              <td class="opacity-70"><%= program.profile_source %></td>
+              <td class="opacity-70"><%= [program.source_kind, program.bundled_agent_key].compact.reject(&:blank?).join(":") %></td>
               <td class="opacity-70 font-mono text-xs"><%= program.local_path %></td>
               <td class="text-right">
                 <%= link_to "View", system_settings_agent_program_path(program), class: "btn btn-ghost btn-sm" %>

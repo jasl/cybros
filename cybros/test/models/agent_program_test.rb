@@ -57,6 +57,27 @@ class AgentProgramTest < ActiveSupport::TestCase
     assert_includes program.errors[:local_path], "must match the bundled source root for this key"
   end
 
+  test "custom programs require a relative local_path" do
+    program = build_program(local_path: "")
+
+    refute_predicate program, :valid?
+    assert_includes program.errors[:local_path], "can't be blank"
+  end
+
+  test "custom programs reject absolute local_path values" do
+    program = build_program(local_path: "/etc/cybros-agent")
+
+    refute_predicate program, :valid?
+    assert_includes program.errors[:local_path], "must stay within the configured agent workspace root"
+  end
+
+  test "custom programs reject parent-directory traversal" do
+    program = build_program(local_path: "../outside")
+
+    refute_predicate program, :valid?
+    assert_includes program.errors[:local_path], "must stay within the configured agent workspace root"
+  end
+
   private
 
   def build_program(attributes = {})
@@ -71,6 +92,7 @@ class AgentProgramTest < ActiveSupport::TestCase
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:v1",
         source_kind: "custom",
+        local_path: "storage/agent_programs/fixture-program",
       }.merge(attributes),
     )
   end

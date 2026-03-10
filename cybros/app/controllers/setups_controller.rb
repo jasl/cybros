@@ -16,6 +16,7 @@ class SetupsController < ApplicationController
     end
 
     User.create!(identity: @identity, role: :owner)
+    AgentPrograms::BootstrapBundledDefaultService.bootstrap!
 
     session = Session.start!(identity: @identity, ip_address: request.remote_ip, user_agent: request.user_agent)
     Current.session = session

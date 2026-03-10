@@ -40,6 +40,13 @@ class RuntimeSettingTest < ActiveSupport::TestCase
     assert_predicate settings, :valid?
   end
 
+  test "rejects a relative agent workspace root" do
+    settings = build_settings(agent_workspace_root: "tmp/cybros-agents")
+
+    refute_predicate settings, :valid?
+    assert_includes settings.errors[:agent_workspace_root], "must be an absolute path"
+  end
+
   private
 
   def build_settings(attributes = {})

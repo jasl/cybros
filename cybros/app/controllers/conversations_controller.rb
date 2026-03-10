@@ -44,11 +44,14 @@ class ConversationsController < AgentController
     title = "Conversation" if title.blank?
     agent_metadata = { "agent_profile" => "coding" }
     default_model_ref = Cybros::AgentRuntimeResolver.default_model_ref_for(agent_metadata: agent_metadata)
+    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
 
     conversation =
       Current.user.conversations.create!(
         title: title,
         metadata: { "agent" => agent_metadata, "llm" => { "model_ref" => default_model_ref } },
+        agent_program: default_program,
+        agent_config_schema_fingerprint: default_program.config_schema_fingerprint,
       )
 
     redirect_to conversation_path(conversation)

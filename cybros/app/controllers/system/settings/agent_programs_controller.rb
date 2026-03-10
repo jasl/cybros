@@ -9,32 +9,32 @@ module System
 
         if @q.present?
           q = "%#{ActiveRecord::Base.sanitize_sql_like(@q)}%"
-          scope = scope.where("name ILIKE ? OR profile_source ILIKE ?", q, q)
+          scope = scope.where("name ILIKE ? OR bundled_agent_key ILIKE ? OR source_kind ILIKE ?", q, q, q)
         end
 
         @agent_programs = scope
       end
 
       def new
-        @profiles = AgentPrograms::BundledProfiles.available
+        @bundled_sources = AgentPrograms::BundledSources.available_keys
       end
 
       def create
         name = params.dig(:agent_program, :name).to_s.strip
-        profile_source = params.dig(:agent_program, :profile_source).to_s.strip
+        bundled_agent_key = params.dig(:agent_program, :bundled_agent_key).to_s.strip
 
-        if name.blank? || profile_source.blank?
-          flash.now[:alert] = "Name and profile are required"
-          @profiles = AgentPrograms::BundledProfiles.available
+        if name.blank? || bundled_agent_key.blank?
+          flash.now[:alert] = "Name and bundled source are required"
+          @bundled_sources = AgentPrograms::BundledSources.available_keys
           render :new, status: :unprocessable_entity
           return
         end
 
-        program = AgentPrograms::Creator.create_from_profile!(name: name, profile_source: profile_source)
+        program = AgentPrograms::Creator.create_from_bundled_source!(name: name, bundled_agent_key: bundled_agent_key)
         redirect_to system_settings_agent_program_path(program)
       rescue StandardError
         flash.now[:alert] = "Failed to create agent program"
-        @profiles = AgentPrograms::BundledProfiles.available
+        @bundled_sources = AgentPrograms::BundledSources.available_keys
         render :new, status: :unprocessable_entity
       end
 

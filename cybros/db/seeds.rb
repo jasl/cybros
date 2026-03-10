@@ -28,8 +28,7 @@ if openrouter_api_key.present?
 end
 
 unless AgentProgram.exists?
-  default_profile = "default-assistant"
-  if AgentPrograms::BundledProfiles.profile_path(default_profile)
-    AgentPrograms::Creator.create_from_profile!(name: "Default assistant", profile_source: default_profile)
+  if AgentPrograms::BundledSources.path_for("default")
+    AgentPrograms::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
   end
 end

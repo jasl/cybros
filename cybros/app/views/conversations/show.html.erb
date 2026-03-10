@@ -210,7 +210,6 @@
               aria-label="Agent"
               onchange="this.form.requestSubmit()"
               class="select select-bordered select-xs max-w-full">
-              <option value="" <%= @selected_agent_program.nil? ? "selected" : nil %>>Built-in</option>
               <% @agent_program_options.each do |program| %>
                 <option value="<%= program.id %>" <%= @selected_agent_program&.id == program.id ? "selected" : nil %>>
                   <%= program.name %>

@@ -10,9 +10,11 @@ module RuntimeGovernance
 
     def resolve!
       provider_key, = Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: selected_model_ref).values_at(:provider_key, :model_key)
-      provider_credential = LLMProviderCredential.find_by(provider_key: provider_key, status: "active")
+      provider_spec = Cybros::LLM::Catalog.effective.provider(provider_key)
+      requires_credential = provider_spec.fetch("requires_credential") == true
+      provider_credential = requires_credential ? LLMProviderCredential.find_by(provider_key: provider_key, status: "active") : nil
 
-      unless provider_credential
+      if requires_credential && !provider_credential
         AgentCore::ValidationError.raise!(
           "Provider credential missing. Please configure credentials and try again.",
           code: "cybros.runtime_governance.provider_credential_missing",
@@ -23,14 +25,14 @@ module RuntimeGovernance
       {
         provider_credential: provider_credential,
         snapshot: {
-          "provider_key" => provider_credential.provider_key,
-          "provider_credential_id" => provider_credential.id,
-          "credential_type" => provider_credential.credential_type,
-          "max_concurrent_requests" => provider_credential.max_concurrent_requests,
-          "requests_per_minute" => provider_credential.requests_per_minute,
-          "tokens_per_minute" => provider_credential.tokens_per_minute,
-          "burst_limit" => provider_credential.burst_limit,
-          "backoff_policy" => normalize_hash(provider_credential.backoff_policy),
+          "provider_key" => provider_key,
+          "provider_credential_id" => provider_credential&.id,
+          "credential_type" => provider_credential&.credential_type || provider_spec.fetch("credential_type", "none").to_s,
+          "max_concurrent_requests" => provider_credential&.max_concurrent_requests,
+          "requests_per_minute" => provider_credential&.requests_per_minute,
+          "tokens_per_minute" => provider_credential&.tokens_per_minute,
+          "burst_limit" => provider_credential&.burst_limit,
+          "backoff_policy" => normalize_hash(provider_credential&.backoff_policy),
         },
       }
     rescue AgentCore::ValidationError => e
@@ -50,5 +52,5 @@ module RuntimeGovernance
       def normalize_hash(value)
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
       end
-  end
+    end
 end
