@@ -24,6 +24,8 @@ Future Python or Rust implementations should use the same contract.
 - bundled agent sources live under the Cybros app root in `agents/`
 - the official bundled default source lives at `agents/default`
 - custom agent sources live under the operator-configured agent workspace root
+- the custom-agent workspace root must be an explicit absolute path outside the Cybros app repository
+- outside test, Cybros does not silently default custom-agent workspace roots to the app root
 - bundled and custom sources both resolve to ordinary `AgentProgram` records
 - `default-assistant` is migration-only trace data, not a runtime identity
 

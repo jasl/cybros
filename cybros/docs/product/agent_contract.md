@@ -18,6 +18,7 @@ The goal is to keep three concerns separate:
 - Deployment inspection facts are never the source of truth for product semantics.
 - External agents may keep additional off-loop capabilities, but the canonical loop still passes through Cybros.
 - there is no builtin conversation-agent runtime fallback
+- top-level programmable execution requires a materialized run binding; it does not synthesize a local provider fallback when `ConversationRun` is missing
 
 ## Product Entities
 
@@ -125,6 +126,7 @@ V1 rules:
 - `agent_deployment_id`
 - deployment fingerprint or revision
 - deployment activation epoch
+- `agent_config_schema_fingerprint`
 
 `ConversationRun` snapshots the finalized result of that binding.
 

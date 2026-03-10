@@ -38,6 +38,8 @@ Each conversation stores one top-level `AgentProgram`.
 
 The default interactive path is the bundled external agent with bundled key `default`. There is no builtin conversation-agent runtime fallback.
 
+Top-level interactive execution only proceeds through a materialized `ConversationRun`. If runtime resolution is reached without that run binding, Cybros fails with `cybros.agent_runtime_resolver.programmable_run_required` instead of constructing a local LLM fallback.
+
 The composer footer should surface that selection directly.
 
 Changing it updates `Conversation.agent_program_id` and affects future drafts only.
@@ -46,7 +48,7 @@ Changing it updates `Conversation.agent_program_id` and affects future drafts on
 
 The user-facing selector chooses `AgentProgram`, not `AgentDeployment`.
 
-Cybros resolves the active deployment during planning.
+Cybros resolves the active healthy deployment that matches the program's current published contract during planning.
 
 If no active healthy deployment exists, Cybros should surface a stale-selection warning and block new draft materialization until the operator fixes the deployment or the user chooses another program.
 

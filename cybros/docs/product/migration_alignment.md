@@ -2,155 +2,92 @@
 
 This document maps the current codebase to the programmable-agent target architecture.
 
-It is intentionally blunt. Transitional compatibility is not the goal.
+As of the 2026-03-10 programmable-agent rebaseline, it is a status snapshot of what is now aligned. Fresh mismatches should be recorded in current audit documents, not inferred from stale pre-cutover gap lists.
 
-## Immediate Mismatches
+## Current Alignment
 
-### 1. Conversation Runtime Selection Is Still Metadata-Shaped
-
-Current state:
-
-- conversations still rely on metadata-driven agent/runtime defaults
-- there is no clean first-class `agent_program` selection path yet
-- there is no clean first-class execution-target path yet
-
-Target:
-
-- `Conversation.agent_program_id`
-- `Conversation.default_execution_target_id`
-- `Conversation.permission_mode`
-- metadata is no longer the primary runtime-selection surface
-
-### 2. `ConversationRun` Is Still Too Thin
+### 1. Conversation Runtime Selection Is First-Class
 
 Current state:
 
-- run records mostly track lifecycle and DAG linkage
-- they do not snapshot the full execution context
-- they do not yet carry the finalized contract, deployment, target, settings, and governor facts described by the new run model
+- top-level conversations persist `agent_program_id`, `default_execution_target_id`, and `permission_mode`
+- the default interactive path resolves model preference, input policy, and runtime surface from `Conversation.agent_program` and the published manifest snapshot
+- `conversations.metadata["agent"]` is no longer the top-level interactive authority; it remains only for explicit legacy `agent_profile` compatibility rows and subagent child worker payloads
+- top-level interactive runtime resolution does not fall back to a local builtin provider when no `ConversationRun` exists
 
-Target:
+Target state:
 
-- immutable run snapshots record program, contract, deployment, target, provider, settings, config, and governor facts
+- keep conversation-scoped runtime selection on first-class fields
+- keep metadata-only runtime authority limited to explicit legacy and child-worker compatibility paths
 
-### 3. `AgentProgram` Still Looks Like A Local Runtime Wrapper
-
-Current state:
-
-- it still reflects local-path and runtime-surface assumptions
-- it does not yet cleanly own published contract identity and global config
-- it still lags the documented separation between selectable program identity and reachable deployment binding
-
-Target:
-
-- `AgentProgram` becomes the selectable identity and contract owner
-- `AgentDeployment` owns connectivity and health
-
-### 4. `AgentDeployment` Does Not Exist As A First-Class Runtime Binding
+### 2. Draft And Run Semantics Are Split
 
 Current state:
 
-- registration, inspection, activation, and health are not yet modeled as product concepts
+- `RunDraft` is the mutable planning record
+- `ConversationRun` is the immutable execution record
+- `RunDraft` pins program, contract, deployment, execution target, provider, runtime governors, and `agent_config_schema_fingerprint`
+- finalization materializes `ConversationRun` from the pinned draft binding instead of re-reading mutable conversation defaults
 
-Target:
+Target state:
 
-- introduce `AgentDeployment` as the only connectable runtime unit
+- preserve the draft/run split
+- preserve draft-pinned finalization for approval resume, stale detection, and replay safety
 
-### 5. Draft And Run Semantics Are Still Mixed
-
-Current state:
-
-- planning and execution concerns still leak into the same runtime shapes
-
-Target:
-
-- `RunDraft` is durable mutable planning state
-- `ConversationRun` is immutable execution state
-
-### 6. Execution Context Still Falls Back To Process Defaults
+### 3. `AgentProgram` And `AgentDeployment` Have Distinct Authority
 
 Current state:
 
-- the runtime resolver still falls back to `Rails.root` or `Dir.pwd`
-- conversation runtime resolution still carries Phase 0 assumptions about metadata-driven defaults
+- `AgentProgram` is the selectable identity and canonical contract owner
+- `AgentDeployment` is the reachable runtime binding with explicit registration, inspection, activation, and health
+- planning resolves the active healthy deployment that matches the selected program's published contract
 
-Target:
+Target state:
 
-- execution context resolves through explicit `ExecutionTarget`
+- keep `AgentProgram` as product identity and contract owner
+- keep `AgentDeployment` as runtime connectivity and health
 
-### 7. Memory, Knowledge, MCP, Tools, And Skills Are Stronger In Engine Docs Than In Product Docs
-
-Current state:
-
-- `AgentCore` has meaningful boundaries
-- product docs still under-specify memory, knowledge, and connector surfaces
-- default resolver wiring still reflects Phase 0 assumptions
-- default memory wiring is still overly global instead of following an explicit scope model
-- prompt-side memory and skills surfaces are not fully wired by default even though the engine supports them
-
-Target:
-
-- product docs explicitly define kernel service surfaces
-- built-in versus adapter boundaries are intentional
-- runtime wiring matches the stated contract
-
-### 8. Automation Is Still Under-Owned
+### 4. Source Ownership Is Explicit
 
 Current state:
 
-- automation semantics are spread across docs and plans
-- the runtime path is not yet treated as a first-class implementation track
+- bundled agent sources live under `agents/` in the app repository
+- custom agent sources live under the operator-configured agent workspace root
+- the custom-agent workspace root must be explicit, absolute, and outside the Cybros app repository
+- outside test, Cybros does not silently default custom-agent workspace roots to `Rails.root`
 
-Target:
+Target state:
 
-- automation becomes an explicit aggregate, lifecycle, and implementation plan
+- keep bundled and custom source ownership separate
+- keep custom source material outside the app repository
 
-### 9. Runtime Governance Is Still Partly Implicit
-
-Current state:
-
-- provider limits, job settings, and execution capacity are not yet modeled as one coherent runtime system
-
-Target:
-
-- explicit provider credential governance
-- explicit runtime settings
-- location-first execution capacity with target override
-- durable waits and admission recovery
-
-### 10. Plan Sequencing Still Encourages Rework
+### 5. Planning And Approval Resume Follow One Canonical Loop
 
 Current state:
 
-- some plans still put draft planning ahead of deployment lifecycle
-- target-switch authority is spread across multiple documents
-- automation runtime behavior is under-owned
+- conversations and automations converge on `RunDraft -> finalization -> immutable run`
+- approval parking preserves the prepared draft without materializing a partial run
+- resumed finalization validates the pinned binding instead of silently drifting to later conversation-level changes
 
-Target:
+Target state:
 
-- deployment lifecycle lands before planning depends on it
-- one canonical target-switch contract
-- automation gets its own implementation track
+- keep planning, approval resume, and execution on the same canonical lifecycle
+- reject stale bindings explicitly instead of reintroducing hidden fallback paths
 
-## Recommended Implementation Sequence
+### 6. Runtime Governance Is First-Class
 
-Use `docs/plans/README.md` as the task-level execution order. At repository level, the preferred cutover sequence is:
+Current state:
 
-1. Freeze the product contract and rewrite plans to match it.
-2. Land first-class schema for programs, deployments, drafts, executions, and automation.
-3. Land runtime-governance schema and admission primitives.
-4. Land deployment registration, inspection, and activation.
-5. Land conversation agent, permission, and target defaults plus the public kernel surfaces.
-6. Land draft planning, finalization, approval resume, and replay-safe RPC.
-7. Land automation dispatch on the same canonical lifecycle.
-8. Rebaseline the runtime resolver onto explicit targets and contract snapshots.
-9. Re-align Nexus and Conduits to the execution-only role.
-10. Finish product surfaces and end-to-end coverage after the domain model is stable.
+- provider credentials, runtime settings, execution locations, workspaces, execution targets, waits, leases, and reservations are modeled explicitly
+- draft planning and finalization snapshot runtime-governor facts into the immutable run record
 
-## Destructive Refactor Rule
+Target state:
 
-When old implementation shapes conflict with the target model:
+- keep runtime governance explicit and durable
+- keep admission recovery and capacity waits on product-owned primitives
 
-- prefer deletion over adapters
-- prefer schema rewrite over transitional compatibility columns
-- prefer smaller explicit APIs over preserving ambiguous convenience layers
+## How To Use This Document
+
+- use the product docs under `docs/product/` as the source of truth for current architecture
+- use current audits for fresh findings
+- do not treat this file as a backlog of historical pre-rebaseline gaps
