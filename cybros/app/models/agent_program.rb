@@ -1,9 +1,12 @@
 class AgentProgram < ApplicationRecord
+  SOURCE_KINDS = %w[bundled custom].freeze
+
   has_many :agent_deployments, dependent: :restrict_with_exception
   has_many :conversations, dependent: :restrict_with_exception
   has_many :conversation_runs, dependent: :restrict_with_exception
   has_many :run_drafts, dependent: :restrict_with_exception
   has_one :active_healthy_deployment, -> { active_healthy }, class_name: "AgentDeployment"
+  belongs_to :forked_from_agent_program, class_name: "AgentProgram", optional: true
 
   before_validation :normalize_contract_fields
 
@@ -11,6 +14,10 @@ class AgentProgram < ApplicationRecord
   validates :config_namespace, presence: true, uniqueness: true
   validates :published_contract_fingerprint, presence: true
   validates :config_schema_fingerprint, presence: true
+  validates :source_kind, inclusion: { in: SOURCE_KINDS }
+  validates :bundled_agent_key, presence: true, if: :bundled_source?
+  validate :bundled_source_must_resolve
+  validate :local_path_must_match_bundled_source, if: :bundled_source?
 
   scope :selectable_for_conversations, -> { joins(:agent_deployments).merge(AgentDeployment.active_healthy).distinct.order(:name) }
 
@@ -24,9 +31,8 @@ class AgentProgram < ApplicationRecord
     value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(value) : {}
   end
 
-  def bundled_profile?
-    profile_source.to_s.strip != ""
-  end
+  def bundled_source? = source_kind.to_s == "bundled"
+  def custom_source? = source_kind.to_s == "custom"
 
   def runtime_surface_config
     stored = runtime_surface_snapshot.fetch("runtime_surface", nil)
@@ -72,7 +78,11 @@ class AgentProgram < ApplicationRecord
   end
 
   def absolute_local_path
-    Rails.root.join(local_path.to_s)
+    if bundled_source?
+      AgentPrograms::BundledSources.path_for(bundled_agent_key)
+    else
+      configured_agent_workspace_root.join(local_path.to_s)
+    end
   end
 
   private
@@ -109,6 +119,8 @@ class AgentProgram < ApplicationRecord
     def generated_contract_fingerprint
       payload = {
         "config_namespace" => config_namespace.to_s,
+        "source_kind" => source_kind.to_s,
+        "bundled_agent_key" => bundled_agent_key.to_s,
         "manifest_snapshot" => normalize_hash_attribute(self[:manifest_snapshot]),
         "global_config_schema" => normalize_hash_attribute(self[:global_config_schema]),
         "conversation_config_schema" => normalize_hash_attribute(self[:conversation_config_schema]),
@@ -135,5 +147,28 @@ class AgentProgram < ApplicationRecord
 
     def default_runtime_surface_config
       Cybros::AgentProfileConfig.default_runtime_surface_metadata
+    end
+
+    def bundled_source_must_resolve
+      return unless bundled_source?
+      return if AgentPrograms::BundledSources.path_for(bundled_agent_key).present?
+
+      errors.add(:bundled_agent_key, "is not a known bundled source")
+    end
+
+    def local_path_must_match_bundled_source
+      expected = AgentPrograms::BundledSources.relative_path_for(bundled_agent_key)
+      return if expected.blank?
+      return if local_path.to_s == expected
+
+      errors.add(:local_path, "must match the bundled source root for this key")
+    end
+
+    def configured_agent_workspace_root
+      root =
+        RuntimeSetting.find_by(scope_key: "instance")&.agent_workspace_root.to_s.presence ||
+          RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT
+
+      Pathname.new(root)
     end
 end

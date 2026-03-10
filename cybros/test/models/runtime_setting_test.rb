@@ -27,6 +27,19 @@ class RuntimeSettingTest < ActiveSupport::TestCase
     end
   end
 
+  test "requires an agent workspace root" do
+    settings = build_settings(agent_workspace_root: "")
+
+    refute_predicate settings, :valid?
+    assert_includes settings.errors[:agent_workspace_root], "can't be blank"
+  end
+
+  test "accepts an agent workspace root" do
+    settings = build_settings(agent_workspace_root: "/srv/cybros-agents")
+
+    assert_predicate settings, :valid?
+  end
+
   private
 
   def build_settings(attributes = {})
@@ -35,6 +48,7 @@ class RuntimeSettingTest < ActiveSupport::TestCase
         default_worker_concurrency: 12,
         queue_overrides: { "critical" => 6 },
         alert_thresholds: { "provider_limit_waits" => 5 },
+        agent_workspace_root: "/tmp/cybros-agents",
       }.merge(attributes),
     )
   end

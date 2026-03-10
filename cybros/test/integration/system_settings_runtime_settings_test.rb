@@ -26,6 +26,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
       patch system_settings_runtime_settings_path, params: {
         runtime_setting: {
           default_worker_concurrency: "16",
+          agent_workspace_root: "/srv/cybros-agents",
           queue_overrides_json: <<~JSON,
             {"critical":8,"default":4}
           JSON
@@ -40,6 +41,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
 
     runtime_setting = RuntimeSetting.find_by!(scope_key: "instance")
     assert_equal 16, runtime_setting.default_worker_concurrency
+    assert_equal "/srv/cybros-agents", runtime_setting.agent_workspace_root
     assert_equal({ "critical" => 8, "default" => 4 }, runtime_setting.queue_overrides)
     assert_equal({ "provider_limit_waits" => 5, "execution_capacity_waits" => 3 }, runtime_setting.alert_thresholds)
   end
@@ -49,6 +51,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
     runtime_setting =
       RuntimeSetting.create!(
         default_worker_concurrency: 12,
+        agent_workspace_root: "/srv/cybros-agents",
         queue_overrides: { "critical" => 6 },
         alert_thresholds: { "provider_limit_waits" => 5 },
       )
@@ -57,6 +60,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
       patch system_settings_runtime_settings_path, params: {
         runtime_setting: {
           default_worker_concurrency: "24",
+          agent_workspace_root: "/srv/custom-agents",
           queue_overrides_json: <<~JSON,
             {"critical":12}
           JSON
@@ -71,6 +75,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
 
     runtime_setting.reload
     assert_equal 24, runtime_setting.default_worker_concurrency
+    assert_equal "/srv/custom-agents", runtime_setting.agent_workspace_root
     assert_equal({ "critical" => 12 }, runtime_setting.queue_overrides)
     assert_equal({ "provider_limit_waits" => 9 }, runtime_setting.alert_thresholds)
   end
@@ -81,12 +86,14 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
     patch system_settings_runtime_settings_path, params: {
       runtime_setting: {
         default_worker_concurrency: "10",
+        agent_workspace_root: "",
         queue_overrides_json: "[]",
         alert_thresholds_json: "{\"provider_limit_waits\":5}",
       },
     }
 
     assert_response :unprocessable_entity
+    assert_includes response.body, "Agent workspace root can&#39;t be blank"
     assert_includes response.body, "Queue overrides must be a JSON object"
     assert_includes response.body, 'value="10"'
     assert_includes response.body, "[]"
@@ -99,6 +106,7 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
     patch system_settings_runtime_settings_path, params: {
       runtime_setting: {
         default_worker_concurrency: "abc",
+        agent_workspace_root: "/srv/cybros-agents",
         queue_overrides_json: "{\"critical\":8}",
         alert_thresholds_json: "{\"provider_limit_waits\":5}",
       },

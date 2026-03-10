@@ -1,10 +1,12 @@
 class RuntimeSetting < ApplicationRecord
   DEFAULT_WORKER_CONCURRENCY = 12
+  DEFAULT_AGENT_WORKSPACE_ROOT = Rails.root.to_s
 
   before_validation :apply_scope_key
 
   validates :scope_key, presence: true, inclusion: { in: %w[instance] }, uniqueness: true
   validates :default_worker_concurrency, presence: true, numericality: { greater_than: 0, only_integer: true }
+  validates :agent_workspace_root, presence: true
   validate :queue_overrides_must_be_object
   validate :alert_thresholds_must_be_object
   validate :singleton_row

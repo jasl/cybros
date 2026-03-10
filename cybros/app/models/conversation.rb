@@ -9,7 +9,7 @@ class Conversation < ApplicationRecord
 
   belongs_to :user
   belongs_to :automation, optional: true
-  belongs_to :agent_program, optional: true
+  belongs_to :agent_program
   belongs_to :default_execution_target, class_name: "ExecutionTarget", optional: true
 
   has_one :dag_graph,
@@ -47,6 +47,7 @@ class Conversation < ApplicationRecord
   after_create :set_root_conversation_to_self, if: :root?
 
   validates :permission_mode, presence: true, inclusion: { in: PERMISSION_MODES }
+  validates :agent_program, presence: true
 
   def dag_node_body_namespace
     Messages

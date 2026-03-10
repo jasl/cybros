@@ -1,7 +1,11 @@
 <%= form_with model: runtime_setting, scope: :runtime_setting, url: system_settings_runtime_settings_path, method: :patch, class: "space-y-4 max-w-3xl" do |f| %>
   <% if runtime_setting.errors.any? %>
     <div role="alert" class="alert alert-error">
-      <span><%= runtime_setting.errors.full_messages.first %></span>
+      <div class="space-y-1">
+        <% runtime_setting.errors.full_messages.each do |message| %>
+          <div><%= message %></div>
+        <% end %>
+      </div>
     </div>
   <% end %>
 
@@ -12,6 +16,14 @@
           <span class="label-text">Default worker concurrency</span>
         <% end %>
         <%= text_field_tag "runtime_setting[default_worker_concurrency]", @default_worker_concurrency_input, class: "input input-bordered w-full max-w-xs", inputmode: "numeric" %>
+      </div>
+
+      <div>
+        <%= label_tag "runtime_setting_agent_workspace_root", class: "label" do %>
+          <span class="label-text">Agent workspace root</span>
+        <% end %>
+        <%= text_field_tag "runtime_setting[agent_workspace_root]", @agent_workspace_root_input, class: "input input-bordered w-full font-mono text-sm", spellcheck: false %>
+        <p class="mt-2 text-xs opacity-70">Root directory for operator-owned custom agent source trees.</p>
       </div>
 
       <div>

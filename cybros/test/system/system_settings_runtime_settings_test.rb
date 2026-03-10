@@ -16,6 +16,7 @@ class SystemSettingsRuntimeSettingsSystemTest < ApplicationSystemTestCase
 
     assert_current_path edit_system_settings_runtime_settings_path
     fill_in "Default worker concurrency", with: "18"
+    fill_in "Agent workspace root", with: "/srv/cybros-agents"
     fill_in "Queue overrides", with: <<~JSON
       {"critical":9,"default":4}
     JSON
@@ -28,11 +29,13 @@ class SystemSettingsRuntimeSettingsSystemTest < ApplicationSystemTestCase
     assert_current_path system_settings_runtime_settings_path
     assert_text "Runtime settings updated"
     assert_text "18"
+    assert_text "/srv/cybros-agents"
     assert_text "\"critical\": 9"
     assert_text "\"provider_limit_waits\": 6"
 
     runtime_setting = RuntimeSetting.find_by!(scope_key: "instance")
     assert_equal 18, runtime_setting.default_worker_concurrency
+    assert_equal "/srv/cybros-agents", runtime_setting.agent_workspace_root
     assert_equal({ "critical" => 9, "default" => 4 }, runtime_setting.queue_overrides)
   end
 
@@ -43,6 +46,7 @@ class SystemSettingsRuntimeSettingsSystemTest < ApplicationSystemTestCase
     visit edit_system_settings_runtime_settings_path
 
     fill_in "Default worker concurrency", with: "14"
+    fill_in "Agent workspace root", with: ""
     fill_in "Queue overrides", with: "[]"
     fill_in "Alert thresholds", with: <<~JSON
       {"provider_limit_waits":6}
@@ -51,8 +55,10 @@ class SystemSettingsRuntimeSettingsSystemTest < ApplicationSystemTestCase
     click_button "Save runtime settings"
 
     assert_current_path edit_system_settings_runtime_settings_path
+    assert_text "Agent workspace root can't be blank"
     assert_text "Queue overrides must be a JSON object"
     assert_field "Default worker concurrency", with: "14"
+    assert_field "Agent workspace root", with: ""
     assert_field "Queue overrides", with: "[]"
   end
 end

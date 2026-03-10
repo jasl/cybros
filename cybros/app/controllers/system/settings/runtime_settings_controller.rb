@@ -36,23 +36,26 @@ module System
                 default_worker_concurrency: RuntimeSetting::DEFAULT_WORKER_CONCURRENCY,
                 queue_overrides: {},
                 alert_thresholds: {},
+                agent_workspace_root: RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT,
               )
         end
 
         def set_form_payloads
           @default_worker_concurrency_input = @runtime_setting.default_worker_concurrency.to_s
+          @agent_workspace_root_input = @runtime_setting.agent_workspace_root.to_s
           @queue_overrides_json = format_json_object(@runtime_setting.queue_overrides)
           @alert_thresholds_json = format_json_object(@runtime_setting.alert_thresholds)
         end
 
         def set_form_payloads_from_params
           @default_worker_concurrency_input = runtime_setting_params.fetch(:default_worker_concurrency, nil).to_s
+          @agent_workspace_root_input = runtime_setting_params.fetch(:agent_workspace_root, nil).to_s
           @queue_overrides_json = runtime_setting_params.fetch(:queue_overrides_json, nil).to_s
           @alert_thresholds_json = runtime_setting_params.fetch(:alert_thresholds_json, nil).to_s
         end
 
         def runtime_setting_attributes_and_errors_from_params
-          raw = runtime_setting_params.permit(:default_worker_concurrency, :queue_overrides_json, :alert_thresholds_json)
+          raw = runtime_setting_params.permit(:default_worker_concurrency, :agent_workspace_root, :queue_overrides_json, :alert_thresholds_json)
           attributes = {}
           errors = []
 
@@ -61,6 +64,13 @@ module System
             attributes["default_worker_concurrency"] = default_worker_concurrency
           else
             errors << [:default_worker_concurrency, "must be a positive integer"]
+          end
+
+          agent_workspace_root = raw[:agent_workspace_root].to_s.strip
+          if agent_workspace_root.present?
+            attributes["agent_workspace_root"] = agent_workspace_root
+          else
+            errors << [:agent_workspace_root, "can't be blank"]
           end
 
           attributes["queue_overrides"] = parse_json_object(raw[:queue_overrides_json], field: :queue_overrides, errors: errors)

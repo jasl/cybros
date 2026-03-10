@@ -26,11 +26,35 @@ class AgentProgramTest < ActiveSupport::TestCase
     program = build_program
     program.save!
 
-    create_conversation!.update!(agent_program: program)
+    conversation = Conversation.create!(user: create_user!, title: "Chat", agent_program: program)
 
     assert_raises(ActiveRecord::DeleteRestrictionError) do
       program.destroy!
     end
+  end
+
+  test "bundled programs require bundled_agent_key" do
+    program =
+      build_program(
+        source_kind: "bundled",
+        bundled_agent_key: "",
+        local_path: "agents/default",
+      )
+
+    refute_predicate program, :valid?
+    assert_includes program.errors[:bundled_agent_key], "can't be blank"
+  end
+
+  test "bundled programs must point at the canonical bundled source root" do
+    program =
+      build_program(
+        source_kind: "bundled",
+        bundled_agent_key: "default",
+        local_path: "agents/floating",
+      )
+
+    refute_predicate program, :valid?
+    assert_includes program.errors[:local_path], "must match the bundled source root for this key"
   end
 
   private
@@ -46,6 +70,7 @@ class AgentProgramTest < ActiveSupport::TestCase
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:v1",
+        source_kind: "custom",
       }.merge(attributes),
     )
   end
