@@ -138,6 +138,6 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
     assert_equal 0.5, policy.dig("oversize", "single_message", "hard_threshold_ratio")
     assert_equal "compress_input", policy.dig("oversize", "single_message", "soft_strategy")
     assert_equal "product_guard", policy.dig("oversize", "single_message", "hard_strategy")
-    assert_equal "compact_context", policy.dig("oversize", "multi_message", "strategy")
+    assert_nil policy.dig("oversize", "multi_message")
   end
 end

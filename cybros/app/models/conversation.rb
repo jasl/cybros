@@ -695,7 +695,6 @@ class Conversation < ApplicationRecord
         running_agent = latest_executing_agent_for_lane(graph: graph, lane: lane)
         sequence_parent = nil
         dependency_parent = nil
-        allow_context_compaction = running_agent.blank?
 
         if running_agent.present? && running_input_policy == "interrupt_new_turn"
           interrupted =
@@ -704,7 +703,6 @@ class Conversation < ApplicationRecord
               interrupted_output_policy: policy.fetch("interrupted_output_policy"),
             )
           sequence_parent = interrupted.fetch(:stable_parent)
-          allow_context_compaction = true
         else
           coalesced_turn =
             coalescible_turn_for_lane(
@@ -739,7 +737,6 @@ class Conversation < ApplicationRecord
               sequence_parent: sequence_parent,
               dependency_parent: dependency_parent,
               input_policy: policy,
-              allow_context_compaction: allow_context_compaction,
             )
           user_node = created.fetch(:user_node)
           guard_node = created[:guard_node]
@@ -1860,18 +1857,9 @@ class Conversation < ApplicationRecord
       claim_after_at:,
       sequence_parent:,
       dependency_parent: nil,
-      input_policy:,
-      allow_context_compaction:
+      input_policy:
     )
       input_guard = Conversation::InputGuard.classify(conversation: self, content: content, input_policy: input_policy)
-      context_compaction_plan =
-        if allow_context_compaction && input_guard.classification != :hard
-          Conversation::ContextCompactionPlan.plan(
-            conversation: self,
-            content: effective_context_input_for(input_guard: input_guard, content: content),
-            input_policy: input_policy,
-          )
-        end
 
       case input_guard.classification
       when :soft
@@ -1884,7 +1872,6 @@ class Conversation < ApplicationRecord
           sequence_parent: sequence_parent,
           dependency_parent: dependency_parent,
           input_guard: input_guard,
-          context_compaction_plan: context_compaction_plan,
         )
       when :hard
         create_hard_oversize_turn!(
@@ -1902,7 +1889,6 @@ class Conversation < ApplicationRecord
           claim_after_at: claim_after_at,
           sequence_parent: sequence_parent,
           dependency_parent: dependency_parent,
-          context_compaction_plan: context_compaction_plan,
         )
       end
     end
@@ -1919,15 +1905,6 @@ class Conversation < ApplicationRecord
     )
       mutations = DAG::Mutations.new(graph: graph, turn_id: user_node.turn_id)
       input_guard = Conversation::InputGuard.classify(conversation: self, content: content, input_policy: input_policy)
-      context_input = [effective_context_input_for(input_guard: input_guard, content: content), additional_context_text.presence].compact.join("\n\n")
-      context_compaction_plan =
-        if input_guard.classification != :hard
-          Conversation::ContextCompactionPlan.plan(
-            conversation: self,
-            content: context_input,
-            input_policy: input_policy,
-          )
-        end
 
       case input_guard.classification
       when :soft
@@ -1950,18 +1927,9 @@ class Conversation < ApplicationRecord
               "generated_by" => "soft_oversize",
               "estimated_tokens" => input_guard.estimated_tokens,
             },
-          )
+        )
         mutations.create_edge(from_node: base_node, to_node: guard_node, edge_type: DAG::Edge::SEQUENCE)
         user_node.request_exclude_from_context!(at: Time.current)
-
-        compact_task =
-          maybe_create_compact_context_task!(
-            graph: graph,
-            lane: lane,
-            mutations: mutations,
-            from_node: guard_node,
-            context_compaction_plan: context_compaction_plan,
-          )
         agent_node =
           mutations.create_node(
             node_type: Messages::AgentMessage.node_type_key,
@@ -1969,9 +1937,9 @@ class Conversation < ApplicationRecord
             lane_id: lane.id,
             metadata: agent_node_metadata_for(model_ref: model_ref),
           )
-        mutations.create_edge(from_node: compact_task || guard_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+        mutations.create_edge(from_node: guard_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
-        { guard_node: guard_node, compact_task: compact_task, agent_node: agent_node }
+        { guard_node: guard_node, compact_task: nil, agent_node: agent_node }
       when :hard
         product_node =
           mutations.create_node(
@@ -1987,14 +1955,6 @@ class Conversation < ApplicationRecord
 
         { agent_node: nil, product_node: product_node }
       else
-        compact_task =
-          maybe_create_compact_context_task!(
-            graph: graph,
-            lane: lane,
-            mutations: mutations,
-            from_node: base_node,
-            context_compaction_plan: context_compaction_plan,
-          )
         agent_node =
           mutations.create_node(
             node_type: Messages::AgentMessage.node_type_key,
@@ -2002,9 +1962,9 @@ class Conversation < ApplicationRecord
             lane_id: lane.id,
             metadata: agent_node_metadata_for(model_ref: model_ref),
           )
-        mutations.create_edge(from_node: compact_task || base_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+        mutations.create_edge(from_node: base_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
-        { compact_task: compact_task, agent_node: agent_node }
+        { compact_task: nil, agent_node: agent_node }
       end
     end
 
@@ -2015,8 +1975,7 @@ class Conversation < ApplicationRecord
       model_ref:,
       claim_after_at:,
       sequence_parent:,
-      dependency_parent: nil,
-      context_compaction_plan: nil
+      dependency_parent: nil
     )
       turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
       mutations = DAG::Mutations.new(graph: graph, turn_id: turn_id)
@@ -2034,15 +1993,6 @@ class Conversation < ApplicationRecord
         mutations.create_edge(from_node: sequence_parent, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
       end
 
-      compact_task =
-        maybe_create_compact_context_task!(
-          graph: graph,
-          lane: lane,
-          mutations: mutations,
-          from_node: user_node,
-          context_compaction_plan: context_compaction_plan,
-        )
-
       agent_node =
         mutations.create_node(
           node_type: Messages::AgentMessage.node_type_key,
@@ -2052,7 +2002,7 @@ class Conversation < ApplicationRecord
           claim_after_at: claim_after_at,
         )
 
-      mutations.create_edge(from_node: compact_task || user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+      mutations.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
       if dependency_parent && !dependency_parent.terminal?
         mutations.create_edge(
@@ -2063,7 +2013,7 @@ class Conversation < ApplicationRecord
         )
       end
 
-      { user_node: user_node, compact_task: compact_task, agent_node: agent_node }
+      { user_node: user_node, compact_task: nil, agent_node: agent_node }
     end
 
     def create_soft_oversize_turn!(
@@ -2074,8 +2024,7 @@ class Conversation < ApplicationRecord
       claim_after_at:,
       sequence_parent:,
       dependency_parent:,
-      input_guard:,
-      context_compaction_plan: nil
+      input_guard:
     )
       turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
       mutations = DAG::Mutations.new(graph: graph, turn_id: turn_id)
@@ -2115,15 +2064,6 @@ class Conversation < ApplicationRecord
       end
       mutations.create_edge(from_node: user_node, to_node: compress_task, edge_type: DAG::Edge::SEQUENCE)
 
-      compact_task =
-        maybe_create_compact_context_task!(
-          graph: graph,
-          lane: lane,
-          mutations: mutations,
-          from_node: compress_task,
-          context_compaction_plan: context_compaction_plan,
-        )
-
       agent_node =
         mutations.create_node(
           node_type: Messages::AgentMessage.node_type_key,
@@ -2133,7 +2073,7 @@ class Conversation < ApplicationRecord
           claim_after_at: claim_after_at,
         )
 
-      mutations.create_edge(from_node: compact_task || compress_task, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+      mutations.create_edge(from_node: compress_task, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
 
       if dependency_parent && !dependency_parent.terminal?
         mutations.create_edge(
@@ -2146,7 +2086,7 @@ class Conversation < ApplicationRecord
 
       user_node.request_exclude_from_context!(at: Time.current)
 
-      { user_node: user_node, guard_node: compress_task, compact_task: compact_task, agent_node: agent_node }
+      { user_node: user_node, guard_node: compress_task, compact_task: nil, agent_node: agent_node }
     end
 
     def create_hard_oversize_turn!(graph:, lane:, content:, sequence_parent:)
@@ -2179,12 +2119,6 @@ class Conversation < ApplicationRecord
       mutations.create_edge(from_node: user_node, to_node: product_node, edge_type: DAG::Edge::SEQUENCE)
 
       { user_node: user_node, agent_node: nil, product_node: product_node }
-    end
-
-    def effective_context_input_for(input_guard:, content:)
-      return input_guard.compressed_content.to_s if input_guard.classification == :soft
-
-      content
     end
 
     def steer_fallback_input_policy_override(input_policy_override:, steer_policy:)
@@ -2264,56 +2198,6 @@ class Conversation < ApplicationRecord
         )
       mutations.create_edge(from_node: user_node, to_node: node, edge_type: DAG::Edge::SEQUENCE)
       node
-    end
-
-    def maybe_create_compact_context_task!(graph:, lane:, mutations:, from_node:, context_compaction_plan:)
-      return nil unless context_compaction_plan&.required?
-
-      apply_context_compaction!(
-        graph: graph,
-        lane: lane,
-        turn_ids: context_compaction_plan.compacted_turn_ids,
-      )
-
-      compact_task =
-        mutations.create_node(
-          node_type: Messages::Task.node_type_key,
-          state: DAG::Node::FINISHED,
-          lane_id: lane.id,
-          body_input: {
-            "name" => "compact_context",
-            "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
-          },
-          body_output: {
-            "result" => AgentCore::Resources::Tools::ToolResult.success(
-              text: context_compaction_plan.summary_text,
-              metadata: {
-                "generated_by" => "compact_context",
-                "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
-              },
-            ).to_h,
-          },
-          metadata: {
-            "generated_by" => "context_overflow",
-            "compacted_turn_ids" => context_compaction_plan.compacted_turn_ids,
-            "estimated_tokens" => context_compaction_plan.estimated_tokens,
-            "effective_prompt_budget_tokens" => context_compaction_plan.effective_prompt_budget_tokens,
-          },
-        )
-
-      mutations.create_edge(from_node: from_node, to_node: compact_task, edge_type: DAG::Edge::SEQUENCE)
-      compact_task
-    end
-
-    def apply_context_compaction!(graph:, lane:, turn_ids:)
-      ids = Array(turn_ids).map(&:to_s).select(&:present?).uniq
-      return if ids.empty?
-
-      nodes = graph.nodes.active.where(lane_id: lane.id, turn_id: ids).to_a
-      return if nodes.empty?
-
-      at = Time.current
-      lane.send(:apply_compact_context_visibility!, keep_nodes: [], exclude_nodes: nodes, at: at, now: at)
     end
 
     def apply_interrupted_output_policy!(node:, interrupted_output_policy:)

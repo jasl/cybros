@@ -76,13 +76,6 @@ class Conversation::ContextCompactionPlanTest < ActiveSupport::TestCase
       Conversation::ContextCompactionPlan.new(
         conversation: create_conversation!,
         content: "follow up",
-        input_policy: {
-          "oversize" => {
-            "multi_message" => {
-              "strategy" => "compact_context",
-            },
-          },
-        },
         runtime_surface_resolution: runtime_surface_resolution,
       )
     end

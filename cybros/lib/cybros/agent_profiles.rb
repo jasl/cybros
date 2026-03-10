@@ -19,9 +19,6 @@ module Cybros
           "soft_strategy" => "compress_input",
           "hard_strategy" => "product_guard",
         },
-        "multi_message" => {
-          "strategy" => "compact_context",
-        },
       },
     }.freeze
 

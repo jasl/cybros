@@ -12,19 +12,17 @@ class Conversation::ContextCompactionPlan
       end
     end
 
-  def self.plan(conversation:, content:, input_policy:, runtime_surface_resolution: nil)
+  def self.plan(conversation:, content:, runtime_surface_resolution: nil)
     new(
       conversation: conversation,
       content: content,
-      input_policy: input_policy,
       runtime_surface_resolution: runtime_surface_resolution,
     ).plan
   end
 
-  def initialize(conversation:, content:, input_policy:, runtime_surface_resolution: nil)
+  def initialize(conversation:, content:, runtime_surface_resolution: nil)
     @conversation = conversation
     @content = content.to_s
-    @input_policy = input_policy.is_a?(Hash) ? input_policy : {}
     @runtime_surface_resolution = runtime_surface_resolution
   end
 
@@ -32,7 +30,6 @@ class Conversation::ContextCompactionPlan
     budget = effective_prompt_budget_tokens
     estimated = estimated_tokens_for(context_nodes: transcript_nodes + [synthetic_user_node])
 
-    return build_result(required: false, estimated: estimated, budget: budget) unless strategy == "compact_context"
     return build_result(required: false, estimated: estimated, budget: budget) if estimated <= budget
 
     compacted_turn_ids = compacted_turn_ids_for(budget: budget)
@@ -67,10 +64,6 @@ class Conversation::ContextCompactionPlan
         compacted_turn_ids: compacted_turn_ids,
         summary_text: summary_text,
       )
-    end
-
-    def strategy
-      @input_policy.dig("oversize", "multi_message", "strategy").to_s.presence || "compact_context"
     end
 
     def transcript_nodes
@@ -183,7 +176,7 @@ class Conversation::ContextCompactionPlan
           limit: budget,
         },
         capabilities: {
-          strategy: strategy,
+          strategy: "compact_context",
         },
         helpers: nil,
       )
