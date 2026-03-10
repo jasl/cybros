@@ -161,6 +161,8 @@ module RunDrafts
       def apply_kv_ops!
         return if conversation.blank?
 
+        lane = draft.bound_lane || conversation.chat_lane
+
         Array(draft.staged_kv_ops).each do |operation|
           next unless operation.is_a?(Hash)
 
@@ -170,13 +172,13 @@ module RunDrafts
 
           case op
           when "set"
-            entry = ::ConversationKVEntry.find_or_initialize_by(conversation: conversation, key: key)
+            entry = ::LaneKVEntry.find_or_initialize_by(lane: lane, key: key)
             entry.value = operation["value"]
             entry.written_by_type = draft.class.name
             entry.written_by_id = draft.id
             entry.save!
           when "delete"
-            ::ConversationKVEntry.where(conversation: conversation, key: key).delete_all
+            ::LaneKVEntry.where(lane: lane, key: key).delete_all
           end
         end
       end

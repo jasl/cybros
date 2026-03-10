@@ -55,9 +55,9 @@ class RPCContractTest < Minitest::Test
       [
         "conversation.settings.update",
         "conversation.config.update",
-        "conversation.kv.set",
-        "conversation.kv.set",
-        "conversation.kv.set",
+        "lane.kv.set",
+        "lane.kv.set",
+        "lane.kv.set",
         "execution_target.list",
         "execution_target.propose",
       ],
@@ -65,7 +65,7 @@ class RPCContractTest < Minitest::Test
     )
     assert_equal(
       %w[fixture-kv fixture-kv-replay fixture-kv-replay],
-      callback.received("conversation.kv.set").map { |call| call.dig("params", "operation_id") }
+      callback.received("lane.kv.set").map { |call| call.dig("params", "operation_id") }
     )
   ensure
     host&.shutdown

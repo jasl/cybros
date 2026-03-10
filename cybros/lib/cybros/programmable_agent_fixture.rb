@@ -144,7 +144,7 @@ module Cybros
         )
         callback_rpc(
           callback_session,
-          "conversation.kv.set",
+          "lane.kv.set",
           {
             "operation_id" => "fixture-kv",
             "key" => "shared.fixture.plan",
@@ -157,7 +157,7 @@ module Cybros
         2.times do
           callback_rpc(
             callback_session,
-            "conversation.kv.set",
+            "lane.kv.set",
             {
               "operation_id" => "fixture-kv-replay",
               "key" => "shared.fixture.replay",

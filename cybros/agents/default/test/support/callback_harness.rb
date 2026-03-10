@@ -94,11 +94,11 @@ module TestSupport
       case method_name
       when "conversation.settings.update", "conversation.config.update"
         { "status" => "staged", "operation_id" => params["operation_id"] }
-      when "conversation.kv.set", "conversation.kv.delete"
+      when "lane.kv.set", "lane.kv.delete"
         { "status" => "staged", "operation_id" => params["operation_id"] }
-      when "conversation.kv.get"
+      when "lane.kv.get"
         { "value" => nil }
-      when "conversation.kv.list"
+      when "lane.kv.list"
         { "entries" => [] }
       when "execution_target.list"
         { "targets" => deep_copy(targets) }
@@ -156,7 +156,7 @@ module TestSupport
       request["Content-Type"] = "application/json"
       request["Authorization"] = "Bearer #{required_bearer}"
       request.body = JSON.generate({ "jsonrpc" => "2.0", "id" => SecureRandom.uuid,
-                                     "method" => "conversation.kv.list", "params" => {} })
+                                     "method" => "lane.kv.list", "params" => {} })
 
       response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
       response.is_a?(Net::HTTPSuccess)

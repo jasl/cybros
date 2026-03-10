@@ -33,7 +33,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "finalization commits staged settings config and kv mutations into conversation state" do
+  test "finalization commits staged settings config and lane kv mutations into conversation state" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
@@ -59,19 +59,19 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     conversation.reload
     assert_equal "concise", conversation.public_settings.fetch("tone")
     assert_equal({ "mode" => "review" }, conversation.selected_agent_config)
-    assert_equal({ "status" => "planned" }, ConversationKVEntry.find_by!(conversation: conversation, key: "shared.stage").value)
+    assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: conversation.chat_lane, key: "shared.stage").value)
     assert_equal run.id, draft.reload.materialized_conversation_run_id
     assert_equal "finalized", draft.status
   ensure
     server&.shutdown
   end
 
-  test "finalization normalizes staged kv keys before applying updates" do
+  test "finalization normalizes staged lane kv keys before applying updates" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
-    ConversationKVEntry.create!(
-      conversation: conversation,
+    LaneKVEntry.create!(
+      lane: conversation.chat_lane,
       key: "shared.stage",
       value: { "status" => "old" },
       written_by_type: "Seed",
@@ -94,8 +94,55 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
     RunDrafts::FinalizeService.finalize!(draft: draft)
 
-    assert_equal 1, ConversationKVEntry.where(conversation: conversation, key: "shared.stage").count
-    assert_equal({ "status" => "planned" }, ConversationKVEntry.find_by!(conversation: conversation, key: "shared.stage").value)
+    assert_equal 1, LaneKVEntry.where(lane: conversation.chat_lane, key: "shared.stage").count
+    assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: conversation.chat_lane, key: "shared.stage").value)
+  ensure
+    server&.shutdown
+  end
+
+  test "finalization applies staged lane kv mutations to the active conversation lane only" do
+    server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server:)
+    root_conversation = runtime.fetch(:conversation)
+    graph = root_conversation.root_graph
+
+    fork_agent = nil
+    graph.mutate! do |m|
+      fork_agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+        )
+    end
+
+    branch =
+      root_conversation.create_child!(
+        from_node_id: fork_agent.id,
+        kind: "branch",
+        title: "Branch",
+        user_content: "What if?",
+      )
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: branch,
+        initiated_by_user: branch.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Ship it",
+        },
+      )
+    draft.update!(
+      staged_kv_ops: [{ "op" => "set", "key" => "branch.stage", "value" => { "status" => "planned" } }],
+    )
+
+    RunDrafts::FinalizeService.finalize!(draft: draft)
+
+    assert_nil LaneKVEntry.find_by(lane: root_conversation.chat_lane, key: "branch.stage")
+    assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: branch.chat_lane, key: "branch.stage").value)
   ensure
     server&.shutdown
   end
@@ -285,7 +332,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
             )
             fixture_callback!(
               callback: callback,
-              method_name: "conversation.kv.set",
+              method_name: "lane.kv.set",
               params: {
                 "operation_id" => "op-kv",
                 "key" => "shared.stage",
@@ -319,14 +366,14 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     )
     assert_equal({}, conversation.reload.public_settings)
     assert_equal({}, conversation.selected_agent_config)
-    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+    assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
 
     run = RunDrafts::FinalizeService.finalize!(draft: draft)
 
     conversation.reload
     assert_equal "concise", conversation.public_settings.fetch("tone")
     assert_equal({ "mode" => "review" }, conversation.selected_agent_config)
-    assert_equal({ "status" => "planned" }, ConversationKVEntry.find_by!(conversation: conversation, key: "shared.stage").value)
+    assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: conversation.chat_lane, key: "shared.stage").value)
     assert_equal run.id, draft.reload.materialized_conversation_run_id
   ensure
     ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
@@ -438,7 +485,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
             2.times do
               fixture_callback!(
                 callback: callback,
-                method_name: "conversation.kv.set",
+                method_name: "lane.kv.set",
                 params: {
                   "operation_id" => "op-kv-confirm",
                   "key" => "shared.stage",
@@ -597,7 +644,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal([], draft.staged_kv_ops)
     assert_equal({}, conversation.reload.public_settings)
     assert_equal({}, conversation.selected_agent_config)
-    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+    assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
   ensure
     server&.shutdown
   end
@@ -636,7 +683,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal([], draft.staged_kv_ops)
     assert_equal({}, conversation.reload.public_settings)
     assert_equal({}, conversation.selected_agent_config)
-    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+    assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
 
     replacement.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
     pinned_deployment.update!(status: "active", health_status: "healthy", deactivated_at: nil)

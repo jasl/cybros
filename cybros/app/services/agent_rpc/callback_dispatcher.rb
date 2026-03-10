@@ -3,15 +3,15 @@ module AgentRPC
     PUBLIC_STATE_MUTATION_METHODS = %w[
       conversation.settings.update
       conversation.config.update
-      conversation.kv.set
-      conversation.kv.delete
+      lane.kv.set
+      lane.kv.delete
     ].freeze
 
     MUTATING_METHODS = %w[
       conversation.settings.update
       conversation.config.update
-      conversation.kv.set
-      conversation.kv.delete
+      lane.kv.set
+      lane.kv.delete
       execution_target.propose
     ].freeze
 
@@ -51,22 +51,24 @@ module AgentRPC
             AgentRPC::KernelServices::ConversationConfig.update!(draft: draft, patch: payload.fetch("patch", {}))
           end
         end
-      when "conversation.kv.get"
-        AgentRPC::KernelServices::ConversationKV.get(draft: draft, key: payload.fetch("key"))
-      when "conversation.kv.set"
+      when "lane.kv.get"
+        AgentRPC::KernelServices::LaneKV.get(draft: draft, key: payload.fetch("key"))
+      when "lane.kv.set"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRPC::KernelServices::ConversationKV.set!(draft: draft, key: payload.fetch("key"), value: payload["value"])
+            AgentRPC::KernelServices::LaneKV.set!(draft: draft, key: payload.fetch("key"), value: payload["value"])
           end
         end
-      when "conversation.kv.delete"
+      when "lane.kv.delete"
         apply_mutation! do
           apply_public_state_mutation! do
-            AgentRPC::KernelServices::ConversationKV.delete!(draft: draft, key: payload.fetch("key"))
+            AgentRPC::KernelServices::LaneKV.delete!(draft: draft, key: payload.fetch("key"))
           end
         end
-      when "conversation.kv.list"
-        AgentRPC::KernelServices::ConversationKV.list(draft: draft, prefix: payload["prefix"])
+      when "lane.kv.list"
+        AgentRPC::KernelServices::LaneKV.list(draft: draft, prefix: payload["prefix"])
+      when "lane.kv.snapshot"
+        AgentRPC::KernelServices::LaneKV.snapshot(draft: draft)
       when "execution_target.list"
         AgentRPC::KernelServices::ExecutionTargets.list(entrypoint: draft.conversation, draft: draft)
       when "execution_target.get"

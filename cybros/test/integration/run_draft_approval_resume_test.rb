@@ -253,7 +253,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     assert_nil draft.materialized_conversation_run_id
     assert_equal({}, conversation.reload.public_settings)
     assert_equal({}, conversation.selected_agent_config)
-    assert_nil ConversationKVEntry.find_by(conversation: conversation, key: "shared.stage")
+    assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
 
     terminal_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft.reload) }
 

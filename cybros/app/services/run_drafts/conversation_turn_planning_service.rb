@@ -7,10 +7,11 @@ module RunDrafts
       conversation.settings.update
       conversation.config.get
       conversation.config.update
-      conversation.kv.get
-      conversation.kv.set
-      conversation.kv.delete
-      conversation.kv.list
+      lane.kv.get
+      lane.kv.set
+      lane.kv.delete
+      lane.kv.list
+      lane.kv.snapshot
       execution_target.list
       execution_target.get
       execution_target.propose

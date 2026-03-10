@@ -4,8 +4,8 @@ class RuntimeGovernance::PublicStateMutationPolicyTest < ActiveSupport::TestCase
   MUTATION_METHODS = %w[
     conversation.settings.update
     conversation.config.update
-    conversation.kv.set
-    conversation.kv.delete
+    lane.kv.set
+    lane.kv.delete
   ].freeze
 
   test "conservative mode confirms all staged public-state mutation methods" do

@@ -49,7 +49,7 @@ module Cybros
                          { "operation_id" => "fixture-config", "patch" => { "mode" => "review" } })
             callback_rpc(
               callback_session,
-              "conversation.kv.set",
+              "lane.kv.set",
               { "operation_id" => "fixture-kv", "key" => "shared.fixture.plan", "value" => { "status" => "planned" } }
             )
           end
@@ -58,7 +58,7 @@ module Cybros
             2.times do
               callback_rpc(
                 callback_session,
-                "conversation.kv.set",
+                "lane.kv.set",
                 { "operation_id" => "fixture-kv-replay", "key" => "shared.fixture.replay",
                   "value" => { "status" => "deduped" } }
               )

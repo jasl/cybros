@@ -3,8 +3,8 @@ module RuntimeGovernance
     SUPPORTED_METHODS = %w[
       conversation.settings.update
       conversation.config.update
-      conversation.kv.set
-      conversation.kv.delete
+      lane.kv.set
+      lane.kv.delete
     ].freeze
 
     def self.evaluate(method_name:, permission_mode:)

@@ -7,7 +7,7 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
     AgentRPCOperationReceipt.create!(
       agent_rpc_invocation: invocation,
       operation_id: "operation-123",
-      method: "conversation.kv.set",
+      method: "lane.kv.set",
       payload_hash: "sha256:payload",
       status: "applied",
       response_snapshot: { "ok" => true },
@@ -17,7 +17,7 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
       AgentRPCOperationReceipt.new(
         agent_rpc_invocation: invocation,
         operation_id: "operation-123",
-        method: "conversation.kv.set",
+        method: "lane.kv.set",
         payload_hash: "sha256:payload",
         status: "applied",
         response_snapshot: { "ok" => true },

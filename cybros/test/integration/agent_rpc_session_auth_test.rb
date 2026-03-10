@@ -64,7 +64,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
       assert_raises(AgentCore::ValidationError) do
         AgentRPC::SessionAuthorizer.authorize_callback!(
           bearer: callback_bearer,
-          method_name: "conversation.kv.delete",
+          method_name: "lane.kv.delete",
           scope_type: session.scope_type,
           scope_id: session.scope_id,
         )

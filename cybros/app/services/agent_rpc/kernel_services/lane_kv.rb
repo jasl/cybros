@@ -1,6 +1,6 @@
 module AgentRPC
   module KernelServices
-    class ConversationKV
+    class LaneKV
       def self.get(draft:, key:)
         new(draft: draft).get(key: key)
       end
@@ -17,12 +17,16 @@ module AgentRPC
         new(draft: draft).list(prefix: prefix)
       end
 
+      def self.snapshot(draft:, prefix: nil)
+        new(draft: draft).snapshot(prefix: prefix)
+      end
+
       def initialize(draft:)
         @draft = draft
       end
 
       def get(key:)
-        entry = conversation.conversation_kv_entries.find_by(key: normalize_key(key))
+        entry = lane.lane_kv_entries.find_by(key: normalize_key(key))
         { "entry" => serialize_entry(entry) }
       end
 
@@ -39,11 +43,22 @@ module AgentRPC
       end
 
       def list(prefix: nil)
-        entries = conversation.conversation_kv_entries.order(:key)
+        entries = lane.lane_kv_entries.order(:key)
         normalized_prefix = prefix.to_s
         entries = entries.where("key LIKE ?", "#{normalized_prefix}%") if normalized_prefix.present?
 
         { "entries" => entries.map { |entry| serialize_entry(entry) } }
+      end
+
+      def snapshot(prefix: nil)
+        entries = matching_entries(prefix: prefix)
+
+        {
+          "snapshot" =>
+            entries.each_with_object({}) do |entry, acc|
+              acc[entry.key] = normalize_value(entry.value)
+            end,
+        }
       end
 
       private
@@ -57,8 +72,15 @@ module AgentRPC
           end
         end
 
-        def conversation
-          draft.bound_conversation
+        def lane
+          draft.bound_lane || draft.bound_conversation&.chat_lane
+        end
+
+        def matching_entries(prefix:)
+          entries = lane.lane_kv_entries.order(:key)
+          normalized_prefix = prefix.to_s
+          entries = entries.where("key LIKE ?", "#{normalized_prefix}%") if normalized_prefix.present?
+          entries
         end
 
         def normalize_key(key)
