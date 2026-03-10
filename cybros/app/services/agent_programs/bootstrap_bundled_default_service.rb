@@ -136,11 +136,24 @@ module AgentPrograms
 
       def ensure_runtime_setting!
         runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
+        env_workspace_root = ENV.fetch("CYBROS_AGENT_WORKSPACE_ROOT", "").to_s.strip
+        current_workspace_root = runtime_setting.agent_workspace_root.to_s.strip
+        desired_workspace_root =
+          if env_workspace_root.present? && (current_workspace_root.blank? || current_workspace_root == Rails.root.to_s)
+            env_workspace_root
+          elsif current_workspace_root.present?
+            current_workspace_root
+          elsif env_workspace_root.present?
+            env_workspace_root
+          else
+            RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT
+          end
+
         runtime_setting.assign_attributes(
           default_worker_concurrency: runtime_setting.default_worker_concurrency.presence || RuntimeSetting::DEFAULT_WORKER_CONCURRENCY,
           queue_overrides: runtime_setting.queue_overrides.presence || {},
           alert_thresholds: runtime_setting.alert_thresholds.presence || {},
-          agent_workspace_root: runtime_setting.agent_workspace_root.presence || RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT,
+          agent_workspace_root: desired_workspace_root,
         )
         runtime_setting.save!
         runtime_setting
