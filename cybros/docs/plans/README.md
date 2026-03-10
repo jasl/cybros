@@ -15,6 +15,7 @@ Automation note:
 ## Active Design Sources
 
 - `2026-03-09-programmable-agent-preflight-design.md`
+- `2026-03-10-bundled-default-external-agent-design.md`
 - `2026-03-08-phase-1-schema-cut-list.md`
 - `2026-03-08-runtime-governance-design.md`
 - `2026-03-09-execution-target-discovery-design.md`
