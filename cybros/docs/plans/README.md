@@ -7,10 +7,10 @@ Product docs under `docs/product/` are normative. Plans may refine implementatio
 Automation note:
 
 - the 2026-03-09 automation-runtime docs are historical
-- current automation source of truth is:
-  - `2026-03-10-automation-conversation-convergence-design.md`
-  - `2026-03-10-automation-conversation-convergence.md`
-- use those 2026-03-10 docs for audit, implementation, and code-review work
+- normative automation semantics live in `docs/product/`
+- `2026-03-10-automation-conversation-convergence-design.md` and `2026-03-10-automation-conversation-convergence.md` remain the active convergence rationale and implementation record
+- use those 2026-03-10 docs alongside the product docs for audit, implementation, and code-review work
+- any sections explicitly marked as pre-cut code, conflict inventory, or historical red-phase expectations are trace only and must not be treated as the current runtime contract
 
 ## Active Design Sources
 

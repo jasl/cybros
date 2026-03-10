@@ -13,9 +13,11 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(user: owner, endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+    execution_conversation = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    clear_enqueued_jobs
 
-    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
-      dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+      Automations::ConversationOrchestrator.start!(conversation: execution_conversation.reload)
     end
 
     sign_in_as!(email: owner.identity.email)

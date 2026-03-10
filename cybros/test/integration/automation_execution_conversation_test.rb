@@ -1,6 +1,6 @@
 require "test_helper"
 
-class AutomationConversationBindingTest < ActiveSupport::TestCase
+class AutomationExecutionConversationTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   setup do
@@ -129,11 +129,15 @@ class AutomationConversationBindingTest < ActiveSupport::TestCase
 
     draft = conversation.run_drafts.order(:created_at, :id).last
     agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
+    expected_target_id = draft.proposed_execution_target_id
+    expected_capacity_target_id = draft.runtime_governors.dig("execution_capacity", "execution_target_id")
     draft.update!(expires_at: 1.minute.ago)
 
     RunDrafts::ApprovalExpiryService.expire!(draft: draft)
 
     assert_equal "expired", draft.reload.status
+    assert_equal expected_target_id, draft.proposed_execution_target_id
+    assert_equal expected_capacity_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
     assert_equal "canceled", conversation.reload.metadata.dig("automation_execution", "status")
     assert_equal DAG::Node::REJECTED, agent_node.reload.state
     assert_equal "approval_expired", agent_node.metadata.fetch("reason")

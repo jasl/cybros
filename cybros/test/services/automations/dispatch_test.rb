@@ -74,6 +74,25 @@ class Automations::DispatchTest < ActiveSupport::TestCase
     end
   end
 
+  test "dispatch requires a non-blank dispatch key" do
+    automation = create_automation!
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Automations::Dispatch.call!(
+          automation: automation,
+          scheduled_for: scheduled_for,
+          dispatch_key: "   ",
+          trigger_snapshot: { "kind" => "schedule", "scheduled_for" => scheduled_for.iso8601 },
+        )
+      end
+
+    assert_equal "cybros.automations.dispatch_key_missing", error.code
+    assert_nil Conversation.find_by(automation: automation)
+    assert_no_enqueued_jobs
+  end
+
   test "dispatch stays retryable when execute job enqueue fails after run creation" do
     automation = create_automation!
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)

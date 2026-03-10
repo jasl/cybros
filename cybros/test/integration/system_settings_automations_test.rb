@@ -27,9 +27,11 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
     scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+    execution_conversation = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    clear_enqueued_jobs
 
-    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
-      dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+      Automations::ConversationOrchestrator.start!(conversation: execution_conversation.reload)
     end
 
     get system_settings_automations_path
@@ -51,7 +53,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "UTC"
     assert_includes response.body, scheduled_for.iso8601
     assert_includes response.body, "completed"
-    assert_includes response.body, Conversation.find_by!(automation: runtime.fetch(:automation)).id
+    assert_includes response.body, execution_conversation.id
     refute_includes response.body, "Conversation binding"
   ensure
     server&.shutdown

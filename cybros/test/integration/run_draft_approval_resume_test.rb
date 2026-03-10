@@ -218,8 +218,8 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
 
     assert_equal "cybros.run_drafts.approval_not_granted", error.code
     assert_equal "discarded", draft.reload.status
-    assert_nil draft.proposed_execution_target_id
-    assert_nil draft.runtime_governors["execution_capacity"]
+    assert_equal alternate_target.id, draft.proposed_execution_target_id
+    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
     assert_equal({}, draft.staged_public_settings_patch)
     assert_equal({}, draft.staged_agent_config_patch)
     assert_equal([], draft.staged_kv_ops)

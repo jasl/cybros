@@ -1,6 +1,6 @@
 require "test_helper"
 
-class AutomationRunDraftFlowTest < ActiveSupport::TestCase
+class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
   setup do
@@ -54,6 +54,34 @@ class AutomationRunDraftFlowTest < ActiveSupport::TestCase
     assert_equal scheduled_for.iso8601, execution_conversation.metadata.dig("schedule", "scheduled_for")
     assert_equal "running", execution_conversation.metadata.dig("automation_execution", "status")
     assert_equal conversation_run.id, execution_conversation.metadata.dig("automation_execution", "conversation_run_id")
+  ensure
+    server&.shutdown
+  end
+
+  test "automation execution uses the prompt snapshotted at dispatch even if the definition changes before execution" do
+    seen_user_inputs = []
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |params, base_result, _identity|
+            seen_user_inputs << params["user_input"]
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_automation_runtime!(server:)
+    automation = runtime.fetch(:automation)
+    original_prompt = automation.task_payload.fetch("prompt")
+    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+
+    execution_conversation = dispatch_automation!(automation: automation, scheduled_for: scheduled_for)
+    automation.update!(task_payload: automation.task_payload.merge("prompt" => "Mutated prompt after dispatch"))
+
+    perform_enqueued_jobs only: Automations::ExecuteConversationJob
+
+    assert_equal [original_prompt], seen_user_inputs
+    assert_equal original_prompt, execution_conversation.reload.metadata.dig("trigger", "user_input")
+    assert_equal original_prompt, execution_conversation.run_drafts.order(:created_at, :id).last.trigger_snapshot.fetch("user_input")
   ensure
     server&.shutdown
   end

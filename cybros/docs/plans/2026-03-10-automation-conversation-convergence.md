@@ -8,6 +8,8 @@
 
 **Tech Stack:** Ruby on Rails, PostgreSQL, ActiveJob, DAG runtime, product docs under `docs/product/`
 
+> Status note (2026-03-10): this convergence has landed. This document now serves as the implementation record and audit checklist. Any line that says "Historical red-phase expectation" describes the original failing-test phase before the cut was applied.
+
 ---
 
 ### Task 1: Rewrite Schema Ownership Around Conversation Execution Instances
@@ -37,7 +39,7 @@ Cover:
 
 Run: `bin/rails test test/models/automation_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb`
 
-Expected: FAIL on removed/changed associations and new required conversation lineage.
+Historical red-phase expectation: FAIL on removed/changed associations and new required conversation lineage.
 
 **Step 3: Write the minimal schema/model implementation**
 
@@ -89,7 +91,7 @@ Cover:
 
 Run: `bin/rails test test/services/automations/dispatch_test.rb test/jobs/automations/dispatch_due_job_test.rb test/integration/automation_scheduler_flow_test.rb`
 
-Expected: FAIL because dispatch still creates `AutomationRun` and the job still claims `automation_run_id`.
+Historical red-phase expectation: FAIL because dispatch still creates `AutomationRun` and the job still claims `automation_run_id`.
 
 **Step 3: Write the minimal dispatch implementation**
 
@@ -126,7 +128,7 @@ git commit -m "refactor: dispatch automations into execution conversations"
 - Modify: `app/services/run_drafts/approval_expiry_service.rb`
 - Modify: `app/models/conversation.rb`
 - Modify: `app/models/conversation_run_tracker.rb`
-- Test: `test/integration/automation_run_draft_flow_test.rb`
+- Test: `test/integration/automation_execution_run_draft_flow_test.rb`
 - Test: `test/integration/run_draft_finalization_test.rb`
 - Test: `test/integration/run_draft_approval_resume_test.rb`
 - Test: `test/integration/automation_failure_recovery_test.rb`
@@ -142,9 +144,9 @@ Cover:
 
 **Step 2: Run test to verify it fails**
 
-Run: `bin/rails test test/integration/automation_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb`
+Run: `bin/rails test test/integration/automation_execution_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb`
 
-Expected: FAIL because automation still routes through `AutomationPlanningService` and `AutomationRun`.
+Historical red-phase expectation: FAIL because automation still routes through `AutomationPlanningService` and `AutomationRun`.
 
 **Step 3: Write the minimal lifecycle implementation**
 
@@ -158,14 +160,14 @@ Implement:
 
 **Step 4: Run test to verify it passes**
 
-Run: `bin/rails test test/integration/automation_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb`
+Run: `bin/rails test test/integration/automation_execution_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb`
 
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git add app/services/run_drafts app/models/conversation.rb app/models/conversation_run_tracker.rb test/integration/automation_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb
+git add app/services/run_drafts app/models/conversation.rb app/models/conversation_run_tracker.rb test/integration/automation_execution_run_draft_flow_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/automation_failure_recovery_test.rb
 git commit -m "refactor: route automation planning through conversation drafts"
 ```
 
@@ -196,7 +198,7 @@ Run: `bin/rails test test/integration/system_settings_automations_test.rb`
 
 Run: `bin/rails test:system test/system/system_settings_automations_test.rb`
 
-Expected: FAIL because controllers and views still load `automation_runs`.
+Historical red-phase expectation: FAIL because controllers and views still load `automation_runs`.
 
 **Step 3: Write the minimal surface implementation**
 
@@ -295,7 +297,7 @@ Expected: PASS
 
 **Step 2: Run the full automation/run-draft/conversation-run sweep**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/models/automation_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb test/services/automations/dispatch_test.rb test/jobs/automations/dispatch_due_job_test.rb test/integration/automation_run_draft_flow_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/automation_failure_recovery_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/system_settings_automations_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/automation_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb test/services/automations/dispatch_test.rb test/jobs/automations/dispatch_due_job_test.rb test/integration/automation_execution_run_draft_flow_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/automation_failure_recovery_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb test/integration/system_settings_automations_test.rb`
 
 Expected: PASS
 

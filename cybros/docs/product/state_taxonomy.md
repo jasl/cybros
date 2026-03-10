@@ -191,24 +191,23 @@ Rules:
 - auditable
 - never reused as mutable settings state
 
-## Automation Snapshot
+## Automation Dispatch Facts
 
 Purpose:
 
-- immutable record of one automation dispatch
+- immutable automation-trigger facts for one execution `Conversation`
 
 Examples:
 
-- selected `agent_program_id`
-- contract fingerprint
-- resolved deployment
-- execution target
+- originating `automation_id`
+- `dispatch_key`
 - scheduled trigger facts
+- original task payload prompt or selected model when needed for audit
 
 Rules:
 
-- immutable after materialization
-- may link to a `ConversationRun`, but does not collapse into it
+- immutable after dispatch
+- live on the execution `Conversation` lineage and any derived `RunDraft` / `ConversationRun` snapshots, not as a second run record
 - durable and auditable
 
 ## System State

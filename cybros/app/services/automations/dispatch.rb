@@ -13,7 +13,7 @@ module Automations
     def initialize(automation:, scheduled_for:, dispatch_key:, trigger_snapshot:, initiated_by_user:)
       @automation = automation
       @scheduled_for = scheduled_for
-      @dispatch_key = dispatch_key.to_s
+      @dispatch_key = normalize_dispatch_key(dispatch_key)
       @trigger_snapshot = trigger_snapshot.is_a?(Hash) ? trigger_snapshot.deep_stringify_keys : {}
       @initiated_by_user = initiated_by_user
     end
@@ -59,7 +59,7 @@ module Automations
       end
 
       def conversation_title
-        prompt = automation.task_payload["prompt"].to_s.squish
+        prompt = automation_prompt.squish
         return "Automation execution" if prompt.blank?
 
         "Automation: #{prompt}".truncate(120)
@@ -69,7 +69,7 @@ module Automations
         {
           "automation" => automation_snapshot,
           "schedule" => schedule_snapshot,
-          "trigger" => trigger_snapshot.merge("dispatch_key" => dispatch_key),
+          "trigger" => trigger_snapshot.merge("dispatch_key" => dispatch_key, "user_input" => automation_prompt).compact,
           "llm" => { "model_ref" => selected_model_ref }.compact,
         }
       end
@@ -81,7 +81,7 @@ module Automations
           "agent_program_id" => automation.agent_program_id,
           "execution_target_id" => automation.execution_target_id,
           "permission_mode" => automation.permission_mode,
-          "task_payload" => automation.task_payload,
+          "task_payload" => automation.task_payload.deep_dup,
         }.compact
       end
 
@@ -96,6 +96,24 @@ module Automations
 
       def selected_model_ref
         automation.task_payload["selected_model_ref"].to_s.presence
+      end
+
+      def automation_prompt
+        automation.task_payload["prompt"].to_s
+      end
+
+      def normalize_dispatch_key(value)
+        normalized = value.to_s.strip
+        return normalized if normalized.present?
+
+        AgentCore::ValidationError.raise!(
+          "Automation dispatch requires a dispatch key.",
+          code: "cybros.automations.dispatch_key_missing",
+          details: {
+            automation_id: automation.id,
+            scheduled_for: scheduled_for&.iso8601,
+          },
+        )
       end
   end
 end

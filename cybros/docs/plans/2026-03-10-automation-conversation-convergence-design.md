@@ -17,9 +17,19 @@ Destructively converge Cybros onto these semantics:
 - Do not regress the recent `agent_rpc` replay binding fixes or the `execution_capacity` naming cleanup.
 - This cut changes automation execution topology. It does not require redefining interactive conversations as single-turn objects.
 
-## Current Source Of Truth
+## Current Converged State
 
-### Code Today
+- `Automation` is a definition model only.
+- `Conversation` is the execution container and DAG attachable root for each automation trigger delivery.
+- `ConversationRun` is the only run model.
+- `RunDraft` is conversation-scoped planning and approval state, not a run.
+- Operator surfaces center on automation definitions, execution conversations, active drafts, and conversation runs.
+
+The next section is retained as historical trace for the convergence cut. It describes the pre-cut conflicts this design removed; do not read it as the current runtime contract.
+
+## Historical Pre-Convergence Snapshot
+
+### Pre-Cut Code
 
 - `Automation` is a first-class aggregate with owner, program, target, permission preset, schedule/trigger, optional `conversation_id`, and `has_many :automation_runs`.
 - `AutomationRun` is a real lifecycle record with `queued -> awaiting_approval -> running -> completed/failed/rejected/canceled`, `dispatch_key`, `scheduled_for`, `approval_state`, `snapshot`, and an optional `conversation_run_id`.
@@ -33,7 +43,7 @@ Destructively converge Cybros onto these semantics:
 - Conversation-bound automations reuse an existing conversation, late-bind `conversation_id` into `trigger_snapshot`, create or reuse a pending DAG node inside that existing graph, and may mutate that conversation's settings, config, KV, and default execution target during finalization.
 - Operator approval and history surfaces are keyed to `AutomationRun`, not to `Conversation`.
 
-### Product Docs Today
+### Pre-Cut Product Docs
 
 - `docs/product/automation.md` says automation is a first-class runtime entrypoint, can own its own lifecycle, and may bind to an existing conversation.
 - `docs/product/run_lifecycle.md` says conversation and automation are parallel entrypoints that converge on a shared lifecycle.

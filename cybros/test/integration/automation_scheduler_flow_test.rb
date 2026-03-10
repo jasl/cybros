@@ -15,11 +15,14 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
     later = create_automation!(status: "active", hour: 10, minute: 0, endpoint_url: server.rpc_url)
     now = Time.utc(2026, 3, 9, 9, 0, 0)
 
-    perform_enqueued_jobs only: [Automations::ExecuteConversationJob, DAG::TickGraphJob, DAG::ExecuteNodeJob] do
-      Automations::DispatchDueJob.perform_now(now: now)
+    due_conversation = dispatch_due_automation!(automation: due, now: now)
+    clear_enqueued_jobs
+
+    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+      Automations::ConversationOrchestrator.start!(conversation: due_conversation.reload)
     end
 
-    due_conversation = Conversation.find_by!(automation: due)
+    due_conversation.reload
     due_run = ConversationRun.where(conversation: due_conversation).order(:created_at, :id).last
     assert_equal "completed", due_conversation.metadata.dig("automation_execution", "status")
     assert_nil Conversation.find_by(automation: paused)
@@ -39,6 +42,14 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
   end
 
   private
+
+    def dispatch_due_automation!(automation:, now:)
+      executions = Automations::DispatchDueJob.perform_now(now: now)
+      matching_execution = executions.find { |conversation| conversation.automation_id == automation.id }
+
+      assert_not_nil matching_execution
+      matching_execution
+    end
 
     def create_automation!(status:, hour:, minute:, endpoint_url:)
       program =

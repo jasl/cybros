@@ -2,6 +2,9 @@ require "application_system_test_case"
 
 class SystemSettingsLlmProviderGovernanceSystemTest < ApplicationSystemTestCase
   setup do
+    ProviderBudgetReservation.delete_all
+    ConversationRun.update_all(provider_credential_id: nil)
+    RunDraft.update_all(provider_credential_id: nil)
     LLMProvider.delete_all
   end
 

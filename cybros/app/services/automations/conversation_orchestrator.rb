@@ -91,18 +91,24 @@ module Automations
           "conversation_id" => conversation.id,
           "dag_node_id" => agent_node.id,
           "dispatch_key" => conversation.automation_dispatch_key,
-          "user_input" => conversation.automation&.task_payload&.fetch("prompt", "").to_s,
+          "user_input" => automation_prompt_snapshot,
         ).compact
       end
 
       def selected_model_ref
         conversation.metadata.dig("llm", "model_ref").to_s.presence ||
+          conversation.metadata.dig("automation", "task_payload", "selected_model_ref").to_s.presence ||
           conversation.automation&.task_payload&.fetch("selected_model_ref", "").to_s.presence ||
           AgentCore::ValidationError.raise!(
             "Automation dispatch is missing selected_model_ref.",
             code: "cybros.automations.selected_model_ref_missing",
             details: { automation_id: conversation.automation_id, conversation_id: conversation.id },
           )
+      end
+
+      def automation_prompt_snapshot
+        conversation.metadata.dig("trigger", "user_input").to_s.presence ||
+          conversation.metadata.dig("automation", "task_payload", "prompt").to_s
       end
 
       def initiated_by_user
