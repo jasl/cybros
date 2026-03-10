@@ -1606,6 +1606,7 @@ class Conversation < ApplicationRecord
       resolved_model_ref =
         Cybros::AgentRuntimeResolver.default_model_ref_for(
           agent_metadata: (metadata || {}).fetch("agent", {}),
+          agent_program: agent_program,
         )
 
       self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => resolved_model_ref } })

@@ -37,6 +37,8 @@ class SmokePagesTest < ActionDispatch::IntegrationTest
     assert_response :success
 
     get agent_programs_path
+    assert_redirected_to system_settings_agent_programs_path
+    follow_redirect!
     assert_response :success
 
     get settings_profile_path

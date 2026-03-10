@@ -152,7 +152,9 @@ module RunDrafts
         current_namespace = agent_config[namespace].is_a?(Hash) ? agent_config[namespace] : {}
         agent_config[namespace] = current_namespace.deep_merge(draft.staged_agent_config_patch)
         conversation.agent_config = agent_config
-        conversation.agent_config_schema_fingerprint = draft.agent_program.config_schema_fingerprint
+        if conversation.agent_program_id.to_s == draft.agent_program_id.to_s
+          conversation.agent_config_schema_fingerprint = conversation.agent_program.config_schema_fingerprint
+        end
         conversation.save!
       end
 
@@ -206,7 +208,7 @@ module RunDrafts
           selected_model_ref: draft.selected_model_ref,
           effective_public_settings: conversation.public_settings,
           effective_agent_config: conversation.selected_agent_config_for(draft.agent_program),
-          agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint,
+          agent_config_schema_fingerprint: draft.agent_config_schema_fingerprint,
           effective_policy: effective_policy_summary,
           runtime_governors: draft.runtime_governors,
           snapshot: {

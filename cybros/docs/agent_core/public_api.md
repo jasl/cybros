@@ -21,7 +21,11 @@
 补充（Cybros app 侧约定）：
 
 - 默认 resolver 委托到 `Cybros::AgentRuntimeResolver.runtime_for(node:)`
-- resolver 会读取 `node.graph.attachable`（通常是 `Conversation`）的 `conversations.metadata["agent"]` 并立刻生效：
+- 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自选中的 `Conversation.agent_program`
+- `conversations.metadata["agent"]` 不再是顶层 interactive runtime 的主 authority；它只保留给：
+  - 显式 legacy `agent_profile` 兼容行
+  - subagent / child conversation 的 worker-boundary payload
+- 当 `conversations.metadata["agent"]` 中显式存在 `agent_profile` / `context_turns` 时，resolver 仍会立刻生效：
   - `agent_profile`：通过 `Policy::Profiled` 包裹 base policy，影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
   - `context_turns`：覆盖 runtime 的 context turns 窗口（范围 1..1000）
 - profiles 映射见：`lib/cybros/agent_profiles.rb`（`coding|review|subagent|repair`）

@@ -50,9 +50,11 @@ class TopLevelPagesSmokeTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Conversations"
 
     get agent_programs_path
+    assert_redirected_to system_settings_agent_programs_path
+    follow_redirect!
     assert_response :success
-    assert_includes response.body, 'data-layout="agent"'
-    assert_includes response.body, "Agents"
+    assert_includes response.body, 'data-layout="settings"'
+    assert_includes response.body, "Agent Programs"
 
     get settings_profile_path
     assert_response :success
@@ -80,5 +82,14 @@ class TopLevelPagesSmokeTest < ActionDispatch::IntegrationTest
 
     get system_settings_llm_providers_path
     assert_redirected_to new_session_path
+  end
+
+  test "public agent programs route is forbidden for non-operator members" do
+    user = create_user!(role: :member)
+    sign_in!(user)
+
+    get agent_programs_path
+
+    assert_response :forbidden
   end
 end

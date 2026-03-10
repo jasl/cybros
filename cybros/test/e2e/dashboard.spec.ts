@@ -33,6 +33,6 @@ test.describe("Dashboard", () => {
   test("'Agents' link navigates to agent programs", async ({ page }) => {
     await page.getByTestId("dashboard-page").getByRole("link", { name: "Agents" }).click()
 
-    await expect(page).toHaveURL(/\/agent_programs/)
+    await expect(page).toHaveURL(/\/system\/settings\/agent_programs/)
   })
 })

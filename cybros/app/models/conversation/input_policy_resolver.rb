@@ -18,7 +18,7 @@ class Conversation::InputPolicyResolver
   end
 
   def resolve
-    policy = Cybros::AgentProfiles.input_policy(profile_name)
+    policy = base_policy
     policy.deep_merge!(conversation_override)
     policy.deep_merge!(app_override)
 
@@ -35,6 +35,28 @@ class Conversation::InputPolicyResolver
 
   def conversation_override
     normalize_policy_hash(conversation.metadata&.dig("input_policy"))
+  end
+
+  def base_policy
+    manifest_authoritative_program&.input_policy_config || Cybros::AgentProfiles.input_policy(profile_name)
+  end
+
+  def manifest_authoritative_program
+    return nil if explicit_agent_profile_metadata?
+
+    conversation.agent_program
+  rescue StandardError
+    nil
+  end
+
+  def explicit_agent_profile_metadata?
+    agent = conversation.metadata&.dig("agent")
+    return false unless agent.is_a?(Hash) && agent.key?("agent_profile")
+
+    raw = agent.fetch("agent_profile", nil)
+    raw.is_a?(Hash) || raw.to_s.strip.present?
+  rescue StandardError
+    false
   end
 
   def profile_name

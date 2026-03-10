@@ -90,4 +90,19 @@ class ConversationInputPolicyResolverTest < ActiveSupport::TestCase
     assert_equal "discard_context", retry_policy.fetch("interrupted_output_policy")
     assert_equal "discard_context", steer_policy.fetch("interrupted_output_policy")
   end
+
+  test "selected agent program manifest drives defaults when no legacy agent_profile is stored" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => { "key" => "main" },
+        },
+      )
+
+    policy = conversation.resolved_input_policy
+
+    assert_equal "queue", policy.fetch("running_input_policy")
+    assert_equal "keep_context", policy.fetch("interrupted_output_policy")
+    assert_equal true, policy.fetch("steer_capability")
+  end
 end

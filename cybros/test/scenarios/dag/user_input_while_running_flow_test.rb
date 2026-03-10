@@ -16,6 +16,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
   end
 
   test "user input while agent running: queue policy keeps the current turn running and schedules the next turn afterward" do

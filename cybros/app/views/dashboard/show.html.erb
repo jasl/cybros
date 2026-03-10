@@ -12,9 +12,11 @@
         New chat
       </button>
     <% end %>
-    <%= link_to agent_programs_path, class: "btn btn-ghost btn-sm gap-2" do %>
-      <span class="icon-[lucide--sparkles] size-4"></span>
-      Agents
+    <% if Current.user&.owner? || Current.user&.admin? %>
+      <%= link_to system_settings_agent_programs_path, class: "btn btn-ghost btn-sm gap-2" do %>
+        <span class="icon-[lucide--sparkles] size-4"></span>
+        Agents
+      <% end %>
     <% end %>
   </div>
 

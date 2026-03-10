@@ -16,8 +16,8 @@ test.describe("Top-level pages smoke", () => {
     await page.goto("/conversations")
     await expect(page.getByRole("heading", { name: "Conversations" })).toBeVisible()
 
-    await page.goto("/agent_programs")
-    await expect(page.getByRole("heading", { name: "Agents" })).toBeVisible()
+    await page.goto("/system/settings/agent_programs")
+    await expect(page.getByRole("heading", { name: "Agent Programs" })).toBeVisible()
 
     await page.goto("/settings/profile")
     await expect(page.getByRole("heading", { name: "Profile" })).toBeVisible()

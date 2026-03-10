@@ -1,6 +1,8 @@
 class RuntimeSetting < ApplicationRecord
   DEFAULT_WORKER_CONCURRENCY = 12
-  DEFAULT_AGENT_WORKSPACE_ROOT = ENV.fetch("CYBROS_AGENT_WORKSPACE_ROOT", Rails.root.to_s)
+  TEST_AGENT_WORKSPACE_ROOT = Rails.root.join("tmp", "agent-workspace").to_s.freeze
+
+  class InvalidAgentWorkspaceRoot < ArgumentError; end
 
   before_validation :apply_scope_key
 
@@ -10,23 +12,46 @@ class RuntimeSetting < ApplicationRecord
   validate :queue_overrides_must_be_object
   validate :alert_thresholds_must_be_object
   validate :agent_workspace_root_must_be_absolute
+  validate :agent_workspace_root_must_point_outside_app_repository
   validate :singleton_row
 
+  def self.default_agent_workspace_root
+    env_root = ENV.fetch("CYBROS_AGENT_WORKSPACE_ROOT", "").to_s.strip
+    return env_root if env_root.present?
+    return TEST_AGENT_WORKSPACE_ROOT if Rails.env.test?
+
+    ""
+  end
+
   def self.instance_agent_workspace_root_path
-    find_by(scope_key: "instance")&.agent_workspace_root_path || normalize_agent_workspace_root_path(DEFAULT_AGENT_WORKSPACE_ROOT)
+    configured_root = find_by(scope_key: "instance")&.agent_workspace_root.to_s.strip
+    configured_root = default_agent_workspace_root if configured_root.blank?
+
+    validate_agent_workspace_root_path!(normalize_agent_workspace_root_path(configured_root))
   end
 
   def self.normalize_agent_workspace_root_path(value)
     root = value.to_s.strip
-    root = DEFAULT_AGENT_WORKSPACE_ROOT if root.empty?
-    raise ArgumentError, "agent workspace root must be absolute" unless root.start_with?(File::SEPARATOR)
+    raise InvalidAgentWorkspaceRoot, "Agent workspace root must be configured before creating custom agents" if root.empty?
+    raise InvalidAgentWorkspaceRoot, "Agent workspace root must be an absolute path" unless root.start_with?(File::SEPARATOR)
 
     components = root.split(File::SEPARATOR).reject(&:blank?)
     Pathname.new(File::SEPARATOR).join(*components).cleanpath
   end
 
+  def self.validate_agent_workspace_root_path!(path)
+    normalized = path.is_a?(Pathname) ? path.cleanpath : normalize_agent_workspace_root_path(path)
+    return normalized unless normalized == app_repository_root_path
+
+    raise InvalidAgentWorkspaceRoot, "Agent workspace root must point outside the Cybros app repository"
+  end
+
+  def self.app_repository_root_path
+    @app_repository_root_path ||= Pathname.new(Rails.root.to_s).cleanpath
+  end
+
   def agent_workspace_root_path
-    self.class.normalize_agent_workspace_root_path(agent_workspace_root)
+    self.class.validate_agent_workspace_root_path!(self.class.normalize_agent_workspace_root_path(agent_workspace_root))
   end
 
   private
@@ -47,8 +72,21 @@ class RuntimeSetting < ApplicationRecord
       return if agent_workspace_root.to_s.strip.blank?
 
       agent_workspace_root_path
-    rescue ArgumentError
+    rescue InvalidAgentWorkspaceRoot => e
+      return unless e.message == "Agent workspace root must be an absolute path"
+
       errors.add(:agent_workspace_root, "must be an absolute path")
+    end
+
+    def agent_workspace_root_must_point_outside_app_repository
+      return if agent_workspace_root.to_s.strip.blank?
+
+      path = self.class.normalize_agent_workspace_root_path(agent_workspace_root)
+      self.class.validate_agent_workspace_root_path!(path)
+    rescue InvalidAgentWorkspaceRoot => e
+      return unless e.message == "Agent workspace root must point outside the Cybros app repository"
+
+      errors.add(:agent_workspace_root, "must point outside the Cybros app repository")
     end
 
     def singleton_row

@@ -785,6 +785,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         agent_deployment: deployment,
         deployment_fingerprint: deployment.deployment_fingerprint,
         deployment_activated_at: deployment.activated_at&.change(usec: 0),
+        agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint,
         provider_credential: resolved.fetch(:provider_credential),
         proposed_execution_target: resolved.fetch(:proposed_execution_target),
         selected_model_ref: resolved.fetch(:selected_model_ref),

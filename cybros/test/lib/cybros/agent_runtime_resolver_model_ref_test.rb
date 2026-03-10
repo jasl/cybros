@@ -53,11 +53,11 @@ class Cybros::AgentRuntimeResolverModelRefTest < ActiveSupport::TestCase
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
-    conversation = create_conversation!(metadata: { "llm" => { "model_ref" => "openai/gpt-5.4" } })
-    node = build_pending_agent_node(conversation: conversation, metadata: {})
+    conversation = create_conversation!(metadata: { "agent" => { "key" => "main" }, "llm" => { "model_ref" => "openai/gpt-5.4" } })
 
-    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
-    assert_equal "gpt-5.4", runtime.model
+    resolution = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation)
+    assert_equal "gpt-5.4", resolution.fetch(:model)
+    assert_equal "openai/gpt-5.4", resolution.fetch(:model_ref)
   end
 
   test "explicit model_ref hard-errors when model_ref is invalid" do

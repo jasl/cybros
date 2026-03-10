@@ -212,9 +212,10 @@
 - ✅ 已落地：native tools `subagent_spawn` + `subagent_poll`
   - spawn：创建 child `Conversation/Graph` + 写入 child `conversations.metadata.agent/subagent` 契约 + 在 child 图中 seed 最小可执行 turn（`user_message` finished → `agent_message` pending）
   - poll：返回 child 状态（`running/pending/awaiting_approval/idle/missing`）+ main lane leaf + bounded transcript 预览（默认 10 turns，最大 50）
-- ✅ 已落地：基于 `conversations.metadata["agent"]` 的 runtime/profile 生效
-  - `agent_profile` 通过 `Policy::Profiled` 立刻影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
-  - `context_turns` 立刻影响 prompt build 的 context window（turns）
+- ✅ 已落地：顶层 interactive conversation 已由 `Conversation.agent_program` 拥有默认 model / input policy / runtime surface
+  - `conversations.metadata["agent"]` 仅保留给显式 legacy `agent_profile` 兼容行与 subagent child worker payload
+  - 当 child/legacy metadata 显式给出 `agent_profile` 时，仍会通过 `Policy::Profiled` 立刻影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
+  - 当 child/legacy metadata 显式给出 `context_turns` 时，仍会立刻影响 prompt build 的 context window（turns）
 - ✅ 已落地：默认禁止 nested spawn（subagent 内再 spawn 直接报错）
 
 ### P1：Prompt Builder 结构化（full/minimal + 稳定 prefix）

@@ -29,8 +29,16 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal({ "steps" => ["draft"] }, draft.prepared_plan)
     assert_equal({ "title" => "Updated" }, draft.staged_public_settings_patch)
     assert_equal([{ "op" => "set", "key" => "shared.stage" }], draft.staged_kv_ops)
+    assert_equal "config:v1", draft.agent_config_schema_fingerprint
     assert_equal draft.provider_credential_id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
     assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+  end
+
+  test "requires an agent config schema fingerprint snapshot" do
+    draft = build_draft(agent_config_schema_fingerprint: nil)
+
+    refute_predicate draft, :valid?
+    assert_includes draft.errors[:agent_config_schema_fingerprint], "can't be blank"
   end
 
   test "bound_conversation only uses the explicit conversation association" do
@@ -197,6 +205,7 @@ class RunDraftTest < ActiveSupport::TestCase
         agent_deployment: deployment,
         deployment_fingerprint: deployment.deployment_fingerprint,
         deployment_activated_at: Time.current.change(usec: 0),
+        agent_config_schema_fingerprint: "config:v1",
         provider_credential: credential,
         proposed_execution_target: target,
         selected_model_ref: "openai/gpt-5.4",

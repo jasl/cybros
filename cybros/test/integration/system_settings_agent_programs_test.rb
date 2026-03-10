@@ -39,6 +39,23 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Name and bundled source are required"
   end
 
+  test "creating the bundled default again keeps the singleton identity instead of renaming it" do
+    sign_in_owner!
+    bundled = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+
+    assert_no_difference -> { AgentProgram.count } do
+      post system_settings_agent_programs_path, params: {
+        agent_program: {
+          name: "Renamed bundled default",
+          bundled_agent_key: "default",
+        },
+      }
+    end
+
+    assert_redirected_to system_settings_agent_program_path(bundled)
+    assert_equal AgentPrograms::BootstrapBundledDefaultService::DEFAULT_PROGRAM_NAME, bundled.reload.name
+  end
+
   test "show falls back to noop runtime surface for invalid config" do
     sign_in_owner!
 
@@ -147,5 +164,42 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     refute_equal "default", forked.manifest_snapshot.fetch("agent_program_key")
   ensure
     FileUtils.rm_rf(root) if root.present?
+  end
+
+  test "copy as custom agent rejects a missing workspace root" do
+    sign_in_owner!
+    bundled = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+
+    RuntimeSetting.delete_all
+
+    with_default_agent_workspace_root("") do
+      assert_no_difference -> { AgentProgram.count } do
+        post fork_system_settings_agent_program_path(bundled), params: { name: "My assistant" }
+      end
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Agent workspace root must be configured before creating custom agents"
+  end
+
+  test "copy as custom agent rejects the app repository workspace root" do
+    sign_in_owner!
+    bundled = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    RuntimeSetting.find_or_initialize_by(scope_key: "instance").tap do |setting|
+      setting.assign_attributes(
+        default_worker_concurrency: 12,
+        queue_overrides: {},
+        alert_thresholds: {},
+        agent_workspace_root: Rails.root.to_s,
+      )
+      setting.save!(validate: false)
+    end
+
+    assert_no_difference -> { AgentProgram.count } do
+      post fork_system_settings_agent_program_path(bundled), params: { name: "My assistant" }
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Agent workspace root must point outside the Cybros app repository"
   end
 end

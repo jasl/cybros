@@ -17,6 +17,7 @@ class RunDraft < ApplicationRecord
   validates :contract_fingerprint, presence: true
   validates :deployment_fingerprint, presence: true
   validates :deployment_activated_at, presence: true
+  validates :agent_config_schema_fingerprint, presence: true
   validates :expires_at, presence: true
 
   validate :binding_consistency

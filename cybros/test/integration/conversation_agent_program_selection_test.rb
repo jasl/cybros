@@ -53,12 +53,47 @@ class ConversationAgentProgramSelectionTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="conversation[agent_program_id]"] option', text: healthy_program.name
   end
 
+  test "show warns when the selected program deployment contract no longer matches the published contract" do
+    user = sign_in_owner!
+    healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
+    activate_program!(healthy_program)
+    stale_program = create_program!(name: "Contract drift agent", config_namespace: "fixture.contract-drift.#{SecureRandom.hex(4)}")
+    activate_program!(stale_program)
+    stale_program.update!(published_contract_fingerprint: "contract:fixture.contract-drift:v2")
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    conversation.update!(agent_program: stale_program, agent_config_schema_fingerprint: stale_program.config_schema_fingerprint)
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_includes response.body, "Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment."
+    assert_select 'select[name="conversation[agent_program_id]"] option[selected]', text: stale_program.name
+  end
+
   test "rejects selecting a program that is not currently active and healthy" do
     user = sign_in_owner!
     healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
     activate_program!(healthy_program)
     stale_program = create_program!(name: "Stale agent", config_namespace: "fixture.stale")
     register_deployment!(stale_program, status: "inactive", health_status: "unhealthy")
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    conversation.update!(agent_program: healthy_program, agent_config_schema_fingerprint: healthy_program.config_schema_fingerprint)
+
+    patch conversation_path(conversation), params: { conversation: { agent_program_id: stale_program.id } }
+
+    assert_response :unprocessable_entity
+    assert_equal healthy_program.id, conversation.reload.agent_program_id
+  end
+
+  test "rejects selecting a program whose deployment contract no longer matches the published contract" do
+    user = sign_in_owner!
+    healthy_program = create_program!(name: "Healthy agent", config_namespace: "fixture.healthy")
+    activate_program!(healthy_program)
+    stale_program = create_program!(name: "Contract drift agent", config_namespace: "fixture.contract-drift.#{SecureRandom.hex(4)}")
+    activate_program!(stale_program)
+    stale_program.update!(published_contract_fingerprint: "contract:fixture.contract-drift:v2")
 
     conversation = create_conversation!(user: user, title: "Chat")
     conversation.update!(agent_program: healthy_program, agent_config_schema_fingerprint: healthy_program.config_schema_fingerprint)

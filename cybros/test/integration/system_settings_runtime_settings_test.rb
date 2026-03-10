@@ -118,6 +118,23 @@ class SystemSettingsRuntimeSettingsIntegrationTest < ActionDispatch::Integration
     assert_nil RuntimeSetting.find_by(scope_key: "instance")
   end
 
+  test "app repository workspace root rerenders edit with inline validation" do
+    sign_in_as!(role: :owner)
+
+    patch system_settings_runtime_settings_path, params: {
+      runtime_setting: {
+        default_worker_concurrency: "10",
+        agent_workspace_root: Rails.root.to_s,
+        queue_overrides_json: "{\"critical\":8}",
+        alert_thresholds_json: "{\"provider_limit_waits\":5}",
+      },
+    }
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Agent workspace root must point outside the Cybros app repository"
+    assert_nil RuntimeSetting.find_by(scope_key: "instance")
+  end
+
   private
 
     def sign_in_as!(role:)

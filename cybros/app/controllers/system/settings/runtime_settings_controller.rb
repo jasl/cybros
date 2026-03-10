@@ -36,7 +36,7 @@ module System
                 default_worker_concurrency: RuntimeSetting::DEFAULT_WORKER_CONCURRENCY,
                 queue_overrides: {},
                 alert_thresholds: {},
-                agent_workspace_root: RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT,
+                agent_workspace_root: RuntimeSetting.default_agent_workspace_root,
               )
         end
 

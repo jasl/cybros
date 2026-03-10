@@ -54,6 +54,9 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     conversation = Conversation.order(:created_at).last
     assert_redirected_to conversation_path(conversation)
     assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
+    assert_equal "main", conversation.metadata.dig("agent", "key")
+    assert_nil conversation.metadata.dig("agent", "agent_profile")
+    assert_equal "keep_context", conversation.resolved_input_policy.fetch("interrupted_output_policy")
     assert_equal default_program.id, conversation.agent_program_id
   end
 
@@ -416,8 +419,9 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4"
   end
 
-  test "create uses site default model when configured" do
+  test "create prefers the selected program manifest over the site default model" do
     user = sign_in_owner!
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
     default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
     Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-pro")
@@ -428,7 +432,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
     conversation = Conversation.order(:created_at).last
     assert_equal user.id, conversation.user_id
-    assert_equal "openrouter/openai-gpt-5.4-pro", conversation.metadata.dig("llm", "model_ref")
+    assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
     assert_equal default_program.id, conversation.agent_program_id
   end
 

@@ -1,9 +1,5 @@
-require "fileutils"
-
 module AgentPrograms
   class Creator
-    STORAGE_ROOT = Rails.root.join("storage", "agent_programs").freeze
-
     def self.create_from_bundled_source!(name:, bundled_agent_key:)
       source_dir = BundledSources.path_for(bundled_agent_key)
       raise ArgumentError, "unknown bundled source" if source_dir.nil?
@@ -13,8 +9,9 @@ module AgentPrograms
       manifest_key = manifest.fetch("agent_program_key")
 
       program = AgentProgram.find_or_initialize_by(source_kind: "bundled", bundled_agent_key: bundled_agent_key.to_s)
+      persisted_name = program.name.to_s.strip.presence
       program.assign_attributes(
-        name: name.presence || manifest.fetch("name", "Bundled agent"),
+        name: persisted_name || name.presence || manifest.fetch("name", "Bundled agent"),
         description: manifest["description"],
         local_path: BundledSources.relative_path_for(bundled_agent_key),
         manifest_snapshot: manifest,
@@ -28,22 +25,9 @@ module AgentPrograms
           "runtime_surface" => loaded.runtime_surface_config,
           "runtime_surface_status" => loaded.runtime_surface_status,
         },
-        active_persona: nil,
       )
       program.save!
       program
-    end
-
-    def self.create_from_profile!(name:, profile_source:)
-      legacy_key =
-        case profile_source.to_s
-        when "default-assistant", "default"
-          "default"
-        else
-          raise ArgumentError, "unknown bundled profile"
-        end
-
-      create_from_bundled_source!(name: name, bundled_agent_key: legacy_key)
     end
 
     def self.bundled_contract_fingerprint(manifest)

@@ -58,7 +58,7 @@ module Conversations
           )
         end
 
-        return program if program.active_healthy_deployment.present?
+        return program if program.selectable_for_conversation?
 
         AgentCore::ValidationError.raise!(
           "Selected agent is not currently active and healthy.",

@@ -36,6 +36,18 @@ class AgentDeploymentsRegistrationTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
+  test "new registration form allows a blank endpoint url for Cybros-managed local deployments" do
+    sign_in_owner!
+    program = create_program!
+
+    get new_system_settings_agent_deployment_path
+
+    assert_response :success
+    assert_includes response.body, program.name
+    assert_includes response.body, "Leave blank to let Cybros allocate and manage a local endpoint"
+    assert_select 'input[name="agent_deployment[endpoint_url]"][required]', count: 0
+  end
+
   test "registration allocates a unique local endpoint and writes runtime config when endpoint url is blank" do
     sign_in_owner!
     program = create_program!

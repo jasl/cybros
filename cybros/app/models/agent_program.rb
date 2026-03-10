@@ -21,7 +21,13 @@ class AgentProgram < ApplicationRecord
   validate :local_path_must_match_bundled_source, if: :bundled_source?
   validate :custom_local_path_must_stay_within_workspace_root, if: :custom_source?
 
-  scope :selectable_for_conversations, -> { joins(:agent_deployments).merge(AgentDeployment.active_healthy).distinct.order(:name) }
+  scope :selectable_for_conversations, lambda {
+    joins(:agent_deployments)
+      .merge(AgentDeployment.active_healthy)
+      .where("agent_deployments.contract_fingerprint = agent_programs.published_contract_fingerprint")
+      .distinct
+      .order(:name)
+  }
 
   def global_config
     value = self[:global_config]
@@ -33,8 +39,38 @@ class AgentProgram < ApplicationRecord
     value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(value) : {}
   end
 
+  def preferred_model_refs
+    model = manifest_snapshot.fetch("model", nil)
+    prefer = model.is_a?(Hash) ? model.fetch("prefer", nil) : model
+
+    Array(prefer).flatten.map { |value| value.to_s.strip }.reject(&:empty?).uniq
+  rescue StandardError
+    []
+  end
+
+  def input_policy_config
+    overrides = manifest_snapshot.fetch("input_policy", nil)
+    overrides = overrides.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(overrides) : {}
+
+    Cybros::AgentProfiles.global_input_policy.deep_merge(overrides)
+  rescue StandardError
+    Cybros::AgentProfiles.global_input_policy
+  end
+
   def bundled_source? = source_kind.to_s == "bundled"
   def custom_source? = source_kind.to_s == "custom"
+
+  def active_healthy_deployment_for_published_contract
+    deployment = active_healthy_deployment
+    return nil if deployment.blank?
+    return nil unless deployment.contract_fingerprint.to_s == published_contract_fingerprint.to_s
+
+    deployment
+  end
+
+  def selectable_for_conversation?
+    active_healthy_deployment_for_published_contract.present?
+  end
 
   def runtime_surface_config
     stored = runtime_surface_snapshot.fetch("runtime_surface", nil)

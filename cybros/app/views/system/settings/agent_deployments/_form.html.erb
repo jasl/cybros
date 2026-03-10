@@ -23,7 +23,8 @@
     <%= f.label :endpoint_url, class: "label" do %>
       <span class="label-text">Endpoint URL</span>
     <% end %>
-    <%= f.text_field :endpoint_url, class: "input input-bordered w-full", required: true %>
+    <%= f.text_field :endpoint_url, class: "input input-bordered w-full" %>
+    <p class="mt-1 text-xs opacity-70">Leave blank to let Cybros allocate and manage a local endpoint.</p>
   </div>
 
   <div>

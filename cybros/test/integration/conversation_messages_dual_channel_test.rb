@@ -170,6 +170,27 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, "Selected model is no longer available"
   end
 
+  test "create returns 422 when the selected agent deployment no longer matches the published contract" do
+    user = create_user!
+    sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    program = create_program!(name: "Contract drift agent", config_namespace: "fixture.contract-drift.#{SecureRandom.hex(4)}")
+    create_active_deployment!(program)
+    conversation = create_conversation!(user: user, title: "Chat", agent_program: program)
+    conversation.update!(agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    program.update!(published_contract_fingerprint: "contract:fixture.contract-drift:v2")
+
+    assert_no_difference -> { RunDraft.count } do
+      post conversation_messages_path(conversation),
+           params: { content: "Hello" },
+           headers: { "Accept" => "text/vnd.turbo-stream.html" }
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, "Selected agent has no active healthy deployment."
+  end
+
   test "create with blank content returns no-content for turbo and creates no messages" do
     user = create_user!
     sign_in!(user)
@@ -281,5 +302,38 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
 
         message.dig("payload", "input", "content").to_s.presence
       end
+    end
+
+    def create_program!(name:, config_namespace:)
+      AgentProgram.create!(
+        name: name,
+        config_namespace: config_namespace,
+        published_contract_fingerprint: "contract:#{config_namespace}",
+        manifest_snapshot: { "name" => name, "agent_program_key" => config_namespace.tr(".", "-") },
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:#{config_namespace}",
+      )
+    end
+
+    def create_active_deployment!(program)
+      AgentDeployment.create!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: "https://example.test/#{program.id}",
+        deployment_bearer_secret_ref: "secret://#{program.id}",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: "deployment:#{program.id}:active:healthy",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
     end
 end

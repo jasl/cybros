@@ -86,6 +86,7 @@ module RunDrafts
           proposed_execution_target: resolved.fetch(:proposed_execution_target),
           selected_model_ref: resolved.fetch(:selected_model_ref),
           runtime_governors: resolved.fetch(:runtime_governors),
+          agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint.presence || conversation.agent_program.config_schema_fingerprint,
           prepare_invocation_id: SecureRandom.uuid,
           prepared_plan: {},
           staged_public_settings_patch: {},
@@ -94,6 +95,10 @@ module RunDrafts
           approval_state: { "status" => "not_required" },
           expires_at: 30.minutes.from_now.change(usec: 0),
         )
+      rescue ActiveRecord::RecordInvalid => e
+        raise unless stale_deployment_binding_error?(e)
+
+        missing_agent_deployment_validation_error!(program: conversation.agent_program)
       end
 
       def resolve_deployment!
@@ -105,14 +110,8 @@ module RunDrafts
           )
         end
 
-        deployment = program.active_healthy_deployment
-        unless deployment&.activated_at.present?
-          AgentCore::ValidationError.raise!(
-            "Selected agent has no active healthy deployment.",
-            code: "cybros.run_drafts.agent_deployment_missing",
-            details: { agent_program_id: program.id },
-          )
-        end
+        deployment = program.active_healthy_deployment_for_published_contract
+        missing_agent_deployment_validation_error!(program:) unless deployment&.activated_at.present?
 
         deployment
       end
@@ -158,6 +157,21 @@ module RunDrafts
         return unless draft.expires_at.present?
 
         RunDrafts::ExpireAwaitingApprovalJob.set(wait_until: draft.expires_at).perform_later(draft.id)
+      end
+
+      def stale_deployment_binding_error?(error)
+        record = error.record
+        return false unless record.is_a?(RunDraft)
+
+        record.errors[:agent_deployment].present? || record.errors[:contract_fingerprint].present?
+      end
+
+      def missing_agent_deployment_validation_error!(program:)
+        AgentCore::ValidationError.raise!(
+          "Selected agent has no active healthy deployment.",
+          code: "cybros.run_drafts.agent_deployment_missing",
+          details: { agent_program_id: program.id, published_contract_fingerprint: program.published_contract_fingerprint },
+        )
       end
   end
 end

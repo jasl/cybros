@@ -93,6 +93,8 @@ module Cybros
                 user: parent.user,
                 parent_conversation: parent,
                 title: title,
+                agent_program: parent.agent_program,
+                agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
                 metadata: build_child_metadata(
                   agent_key: agent_key,
                   profile: profile,
@@ -251,6 +253,8 @@ module Cybros
                 user: parent.user,
                 parent_conversation: parent,
                 title: title,
+                agent_program: parent.agent_program,
+                agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
                 metadata: build_child_metadata(
                   agent_key: agent_key,
                   profile: profile,

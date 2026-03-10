@@ -51,6 +51,13 @@ class RuntimeSettingTest < ActiveSupport::TestCase
     assert_includes settings.errors[:agent_workspace_root], "must be an absolute path"
   end
 
+  test "rejects the app repository as the agent workspace root" do
+    settings = build_settings(agent_workspace_root: Rails.root.to_s)
+
+    refute_predicate settings, :valid?
+    assert_includes settings.errors[:agent_workspace_root], "must point outside the Cybros app repository"
+  end
+
   test "returns the normalized configured workspace root path" do
     settings = build_settings(agent_workspace_root: "/srv/cybros-agents/../custom-agents")
 
@@ -60,7 +67,19 @@ class RuntimeSettingTest < ActiveSupport::TestCase
   test "returns the default workspace root path when instance settings are absent" do
     RuntimeSetting.delete_all
 
-    assert_equal Pathname.new(RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT).cleanpath, RuntimeSetting.instance_agent_workspace_root_path
+    assert_equal Pathname.new(RuntimeSetting.default_agent_workspace_root).cleanpath, RuntimeSetting.instance_agent_workspace_root_path
+  end
+
+  test "raises when no configured workspace root is available" do
+    RuntimeSetting.delete_all
+
+    with_default_agent_workspace_root("") do
+      error = assert_raises(RuntimeSetting::InvalidAgentWorkspaceRoot) do
+        RuntimeSetting.instance_agent_workspace_root_path
+      end
+
+      assert_equal "Agent workspace root must be configured before creating custom agents", error.message
+    end
   end
 
   private

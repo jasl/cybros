@@ -47,7 +47,6 @@ module AgentPrograms
 
     def bootstrap!
       program = self.class.ensure_program!
-      backfill_execution_capable_conversations!(program:)
 
       return ensure_test_runtime!(program:) if Rails.env.test?
 
@@ -126,36 +125,28 @@ module AgentPrograms
 
     private
 
-      def backfill_execution_capable_conversations!(program:)
-        Conversation.where(agent_program_id: nil).update_all(
-          agent_program_id: program.id,
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
-          updated_at: Time.current,
-        )
-      end
-
       def ensure_runtime_setting!
         runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
         env_workspace_root = ENV.fetch("CYBROS_AGENT_WORKSPACE_ROOT", "").to_s.strip
         current_workspace_root = runtime_setting.agent_workspace_root.to_s.strip
         desired_workspace_root =
-          if env_workspace_root.present? && (current_workspace_root.blank? || current_workspace_root == Rails.root.to_s)
+          if env_workspace_root.present?
             env_workspace_root
           elsif current_workspace_root.present?
             current_workspace_root
-          elsif env_workspace_root.present?
-            env_workspace_root
           else
-            RuntimeSetting::DEFAULT_AGENT_WORKSPACE_ROOT
+            RuntimeSetting.default_agent_workspace_root.presence
           end
 
         runtime_setting.assign_attributes(
           default_worker_concurrency: runtime_setting.default_worker_concurrency.presence || RuntimeSetting::DEFAULT_WORKER_CONCURRENCY,
           queue_overrides: runtime_setting.queue_overrides.presence || {},
           alert_thresholds: runtime_setting.alert_thresholds.presence || {},
-          agent_workspace_root: desired_workspace_root,
         )
-        runtime_setting.save!
+        runtime_setting.agent_workspace_root = desired_workspace_root if desired_workspace_root.present?
+        return nil if runtime_setting.new_record? && runtime_setting.agent_workspace_root.to_s.strip.blank?
+
+        runtime_setting.save! if runtime_setting.changed?
         runtime_setting
       end
 

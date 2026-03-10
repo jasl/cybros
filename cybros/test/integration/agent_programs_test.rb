@@ -15,4 +15,8 @@ class AgentProgramsTest < ActiveSupport::TestCase
     assert_equal "default", program.manifest_snapshot.fetch("agent_program_key")
     assert_equal true, program.absolute_local_path.directory?
   end
+
+  test "legacy profile-based creator shim has been removed" do
+    refute_respond_to AgentPrograms::Creator, :create_from_profile!
+  end
 end

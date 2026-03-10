@@ -51,47 +51,55 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     node
   end
 
-  test "runtime_for selects model_ref preference when available in YAML catalog" do
+  test "model_resolution_for selects model_ref preference from the selected agent program manifest" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
+    ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
 
     conversation =
       create_conversation!(
         metadata: {
-          "agent" => {
-            "agent_profile" => "coding",
-              "agent_program" => { "model_prefer" => ["openai/gpt-5.4"] },
-          },
+          "agent" => { "key" => "main" },
         },
+        agent_program: program,
       )
-    node = build_pending_agent_node(conversation: conversation)
+    resolution = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation)
 
-    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
-
-    provider = runtime.provider
-    assert_equal "openai", provider.name
-    assert_equal "gpt-5.4", runtime.model
-
-    # Implementation detail, but needed to prove DB-driven selection without making a network call.
-    client_options = provider.instance_variable_get(:@delegate).instance_variable_get(:@client_options)
-    assert_equal "https://api.openai.com/v1", client_options.fetch(:base_url)
+    assert_equal "openai", resolution.fetch(:provider_key)
+    assert_equal "gpt-5.4", resolution.fetch(:model_key)
+    assert_equal "openai/gpt-5.4", resolution.fetch(:model_ref)
+    assert_equal "gpt-5.4", resolution.fetch(:model)
   end
 
-  test "runtime_for ignores preferences for providers requiring missing credentials" do
+  test "model_resolution_for hard-errors when the selected agent program manifest prefers an unavailable provider" do
     LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
+    program =
+      AgentProgram.create!(
+        name: "Fixture Program",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:v1",
+        manifest_snapshot: {
+          "agent_program_key" => "fixture-program",
+          "name" => "Fixture Program",
+          "model" => { "prefer" => ["codex_subscription/gpt-5.3-codex"] },
+        },
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:v1",
+      )
 
     conversation =
       create_conversation!(
         metadata: {
-          "agent" => {
-            "agent_profile" => "coding",
-            "agent_program" => { "model_prefer" => ["codex_subscription/gpt-5.3-codex"] },
-          },
+          "agent" => { "key" => "main" },
         },
+        agent_program: program,
       )
-    node = build_pending_agent_node(conversation: conversation)
 
-    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.runtime_for(node: node) }
+    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation) }
     assert_equal "cybros.llm.model_preference_unavailable", error.code
   end
 

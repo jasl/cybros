@@ -139,6 +139,87 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "approval resume keeps the draft agent config schema fingerprint pinned when the live conversation agent changes after parking" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    original_program = runtime.fetch(:program)
+    agent_node =
+      conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4").fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+    alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
+
+    Conversations::RuntimeSettingsUpdater.update!(
+      conversation: conversation,
+      attributes: { agent_program_id: alternate_program.id },
+    )
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob) do
+      conversation.approve_parked_agent_node!(node_id: agent_node.id, approved_by: "manual-approval:test")
+    end
+
+    run = draft.reload.materialized_conversation_run
+    assert_equal "finalized", draft.status
+    assert_equal original_program.id, run.agent_program_id
+    assert_equal original_program.config_schema_fingerprint, run.agent_config_schema_fingerprint
+    assert_equal original_program.config_schema_fingerprint, draft.agent_config_schema_fingerprint
+    assert_equal alternate_program.config_schema_fingerprint, conversation.reload.agent_config_schema_fingerprint
+  ensure
+    server&.shutdown
+  end
+
+  test "approval resume keeps the live conversation schema on the current agent when staged config mutations finalize an older parked draft" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "turn.prepare" => lambda do |_params, base_result, _identity|
+            base_result.merge(
+              "approval_state" => {
+                "status" => "pending_confirmation",
+                "reason" => "fixture_approval",
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    original_program = runtime.fetch(:program)
+    agent_node =
+      conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4").fetch(:agent_node)
+    draft = RunDraft.order(:created_at).last
+    alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
+
+    draft.update!(staged_agent_config_patch: { "mode" => "review" })
+    Conversations::RuntimeSettingsUpdater.update!(
+      conversation: conversation,
+      attributes: { agent_program_id: alternate_program.id },
+    )
+
+    assert_enqueued_with(job: DAG::ExecuteNodeJob) do
+      conversation.approve_parked_agent_node!(node_id: agent_node.id, approved_by: "manual-approval:test")
+    end
+
+    run = draft.reload.materialized_conversation_run
+    assert_equal original_program.config_schema_fingerprint, run.agent_config_schema_fingerprint
+    assert_equal alternate_program.config_schema_fingerprint, conversation.reload.agent_config_schema_fingerprint
+    assert_equal({ "mode" => "review" }, conversation.reload.agent_config.fetch(original_program.config_namespace))
+  ensure
+    server&.shutdown
+  end
+
   test "rejected approval discards staged draft mutations and leaves the draft terminal" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
@@ -456,7 +537,43 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 
-      { conversation: conversation, deployment: deployment }
+      { conversation: conversation, deployment: deployment, program: program }
+    end
+
+    def create_program!(name:, config_namespace:, server:)
+      program =
+        AgentProgram.create!(
+          name: name,
+          config_namespace: config_namespace,
+          published_contract_fingerprint: "contract:#{config_namespace}",
+          manifest_snapshot: {
+            "agent_program_key" => config_namespace.tr(".", "-"),
+            "name" => name,
+          },
+          global_config: {},
+          global_config_schema: { "type" => "object" },
+          conversation_config_schema: { "type" => "object" },
+          config_schema_fingerprint: "config:#{config_namespace}",
+        )
+      AgentDeployment.create!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: server.rpc_url,
+        deployment_bearer_secret_ref: "secret://#{config_namespace}",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: "deployment:#{config_namespace}",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
+      program
     end
 
     def create_execution_target!(name: "Primary target")

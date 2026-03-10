@@ -42,9 +42,13 @@ class ConversationsController < AgentController
   def create
     title = params.dig(:conversation, :title).to_s.strip
     title = "Conversation" if title.blank?
-    agent_metadata = { "agent_profile" => "coding" }
-    default_model_ref = Cybros::AgentRuntimeResolver.default_model_ref_for(agent_metadata: agent_metadata)
     default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    agent_metadata = { "key" => "main" }
+    default_model_ref =
+      Cybros::AgentRuntimeResolver.default_model_ref_for(
+        agent_metadata: agent_metadata,
+        agent_program: default_program,
+      )
 
     conversation =
       Current.user.conversations.create!(
@@ -73,7 +77,7 @@ class ConversationsController < AgentController
     @permission_mode_options = Conversation::PERMISSION_MODE_LABELS
     @selected_agent_program = @conversation.agent_program
     @agent_program_options = selectable_agent_programs_for(@conversation)
-    @selected_agent_program_stale = @selected_agent_program.present? && @selected_agent_program.active_healthy_deployment.blank?
+    @selected_agent_program_stale = @selected_agent_program.present? && !@selected_agent_program.selectable_for_conversation?
     @selected_execution_target = @conversation.default_execution_target
     @execution_target_options = selectable_execution_targets_for(@conversation)
     @selected_execution_target_stale =
@@ -91,6 +95,7 @@ class ConversationsController < AgentController
           resolved_default_model_ref =
             Cybros::AgentRuntimeResolver.default_model_ref_for(
               agent_metadata: @conversation.metadata.fetch("agent", {}),
+              agent_program: @conversation.agent_program,
             )
         rescue AgentCore::ValidationError
           resolved_default_model_ref = nil

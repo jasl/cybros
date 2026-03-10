@@ -104,6 +104,7 @@ class RunDraftTargetSwitchPolicyTest < ActiveSupport::TestCase
         agent_deployment: deployment,
         deployment_fingerprint: deployment.deployment_fingerprint,
         deployment_activated_at: Time.current.change(usec: 0),
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
         provider_credential: provider_credential,
         proposed_execution_target: proposed_execution_target,
         selected_model_ref: "openai/gpt-5.4",

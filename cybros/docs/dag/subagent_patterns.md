@@ -57,9 +57,12 @@ child conversation metadata 契约（写入 `conversations.metadata`）：
 }
 ```
 
+同时，child conversation 会显式继承父会话的 `agent_program`。
+
 运行时 profile 生效（关键）：
 
-- `AgentCore::DAG.runtime_resolver` 会读取 `conversation.metadata["agent"]`，并用 `Policy::Profiled` 包裹 base policy，使 `agent_profile/context_turns` 立刻影响该会话的工具可见性与授权判定。
+- 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自所选 `agent_program`。
+- subagent child conversation 仍由 `conversation.metadata["agent"]` 携带 worker-boundary `agent_profile/context_turns`，resolver 会读取这些字段，并用 `Policy::Profiled` 包裹 base policy，使其立刻影响该 child 会话的工具可见性与授权判定。
 
 当前已知 caveat：
 

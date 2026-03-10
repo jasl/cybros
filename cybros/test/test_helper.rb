@@ -79,6 +79,15 @@ module ActiveSupport
       User.create!(identity: identity, role: role)
     end
 
+    def with_default_agent_workspace_root(value)
+      singleton = RuntimeSetting.singleton_class
+      original_method = singleton.instance_method(:default_agent_workspace_root)
+      singleton.send(:define_method, :default_agent_workspace_root) { value }
+      yield
+    ensure
+      singleton.send(:define_method, :default_agent_workspace_root, original_method)
+    end
+
     def create_conversation!(user: nil, title: "Chat", metadata: nil, default_execution_target: :__default__, agent_program: :__default__)
       user ||= create_user!
       metadata ||= { "agent" => { "agent_profile" => "coding" } }

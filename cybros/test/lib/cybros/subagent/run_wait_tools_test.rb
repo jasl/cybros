@@ -31,8 +31,10 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
   end
 
   test "subagent_run spawns child kicks execution and returns an initial status snapshot" do
+    program = create_program!
     parent =
       create_conversation!(
+        agent_program: program,
         metadata: {
           "agent" => {
             "agent_profile" => "review",
@@ -74,6 +76,8 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
     assert_equal DAG::Node::PENDING, payload.dig("leaf", "state")
     assert_includes payload.fetch("transcript_lines").join("\n"), "child: hello"
 
+    assert_equal parent.agent_program_id, child.agent_program_id
+    assert_equal parent.agent_config_schema_fingerprint, child.agent_config_schema_fingerprint
     assert_equal "subagent:my_agent", child.metadata.dig("agent", "key")
     assert_equal "subagent", child.metadata.dig("agent", "agent_profile")
     assert_equal 88, child.metadata.dig("agent", "context_turns")
@@ -280,6 +284,19 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
   end
 
   private
+
+    def create_program!
+      AgentProgram.create!(
+        name: "Fixture Program #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
+        manifest_snapshot: {},
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+      )
+    end
 
     def parent_context(parent, agent_key: "main", agent_profile: "coding", context_turns: 50)
       graph = parent.dag_graph

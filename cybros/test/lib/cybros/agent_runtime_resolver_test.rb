@@ -345,10 +345,64 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     end
   end
 
+  test "selected agent program runtime_surface config drives interactive runtime when no legacy agent_profile is stored" do
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    program.update!(
+      args: {
+        "runtime_surface" => {
+          "type" => "noop",
+          "helpers" => { "estimate_tokens" => true },
+          "stage_limits" => {
+            "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 2048 },
+          },
+        },
+        "runtime_surface_status" => "configured",
+      },
+    )
+
+    node =
+      build_pending_agent_node(
+        metadata: {
+          "routing" => { "channel" => "web" },
+          "agent" => { "key" => "main" },
+        },
+        agent_program: program,
+      )
+
+    runtime = build_runtime_for(node)
+
+    assert_equal(
+      {
+        type: :noop,
+        helpers: [:estimate_tokens],
+        stage_limits: {
+          prepare_turn: { timeout_s: 0.5, max_output_bytes: 2048 },
+        },
+      },
+      runtime.execution_context_attributes.fetch(:runtime_surface),
+    )
+  end
+
+  test "top-level manifest-driven runtime requires a materialized programmable run when no provider override is supplied" do
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
+
+    node =
+      build_pending_agent_node(
+        metadata: {
+          "agent" => { "key" => "main" },
+        },
+      )
+
+    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.runtime_for(node: node) }
+
+    assert_equal "cybros.agent_runtime_resolver.programmable_run_required", error.code
+  end
+
   private
 
-    def build_pending_agent_node(metadata:)
-      conversation = create_conversation!(metadata: metadata)
+    def build_pending_agent_node(metadata:, agent_program: :__default__)
+      conversation = create_conversation!(metadata: metadata, agent_program: agent_program)
       graph = conversation.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
       node = nil

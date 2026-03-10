@@ -78,6 +78,11 @@ class AgentProgramTest < ActiveSupport::TestCase
     assert_includes program.errors[:local_path], "must stay within the configured agent workspace root"
   end
 
+  test "legacy profile columns have been removed" do
+    refute_includes AgentProgram.column_names, "profile_source"
+    refute_includes AgentProgram.column_names, "active_persona"
+  end
+
   private
 
   def build_program(attributes = {})
