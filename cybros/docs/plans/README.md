@@ -28,6 +28,7 @@ Automation note:
 - `2026-03-08-runtime-governance.md`
 - `2026-03-09-agent-deployment-connection.md`
 - `2026-03-10-automation-conversation-convergence.md`
+- `2026-03-10-bundled-default-external-agent.md`
 
 ## Historical But Superseded
 
