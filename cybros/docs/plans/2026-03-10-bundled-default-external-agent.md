@@ -33,6 +33,17 @@ Challenge-suite failures should be used to decide whether the missing capability
 - the bundled default agent package
 - or a category-specific external agent
 
+## Autonomy Gate
+
+There is no remaining design blocker for milestone 1 if implementation treats these as fixed decisions rather than open questions:
+
+- bundled runtime identity is singular: bundled key `default`, source root `agents/default`
+- `default-assistant` is legacy trace only
+- execution-capable conversations must not proceed without `agent_program_id`
+- official local development and official compose flows must auto-launch the bundled default deployment and forked custom deployments
+- `generated-config-ready` is only acceptable for unsupported external deployment topologies, not for the core milestone-1 acceptance path
+- milestone-1 completion requires one bundled-default end-to-end loop and one forked-agent end-to-end loop through Cybros
+
 ---
 
 ### Task 1: Model Source Ownership And Workspace Root
@@ -45,6 +56,7 @@ Challenge-suite failures should be used to decide whether the missing capability
 - Modify: `app/controllers/system/settings/runtime_settings_controller.rb`
 - Modify: `app/views/system/settings/runtime_settings/_form.html.erb`
 - Modify: `app/views/system/settings/runtime_settings/show.html.erb`
+- Create: `test/models/conversation_program_selection_test.rb`
 - Test: `test/models/agent_program_test.rb`
 - Test: `test/models/runtime_setting_test.rb`
 - Test: `test/integration/system_settings_runtime_settings_test.rb`
@@ -89,7 +101,7 @@ end
 
 **Step 2: Run the focused tests to verify they fail**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/models/conversation_program_selection_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb`
 
 Expected: failures about unknown attributes and missing validations for source ownership and `agent_workspace_root`.
 
@@ -123,14 +135,14 @@ Keep the first pass narrow, but include the owner boundary changes required by t
 
 **Step 4: Run the focused tests again**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/models/conversation_program_selection_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add db/migrate/20260310100000_add_agent_source_fields_and_workspace_root.rb app/models/agent_program.rb app/models/runtime_setting.rb app/controllers/system/settings/runtime_settings_controller.rb app/views/system/settings/runtime_settings/_form.html.erb app/views/system/settings/runtime_settings/show.html.erb test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb
+git add db/migrate/20260310100000_add_agent_source_fields_and_workspace_root.rb app/models/agent_program.rb app/models/conversation.rb app/models/runtime_setting.rb app/controllers/system/settings/runtime_settings_controller.rb app/views/system/settings/runtime_settings/_form.html.erb app/views/system/settings/runtime_settings/show.html.erb test/models/agent_program_test.rb test/models/runtime_setting_test.rb test/models/conversation_program_selection_test.rb test/integration/system_settings_runtime_settings_test.rb test/system/system_settings_runtime_settings_test.rb
 git commit -m "feat: model bundled agent source ownership"
 ```
 
@@ -251,6 +263,7 @@ git commit -m "feat: add bundled default external agent host"
 - Modify: `app/services/agent_deployments/inspection_service.rb`
 - Modify: `app/services/agent_deployments/activation_service.rb`
 - Modify: `app/models/agent_deployment.rb`
+- Create: `test/services/agent_rpc/lifecycle_caller_test.rb`
 - Test: `test/models/agent_deployment_test.rb`
 - Test: `test/integration/agent_deployments_registration_test.rb`
 - Test: `test/integration/agent_deployments_activation_gate_test.rb`
@@ -261,7 +274,7 @@ Add assertions like:
 
 ```ruby
 test "registration allocates a unique port and writes runtime config" do
-  program = agent_programs(:default_assistant)
+  program = agent_programs(:bundled_default)
 
   deployment = AgentDeployments::RegistrationService.new(
     agent_program: program,
@@ -276,15 +289,15 @@ test "registration allocates a unique port and writes runtime config" do
 end
 
 test "registration persists endpoint allocation without trusting a fixed port" do
-  deployment = agent_deployments(:inactive_default_assistant_candidate)
+  deployment = agent_deployments(:inactive_bundled_default_candidate)
 
   assert_nil deployment.transport_config["port"]
   refute_equal "http://127.0.0.1:8001", deployment.endpoint_url
 end
 
 test "activation does not deactivate the old deployment before the new one is healthy" do
-  old_deployment = agent_deployments(:active_default_assistant)
-  new_deployment = agent_deployments(:inactive_default_assistant_candidate)
+  old_deployment = agent_deployments(:active_bundled_default)
+  new_deployment = agent_deployments(:inactive_bundled_default_candidate)
 
   new_deployment.update!(health_status: "unhealthy")
 
@@ -328,16 +341,20 @@ Make sure activation semantics remain:
 - never let an in-flight run silently reconnect to a replacement process on the same port
 - mark deployment-bound sessions stale when the underlying deployment dies or is replaced
 
+Add one focused service-level test for the stale-session boundary:
+
+- `test/services/agent_rpc/lifecycle_caller_test.rb` should prove that a deployment-bound session or replay attempt is rejected once the deployment is no longer the active healthy binding
+
 **Step 5: Run the focused tests again**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb test/services/agent_rpc/lifecycle_caller_test.rb`
 
 Expected: PASS.
 
 **Step 6: Commit**
 
 ```bash
-git add app/services/agent_deployments/endpoint_allocator.rb app/services/agent_deployments/runtime_config_writer.rb app/services/agent_deployments/registration_service.rb app/services/agent_deployments/inspection_service.rb app/services/agent_deployments/activation_service.rb app/models/agent_deployment.rb test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb
+git add app/services/agent_deployments/endpoint_allocator.rb app/services/agent_deployments/runtime_config_writer.rb app/services/agent_deployments/registration_service.rb app/services/agent_deployments/inspection_service.rb app/services/agent_deployments/activation_service.rb app/models/agent_deployment.rb test/models/agent_deployment_test.rb test/integration/agent_deployments_registration_test.rb test/integration/agent_deployments_activation_gate_test.rb test/services/agent_rpc/lifecycle_caller_test.rb
 git commit -m "feat: add deployment endpoint allocation"
 ```
 
@@ -350,8 +367,10 @@ git commit -m "feat: add deployment endpoint allocation"
 - Modify: `compose.yaml.sample`
 - Modify: `.devcontainer/compose.yaml`
 - Modify: `test/e2e/helpers.ts`
+- Create: `test/integration/bundled_default_agent_execution_test.rb`
 - Test: `test/integration/setup_and_sessions_test.rb`
 - Test: `test/integration/agent_deployments_registration_test.rb`
+- Test: `test/e2e/bundled_default_agent_flow.spec.ts`
 - Test: `test/e2e/settings.spec.ts`
 
 **Step 1: Write the failing bootstrap tests**
@@ -394,18 +413,26 @@ Then wire it into:
 Be explicit in the code and tests about the promise level:
 
 - local development and official compose paths should produce a launched default deployment
-- if custom deployments are not yet auto-launched, the product must surface them as generated-config-ready rather than pretending they are already live
+- the bundled default deployment must be runnable end-to-end in official local development and official compose flows
+- unsupported external deployment topologies may still surface as generated-config-ready, but that fallback must not apply to the bundled default acceptance path
+
+Add one direct integration proof and one browser proof for the default path:
+
+- `test/integration/bundled_default_agent_execution_test.rb` should prove setup-created bundled default agent selection can open a `RunDraft`, finalize a `ConversationRun`, and complete one agent loop through the bundled host
+- `test/e2e/bundled_default_agent_flow.spec.ts` should prove a fresh setup session can create a conversation, inherit the bundled default agent, send one message, and receive one bundled-agent response without manual deployment registration
 
 **Step 4: Run the focused tests again**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/setup_and_sessions_test.rb test/integration/agent_deployments_registration_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/setup_and_sessions_test.rb test/integration/agent_deployments_registration_test.rb test/integration/bundled_default_agent_execution_test.rb`
+
+Run: `bunx playwright test test/e2e/bundled_default_agent_flow.spec.ts test/e2e/settings.spec.ts`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add app/services/agent_programs/bootstrap_bundled_default_service.rb app/controllers/setups_controller.rb Procfile.dev compose.yaml.sample .devcontainer/compose.yaml test/e2e/helpers.ts test/integration/setup_and_sessions_test.rb test/integration/agent_deployments_registration_test.rb test/e2e/settings.spec.ts
+git add app/services/agent_programs/bootstrap_bundled_default_service.rb app/controllers/setups_controller.rb Procfile.dev compose.yaml.sample .devcontainer/compose.yaml test/e2e/helpers.ts test/integration/setup_and_sessions_test.rb test/integration/agent_deployments_registration_test.rb test/integration/bundled_default_agent_execution_test.rb test/e2e/bundled_default_agent_flow.spec.ts test/e2e/settings.spec.ts
 git commit -m "feat: bootstrap bundled default agent"
 ```
 
@@ -482,8 +509,10 @@ git commit -m "feat: remove builtin conversation agent path"
 - Modify: `app/controllers/system/settings/agent_programs_controller.rb`
 - Modify: `app/views/system/settings/agent_programs/index.html.erb`
 - Modify: `app/views/system/settings/agent_programs/show.html.erb`
+- Create: `test/integration/forked_agent_execution_test.rb`
 - Test: `test/integration/system_settings_agent_programs_test.rb`
 - Test: `test/system/system_settings_agent_programs_test.rb`
+- Test: `test/e2e/bundled_agent_fork_flow.spec.ts`
 
 **Step 1: Write the failing fork-flow tests**
 
@@ -498,7 +527,7 @@ test "copy as custom agent creates a forked program and git repo" do
   forked = AgentProgram.find_by!(name: "My assistant")
   assert_equal "custom", forked.source_kind
   assert_equal bundled.id, forked.forked_from_agent_program_id
-  assert File.directory?(Rails.root.join(forked.local_path, ".git"))
+  assert File.directory?(forked.absolute_local_path.join(".git"))
 end
 ```
 
@@ -521,16 +550,28 @@ Implement a product-managed flow that:
 
 Keep Cybros out of ongoing git workflows after the initial bootstrap.
 
+For milestone 1, this task must also close the main autonomy gap:
+
+- in official local development and official compose flows, a forked agent must become runnable end-to-end, not merely generated-config-ready
+- if unsupported deployment topologies still fall back to generated-config-ready, that fallback must be explicit and must not be used to claim milestone-1 completion
+
+Add one direct integration proof and one browser proof for the fork path:
+
+- `test/integration/forked_agent_execution_test.rb` should prove a forked agent can be selected for a conversation and complete one Cybros-owned agent loop through planning, finalization, and compose
+- `test/e2e/bundled_agent_fork_flow.spec.ts` should prove the operator can fork the bundled default agent from settings, create a conversation with the forked agent, send one message, and observe a response through the forked deployment
+
 **Step 4: Run the focused tests again**
 
-Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/system_settings_agent_programs_test.rb test/system/system_settings_agent_programs_test.rb`
+Run: `PARALLEL_WORKERS=1 bin/rails test test/integration/system_settings_agent_programs_test.rb test/system/system_settings_agent_programs_test.rb test/integration/forked_agent_execution_test.rb`
+
+Run: `bunx playwright test test/e2e/bundled_agent_fork_flow.spec.ts`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add app/services/agent_programs/git_bootstrap.rb app/services/agent_programs/fork_service.rb config/routes.rb app/controllers/system/settings/agent_programs_controller.rb app/views/system/settings/agent_programs/index.html.erb app/views/system/settings/agent_programs/show.html.erb test/integration/system_settings_agent_programs_test.rb test/system/system_settings_agent_programs_test.rb
+git add app/services/agent_programs/git_bootstrap.rb app/services/agent_programs/fork_service.rb config/routes.rb app/controllers/system/settings/agent_programs_controller.rb app/views/system/settings/agent_programs/index.html.erb app/views/system/settings/agent_programs/show.html.erb test/integration/system_settings_agent_programs_test.rb test/system/system_settings_agent_programs_test.rb test/integration/forked_agent_execution_test.rb test/e2e/bundled_agent_fork_flow.spec.ts
 git commit -m "feat: add bundled agent fork flow"
 ```
 
@@ -611,6 +652,7 @@ Run the implementation branch through the targeted verification suite before cla
 PARALLEL_WORKERS=1 bin/rails test \
   test/models/agent_program_test.rb \
   test/models/runtime_setting_test.rb \
+  test/models/conversation_program_selection_test.rb \
   test/models/agent_deployment_test.rb \
   test/models/conversation_chat_facade_test.rb \
   test/integration/setup_and_sessions_test.rb \
@@ -620,17 +662,20 @@ PARALLEL_WORKERS=1 bin/rails test \
   test/integration/agent_deployments_inspection_test.rb \
   test/integration/agent_deployments_activation_gate_test.rb \
   test/integration/conversation_agent_program_selection_test.rb \
+  test/integration/programmable_agent_execution_test.rb \
+  test/integration/bundled_default_agent_execution_test.rb \
+  test/integration/forked_agent_execution_test.rb \
   test/integration/system_settings_runtime_settings_test.rb \
   test/system/system_settings_runtime_settings_test.rb \
   test/system/system_settings_agent_programs_test.rb
 
 bin/rails test test/models/agent_rpc_invocation_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/agent_rpc_activation_drift_test.rb
 
-PARALLEL_WORKERS=1 bin/rails test test/services/agent_rpc/lifecycle_caller_test.rb test/integration/run_draft_finalization_test.rb
+PARALLEL_WORKERS=1 bin/rails test test/services/agent_rpc/lifecycle_caller_test.rb test/integration/run_draft_finalization_test.rb test/lib/cybros/bundled_agent_host_test.rb
 
 cd agents/default && bundle exec ruby -Itest test/unit/manifest_test.rb test/integration/rpc_contract_test.rb
 
-bunx playwright test test/e2e/settings.spec.ts test/e2e/programmable_agent_registration.spec.ts
+bunx playwright test test/e2e/settings.spec.ts test/e2e/programmable_agent_registration.spec.ts test/e2e/programmable_agent_approval_resume.spec.ts test/e2e/programmable_agent_target_switch.spec.ts test/e2e/bundled_default_agent_flow.spec.ts test/e2e/bundled_agent_fork_flow.spec.ts
 ```
 
 Expected:
@@ -639,5 +684,5 @@ Expected:
 - programmable-agent replay/binding suites stay green
 - the bundled default agent package tests pass as a standalone program
 - deployment disconnect / stale-session behavior is covered explicitly
-- e2e coverage confirms the default external agent and fork flow in the UI
-- milestone 1 acceptance is judged against general-assistant + light-coding behavior, while remaining reference classes are recorded as explicit post-cut challenge suites
+- e2e coverage confirms the default bundled path and fork path both run through the Cybros-owned loop, including approval-resume and target-switch edges
+- milestone 1 acceptance is judged against general-assistant + light-coding behavior, while broader always-on / multi-surface general-agent expectations and the remaining reference classes are recorded as explicit post-cut challenge suites

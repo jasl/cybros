@@ -27,7 +27,7 @@ That leaves the product in the worst possible state:
 Adopt a bundled-default-external-agent architecture:
 
 - delete the builtin conversation-agent runtime path
-- ship at least one official bundled agent under `cybros/agents`
+- ship at least one official bundled agent under app-root `agents/`
 - treat bundled agents as ordinary `AgentProgram` + `AgentDeployment` objects
 - use an out-of-process companion host that speaks the normal `agent_rpc` contract
 - let users copy bundled agents into a user-owned workspace root and run them through the same companion-host contract
@@ -42,7 +42,7 @@ Bundled agents may have bootstrap and operator-UX conveniences, but they must no
 4. Bundled agents and copied custom agents share the same runtime contract and governance rules.
 5. The product may special-case bootstrap, distribution, and UI, but not runtime authority.
 6. Source ownership is explicit:
-   - bundled sources live under `cybros/agents`
+   - bundled sources live under app-root `agents/`
    - user custom sources live under a separate user-owned workspace root
 7. Deployment endpoint assignment is per deployment; there are no trusted fixed well-known ports.
 8. Deployment changes are rollout events, not hidden hot patches.
@@ -51,7 +51,7 @@ Bundled agents may have bootstrap and operator-UX conveniences, but they must no
 
 ### Bundled Agents
 
-`cybros/agents` becomes the official bundled-agent source directory. It is product-owned, versioned with Cybros, and treated as read-only application content.
+`agents/` becomes the official bundled-agent source directory inside the Cybros app root. It is product-owned, versioned with Cybros, and treated as read-only application content.
 
 Each bundled agent is represented in product state by a normal `AgentProgram`. The default bundled agent is pre-created and paired with a normal `AgentDeployment`.
 
@@ -239,7 +239,7 @@ Bundled and custom sources must not share the same directory semantics.
 
 ### Bundled Source Root
 
-- lives under `cybros/agents`
+- lives under app-root `agents/`
 - owned by the application release
 - not modified by product-side copy flows
 
@@ -312,7 +312,7 @@ For milestone 1, that owner should be the companion deployment layer:
 - additional custom deployments must be started from the same companion-deployment contract, using deployment-specific generated config
 - Cybros may create deployment records and runtime config, but "copy as custom agent" is only considered runnable once the launch path for that deployment type is defined
 
-If milestone 1 cannot yet fully supervise arbitrary extra processes, the product must downgrade the promise from "immediately runnable" to "ready to launch with generated config". The design must not promise launched independent processes without assigning an owner.
+If milestone 1 cannot yet fully supervise unsupported external deployment topologies, the product must downgrade the promise for those topologies from "immediately runnable" to "ready to launch with generated config". The design must not promise launched independent processes without assigning an owner.
 
 ## Deployment, Rollout, And Failure Model
 
@@ -422,7 +422,7 @@ These assumptions are intentionally narrow so the first implementation lands qui
 - `AgentProgram` path handling may need to move from repo-relative `local_path` semantics to a path model that can represent mounted user-owned roots explicitly
 - the first bundled agent only needs to clear an acceptance bar equivalent to a high-quality general assistant plus a light coding agent; it does not need to clear the full research / trading / roleplay challenge suite on day one
 - the first bundled source should reshape `agents/default` into the canonical bundled agent program and absorb the useful prompt assets from the legacy `default-assistant` profile
-- if arbitrary custom deployments cannot yet be auto-launched, milestone 1 must explicitly scope them to generated-config readiness rather than false "immediately runnable" promises
+- if unsupported external deployment topologies cannot yet be auto-launched, milestone 1 must explicitly scope only those topologies to generated-config readiness rather than false "immediately runnable" promises
 - deeper git automation, upstream merge flows, and multi-host orchestration stay out of scope
 
 ## Acceptance And Challenge Strategy
@@ -435,7 +435,7 @@ Milestone 1 should be accepted only if the bundled default external agent can ac
 
 After that first acceptance, Cybros should use progressively harder reference classes as challenge suites:
 
-1. general / universal agents
+1. general / universal agents with broader always-on, multi-surface, or plugin-heavy behavior than the milestone-1 default-agent bar
 2. research and chat / roleplay agents
 3. trading agents
 
@@ -453,6 +453,17 @@ The passing standard is therefore architectural:
 - agent loop orchestration remains Cybros-owned
 - category logic remains largely agent-owned
 - any capability needed across multiple categories eventually graduates into Cybros substrate rather than being left as bundled-agent-only magic
+
+## Implementation Readiness
+
+No design blocker remains for milestone 1 if the implementation keeps these boundaries fixed:
+
+- bundled runtime identity is singular: bundled key `default`, source root `agents/default`
+- `default-assistant` remains migration input only
+- execution-capable conversations are not allowed to proceed without `agent_program_id`
+- official local development and official compose flows must auto-launch both the bundled default deployment and forked custom deployments
+- `generated-config-ready` is allowed only for unsupported external deployment topologies, not for the core milestone-1 acceptance path
+- milestone-1 acceptance requires at least one end-to-end Cybros-owned agent loop through the bundled default agent and one through a forked custom agent
 
 ## Non-Goals
 
