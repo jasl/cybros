@@ -73,6 +73,11 @@ FROM base
 # Run and own only the runtime files as a non-root user for security
 RUN groupadd --system --gid 1000 rails && \
     useradd rails --uid 1000 --gid 1000 --create-home --shell /bin/bash
+
+# Seed runtime-owned directories so empty named volumes inherit writable ownership.
+RUN mkdir -p /rails/agent-workspace /rails/storage && \
+    touch /rails/agent-workspace/.keep && \
+    chown -R rails:rails /rails/agent-workspace /rails/storage
 USER 1000:1000
 
 # Copy built artifacts: gems, application

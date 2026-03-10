@@ -8,6 +8,12 @@ x-app: &default-app
   environment:
     RAILS_DB_URL_BASE: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@db
     RAILS_ENV: production
+    SECRET_KEY_BASE: ${SECRET_KEY_BASE:-compose-local-secret-key-base}
+    ACTIVE_RECORD_ENCRYPTION__PRIMARY_KEY: ${ACTIVE_RECORD_ENCRYPTION__PRIMARY_KEY:-compose-local-primary-key-32-bytes}
+    ACTIVE_RECORD_ENCRYPTION__DETERMINISTIC_KEY: ${ACTIVE_RECORD_ENCRYPTION__DETERMINISTIC_KEY:-compose-local-deterministic-key}
+    ACTIVE_RECORD_ENCRYPTION__KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION__KEY_DERIVATION_SALT:-compose-local-key-derivation-salt}
+    RAILS_ASSUME_SSL: "false"
+    RAILS_FORCE_SSL: "false"
     CYBROS_MANAGED_AGENT_AUTOLAUNCH: "1"
     CYBROS_AGENT_WORKSPACE_ROOT: /rails/agent-workspace
     CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT: /rails
