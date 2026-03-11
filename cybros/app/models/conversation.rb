@@ -31,7 +31,6 @@ class Conversation < ApplicationRecord
            inverse_of: :parent_conversation
 
   has_many :events, dependent: :destroy
-  has_many :conversation_kv_entries, dependent: :destroy
   has_many :conversation_runs, dependent: :destroy
   has_many :run_drafts, dependent: :destroy
 
@@ -1089,13 +1088,27 @@ class Conversation < ApplicationRecord
 
       merge_node = nil
       graph.mutate! do |m|
+        merge_metadata = metadata.is_a?(Hash) ? metadata.deep_stringify_keys : {}
+        source_snapshot = lane_state_snapshot(lane: source_lane)
+        target_snapshot = lane_state_snapshot(lane: target_lane)
+        arguments = {
+          "target_lane_id" => target_lane.id,
+          "source_lane_ids" => [source_lane.id],
+          "target_lane_kv_snapshot" => target_snapshot.fetch("kv_entries"),
+          "source_lane_kv_snapshots" => [{ "lane_id" => source_lane.id, "entries" => source_snapshot.fetch("kv_entries") }],
+          "target_prompt_buffer_snapshot" => target_snapshot.fetch("prompt_buffer_entries"),
+          "source_prompt_buffer_snapshots" => [{ "lane_id" => source_lane.id, "entries" => source_snapshot.fetch("prompt_buffer_entries") }],
+          "merge_metadata" => merge_metadata,
+          "archive_source_lanes" => merge_metadata.delete("archive_source_lanes") == true,
+        }
         merge_node =
           m.merge_lanes!(
             target_lane: target_lane,
             target_from_node: target_head,
             source_lanes_and_nodes: [{ lane: source_lane, from_node: source_head }],
-            node_type: Messages::AgentMessage.node_type_key,
-            metadata: metadata.is_a?(Hash) ? metadata : {},
+            node_type: Messages::Task.node_type_key,
+            metadata: merge_metadata,
+            body_input: merge_task_body_input(arguments: arguments),
           )
       end
 
@@ -1322,6 +1335,17 @@ class Conversation < ApplicationRecord
       else
         value
       end
+    end
+
+    def merge_task_body_input(arguments:)
+      {
+        "tool_call_id" => "merge_lane_state:#{arguments.fetch("source_lane_ids").join(",")}",
+        "requested_name" => "merge_lane_state",
+        "name" => "merge_lane_state",
+        "arguments" => snapshot_json(arguments),
+        "arguments_summary" => AgentCore::Utils.truncate_utf8_bytes(JSON.generate(arguments), max_bytes: 4_000),
+        "source" => "conversation_merge",
+      }
     end
 
     def decorate_transcript_page(page)

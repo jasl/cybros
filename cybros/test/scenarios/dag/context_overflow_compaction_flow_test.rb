@@ -208,6 +208,191 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
     assert_equal "none", suppressed_budget.metadata.dig("context_budget", "budget_action")
   end
 
+  test "compact_context writes compacted working state into lane prompt buffer" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+    chunk = "history context detail " * 6
+    sequence_parent = nil
+    oldest_user = nil
+
+    3.times do |index|
+      created =
+        create_finished_turn!(
+          graph: graph,
+          lane: lane,
+          user_content: "history-#{index}\n#{chunk}",
+          agent_content: "reply-#{index}\n#{chunk}",
+          sequence_parent: sequence_parent,
+        )
+      oldest_user ||= created.fetch(:user_node)
+      sequence_parent = created.fetch(:agent_node)
+    end
+
+    lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "summaries",
+      seq: 10,
+      kind: "summary",
+      content: "Existing summary",
+      priority: 100,
+      estimated_tokens: 16,
+      metadata: {},
+    )
+
+    task_node = nil
+    graph.mutate!(turn_id: SecureRandom.uuid) do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          body_output: { "content" => "Compacting" },
+          metadata: {},
+        )
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: lane.id,
+          metadata: {},
+          body_input: {
+            "tool_call_id" => "tc_compact",
+            "name" => "compact_context",
+            "requested_name" => "compact_context",
+            "arguments" => { "reason" => "manual" },
+          },
+        )
+
+      m.create_edge(from_node: sequence_parent, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: agent, to_node: task_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: NullProvider.new,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 200,
+        reserved_output_tokens: 0,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    tool = Cybros::ContextBudget::Tools.build.find { |entry| entry.name == "compact_context" }
+    result =
+      tool.call(
+        { "reason" => "manual", "target" => "older_turns" },
+        context: AgentCore::ExecutionContext.new(attributes: { dag: { node_id: task_node.id.to_s } }),
+      )
+
+    refute result.error?
+    assert_equal false, result.metadata.fetch("noop")
+    assert_equal "Context compacted into lane prompt buffer.", result.metadata.dig("prompt_projection", "text")
+
+    summary_entries = lane.lane_prompt_buffer_entries.where(buffer_name: "summaries").ordered.to_a
+    assert_equal 2, summary_entries.length
+    assert_equal ["Existing summary"], summary_entries.first(1).map(&:content)
+    assert_includes summary_entries.last.content, "[Compacted prior context]"
+    refute_includes summary_entries.last.content, "Existing summary"
+    assert_equal "summary", summary_entries.last.kind
+    refute graph.nodes.active.where(node_type: Messages::Summary.node_type_key).exists?
+    assert oldest_user.reload.context_excluded?
+  ensure
+    AgentCore::DAG.runtime_resolver = original_runtime_resolver
+  end
+
+  test "compact_context plans against the current branch lane instead of the root lane" do
+    root = create_conversation!(title: "Root")
+    graph = root.root_graph
+    root_lane = root.chat_lane
+
+    root_agent = nil
+    root_history_user = nil
+    graph.mutate! do |m|
+      root_history_user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: root_lane.id,
+          content: "MAIN ONLY " * 8,
+          metadata: {},
+        )
+      root_agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: root_lane.id,
+          body_output: { "content" => "MAIN REPLY " * 8 },
+          metadata: {},
+        )
+      m.create_edge(from_node: root_history_user, to_node: root_agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    branch = root.create_child!(from_node_id: root_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+    branch_lane = branch.chat_lane
+    branch_history = branch.append_user_message!(content: "BRANCH ONLY " * 8)
+    branch_user = branch_history.fetch(:user_node)
+    branch_agent = branch_history.fetch(:agent_node)
+    branch_agent.mark_running!
+    branch_agent.mark_finished!(content: "BRANCH REPLY " * 8)
+
+    task_node = nil
+    graph.mutate!(turn_id: SecureRandom.uuid) do |m|
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: branch_lane.id,
+          metadata: {},
+          body_input: {
+            "tool_call_id" => "tc_branch_compact",
+            "name" => "compact_context",
+            "requested_name" => "compact_context",
+            "arguments" => { "reason" => "manual" },
+          },
+        )
+    end
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: NullProvider.new,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 200,
+        reserved_output_tokens: 0,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    tool = Cybros::ContextBudget::Tools.build.find { |entry| entry.name == "compact_context" }
+    result =
+      tool.call(
+        { "reason" => "manual", "target" => "older_turns" },
+        context: AgentCore::ExecutionContext.new(attributes: { dag: { node_id: task_node.id.to_s } }),
+      )
+
+    refute result.error?
+    branch_summary = branch_lane.lane_prompt_buffer_entries.where(buffer_name: "summaries").ordered.last
+    assert branch_summary.present?, "expected branch lane summary entry"
+    assert_includes branch_summary.content, "What if?"
+    refute_includes branch_summary.content, "MAIN ONLY"
+    assert graph.nodes.where(lane_id: branch_lane.id).where.not(context_excluded_at: nil).exists?
+    refute branch_user.reload.context_excluded?
+    refute root_history_user.reload.context_excluded?
+  ensure
+    AgentCore::DAG.runtime_resolver = original_runtime_resolver
+  end
+
   private
 
     class NullProvider < AgentCore::Resources::Provider::Base

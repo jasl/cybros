@@ -143,7 +143,9 @@ The programmable boundary should remain explicit and stable:
 
 - `conversation.settings.*`
 - `conversation.config.*`
-- `conversation.kv.*`
+- `lane.kv.*`
+- `lane.prompt_buffer.*`
+- `tokens.*`
 - `execution_target.*`
 
 Implementation details may vary, but the product boundary should not collapse back into metadata patches or storage-level writes.

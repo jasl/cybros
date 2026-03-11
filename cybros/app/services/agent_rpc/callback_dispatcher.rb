@@ -5,6 +5,9 @@ module AgentRPC
       conversation.config.update
       lane.kv.set
       lane.kv.delete
+      lane.prompt_buffer.put
+      lane.prompt_buffer.delete
+      lane.prompt_buffer.clear
     ].freeze
 
     MUTATING_METHODS = %w[
@@ -12,6 +15,9 @@ module AgentRPC
       conversation.config.update
       lane.kv.set
       lane.kv.delete
+      lane.prompt_buffer.put
+      lane.prompt_buffer.delete
+      lane.prompt_buffer.clear
       execution_target.propose
     ].freeze
 
@@ -69,6 +75,47 @@ module AgentRPC
         AgentRPC::KernelServices::LaneKV.list(draft: draft, prefix: payload["prefix"])
       when "lane.kv.snapshot"
         AgentRPC::KernelServices::LaneKV.snapshot(draft: draft)
+      when "lane.prompt_buffer.put"
+        apply_mutation! do
+          apply_public_state_mutation! do
+            AgentRPC::KernelServices::LanePromptBuffer.put!(
+              draft: draft,
+              buffer_name: payload.fetch("buffer_name"),
+              kind: payload["kind"],
+              content: payload.fetch("content"),
+              priority: payload["priority"],
+              metadata: payload["metadata"],
+            )
+          end
+        end
+      when "lane.prompt_buffer.get"
+        AgentRPC::KernelServices::LanePromptBuffer.get(draft: draft, entry_id: payload.fetch("entry_id"))
+      when "lane.prompt_buffer.list"
+        AgentRPC::KernelServices::LanePromptBuffer.list(draft: draft, buffer_name: payload["buffer_name"])
+      when "lane.prompt_buffer.delete"
+        apply_mutation! do
+          apply_public_state_mutation! do
+            AgentRPC::KernelServices::LanePromptBuffer.delete!(draft: draft, entry_id: payload.fetch("entry_id"))
+          end
+        end
+      when "lane.prompt_buffer.clear"
+        apply_mutation! do
+          apply_public_state_mutation! do
+            AgentRPC::KernelServices::LanePromptBuffer.clear!(draft: draft, buffer_name: payload.fetch("buffer_name"))
+          end
+        end
+      when "lane.prompt_buffer.snapshot"
+        AgentRPC::KernelServices::LanePromptBuffer.snapshot(draft: draft, buffer_name: payload["buffer_name"])
+      when "lane.prompt_buffer.render"
+        AgentRPC::KernelServices::LanePromptBuffer.render(
+          draft: draft,
+          buffer_name: payload.fetch("buffer_name"),
+          max_tokens: payload.fetch("max_tokens"),
+        )
+      when "tokens.estimate_text"
+        AgentRPC::KernelServices::Tokens.estimate_text(draft: draft, text: payload.fetch("text"))
+      when "tokens.estimate_messages"
+        AgentRPC::KernelServices::Tokens.estimate_messages(draft: draft, messages: payload.fetch("messages"))
       when "execution_target.list"
         AgentRPC::KernelServices::ExecutionTargets.list(entrypoint: draft.conversation, draft: draft)
       when "execution_target.get"

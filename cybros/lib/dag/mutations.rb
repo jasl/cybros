@@ -269,7 +269,7 @@ module DAG
       node
     end
 
-      def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {})
+      def merge_lanes!(target_lane:, target_from_node:, source_lanes_and_nodes:, node_type:, metadata: {}, body_input: {}, body_output: {})
       assert_lane_belongs_to_graph!(target_lane)
       assert_node_belongs_to_graph!(target_from_node)
 
@@ -321,7 +321,9 @@ module DAG
           state: DAG::Node::PENDING,
           metadata: merge_metadata,
           turn_id: nil,
-          lane_id: target_lane.id
+          lane_id: target_lane.id,
+          body_input: body_input,
+          body_output: body_output,
         )
 
       create_edge(

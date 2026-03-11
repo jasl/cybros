@@ -29,6 +29,22 @@ class RunDraftTest < ActiveSupport::TestCase
     assert_equal({ "steps" => ["draft"] }, draft.prepared_plan)
     assert_equal({ "title" => "Updated" }, draft.staged_public_settings_patch)
     assert_equal([{ "op" => "set", "key" => "shared.stage" }], draft.staged_kv_ops)
+    assert_equal(
+      [{
+        "op" => "put",
+        "entry" => {
+          "id" => "entry-1",
+          "buffer_name" => "summaries",
+          "seq" => 10,
+          "kind" => "summary",
+          "content" => "Snapshot",
+          "priority" => 2,
+          "estimated_tokens" => 6,
+          "metadata" => { "source" => "prepare" },
+        },
+      }],
+      draft.staged_prompt_buffer_ops,
+    )
     assert_equal "config:v1", draft.agent_config_schema_fingerprint
     assert_equal draft.provider_credential_id, draft.runtime_governors.dig("provider_limiter", "provider_credential_id")
     assert_equal draft.proposed_execution_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
@@ -215,6 +231,19 @@ class RunDraftTest < ActiveSupport::TestCase
         staged_public_settings_patch: { "title" => "Updated" },
         staged_agent_config_patch: { "mode" => "coding" },
         staged_kv_ops: [{ "op" => "set", "key" => "shared.stage" }],
+        staged_prompt_buffer_ops: [{
+          "op" => "put",
+          "entry" => {
+            "id" => "entry-1",
+            "buffer_name" => "summaries",
+            "seq" => 10,
+            "kind" => "summary",
+            "content" => "Snapshot",
+            "priority" => 2,
+            "estimated_tokens" => 6,
+            "metadata" => { "source" => "prepare" },
+          },
+        }],
         approval_state: { "status" => "not_required" },
         expires_at: 30.minutes.from_now.change(usec: 0),
       }.merge(attributes.except(:conversation)),

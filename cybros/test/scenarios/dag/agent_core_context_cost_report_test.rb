@@ -27,6 +27,15 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
   test "context_cost report includes prune_tool_outputs decision when pruning makes prompt fit" do
     conversation = create_conversation!
     graph = conversation.dag_graph
+    conversation.chat_lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "summaries",
+      seq: 10,
+      kind: "summary",
+      content: "Compact summary kept in the prompt buffer.",
+      priority: 100,
+      estimated_tokens: 40,
+      metadata: { "source" => "compact_context" },
+    )
 
     long_tool_output = "x" * 2_000
 
@@ -123,6 +132,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
 
       # Pruned prompt should still include the tool result message and tool_call_id.
       sent_messages = provider.calls.fetch(0).fetch(:messages)
+      assert_includes sent_messages.first.text, "Compact summary kept in the prompt buffer."
       tool_msg = sent_messages.find { |m| m.role == :tool_result && m.tool_call_id == "tc_1" }
       assert tool_msg, "expected tool_result message with tool_call_id tc_1"
       assert_includes tool_msg.text, "[Tool result trimmed:"
@@ -139,6 +149,7 @@ class DAG::AgentCoreContextCostReportTest < ActiveSupport::TestCase
       assert_equal 1200, ctx_cost.fetch("context_soft_limit_tokens")
       assert_equal 0.9, ctx_cost.fetch("context_soft_limit_ratio")
       assert_equal 1200, ctx_cost.fetch("effective_context_soft_limit_tokens")
+      assert ctx_cost.dig("prompt_sections", "system_prompt", "sections").any? { |section| section.dig("metadata", "source") == "lane_prompt_buffer" && section.dig("metadata", "buffer_name") == "summaries" }
 
       assert_equal 3, ctx_cost.fetch("limit_turns")
       refute decisions.any? { |d| d["type"] == "shrink_turns" }

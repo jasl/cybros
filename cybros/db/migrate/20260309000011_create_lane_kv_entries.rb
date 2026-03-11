@@ -1,4 +1,4 @@
-class CreateLaneKvEntries < ActiveRecord::Migration[8.2]
+class CreateLaneKVEntries < ActiveRecord::Migration[8.2]
   def change
     create_table :lane_kv_entries, id: :uuid, default: -> { "uuidv7()" } do |t|
       t.references :lane, null: false, type: :uuid, foreign_key: { to_table: :dag_lanes }

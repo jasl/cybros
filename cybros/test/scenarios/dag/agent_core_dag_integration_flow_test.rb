@@ -1792,25 +1792,50 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
   test "context budget soft limit lets the model call compact_context as a normal task" do
     conversation = create_conversation!
     graph = conversation.dag_graph
+    lane = conversation.chat_lane
+    prior_turn_id = "0194f3c0-0000-7000-8000-00000000d113a"
     turn_id = "0194f3c0-0000-7000-8000-00000000d113b"
 
-    user = nil
+    prior_agent = nil
     agent = nil
+
+    graph.mutate!(turn_id: prior_turn_id) do |m|
+      prior_user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          content: "Earlier context #{"x" * 6}",
+          metadata: {},
+        )
+      prior_agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          body_output: { "content" => "Earlier reply #{"y" * 4}" },
+          metadata: {},
+        )
+      m.create_edge(from_node: prior_user, to_node: prior_agent, edge_type: DAG::Edge::SEQUENCE)
+    end
 
     graph.mutate!(turn_id: turn_id) do |m|
       user =
         m.create_node(
           node_type: Messages::UserMessage.node_type_key,
           state: DAG::Node::FINISHED,
-          content: "Need a lot of context #{"x" * 50}",
+          lane_id: lane.id,
+          content: "Need a lot of context #{"x" * 18}",
           metadata: {},
         )
       agent =
         m.create_node(
           node_type: Messages::AgentMessage.node_type_key,
           state: DAG::Node::PENDING,
+          lane_id: lane.id,
           metadata: {},
         )
+      m.create_edge(from_node: prior_agent, to_node: user, edge_type: DAG::Edge::SEQUENCE)
       m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
@@ -1825,6 +1850,10 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
                 tool_calls: [AgentCore::ToolCall.new(id: "tc_compact", name: "compact_context", arguments: { "reason" => "soft_limit_reached" })],
               ),
             stop_reason: :tool_use,
+          ),
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "Compaction applied."),
+            stop_reason: :end_turn,
           ),
         ]
       )
@@ -1892,6 +1921,28 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
           .where.not(id: agent.id)
           .sole
       assert next_agent.present?
+
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [compact_task.id], claimed.map(&:id)
+      DAG::Runner.run_node!(compact_task.id)
+
+      compact_task.reload
+      assert_equal DAG::Node::FINISHED, compact_task.state
+
+      summary_entry = conversation.chat_lane.lane_prompt_buffer_entries.where(buffer_name: "summaries").sole
+      assert_includes summary_entry.content, "[Compacted prior context]"
+
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [next_agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(next_agent.id)
+
+      second_call = provider.calls.fetch(1)
+      assert_includes second_call.fetch(:messages).first.text, summary_entry.content
+
+      compact_result_message = second_call.fetch(:messages).find { |message| message.role == :tool_result && message.tool_call_id == "tc_compact" }
+      refute_nil compact_result_message
+      assert_equal "Context compacted into lane prompt buffer.", compact_result_message.text
+      refute_includes compact_result_message.text, "[Compacted prior context]"
     ensure
       AgentCore::DAG.runtime_resolver = original_runtime_resolver
       DAG.executor_registry = original_registry

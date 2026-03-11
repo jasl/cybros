@@ -273,15 +273,15 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
         metadata: {
           "routing" => { "channel" => "web" },
           "agent" => {
-            "agent_profile" => {
-              "base" => "coding",
-              "runtime_surface" => {
-                "type" => "noop",
-                "helpers" => { "estimate_tokens" => true },
-                "stage_limits" => {
-                  "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 2048 },
+              "agent_profile" => {
+                "base" => "coding",
+                "runtime_surface" => {
+                  "type" => "noop",
+                  "helpers" => { "estimate_tokens" => true, "estimate_messages" => true },
+                  "stage_limits" => {
+                    "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 2048 },
+                  },
                 },
-              },
             },
           },
         },
@@ -294,7 +294,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal(
       {
         type: :noop,
-        helpers: [:estimate_tokens],
+        helpers: [:estimate_messages, :estimate_tokens],
         stage_limits: {
           prepare_turn: { timeout_s: 0.5, max_output_bytes: 2048 },
         },
@@ -352,7 +352,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
       args: {
         "runtime_surface" => {
           "type" => "noop",
-          "helpers" => { "estimate_tokens" => true },
+          "helpers" => { "estimate_tokens" => true, "estimate_messages" => true },
           "stage_limits" => {
             "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 2048 },
           },
@@ -375,7 +375,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal(
       {
         type: :noop,
-        helpers: [:estimate_tokens],
+        helpers: [:estimate_messages, :estimate_tokens],
         stage_limits: {
           prepare_turn: { timeout_s: 0.5, max_output_bytes: 2048 },
         },

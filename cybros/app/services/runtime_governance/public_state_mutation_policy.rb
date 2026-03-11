@@ -5,6 +5,9 @@ module RuntimeGovernance
       conversation.config.update
       lane.kv.set
       lane.kv.delete
+      lane.prompt_buffer.put
+      lane.prompt_buffer.delete
+      lane.prompt_buffer.clear
     ].freeze
 
     def self.evaluate(method_name:, permission_mode:)

@@ -222,7 +222,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
-  test "merge creates a pending join node in the target lane without archiving the source lanes" do
+  test "merge creates a pending merge_lane_state task in the target lane without archiving the source lanes" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane
@@ -245,13 +245,27 @@ class DAG::LaneTest < ActiveSupport::TestCase
           target_lane: main_lane,
           target_from_node: main_head,
           source_lanes_and_nodes: [{ lane: source_lane, from_node: source_head }],
-          node_type: Messages::AgentMessage.node_type_key,
-          metadata: { "kind" => "test" }
+          node_type: Messages::Task.node_type_key,
+          metadata: { "kind" => "test" },
+          body_input: {
+            "tool_call_id" => "merge:test",
+            "requested_name" => "merge_lane_state",
+            "name" => "merge_lane_state",
+            "arguments" => {
+              "target_lane_id" => main_lane.id,
+              "source_lane_ids" => [source_lane.id],
+            },
+            "arguments_summary" => "{\"target_lane_id\":\"#{main_lane.id}\",\"source_lane_ids\":[\"#{source_lane.id}\"]}",
+          },
         )
     end
 
     assert_equal main_lane.id, merge_node.lane_id
+    assert_equal Messages::Task.node_type_key, merge_node.node_type
     assert_equal DAG::Node::PENDING, merge_node.state
+    assert_equal "merge_lane_state", merge_node.body_input["name"]
+    assert_equal main_lane.id, merge_node.body_input.dig("arguments", "target_lane_id")
+    assert_equal [source_lane.id], merge_node.body_input.dig("arguments", "source_lane_ids")
 
     assert graph.edges.active.exists?(
       from_node_id: main_head.id,
@@ -299,7 +313,7 @@ class DAG::LaneTest < ActiveSupport::TestCase
           target_lane: branch_lane,
           target_from_node: branch_head,
           source_lanes_and_nodes: [{ lane: main_lane, from_node: main_head }],
-          node_type: Messages::AgentMessage.node_type_key,
+          node_type: Messages::Task.node_type_key,
           metadata: {}
         )
       end

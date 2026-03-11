@@ -126,17 +126,32 @@ Owns:
 - governor snapshot
 - execution lifecycle timestamps and result state
 
-### ConversationKVEntry
+### LaneKVEntry
 
-The shared per-conversation working-state entry for agents.
+The branch-local structured working-state entry for agents.
 
 Owns:
 
 - namespaced key
 - JSON value
-- current-state semantics
+- lane-scoped current-state semantics
 
 It is operational state, not append-only audit history.
+
+### LanePromptBufferEntry
+
+The lane-scoped prompt working-set entry for summaries, notes, and handoff material.
+
+Owns:
+
+- `buffer_name`
+- ordered `seq`
+- `kind`
+- prompt content
+- `priority`
+- `estimated_tokens`
+
+It is prompt-side working material, not durable transcript history.
 
 ### Automation
 

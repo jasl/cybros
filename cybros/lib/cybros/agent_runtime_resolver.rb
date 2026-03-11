@@ -74,6 +74,13 @@ module Cybros
       )
     end
 
+    def token_counter_for_model_ref(model_ref:)
+      provider_key, model_key = validate_model_ref!(model_ref: model_ref).values_at(:provider_key, :model_key)
+      model_spec = Cybros::LLM::Catalog.effective.model(provider_key, model_key)
+
+      build_token_counter(model_spec: model_spec)
+    end
+
     def validate_model_ref!(model_ref:)
       ref = normalize_model_ref(model_ref: model_ref)
       provider_key, model_key = ref.split("/", 2).map(&:to_s)
@@ -643,16 +650,7 @@ module Cybros
       tokenizer_hint = model_spec.fetch("tokenizer_hint", nil).to_s.strip
       tokenizer_hint = Cybros::TokenEstimation.canonical_model_hint(api_model) if tokenizer_hint.empty?
 
-      token_estimator =
-        Cybros::TokenEstimation.estimator(
-          tokenizer_root_path: Cybros::TokenEstimation.tokenizer_root,
-          strict: false,
-        )
-      token_counter =
-        AgentCore::Resources::TokenCounter::Estimator.new(
-          token_estimator: token_estimator,
-          model_hint: tokenizer_hint,
-        )
+      token_counter = build_token_counter(model_spec: model_spec, api_model: api_model, tokenizer_hint: tokenizer_hint)
 
       base_url = provider_spec.fetch("base_url").to_s
       headers = provider_spec.fetch("headers", {})
@@ -802,6 +800,7 @@ module Cybros
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::ContextBudget::Tools.build)
+      registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
 
       # Phase 0: always register native memory + skills tools.
@@ -828,7 +827,7 @@ module Cybros
     def context_budget_tool_policy(delegate:)
       AgentCore::Resources::Tools::Policy::Profiled.new(
         allowed: ["*"],
-        hidden: ["compact_context"],
+        hidden: ["compact_context", "merge_lane_state"],
         context_allowed: lambda { |context|
           context_budget_action(context) == "advise_compact" ? ["compact_context"] : []
         },
@@ -1032,6 +1031,18 @@ module Cybros
             end
           end
       end
+      if config.dig(:helpers, :estimate_messages) == true
+        helpers[:estimate_messages] =
+          lambda do |messages, **|
+            if token_counter.respond_to?(:count_messages)
+              token_counter.count_messages(Array(messages))
+            else
+              Array(messages).sum do |message|
+                message.respond_to?(:content) ? message.content.to_s.bytesize : message.to_s.bytesize
+              end
+            end
+          end
+      end
 
       {
         runtime_surface: build_runtime_surface(config),
@@ -1059,7 +1070,7 @@ module Cybros
       normalized_helpers =
         helpers.each_with_object({}) do |(helper_name, enabled), out|
           key = helper_name.to_s.strip.downcase.tr("-", "_").to_sym
-          next unless key == :estimate_tokens
+          next unless %i[estimate_tokens estimate_messages].include?(key)
           next unless enabled == true
 
           out[key] = true
@@ -1103,6 +1114,25 @@ module Cybros
       }.freeze
     end
     private_class_method :noop_runtime_surface_config
+
+    def build_token_counter(model_spec:, api_model: nil, tokenizer_hint: nil)
+      resolved_api_model = api_model.presence || model_spec.fetch("api_model").to_s
+      resolved_hint = tokenizer_hint.to_s.strip
+      resolved_hint = model_spec.fetch("tokenizer_hint", nil).to_s.strip if resolved_hint.empty?
+      resolved_hint = Cybros::TokenEstimation.canonical_model_hint(resolved_api_model) if resolved_hint.empty?
+
+      token_estimator =
+        Cybros::TokenEstimation.estimator(
+          tokenizer_root_path: Cybros::TokenEstimation.tokenizer_root,
+          strict: false,
+        )
+
+      AgentCore::Resources::TokenCounter::Estimator.new(
+        token_estimator: token_estimator,
+        model_hint: resolved_hint,
+      )
+    end
+    private_class_method :build_token_counter
 
     def build_runtime_surface(config)
       case config.fetch(:type)

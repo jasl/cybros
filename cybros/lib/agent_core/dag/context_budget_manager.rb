@@ -501,6 +501,7 @@ module AgentCore
           token_counter = @runtime.token_counter
 
           memory_results = build.memory_dropped ? [] : Array(prepared.memory_results)
+          final_prompt_injection_items = final_prompt_injection_items_for(prepared: prepared)
           memory_knowledge_tokens =
             if memory_results.any?
               memory_text = memory_results.map { |e| e.respond_to?(:content) ? e.content.to_s : e.to_s }.join("\n\n")
@@ -533,7 +534,7 @@ module AgentCore
           system_injections_tokens = system_prompt_tokens - base_system_prompt_tokens - memory_knowledge_tokens
           system_injections_tokens = 0 if system_injections_tokens.negative?
 
-          preamble_count = preamble_injection_message_count(prepared.prompt_injection_items)
+          preamble_count = preamble_injection_message_count(final_prompt_injection_items)
           prompt_messages = Array(build.built_prompt.messages)
           preamble_messages = preamble_count.positive? ? prompt_messages.first(preamble_count) : []
 
@@ -572,7 +573,7 @@ module AgentCore
               "injections" => injections_tokens,
               "memory_knowledge" => memory_knowledge_tokens,
             }.compact,
-            "prompt_sections" => prompt_sections_report(base_system_prompt, build, prepared: prepared, memory_results: memory_results),
+            "prompt_sections" => prompt_sections_report(base_system_prompt, build, prompt_injection_items: final_prompt_injection_items, memory_results: memory_results),
             "decisions" => Array(build.decisions).map { |d| d.is_a?(Hash) ? d : { "type" => d.to_s } },
           }.compact
         rescue StandardError
@@ -596,7 +597,7 @@ module AgentCore
           }.compact
         end
 
-        def prompt_sections_report(base_system_prompt, build, prepared:, memory_results:)
+        def prompt_sections_report(base_system_prompt, build, prompt_injection_items:, memory_results:)
           token_counter = @runtime.token_counter
 
           prompt_context =
@@ -606,7 +607,7 @@ module AgentCore
               memory_results: memory_results,
               variables: prompt_variables,
               prompt_mode: @runtime.prompt_mode,
-              prompt_injection_items: prepared.prompt_injection_items,
+              prompt_injection_items: prompt_injection_items,
               tool_policy: @runtime.tool_policy,
               skills_store: @runtime.skills_store,
               include_skill_locations: @runtime.include_skill_locations,
@@ -635,7 +636,7 @@ module AgentCore
             end
 
           tools_schema = tools_schema_report(build)
-          preamble_messages = preamble_messages_report(prepared, token_counter: token_counter)
+          preamble_messages = preamble_messages_report(prompt_injection_items, token_counter: token_counter)
 
           {
             "system_prompt" => {
@@ -681,9 +682,9 @@ module AgentCore
           nil
         end
 
-        def preamble_messages_report(prepared, token_counter:)
+        def preamble_messages_report(prompt_injection_items, token_counter:)
           items =
-            Array(prepared.prompt_injection_items)
+            Array(prompt_injection_items)
               .select { |item| item.respond_to?(:preamble_message?) && item.preamble_message? }
               .each_with_index
               .sort_by { |(item, idx)| [item.order.to_i, idx] }
@@ -720,6 +721,14 @@ module AgentCore
           items
         rescue StandardError
           []
+        end
+
+        def final_prompt_injection_items_for(prepared:)
+          PromptAssembly.new(runtime: @runtime, execution_context: @execution_context).final_prompt_injection_items(
+            prompt_injection_items: prepared.prompt_injection_items,
+          )
+        rescue StandardError
+          Array(prepared.prompt_injection_items)
         end
 
         def prompt_variables
@@ -1013,6 +1022,7 @@ module AgentCore
             effective_prompt_budget_tokens: budget_facts.fetch(:effective_prompt_budget_tokens, nil),
             effective_context_soft_limit_tokens: budget_facts.fetch(:effective_context_soft_limit_tokens, nil),
             context_node_ids: relevant_context_node_ids,
+            lane_prompt_buffer: lane_prompt_buffer_fingerprint_payload,
           }.compact
 
           Digest::SHA256.hexdigest(JSON.generate(payload))
@@ -1116,6 +1126,15 @@ module AgentCore
           !AgentCore::Resources::Tools::ToolResult.from_h(result_hash).error?
         rescue StandardError
           false
+        end
+
+        def lane_prompt_buffer_fingerprint_payload
+          lane = @node.respond_to?(:lane) ? @node.lane : nil
+          return [] if lane.nil?
+
+          LanePromptBufferSections.new(lane: lane).fingerprint_payload
+        rescue StandardError
+          []
         end
     end
   end

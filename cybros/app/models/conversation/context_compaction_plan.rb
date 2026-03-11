@@ -12,43 +12,48 @@ class Conversation::ContextCompactionPlan
       end
     end
 
-  def self.plan(conversation:, content:, runtime_surface_resolution: nil)
+  def self.plan(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil)
     new(
       conversation: conversation,
       content: content,
+      lane: lane,
       runtime_surface_resolution: runtime_surface_resolution,
+      runtime: runtime,
     ).plan
   end
 
-  def initialize(conversation:, content:, runtime_surface_resolution: nil)
+  def initialize(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil)
     @conversation = conversation
     @content = content.to_s
+    @lane = lane || conversation.chat_lane
     @runtime_surface_resolution = runtime_surface_resolution
+    @runtime = runtime
   end
 
   def plan
-    budget = effective_prompt_budget_tokens
+    hard_budget = effective_prompt_budget_tokens
+    compaction_budget = compaction_target_tokens(hard_budget: hard_budget)
     estimated = estimated_tokens_for(context_nodes: transcript_nodes + [synthetic_user_node])
 
-    return build_result(required: false, estimated: estimated, budget: budget) if estimated <= budget
+    return build_result(required: false, estimated: estimated, budget: hard_budget) if estimated <= compaction_budget
 
-    compacted_turn_ids = compacted_turn_ids_for(budget: budget)
-    return build_result(required: false, estimated: estimated, budget: budget) if compacted_turn_ids.empty?
+    compacted_turn_ids = compacted_turn_ids_for(budget: compaction_budget)
+    return build_result(required: false, estimated: estimated, budget: hard_budget) if compacted_turn_ids.empty?
 
     compacted_nodes = transcript_nodes.select { |node| compacted_turn_ids.include?(node.fetch("turn_id").to_s) }
-    summary_text = summary_text_for(compacted_nodes: compacted_nodes, budget: budget)
+    summary_text = summary_text_for(compacted_nodes: compacted_nodes, budget: compaction_budget)
     compacted_turn_ids, summary_text =
       apply_runtime_surface_compaction(
         compacted_turn_ids: compacted_turn_ids,
         summary_text: summary_text,
         estimated: estimated,
-        budget: budget,
+        budget: compaction_budget,
       )
 
     build_result(
       required: true,
       estimated: estimated,
-      budget: budget,
+      budget: hard_budget,
       compacted_turn_ids: compacted_turn_ids,
       summary_text: summary_text,
     )
@@ -67,15 +72,18 @@ class Conversation::ContextCompactionPlan
     end
 
     def transcript_nodes
-      @transcript_nodes ||= @conversation.chat_lane.transcript_recent_turns(limit_turns: Cybros::AgentRuntimeResolver::MAX_CONTEXT_TURNS, mode: :full)
+      @transcript_nodes ||= lane.transcript_recent_turns(limit_turns: Cybros::AgentRuntimeResolver::MAX_CONTEXT_TURNS, mode: :full)
     end
 
     def compacted_turn_ids_for(budget:)
       turn_ids = transcript_nodes.filter_map { |node| node.fetch("turn_id").to_s.presence }.uniq
+      return [] if turn_ids.length <= 1
+
+      latest_turn_id = turn_ids.last
       kept_turn_ids = turn_ids.dup
       compacted_turn_ids = []
 
-      while kept_turn_ids.any?
+      while kept_turn_ids.length > 1
         estimate =
           estimated_tokens_for(
             context_nodes:
@@ -83,7 +91,10 @@ class Conversation::ContextCompactionPlan
           )
         break if estimate <= budget
 
-        compacted_turn_ids << kept_turn_ids.shift
+        candidate_turn_id = kept_turn_ids.shift
+        next if candidate_turn_id == latest_turn_id
+
+        compacted_turn_ids << candidate_turn_id
       end
 
       compacted_turn_ids
@@ -91,11 +102,14 @@ class Conversation::ContextCompactionPlan
 
     def summary_text_for(compacted_nodes:, budget:)
       lines = compacted_nodes.filter_map { |node| compacted_line_for(node) }
-      text = if lines.any?
-        "[Compacted prior context]\n#{lines.join("\n")}"
-      else
-        "[Compacted prior context]\nOlder conversation context was compacted before this turn."
-      end
+      summary_body =
+        if lines.any?
+          lines.join("\n")
+        else
+          "Older conversation context was compacted before this turn."
+        end
+
+      text = "[Compacted prior context]\n#{summary_body}"
 
       truncate_to_token_limit(text, token_limit: [[budget / 4, 128].max, budget].min)
     end
@@ -303,7 +317,7 @@ class Conversation::ContextCompactionPlan
       {
         "node_id" => "synthetic-user",
         "turn_id" => "synthetic-turn",
-        "lane_id" => @conversation.chat_lane.id,
+        "lane_id" => lane.id,
         "node_type" => Messages::UserMessage.node_type_key,
         "state" => DAG::Node::FINISHED,
         "payload" => {
@@ -317,19 +331,31 @@ class Conversation::ContextCompactionPlan
 
     def estimated_tokens_for(context_nodes:)
       adapted = AgentCore::DAG::ContextAdapter.new(context_nodes: context_nodes).call
-      token_counter.count_text(adapted.system_prompt.to_s) + token_counter.count_messages(adapted.messages)
+      prompt_buffer_tokens =
+        AgentCore::DAG::LanePromptBufferSections.new(lane: lane).sections.sum do |section|
+          token_counter.count_text(section.content.to_s)
+        end
+
+      token_counter.count_text(adapted.system_prompt.to_s) + prompt_buffer_tokens + token_counter.count_messages(adapted.messages)
+    end
+
+    def lane
+      @lane
     end
 
     def effective_prompt_budget_tokens
-      [(model_spec.fetch("context_window_tokens").to_i - reserved_output_tokens), 1].max
+      window_tokens = runtime_context_window_tokens || model_spec.fetch("context_window_tokens").to_i
+      [(window_tokens - reserved_output_tokens), 1].max
     end
 
     def reserved_output_tokens
+      return @runtime.reserved_output_tokens.to_i if @runtime.respond_to?(:reserved_output_tokens)
+
       0
     end
 
     def token_counter
-      @token_counter ||=
+      @token_counter ||= @runtime&.token_counter ||
         AgentCore::Resources::TokenCounter::Estimator.new(
           token_estimator: Cybros::TokenEstimation.estimator(tokenizer_root_path: Cybros::TokenEstimation.tokenizer_root, strict: false),
           model_hint: model_spec.fetch("tokenizer_hint", model_spec.fetch("api_model")).to_s,
@@ -355,5 +381,35 @@ class Conversation::ContextCompactionPlan
             resolution.fetch(:model_key),
           )
         end
+    end
+
+    def runtime_context_window_tokens
+      return nil unless @runtime.respond_to?(:context_window_tokens)
+
+      value = @runtime.context_window_tokens
+      value.present? ? value.to_i : nil
+    end
+
+    def compaction_target_tokens(hard_budget:)
+      soft_budget = effective_context_soft_limit_tokens(limit: hard_budget)
+      soft_budget || hard_budget
+    end
+
+    def effective_context_soft_limit_tokens(limit:)
+      return nil if limit.nil?
+
+      token_limit =
+        if @runtime.respond_to?(:context_soft_limit_tokens) && @runtime.context_soft_limit_tokens.present?
+          @runtime.context_soft_limit_tokens.to_i
+        end
+      ratio_limit =
+        if @runtime.respond_to?(:context_soft_limit_ratio) && @runtime.context_soft_limit_ratio.present?
+          (limit * @runtime.context_soft_limit_ratio.to_f).floor
+        end
+
+      soft_limit = [token_limit, ratio_limit].compact.min
+      return nil if soft_limit.nil?
+
+      [soft_limit, limit].min
     end
 end

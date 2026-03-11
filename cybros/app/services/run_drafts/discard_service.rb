@@ -18,6 +18,7 @@ module RunDrafts
           staged_public_settings_patch: {},
           staged_agent_config_patch: {},
           staged_kv_ops: [],
+          staged_prompt_buffer_ops: [],
         }
         attributes[:approval_state] = approval_state if approval_state.present?
         draft.update!(attributes)

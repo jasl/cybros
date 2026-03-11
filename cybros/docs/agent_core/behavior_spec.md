@@ -27,13 +27,19 @@
 
 - `Messages::AgentMessage` / `Messages::CharacterMessage`：一次 LLM 调用（可扩展出 tool loop）
 - `Messages::Task`：一次工具调用（native/MCP/skills）
-- `Messages::Summary`：历史或离线压缩产物；当前 active context-budget 主路径不会自动生成这类节点
+- `Messages::Summary`：历史或离线压缩产物；当前 active prompt-working-set 主路径不会依赖它来承载 prompt-side summaries
 
 执行由 DAG 引擎驱动：
 
 - `DAG::Scheduler` claim `pending` 节点 → `running`
 - `DAG::Runner` 根据 executor 的 `context_mode` 选择 `context_for_full` 或 `context_for`
 - executor 返回 `DAG::ExecutionResult`，由 Runner 负责落库与失败传播
+
+Prompt working set 的 shipped 结构是：
+
+- DAG history window
+- `lane.prompt_buffer`
+- memory / prompt injections / visible tools under token budget
 
 ---
 
@@ -276,7 +282,7 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 
 - executor 需要 **full context**（包含 tool/task/summary 等），通过 `context_mode = :full` 向 DAG Runner 声明
 - `ContextAdapter` 将 DAG context nodes 映射为 `AgentCore::Message` 列表
-- `PromptAssembly` 负责注入 memory、prompt_injections、skills fragment 等
+- `PromptAssembly` 负责注入 `lane.prompt_buffer`、memory、prompt_injections、skills fragment 等
 
 与 tool calling/预算相关的关键行为：
 
@@ -284,7 +290,7 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
 - Strict schema：发送给模型前，对 tool schema 做保守 strict 化（缺失时补 `additionalProperties:false` 等），降低参数漂移（见 `StrictJsonSchema`）
 - Runtime surface：
   - `prepare_turn` 在预算 fit 后、真正调用 provider 前对 prompt view 做最后一次受限重写
-  - `compact_context` 通过 app 层 compaction plan + `runtime_surface.compact_context(input:)` 参与摘要/保留项决策；一旦进入 active path，会 materialize 为普通 `task` 节点
+  - `compact_context` 通过 app 层 compaction plan + `runtime_surface.compact_context(input:)` 参与摘要/保留项决策；一旦进入 active path，会 materialize 为普通 `task` 节点，并把 durable prompt-side material 写到 `lane.prompt_buffer`
 - Token budget：当启用 `context_window_tokens` 时，`ContextBudgetManager` 先做 drop memory / prune tool outputs / shrink turns 以满足 hard cap，再计算 `budget_state = normal|soft_limit_reached|near_hard_cap|forced_fit`
 - Bundled default compact behavior：`Cybros::ContextBudget::DefaultPolicy` 把 `budget_state` 映射到 `none|advise_compact|enqueue_compact`
   - `advise_compact`：只向 prompt 注入最小预算 guidance；模型可见性掩码决定 `compact_context_available`

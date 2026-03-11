@@ -22,18 +22,28 @@ then it must pass through a Cybros-owned surface.
 
 ## Kernel-Owned Surfaces
 
-### 1. Conversation Control Surface
+### 1. Conversation And Lane Control Surface
 
-These are the canonical programmable surfaces for conversation-scoped state:
+These are the canonical programmable surfaces for conversation-scoped and lane-scoped state:
 
 - `conversation.settings.get`
 - `conversation.settings.update`
 - `conversation.config.get`
 - `conversation.config.update`
-- `conversation.kv.get`
-- `conversation.kv.set`
-- `conversation.kv.delete`
-- `conversation.kv.list`
+- `lane.kv.get`
+- `lane.kv.set`
+- `lane.kv.delete`
+- `lane.kv.list`
+- `lane.kv.snapshot`
+- `lane.prompt_buffer.put`
+- `lane.prompt_buffer.get`
+- `lane.prompt_buffer.list`
+- `lane.prompt_buffer.delete`
+- `lane.prompt_buffer.clear`
+- `lane.prompt_buffer.snapshot`
+- `lane.prompt_buffer.render`
+- `tokens.estimate_text`
+- `tokens.estimate_messages`
 - `execution_target.list`
 - `execution_target.get`
 - `execution_target.propose`

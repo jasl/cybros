@@ -25,7 +25,7 @@ module Cybros
       MAX_TOOL_PATTERN_BYTES = 128
       MAX_SYSTEM_PROMPT_SECTIONS = 50
       RUNTIME_SURFACE_TYPES = %w[noop].freeze
-      RUNTIME_SURFACE_HELPER_IDS = %w[estimate_tokens].freeze
+      RUNTIME_SURFACE_HELPER_IDS = %w[estimate_tokens estimate_messages].freeze
       RUNTIME_SURFACE_STAGE_IDS = AgentCore::RuntimeSurface::LIFECYCLE_METHODS.map(&:to_s).freeze
       SYSTEM_PROMPT_SECTION_IDS = %w[
         safety

@@ -223,7 +223,7 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
-  test "transcript_page is lane-scoped (supports topics/subthreads)" do
+  test "transcript_page is lane-scoped (supports branch lanes/subthreads)" do
     conversation = create_conversation!
     graph = conversation.dag_graph
     main_lane = graph.main_lane

@@ -1,6 +1,6 @@
-# AgentCore（DAG-first）上下文预算与 compaction 主路径
+# AgentCore（DAG-first）上下文预算与 prompt-working-set 主路径
 
-本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 active budget 行为，以及 Cybros 如何把 `compact_context` 接到普通 DAG task/tool loop 中。
+本文档描述 `AgentCore::DAG::ContextBudgetManager` 的 active budget 行为，以及 Cybros 如何把 `lane.prompt_buffer` 与 `compact_context` 接到普通 DAG task/tool loop 中。
 
 实现落点：
 
@@ -19,6 +19,18 @@
 
 ## 1) Effective limits
 
+在 shipped 实现中，prompt working set 分为三层：
+
+- DAG history window
+- `lane.prompt_buffer`
+- token budget
+
+`PromptAssembly` 会先把 lane-scoped prompt buffer material 渲染进 system sections，再由 `ContextBudgetManager` 对完整 prompt 做 fit 与 budget state 计算。
+
+---
+
+## 2) Effective limits
+
 - `runtime.context_window_tokens` 是唯一生效的 hard cap
 - `effective_prompt_budget_tokens = max(context_window_tokens - reserved_output_tokens, 0)`
 - `model_context_window_tokens` / `provider_context_window_tokens` 只是观测字段，会写入 `context_cost`
@@ -29,11 +41,11 @@
 
 ---
 
-## 2) Prompt fit 顺序
+## 3) Prompt fit 顺序
 
 `ContextBudgetManager` 在真正调用 provider 前按如下顺序做 fit：
 
-1. 组装 full prompt（history + visible tools + injections + memory）
+1. 组装 full prompt（history + `lane.prompt_buffer` + visible tools + injections + memory）
 2. 若超 hard cap，先移除 memory results
 3. 若仍超 hard cap，对旧 tool outputs 做 prompt-only pruning
 4. 若仍超 hard cap，递减 `limit_turns` 并重建 context
@@ -43,7 +55,7 @@
 
 ---
 
-## 3) Budget states
+## 4) Budget states
 
 在 prompt fit 之后，manager 会继续计算：
 
@@ -72,7 +84,7 @@
 
 ---
 
-## 4) Bundled default policy
+## 5) Bundled default policy
 
 kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros::ContextBudget::DefaultPolicy` 提供：
 
@@ -85,7 +97,7 @@ kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros
 
 ---
 
-## 5) `compact_context` 的 active path
+## 6) `compact_context` 的 active path
 
 `compact_context` 是 canonical native tool，不是额外特权通道：
 
@@ -110,10 +122,17 @@ kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros
 - 审批/可见性/统计
 - turn execution projection
 - provider prompt history
+- lane prompt buffer summary materialization
+
+执行成功后：
+
+- 较老 turn 的可见性变化仍落在 DAG 上
+- prompt-side summary / handoff material 落在 `lane.prompt_buffer`
+- prompt history 中只回灌 compact task 的短投影，而不是完整摘要正文
 
 ---
 
-## 6) Loop suppression
+## 7) Loop suppression
 
 重复 compaction 必须可抑制。
 
@@ -123,6 +142,7 @@ kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros
 - effective prompt budget
 - effective soft limit
 - 标准化后的底层上下文节点集合
+- `lane.prompt_buffer` 快照
 
 它不会把 compaction 自己产生的 bookkeeping 视为“新的业务上下文变化”。
 
@@ -135,7 +155,7 @@ kernel 只负责计算 budget facts；默认动作映射由独立 helper `Cybros
 
 ---
 
-## 7) `runtime_surface.compact_context`
+## 8) `runtime_surface.compact_context`
 
 `compact_context` 工具内部仍复用 app 侧 compaction plan：
 
@@ -147,5 +167,6 @@ surface 负责建议保留项、summary text 与预算内安全改写；executor
 - 生成普通 DAG task
 - 落 durable metadata
 - 应用 context visibility mutation
+- 写入或更新 `lane.prompt_buffer`
 
 当前 shipped 主路径不再依赖额外的 conversation-entry compaction 或单独的 durable summary 预处理步骤。

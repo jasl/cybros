@@ -6,6 +6,9 @@ class RuntimeGovernance::PublicStateMutationPolicyTest < ActiveSupport::TestCase
     conversation.config.update
     lane.kv.set
     lane.kv.delete
+    lane.prompt_buffer.put
+    lane.prompt_buffer.delete
+    lane.prompt_buffer.clear
   ].freeze
 
   test "conservative mode confirms all staged public-state mutation methods" do

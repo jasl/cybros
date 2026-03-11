@@ -18,6 +18,7 @@ class AgentCore::RuntimeSurfaceRunnerTest < Minitest::Test
       AgentCore::RuntimeSurface::Decisions::TurnRewrite.new(
         prompt: {
           estimated_tokens: input.helpers.estimate_tokens("hello"),
+          estimated_message_tokens: input.helpers.estimate_messages([Struct.new(:content).new("world")]),
         },
         metadata: {
           helper_responds_to_unknown: input.helpers.respond_to?(:dangerous),
@@ -51,7 +52,13 @@ class AgentCore::RuntimeSurfaceRunnerTest < Minitest::Test
 
   def test_runner_uses_common_stage_entrypoint_and_constrained_helpers
     instrumenter = RecordingInstrumenter.new
-    runner = AgentCore::RuntimeSurface::Runner.new(helpers: { estimate_tokens: ->(text) { text.to_s.length } })
+    runner =
+      AgentCore::RuntimeSurface::Runner.new(
+        helpers: {
+          estimate_tokens: ->(text) { text.to_s.length },
+          estimate_messages: ->(messages) { messages.sum { |message| message.content.to_s.length } + 4 },
+        },
+      )
 
     result =
       runner.run(
@@ -64,6 +71,7 @@ class AgentCore::RuntimeSurfaceRunnerTest < Minitest::Test
     refute result.fallback?
     assert_instance_of AgentCore::RuntimeSurface::Decisions::TurnRewrite, result.decision
     assert_equal 5, result.decision.prompt.fetch(:estimated_tokens)
+    assert_equal 9, result.decision.prompt.fetch(:estimated_message_tokens)
     assert_equal false, result.decision.metadata.fetch(:helper_responds_to_unknown)
     assert_equal ["agent_core.runtime_surface.audit", "agent_core.runtime_surface.stage"], instrumenter.events.map(&:first).uniq.sort
     stage_event = instrumenter.events.find { |name, payload| name == "agent_core.runtime_surface.stage" && payload.fetch(:stage) == "prepare_turn" }

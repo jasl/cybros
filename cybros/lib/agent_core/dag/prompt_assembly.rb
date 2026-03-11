@@ -34,6 +34,19 @@ module AgentCore
         )
       end
 
+      def final_prompt_injection_items(prompt_injection_items: :auto, latest_user_message: nil)
+        base_items =
+          if prompt_injection_items == :auto
+            build_prompt_injection_items(latest_user_message)
+          else
+            Array(prompt_injection_items)
+          end
+
+        Array(base_items).dup + context_budget_prompt_injection_items(visible_tools: visible_tool_definitions)
+      rescue StandardError
+        prompt_injection_items == :auto ? build_prompt_injection_items(latest_user_message) : Array(prompt_injection_items)
+      end
+
       def build(context_nodes:, memory_results: :auto, prompt_injection_items: :auto)
         adapted = ContextAdapter.new(context_nodes: context_nodes).call
         latest_user_message = adapted.latest_user_message
@@ -41,10 +54,16 @@ module AgentCore
         memory_results = lookup_memory(latest_user_message) if memory_results == :auto
         memory_results = Array(memory_results)
 
-        prompt_injection_items = build_prompt_injection_items(latest_user_message) if prompt_injection_items == :auto
-        prompt_injection_items = Array(prompt_injection_items)
         visible_tools = visible_tool_definitions
-        prompt_injection_items += context_budget_prompt_injection_items(visible_tools: visible_tools)
+        prompt_injection_items =
+          if prompt_injection_items == :auto
+            final_prompt_injection_items(
+              latest_user_message: latest_user_message,
+              prompt_injection_items: :auto,
+            )
+          else
+            Array(prompt_injection_items).dup + context_budget_prompt_injection_items(visible_tools: visible_tools)
+          end
 
         prompt_context =
           PromptBuilder::Context.new(
@@ -86,6 +105,12 @@ module AgentCore
         end
 
         def build_prompt_injection_items(latest_user_message)
+          source_prompt_injection_items(latest_user_message) + lane_prompt_buffer_prompt_injection_items
+        rescue StandardError
+          source_prompt_injection_items(latest_user_message)
+        end
+
+        def source_prompt_injection_items(latest_user_message)
           sources = @runtime.prompt_injection_sources
           return [] if sources.empty?
 
@@ -103,6 +128,24 @@ module AgentCore
           end
         rescue StandardError
           []
+        end
+
+        def lane_prompt_buffer_prompt_injection_items
+          lane = current_lane
+          return [] if lane.nil?
+
+          LanePromptBufferSections.new(lane: lane).prompt_injection_items
+        rescue StandardError
+          []
+        end
+
+        def current_lane
+          lane_id = @execution_context.attributes.dig(:dag, :lane_id).to_s.strip
+          return nil if lane_id.empty?
+
+          ::DAG::Lane.includes(:lane_prompt_buffer_entries).find_by(id: lane_id)
+        rescue StandardError
+          nil
         end
 
         def variables_from_context

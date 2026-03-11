@@ -31,7 +31,9 @@ module Cybros
             Conversation::ContextCompactionPlan.plan(
               conversation: conversation,
               content: "",
+              lane: lane,
               runtime_surface_resolution: runtime_surface_resolution_for(runtime),
+              runtime: runtime,
             )
 
           reason = args.fetch("reason", nil).to_s.presence || "manual"
@@ -39,6 +41,17 @@ module Cybros
 
           if plan.required?
             apply_compaction!(graph: graph, lane: lane, turn_ids: plan.compacted_turn_ids)
+            summary_entry =
+              write_summary_to_prompt_buffer!(
+                lane: lane,
+                summary_text: plan.summary_text.to_s,
+                reason: reason,
+                target: target,
+                compacted_turn_ids: plan.compacted_turn_ids,
+                estimated_tokens_before: plan.estimated_tokens,
+                effective_prompt_budget_tokens: plan.effective_prompt_budget_tokens,
+                token_counter: token_counter_for(runtime: runtime, conversation: conversation),
+              )
 
             AgentCore::Resources::Tools::ToolResult.success(
               text: plan.summary_text.to_s,
@@ -49,6 +62,14 @@ module Cybros
                 "compacted_turn_ids" => plan.compacted_turn_ids,
                 "estimated_tokens_before" => plan.estimated_tokens,
                 "effective_prompt_budget_tokens" => plan.effective_prompt_budget_tokens,
+                "prompt_buffer" => {
+                  "buffer_name" => "summaries",
+                  "entry_ids" => [summary_entry.id],
+                },
+                "prompt_projection" => {
+                  "text" => "Context compacted into lane prompt buffer.",
+                  "include_tool_name_header" => false,
+                },
               },
             )
           else
@@ -107,6 +128,33 @@ module Cybros
       end
       private_class_method :apply_compaction!
 
+      def write_summary_to_prompt_buffer!(lane:, summary_text:, reason:, target:, compacted_turn_ids:, estimated_tokens_before:, effective_prompt_budget_tokens:, token_counter:)
+        content = summary_text.to_s.strip
+        metadata = {
+          "source" => "compact_context",
+          "reason" => reason,
+          "target" => target,
+          "compacted_turn_ids" => compacted_turn_ids,
+          "estimated_tokens_before" => estimated_tokens_before,
+          "effective_prompt_budget_tokens" => effective_prompt_budget_tokens,
+        }
+        next_seq = lane.lane_prompt_buffer_entries.where(buffer_name: "summaries").maximum(:seq).to_i + AgentRPC::KernelServices::LanePromptBuffer::SEQ_STEP
+        next_seq = AgentRPC::KernelServices::LanePromptBuffer::SEQ_STEP if next_seq <= 0
+
+        lane.transaction do
+          lane.lane_prompt_buffer_entries.create!(
+            buffer_name: "summaries",
+            seq: next_seq,
+            kind: "summary",
+            content: content,
+            priority: 100,
+            estimated_tokens: token_counter.count_text(content),
+            metadata: metadata,
+          )
+        end
+      end
+      private_class_method :write_summary_to_prompt_buffer!
+
       def runtime_surface_resolution_for(runtime)
         return nil if runtime.nil?
         return nil if runtime.runtime_surface.nil? || runtime.runtime_surface_runner.nil?
@@ -119,6 +167,14 @@ module Cybros
         nil
       end
       private_class_method :runtime_surface_resolution_for
+
+      def token_counter_for(runtime:, conversation:)
+        return runtime.token_counter if runtime.respond_to?(:token_counter) && runtime.token_counter
+
+        model_ref = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation).fetch(:model_ref)
+        Cybros::AgentRuntimeResolver.token_counter_for_model_ref(model_ref: model_ref)
+      end
+      private_class_method :token_counter_for
     end
   end
 end

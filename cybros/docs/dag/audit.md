@@ -130,7 +130,7 @@
 - `roleplay_group_chat_flow_test.rb`：多角色群聊（同 turn 多条 `character_message` 并行执行、其中一个 rerun）；验证 turn 聚合视图与按节点锚定视图的差异。
 - `graph_surgery_and_visibility_flow_test.rb`：visibility patch defer/apply + compress + edit + retry/rerun 的交叉回归；验证“改图/隐藏节点”组合操作后 GraphAudit 仍为空。
 - `rerun_versions_and_compact_flow_test.rb`：多版本 rerun + adopt 切换版本 + turn context compaction；覆盖 ChatGPT 风格的版本切换与“单轮中间过程不入上下文”需求。
-- `lane_branch_and_merge_flow_test.rb`：分支对话（fork 创建 branch lane/topic）、merge 回 main（join 节点）、merge 后分支可继续、再显式 archive 分支并验证“禁新 turn / 允许收尾”，以及 archived lane 仍可作为 merge source。
+- `lane_branch_and_merge_flow_test.rb`：分支对话（fork 创建 branch lane/child conversation）、通过 `merge_lane_state` task merge 回 main、merge 后分支可继续、再显式 archive 分支并验证“禁新 turn / 允许收尾”，以及 archived lane 仍可作为 merge source。
 
 ---
 

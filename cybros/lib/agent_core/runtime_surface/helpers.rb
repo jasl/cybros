@@ -1,7 +1,7 @@
 module AgentCore
   module RuntimeSurface
     class Helpers
-      ALLOWED_KEYS = %i[estimate_tokens].freeze
+      ALLOWED_KEYS = %i[estimate_tokens estimate_messages].freeze
 
       def initialize(callables: {})
         raw = callables.nil? ? {} : callables
@@ -48,6 +48,10 @@ module AgentCore
 
         def estimate_tokens(text)
           call_helper(:estimate_tokens, text)
+        end
+
+        def estimate_messages(messages)
+          call_helper(:estimate_messages, messages)
         end
 
         private

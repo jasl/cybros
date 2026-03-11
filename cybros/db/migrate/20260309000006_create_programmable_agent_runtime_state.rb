@@ -93,6 +93,7 @@ class CreateProgrammableAgentRuntimeState < ActiveRecord::Migration[8.2]
       t.jsonb :staged_public_settings_patch, null: false, default: {}
       t.jsonb :staged_agent_config_patch, null: false, default: {}
       t.jsonb :staged_kv_ops, null: false, default: []
+      t.jsonb :staged_prompt_buffer_ops, null: false, default: []
       t.jsonb :approval_state, null: false, default: {}
       t.datetime :expires_at, null: false
       t.references :materialized_conversation_run, type: :uuid, foreign_key: { to_table: :conversation_runs }

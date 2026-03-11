@@ -207,6 +207,69 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
     assert_equal "enqueue_compact", result.metadata.dig("context_budget", "budget_action")
   end
 
+  test "prompt sections report includes context budget guidance when soft limit advises compaction" do
+    agent_node, graph = build_simple_turn!
+    estimate = estimate_for(agent_node, graph)
+
+    result =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: estimate + 1000,
+        context_soft_limit_tokens: estimate,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
+      )
+
+    assert_equal "soft_limit_reached", result.metadata.dig("context_budget", "budget_state")
+    assert_equal "advise_compact", result.metadata.dig("context_budget", "budget_action")
+    assert result.metadata.dig("context_cost", "prompt_sections", "system_prompt", "sections").any? { |section| section.fetch("id") == "prompt_injection:context_budget_guidance" }
+  end
+
+  test "lane prompt buffer material contributes to budget state fingerprint and prompt sections" do
+    agent_node, graph = build_simple_turn!
+
+    baseline = build_prompt(agent_node, graph, context_window_tokens: 10_000)
+    baseline_total = baseline.metadata.fetch("context_cost").dig("estimated_tokens", "total")
+
+    normal_without_buffer =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: baseline_total + 10_000,
+        context_soft_limit_tokens: baseline_total + 10,
+      )
+
+    assert_equal "normal", normal_without_buffer.metadata.fetch("context_cost").fetch("budget_state")
+
+    agent_node.lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "summaries",
+      seq: 10,
+      kind: "summary",
+      content: "Buffer summary " + ("x" * 80),
+      priority: 100,
+      estimated_tokens: 95,
+      metadata: { "source" => "compact_context" },
+    )
+
+    with_buffer =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: baseline_total + 10_000,
+        context_soft_limit_tokens: baseline_total + 10,
+      )
+
+    assert_equal "soft_limit_reached", with_buffer.metadata.fetch("context_cost").fetch("budget_state")
+    refute_equal baseline.metadata.dig("context_budget", "budget_fingerprint"), with_buffer.metadata.dig("context_budget", "budget_fingerprint")
+
+    section =
+      with_buffer.metadata
+        .dig("context_cost", "prompt_sections", "system_prompt", "sections")
+        .find { |entry| entry.dig("metadata", "source") == "lane_prompt_buffer" && entry.dig("metadata", "buffer_name") == "summaries" }
+
+    assert section.present?, "expected lane prompt buffer section in prompt_sections report"
+  end
+
   private
 
     def estimate_for(agent_node, graph)
@@ -228,7 +291,7 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
         AgentCore::DAG::ContextBudgetManager.new(
           node: agent_node,
           runtime: runtime,
-          execution_context: {},
+          execution_context: AgentCore::DAG::ExecutionContextBuilder.build(node: agent_node, runtime: runtime),
         )
 
       manager.build_prompt(context_nodes: graph.context_for_full(agent_node.id))

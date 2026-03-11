@@ -33,7 +33,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "finalization commits staged settings config and lane kv mutations into conversation state" do
+  test "finalization commits staged settings config lane kv and prompt buffer mutations into conversation state" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
@@ -52,6 +52,19 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       staged_public_settings_patch: { "tone" => "concise" },
       staged_agent_config_patch: { "mode" => "review" },
       staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
+      staged_prompt_buffer_ops: [{
+        "op" => "put",
+        "entry" => {
+          "id" => SecureRandom.uuid,
+          "buffer_name" => "summaries",
+          "seq" => 10,
+          "kind" => "summary",
+          "content" => "Branch-ready summary",
+          "priority" => 5,
+          "estimated_tokens" => 7,
+          "metadata" => { "source" => "prepare" },
+        },
+      }],
     )
 
     run = RunDrafts::FinalizeService.finalize!(draft: draft)
@@ -60,8 +73,13 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal "concise", conversation.public_settings.fetch("tone")
     assert_equal({ "mode" => "review" }, conversation.selected_agent_config)
     assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: conversation.chat_lane, key: "shared.stage").value)
+    prompt_buffer_entry = LanePromptBufferEntry.find_by!(lane: conversation.chat_lane, buffer_name: "summaries", seq: 10)
+    assert_equal "Branch-ready summary", prompt_buffer_entry.content
+    assert_equal 7, prompt_buffer_entry.estimated_tokens
+    assert_equal({ "source" => "prepare" }, prompt_buffer_entry.metadata)
     assert_equal run.id, draft.reload.materialized_conversation_run_id
     assert_equal "finalized", draft.status
+    assert_equal [], draft.staged_prompt_buffer_ops
   ensure
     server&.shutdown
   end

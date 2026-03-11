@@ -609,6 +609,26 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
 
     branch = root.create_child!(from_node_id: main_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
     branch_lane = branch.chat_lane
+    root.chat_lane.lane_kv_entries.create!(
+      key: "shared.stage",
+      value: { "status" => "main" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    branch_lane.lane_kv_entries.create!(
+      key: "shared.stage",
+      value: { "status" => "branch" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+    branch_lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "handoff",
+      seq: 10,
+      kind: "note",
+      content: "Branch handoff",
+      priority: 50,
+      estimated_tokens: 7,
+    )
 
     # Continue main after branching so the parent lane has a current head.
     root.append_user_message!(content: "Main followup")
@@ -623,8 +643,31 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     branch_agent.mark_finished!(content: "Branch done")
 
     merge = branch.merge_into_parent!(metadata: { "reason" => "test" })
+    args = merge.body_input.fetch("arguments")
+
     assert_equal main_lane.id, merge.lane_id
+    assert_equal Messages::Task.node_type_key, merge.node_type
     assert_equal DAG::Node::PENDING, merge.state
+    assert_equal "merge_lane_state", merge.body_input["name"]
+    assert_equal main_lane.id, args.fetch("target_lane_id")
+    assert_equal [branch_lane.id], args.fetch("source_lane_ids")
+    assert_equal "test", args.dig("merge_metadata", "reason")
+    assert_equal root.send(:lane_state_snapshot, lane: main_lane).fetch("kv_entries"), args.fetch("target_lane_kv_snapshot")
+    assert_equal root.send(:lane_state_snapshot, lane: branch_lane).fetch("prompt_buffer_entries"), args.fetch("source_prompt_buffer_snapshots").sole.fetch("entries")
+
+    branch_lane.lane_kv_entries.find_by!(key: "shared.stage").update!(value: { "status" => "mutated_after_merge_request" })
+    LanePromptBufferEntry.create!(
+      lane: branch_lane,
+      buffer_name: "handoff",
+      seq: 20,
+      kind: "note",
+      content: "Late branch note",
+      priority: 10,
+      estimated_tokens: 5,
+    )
+
+    assert_equal({ "status" => "branch" }, args.fetch("source_lane_kv_snapshots").sole.fetch("entries").sole.fetch("value"))
+    assert_equal ["Branch handoff"], args.fetch("source_prompt_buffer_snapshots").sole.fetch("entries").map { |entry| entry.fetch("content") }
   end
 
   test "message_page includes only the active version after regenerate" do

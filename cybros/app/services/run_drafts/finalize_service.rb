@@ -27,6 +27,7 @@ module RunDrafts
             staged_public_settings_patch: {},
             staged_agent_config_patch: {},
             staged_kv_ops: [],
+            staged_prompt_buffer_ops: [],
           )
         end
 
@@ -132,6 +133,7 @@ module RunDrafts
         apply_public_settings_patch!
         apply_agent_config_patch!
         apply_kv_ops!
+        apply_prompt_buffer_ops!
         apply_execution_target_selection!
       end
 
@@ -181,6 +183,48 @@ module RunDrafts
             ::LaneKVEntry.where(lane: lane, key: key).delete_all
           end
         end
+      end
+
+      def apply_prompt_buffer_ops!
+        return if conversation.blank?
+
+        lane = draft.bound_lane || conversation.chat_lane
+
+        Array(draft.staged_prompt_buffer_ops).each do |operation|
+          next unless operation.is_a?(Hash)
+
+          case operation["op"].to_s
+          when "put"
+            apply_prompt_buffer_put!(lane: lane, entry_payload: operation["entry"])
+          when "delete"
+            entry_id = operation["entry_id"].to_s.strip
+            next if entry_id.blank?
+
+            lane.lane_prompt_buffer_entries.where(id: entry_id).delete_all
+          when "clear"
+            buffer_name = operation["buffer_name"].to_s.strip
+            next if buffer_name.blank?
+
+            lane.lane_prompt_buffer_entries.where(buffer_name: buffer_name).delete_all
+          end
+        end
+      end
+
+      def apply_prompt_buffer_put!(lane:, entry_payload:)
+        return unless entry_payload.is_a?(Hash)
+
+        entry_id = entry_payload["id"].to_s.strip
+        return if entry_id.blank?
+
+        entry = lane.lane_prompt_buffer_entries.find_or_initialize_by(id: entry_id)
+        entry.buffer_name = entry_payload["buffer_name"]
+        entry.seq = entry_payload["seq"]
+        entry.kind = entry_payload["kind"]
+        entry.content = entry_payload["content"]
+        entry.priority = entry_payload["priority"]
+        entry.estimated_tokens = entry_payload["estimated_tokens"]
+        entry.metadata = entry_payload["metadata"]
+        entry.save!
       end
 
       def apply_execution_target_selection!

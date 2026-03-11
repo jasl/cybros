@@ -12,6 +12,15 @@ module RunDrafts
       lane.kv.delete
       lane.kv.list
       lane.kv.snapshot
+      lane.prompt_buffer.put
+      lane.prompt_buffer.get
+      lane.prompt_buffer.list
+      lane.prompt_buffer.delete
+      lane.prompt_buffer.clear
+      lane.prompt_buffer.snapshot
+      lane.prompt_buffer.render
+      tokens.estimate_text
+      tokens.estimate_messages
       execution_target.list
       execution_target.get
       execution_target.propose
@@ -93,6 +102,7 @@ module RunDrafts
           staged_public_settings_patch: {},
           staged_agent_config_patch: {},
           staged_kv_ops: [],
+          staged_prompt_buffer_ops: [],
           approval_state: { "status" => "not_required" },
           expires_at: 30.minutes.from_now.change(usec: 0),
         )

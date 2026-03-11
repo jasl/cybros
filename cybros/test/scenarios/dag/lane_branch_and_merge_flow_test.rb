@@ -45,9 +45,23 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
     registry = DAG::ExecutorRegistry.new
     registry.register(Messages::AgentMessage.node_type_key, LaneAwareAgentExecutor.new)
+    registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
 
     original_registry = DAG.executor_registry
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
     DAG.executor_registry = registry
+    AgentCore::DAG.runtime_resolver =
+      lambda do |node:|
+        _ = node
+        AgentCore::DAG::Runtime.new(
+          provider: Struct.new(:name).new("test-provider"),
+          model: "dev/mock-model",
+          tools_registry: AgentCore::Resources::Tools::Registry.new.tap { |tool_registry| tool_registry.register_many(Cybros::LaneState::Tools.build) },
+          tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+          llm_options: {},
+          instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        )
+      end
 
     begin
       main_user = nil
@@ -168,17 +182,9 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       main_head = graph.leaf_nodes.where(lane_id: main_lane.id).sole
       source_head = graph.leaf_nodes.where(lane_id: branch_lane.id).sole
 
-      merge_node = nil
-      graph.mutate! do |m|
-        merge_node = m.merge_lanes!(
-          target_lane: main_lane,
-          target_from_node: main_head,
-          source_lanes_and_nodes: [{ lane: branch_lane, from_node: source_head }],
-          node_type: Messages::AgentMessage.node_type_key,
-          metadata: { "reason" => "test" }
-        )
-      end
+      merge_node = branch_conversation.merge_into_parent!(metadata: { "reason" => "test" })
       assert_equal main_lane.id, merge_node.lane_id
+      assert_equal Messages::Task.node_type_key, merge_node.node_type
       assert_equal DAG::Node::PENDING, merge_node.state
 
       branch_lane.reload
@@ -216,8 +222,8 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
         )
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal [branch_agent_3.id], claimed.map(&:id)
-      DAG::Runner.run_node!(branch_agent_3.id)
+      assert_includes claimed.map(&:id), branch_agent_3.id
+      claimed.each { |node| DAG::Runner.run_node!(node.id) }
       assert_equal DAG::Node::FINISHED, branch_agent_3.reload.state
 
       branch_user_4 = nil
@@ -269,17 +275,9 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       main_head = graph.leaf_nodes.where(lane_id: main_lane.id).sole
       source_head = graph.leaf_nodes.where(lane_id: branch_lane.id).sole
 
-      merge_node_2 = nil
-      graph.mutate! do |m|
-        merge_node_2 = m.merge_lanes!(
-          target_lane: main_lane,
-          target_from_node: main_head,
-          source_lanes_and_nodes: [{ lane: branch_lane, from_node: source_head }],
-          node_type: Messages::AgentMessage.node_type_key,
-          metadata: { "reason" => "merge_again" }
-        )
-      end
+      merge_node_2 = branch_conversation.merge_into_parent!(metadata: { "reason" => "merge_again" })
       assert_equal main_lane.id, merge_node_2.lane_id
+      assert_equal Messages::Task.node_type_key, merge_node_2.node_type
       assert_equal DAG::Node::PENDING, merge_node_2.state
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
@@ -289,6 +287,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
 
       assert_equal [], DAG::GraphAudit.scan(graph: graph)
     ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
       DAG.executor_registry = original_registry
     end
   end

@@ -153,7 +153,9 @@ The callable Cybros surface should remain explicit and small in V1:
 
 - `conversation.settings.*`
 - `conversation.config.*`
-- `conversation.kv.*`
+- `lane.kv.*`
+- `lane.prompt_buffer.*`
+- `tokens.*`
 - `execution_target.*`
 
 Memory, knowledge, and future stable kernel surfaces may be added incrementally, but they should follow the same bounded-session and schema-first rules.
@@ -176,10 +178,20 @@ Agent-to-Cybros methods:
 - `conversation.settings.update`
 - `conversation.config.get`
 - `conversation.config.update`
-- `conversation.kv.get`
-- `conversation.kv.set`
-- `conversation.kv.delete`
-- `conversation.kv.list`
+- `lane.kv.get`
+- `lane.kv.set`
+- `lane.kv.delete`
+- `lane.kv.list`
+- `lane.kv.snapshot`
+- `lane.prompt_buffer.put`
+- `lane.prompt_buffer.get`
+- `lane.prompt_buffer.list`
+- `lane.prompt_buffer.delete`
+- `lane.prompt_buffer.clear`
+- `lane.prompt_buffer.snapshot`
+- `lane.prompt_buffer.render`
+- `tokens.estimate_text`
+- `tokens.estimate_messages`
 - `execution_target.list`
 - `execution_target.get`
 - `execution_target.propose`
@@ -192,7 +204,7 @@ The agent may:
 
 - return prompt fragments or workflow decisions
 - read approved state through Cybros surfaces
-- request settings/config/KV mutations through Cybros surfaces
+- request settings/config/lane-state mutations through Cybros surfaces
 - inspect visible execution targets through Cybros surfaces
 - request execution-target proposals through Cybros surfaces
 
@@ -211,7 +223,7 @@ When the agent calls kernel surfaces during `turn.prepare`, Cybros handles them 
 
 - read requests return current approved state
 - execution-target discovery reads return visible inventory summaries and policy previews
-- settings/config/KV mutations are staged on the `RunDraft`
+- settings/config/lane-state mutations are staged on the `RunDraft`
 - execution-target proposals update the draft selection state
 
 Those staged operations commit only when draft finalization succeeds.

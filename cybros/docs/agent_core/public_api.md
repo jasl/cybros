@@ -117,7 +117,9 @@ runtime surface 约束：
 默认 context-budget 约定（Cybros app 侧）：
 
 - `Cybros::ContextBudget::DefaultPolicy` 是 bundled helper：把 `budget_state` 映射到 `none|advise_compact|enqueue_compact`
+- `PromptAssembly` 的默认上下文管理器会按当前 `execution_context.attributes[:dag][:lane_id]` 读取 `lane.prompt_buffer`，并在 budget 计算前把 summaries / notes / handoff material 渲染进 prompt
 - `compact_context` 始终存在于 canonical registry，但默认对模型隐藏
+- `merge_lane_state` 也注册在 canonical registry 中，但仅用于 product-owned merge task，不向模型暴露
 - 当 bundled policy 产出 `advise_compact` 时，resolver / tool policy 会在该 step 解除 `compact_context` 的可见性掩码
 - prompt guidance 中的 `compact_context_available` 只在 tool visibility mask 已解析完成后写入
 - 当 bundled policy 产出 `enqueue_compact` 时，executor 会在当前 turn 内插入一个普通 `task(compact_context)`，而不是走额外特权通道

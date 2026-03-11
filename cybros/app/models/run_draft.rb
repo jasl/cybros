@@ -36,6 +36,10 @@ class RunDraft < ApplicationRecord
     conversation.root_graph.nodes.find_by(id: node_id)
   end
 
+  def bound_lane
+    bound_agent_node&.lane || bound_conversation&.chat_lane
+  end
+
   private
 
     def normalize_payloads
@@ -46,6 +50,7 @@ class RunDraft < ApplicationRecord
       self.staged_agent_config_patch = normalize_hash(self[:staged_agent_config_patch])
       self.approval_state = normalize_hash(self[:approval_state])
       self.staged_kv_ops = Array(self[:staged_kv_ops]).map { |value| value.is_a?(Hash) ? value.deep_stringify_keys : value }
+      self.staged_prompt_buffer_ops = Array(self[:staged_prompt_buffer_ops]).map { |value| value.is_a?(Hash) ? value.deep_stringify_keys : value }
     end
 
     def normalize_hash(value)

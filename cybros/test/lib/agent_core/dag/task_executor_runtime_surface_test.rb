@@ -123,6 +123,69 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     assert_equal "error", payload.dig("projection", "failure_reason")
   end
 
+  test "task executor executes merge_lane_state through the ordinary task contract" do
+    root = create_conversation!(title: "Root")
+    graph = root.root_graph
+    main_lane = root.chat_lane
+
+    agent = nil
+    graph.mutate! do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+        )
+    end
+
+    main_lane.lane_kv_entries.create!(
+      key: "shared.stage",
+      value: { "status" => "main" },
+      written_by_type: "Seed",
+      written_by_id: SecureRandom.uuid,
+    )
+
+    branch = root.create_child!(from_node_id: agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+    branch_lane = branch.chat_lane
+    branch_lane.lane_kv_entries.find_by!(key: "shared.stage").update!(value: { "status" => "branch" })
+
+    root.append_user_message!(content: "Main followup")
+    main_agent = graph.leaf_nodes.where(lane_id: main_lane.id).order(:id).last
+    main_agent.mark_running!
+    main_agent.mark_finished!(content: "Main done")
+
+    branch.append_user_message!(content: "Branch followup")
+    branch_agent = graph.leaf_nodes.where(lane_id: branch_lane.id).order(:id).last
+    branch_agent.mark_running!
+    branch_agent.mark_finished!(content: "Branch done")
+
+    merge_task = branch.merge_into_parent!(metadata: { "reason" => "test" })
+
+    branch_lane.lane_kv_entries.find_by!(key: "shared.stage").update!(value: { "status" => "mutated_after_merge_request" })
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: Struct.new(:name).new("test-provider"),
+        model: "dev/mock-model",
+        tools_registry: lane_state_registry,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: {},
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    result =
+      with_runtime(runtime) do
+        AgentCore::DAG::Executors::TaskExecutor.new.execute(
+          node: merge_task,
+          context: [],
+          stream: nil,
+        )
+      end
+
+    assert_equal false, AgentCore::Resources::Tools::ToolResult.from_h(result.payload.fetch("result")).error?
+    assert_equal({ "status" => "branch" }, main_lane.lane_kv_entries.find_by!(key: "shared.stage").value)
+  end
+
   private
 
     def execute_task(runtime:, tool_name:)
@@ -178,6 +241,12 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         runtime_surface: runtime_surface,
         runtime_surface_runner: AgentCore::RuntimeSurface::Runner.new,
       )
+    end
+
+    def lane_state_registry
+      AgentCore::Resources::Tools::Registry.new.tap do |registry|
+        registry.register_many(Cybros::LaneState::Tools.build)
+      end
     end
 
     def with_runtime(runtime)
