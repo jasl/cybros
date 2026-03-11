@@ -20,7 +20,7 @@ Cybros owns:
 - DAG orchestration and run lifecycle
 - provider selection and runtime governance
 - policy, approval, and permission-preset compilation
-- kernel service surfaces for settings, config, KV, target discovery, memory, knowledge, tools, and connectors
+- kernel service surfaces for settings, config, lane-scoped state (`lane.kv`, `lane.prompt_buffer`), token estimation, target discovery, memory, knowledge, tools, and connectors
 - transcript, observability, and audit
 
 ### Programmable Agent
@@ -108,7 +108,7 @@ Kernel-owned authority remains final:
 - Product code uses public product surfaces, not raw storage internals.
 - Conversation defaults affect future drafts only.
 - Automation defaults seed fresh execution conversations; they do not act as live run state.
-- `turn.prepare` is planning-only and cannot durably commit public state.
+- `before_agent_step` is planning-only and cannot durably commit public state when invoked on a `RunDraft`.
 - Approval resume continues from persisted draft state and does not reopen planning.
 - Each run snapshots one finalized contract and execution context instead of mutating history.
 - Subagents remain owned by the top-level agent that launched them for that turn.

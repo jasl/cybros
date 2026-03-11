@@ -21,7 +21,7 @@ Rules:
 - stored under the owning `AgentProgram`
 - versioned by the published contract fingerprint
 - not writable through ordinary conversation-scoped runtime APIs
-- distinct from per-conversation config and shared KV
+- distinct from per-conversation config and lane-scoped mutable state
 
 ## Conversation Runtime Defaults
 
@@ -92,11 +92,11 @@ Rules:
 
 V1 may enforce only light schema validation, but the contract fingerprint still matters for snapshot and migration semantics.
 
-## Conversation KV
+## Lane KV
 
 Purpose:
 
-- operational working state for agents inside one conversation
+- branch-local operational working state for agents inside one lane
 
 Examples:
 
@@ -107,19 +107,33 @@ Examples:
 
 Rules:
 
-- shared across agent switches in v1
+- scoped to one lane snapshot
 - JSON values
 - writable by agent through public APIs
 - current-state only in v1
 - not used for long-term retrieval
 - no implicit TTL in v1
 
-Reserved or recommended prefixes:
+## Lane Prompt Buffer
 
-- `system.*` reserved and non-agent-writable
-- `agent.<agent_key>.*`
-- `shared.*`
-- `user.*`
+Purpose:
+
+- branch-local prompt working material for one lane
+
+Examples:
+
+- summaries
+- working notes
+- handoff material
+
+Rules:
+
+- scoped to one lane snapshot
+- ordered and token-aware
+- writable by agent through public APIs
+- prompt-side working set only
+- not durable transcript history
+- not general structured KV
 
 ## Memory
 
@@ -136,7 +150,7 @@ Examples:
 Rules:
 
 - retrieval-oriented
-- distinct from conversation KV
+- distinct from lane KV and lane prompt buffer
 - built-in baseline plus adapter-friendly
 - explicit scope and visibility rules are required
 - may be searchable

@@ -19,7 +19,7 @@ class ConversationBranchingTest < ActionDispatch::IntegrationTest
     user
   end
 
-  test "branching from a node creates a child conversation and redirects to it" do
+  test "branching from a node creates a branch conversation and redirects to it" do
     user = sign_in_owner!
     conversation = create_conversation!(user: user, title: "Root")
 

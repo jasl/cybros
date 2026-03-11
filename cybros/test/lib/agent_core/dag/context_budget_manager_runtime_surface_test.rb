@@ -270,11 +270,135 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
     assert section.present?, "expected lane prompt buffer section in prompt_sections report"
   end
 
+  test "budget fitting drops working_notes before memory results or history turns" do
+    agent_node, graph = build_two_turn_turn!
+
+    agent_node.lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "working_notes",
+      seq: 10,
+      kind: "note",
+      content: "Working note " + ("x" * 240),
+      priority: 100,
+      estimated_tokens: 260,
+      metadata: {},
+    )
+
+    memory_store =
+      Struct.new(:entries) do
+        def search(query:, limit:)
+          _ = query
+          Array(entries).first(limit)
+        end
+      end.new([Struct.new(:content).new("Memory fact " + ("y" * 140))])
+
+    with_buffer =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: 20_000,
+        memory_store: memory_store,
+        memory_search_limit: 5,
+      )
+    without_buffer =
+      prompt_estimate_for(
+        agent_node,
+        graph,
+        memory_store: memory_store,
+        memory_search_limit: 5,
+        excluded_prompt_buffer_names: ["working_notes"],
+      )
+
+    result =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: without_buffer.fetch(:total) + 10,
+        memory_store: memory_store,
+        memory_search_limit: 5,
+      )
+
+    decisions = result.metadata.fetch("context_cost").fetch("decisions")
+
+    assert_operator with_buffer.metadata.fetch("context_cost").dig("estimated_tokens", "total"), :>, without_buffer.fetch(:total)
+    assert_includes decisions, { "type" => "drop_prompt_buffer_sections", "buffer_names" => ["working_notes"] }
+    refute decisions.any? { |decision| decision["type"] == "drop_memory_results" }
+    refute decisions.any? { |decision| decision["type"] == "shrink_turns" }
+    refute_includes result.built_prompt.system_prompt, "Working note"
+  end
+
+  test "budget fitting drops summaries and handoff before shrinking history turns" do
+    agent_node, graph = build_two_turn_turn!
+
+    agent_node.lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "summaries",
+      seq: 10,
+      kind: "summary",
+      content: "Summary note " + ("s" * 220),
+      priority: 100,
+      estimated_tokens: 240,
+      metadata: {},
+    )
+    agent_node.lane.lane_prompt_buffer_entries.create!(
+      buffer_name: "handoff",
+      seq: 20,
+      kind: "handoff",
+      content: "Handoff note " + ("h" * 220),
+      priority: 90,
+      estimated_tokens: 240,
+      metadata: {},
+    )
+
+    without_buffers =
+      prompt_estimate_for(
+        agent_node,
+        graph,
+        excluded_prompt_buffer_names: %w[summaries handoff],
+      )
+
+    result =
+      build_prompt(
+        agent_node,
+        graph,
+        context_window_tokens: without_buffers.fetch(:total) + 10,
+      )
+
+    decisions = result.metadata.fetch("context_cost").fetch("decisions")
+
+    assert_includes decisions, { "type" => "drop_prompt_buffer_sections", "buffer_names" => %w[summaries handoff] }
+    refute decisions.any? { |decision| decision["type"] == "shrink_turns" }
+    refute_includes result.built_prompt.system_prompt, "Summary note"
+    refute_includes result.built_prompt.system_prompt, "Handoff note"
+  end
+
   private
 
     def estimate_for(agent_node, graph)
       result = build_prompt(agent_node, graph)
       result.metadata.fetch("context_cost").fetch("estimated_tokens").fetch("total")
+    end
+
+    def prompt_estimate_for(agent_node, graph, excluded_prompt_buffer_names:, **runtime_overrides)
+      runtime =
+        AgentCore::DAG::Runtime.new(
+          provider: Object.new,
+          model: "test-model",
+          tools_registry: AgentCore::Resources::Tools::Registry.new,
+          token_counter: precise_token_counter,
+          **runtime_overrides,
+        )
+      execution_context = AgentCore::DAG::ExecutionContextBuilder.build(node: agent_node, runtime: runtime)
+      prompt_assembly =
+        AgentCore::DAG::PromptAssembly.new(
+          runtime: runtime,
+          execution_context: execution_context,
+        )
+      built_prompt =
+        prompt_assembly.build(
+          context_nodes: graph.context_for_full(agent_node.id),
+          excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+        )
+
+      built_prompt.estimate_tokens(token_counter: runtime.token_counter)
     end
 
     def build_prompt(agent_node, graph, **runtime_overrides)
@@ -335,6 +459,57 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
 
         m.create_edge(from_node: system_node, to_node: user_node, edge_type: DAG::Edge::SEQUENCE)
         m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+      end
+
+      [agent_node, graph]
+    end
+
+    def build_two_turn_turn!
+      conversation = create_conversation!
+      graph = conversation.dag_graph
+      turn_id = SecureRandom.uuid
+      agent_node = nil
+
+      graph.mutate!(turn_id: turn_id) do |m|
+        system_node =
+          m.create_node(
+            node_type: Messages::SystemMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "BASE_SYSTEM",
+            metadata: {},
+          )
+        user_one =
+          m.create_node(
+            node_type: Messages::UserMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "Earlier request",
+            metadata: {},
+          )
+        agent_one =
+          m.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "Earlier answer",
+            metadata: {},
+          )
+        user_two =
+          m.create_node(
+            node_type: Messages::UserMessage.node_type_key,
+            state: DAG::Node::FINISHED,
+            content: "Latest request",
+            metadata: {},
+          )
+        agent_node =
+          m.create_node(
+            node_type: Messages::AgentMessage.node_type_key,
+            state: DAG::Node::PENDING,
+            metadata: {},
+          )
+
+        m.create_edge(from_node: system_node, to_node: user_one, edge_type: DAG::Edge::SEQUENCE)
+        m.create_edge(from_node: user_one, to_node: agent_one, edge_type: DAG::Edge::SEQUENCE)
+        m.create_edge(from_node: agent_one, to_node: user_two, edge_type: DAG::Edge::SEQUENCE)
+        m.create_edge(from_node: user_two, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
       end
 
       [agent_node, graph]

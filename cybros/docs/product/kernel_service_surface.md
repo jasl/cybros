@@ -55,6 +55,11 @@ These calls are:
 - staged on `RunDraft` when invoked during planning
 - audited when they commit
 
+Current shipped nuance:
+
+- `lane.prompt_buffer.render(max_tokens:)` is available to the agent as a token-aware selective read surface
+- the bundled/default prompt builder does not yet use that API as its own hot path; it currently reads lane prompt-buffer entries and injects grouped sections directly into prompt assembly
+
 ### 2. Memory Surface
 
 Memory is Cybros substrate, not just an agent-local convenience.

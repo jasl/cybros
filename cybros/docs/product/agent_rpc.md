@@ -11,6 +11,38 @@ It allows:
 - schema-validated structured data
 - controlled access to Cybros kernel surfaces
 
+## Current Runtime Status
+
+The shipped programmable-agent runtime now uses the hook/capability cutover surface for planning, delegated-worker control, terminal task notices, and final output:
+
+- `capabilities.handshake`
+- `capabilities.refresh`
+- `before_agent_step`
+- `on_context_pressure`
+- `before_subagent_spawn`
+- `after_task_notice`
+- `after_subagent_result`
+- `before_finalize_output`
+
+Current shipped notice coverage is still intentionally narrow:
+
+- `after_task_notice` is currently dispatched for provider-side and hard-cap terminal failures that can still be reported through a healthy callback channel
+- `after_subagent_result` is dispatched for delegated-worker completion observed through `subagent_wait`
+
+What has already landed beneath that runtime shape is the lane-scoped kernel service surface:
+
+- `lane.kv.*`
+- `lane.prompt_buffer.*`
+- `tokens.*`
+
+The runtime cutover itself is now on the typed hook/capability surface.
+
+What remains intentionally separate from this protocol document is concrete agent-quality iteration:
+
+- prompt quality
+- concrete orchestration strategy quality
+- agent-specific vertical behavior tuning
+
 ## Goals
 
 The protocol must:
@@ -137,15 +169,26 @@ Agent-to-Cybros requests are subordinate data-access or policy-gated state reque
 - `agent.health`
 - `agent.schemas.get`
 
-### Turn Hooks
+### Runtime Hooks
 
-- `turn.prepare`
-- `turn.compose`
-- `turn.handle_error`
+- `before_agent_step`
+- `on_context_pressure`
+- `before_subagent_spawn`
+- `after_task_notice`
+- `after_subagent_result`
+- `before_finalize_output`
 
-`turn.prepare` operates on a mutable `RunDraft`.
+`before_agent_step` operates on a mutable `RunDraft` during planning and returns a typed hook envelope whose durable planning payload is later finalized into the run snapshot.
 
-`turn.compose` and `turn.handle_error` operate on immutable run records.
+`on_context_pressure` operates on the live assistant step before the model call and receives typed context-budget pressure facts. It may update placeholder status, prepend recovery work such as `compact_context`, or halt the live continuation.
+
+`before_subagent_spawn` operates on a live step plus a typed spawn-family task request before Cybros launches delegated background work.
+
+`after_subagent_result` operates on immutable `ConversationRun` records plus typed delegated-worker result facts. `after_task_notice` is the shared terminal-notice schema for runtime-managed failures and follow-up signals; the currently shipped mappings include provider-side / hard-cap agent-step notices, and later task-terminal notices should reuse the same typed payload shape rather than reintroducing a generic runtime-error hook.
+
+`before_finalize_output` operates on immutable `ConversationRun` records plus typed runtime context and is the only programmable hook that may finalize the current assistant placeholder into final output.
+
+Generic AgentCore runtime-surface lifecycle methods such as `finalize_output` and `handle_error` still exist as internal middleware stages, but they are not the canonical programmable `agent_rpc` hook names.
 
 ### Kernel Service Surface
 
@@ -168,9 +211,14 @@ Cybros-to-agent methods:
 - `agent.describe`
 - `agent.health`
 - `agent.schemas.get`
-- `turn.prepare`
-- `turn.compose`
-- `turn.handle_error`
+- `capabilities.handshake`
+- `capabilities.refresh`
+- `before_agent_step`
+- `on_context_pressure`
+- `before_subagent_spawn`
+- `after_task_notice`
+- `after_subagent_result`
+- `before_finalize_output`
 
 Agent-to-Cybros methods:
 
@@ -202,7 +250,7 @@ Turn hooks must stay declarative.
 
 The agent may:
 
-- return prompt fragments or workflow decisions
+- return typed planning data and step-local `actions[]`
 - read approved state through Cybros surfaces
 - request settings/config/lane-state mutations through Cybros surfaces
 - inspect visible execution targets through Cybros surfaces
@@ -219,7 +267,7 @@ Cybros remains authoritative for final prompt assembly, DAG mutation, tool-loop 
 
 ## Draft Mutation Staging
 
-When the agent calls kernel surfaces during `turn.prepare`, Cybros handles them through the draft boundary:
+When the agent calls kernel surfaces during `before_agent_step`, Cybros handles them through the draft boundary:
 
 - read requests return current approved state
 - execution-target discovery reads return visible inventory summaries and policy previews
@@ -237,4 +285,4 @@ If the draft parks for approval, is rejected, expires, or becomes stale, Cybros 
 - every agent-to-Cybros side effect carries an `operation_id`
 - operation receipts must survive session replay for the same logical invocation
 
-Approval resume is not a replay of `turn.prepare`. It is local continuation from a persisted prepared draft.
+Approval resume is not a replay of `before_agent_step`. It is local continuation from a persisted prepared draft.

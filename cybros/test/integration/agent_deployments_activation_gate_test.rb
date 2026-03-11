@@ -51,7 +51,7 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         identity_overrides: {
-          "supported_methods" => %w[initialize agent.describe agent.health agent.schemas.get turn.prepare],
+          "supported_methods" => %w[initialize agent.describe agent.health agent.schemas.get before_agent_step],
         },
         rpc_overrides: {
           "agent.health" => { "healthy" => false, "status" => "unhealthy" },
@@ -97,7 +97,7 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
-  test "rejects activation when turn.handle_error is missing from the inspected contract" do
+  test "rejects activation when after_task_notice is missing from the inspected contract" do
     sign_in_owner!
     program = create_program!
     server =
@@ -108,8 +108,112 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
             agent.describe
             agent.health
             agent.schemas.get
-            turn.prepare
-            turn.compose
+            capabilities.handshake
+            capabilities.refresh
+            before_agent_step
+            before_finalize_output
+          ],
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+  ensure
+    server&.shutdown
+  end
+
+  test "rejects activation when after_subagent_result is missing from the inspected contract" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "supported_methods" => %w[
+            initialize
+            agent.describe
+            agent.health
+            agent.schemas.get
+            capabilities.handshake
+            capabilities.refresh
+            before_agent_step
+            before_finalize_output
+            after_task_notice
+          ],
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+  ensure
+    server&.shutdown
+  end
+
+  test "rejects activation when before_subagent_spawn is missing from the inspected contract" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "supported_methods" => %w[
+            initialize
+            agent.describe
+            agent.health
+            agent.schemas.get
+            capabilities.handshake
+            capabilities.refresh
+            before_agent_step
+            before_finalize_output
+            after_task_notice
+            after_subagent_result
+          ],
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+  ensure
+    server&.shutdown
+  end
+
+  test "rejects activation when on_context_pressure is missing from the inspected contract" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "supported_methods" => %w[
+            initialize
+            agent.describe
+            agent.health
+            agent.schemas.get
+            capabilities.handshake
+            capabilities.refresh
+            before_agent_step
+            before_subagent_spawn
+            before_finalize_output
+            after_task_notice
+            after_subagent_result
           ],
         },
       ).start

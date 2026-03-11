@@ -9,6 +9,7 @@ module AgentRPC
       invocation_id:,
       request_payload:,
       allowed_callback_methods:,
+      result_validator: nil,
       rpc_client_factory: nil
     )
       new(
@@ -20,6 +21,7 @@ module AgentRPC
         invocation_id: invocation_id,
         request_payload: request_payload,
         allowed_callback_methods: allowed_callback_methods,
+        result_validator: result_validator,
         rpc_client_factory: rpc_client_factory,
       ).call!
     end
@@ -33,6 +35,7 @@ module AgentRPC
       invocation_id:,
       request_payload:,
       allowed_callback_methods:,
+      result_validator:,
       rpc_client_factory:
     )
       @deployment = deployment
@@ -43,6 +46,7 @@ module AgentRPC
       @invocation_id = invocation_id
       @request_payload = request_payload.is_a?(Hash) ? request_payload.deep_stringify_keys : {}
       @allowed_callback_methods = Array(allowed_callback_methods)
+      @result_validator = result_validator
       @rpc_client_factory = rpc_client_factory
     end
 
@@ -61,7 +65,7 @@ module AgentRPC
 
       case invocation.status
       when "succeeded"
-        invocation.result_snapshot
+        validate_result!(invocation: invocation, result: invocation.result_snapshot)
       when "failed"
         AgentCore::ValidationError.raise!(
           "Invocation has already failed.",
@@ -96,13 +100,14 @@ module AgentRPC
 
     private
 
-      attr_reader :deployment, :conversation, :scope_type, :scope_id, :method_name, :invocation_id, :request_payload, :allowed_callback_methods, :rpc_client_factory
+      attr_reader :deployment, :conversation, :scope_type, :scope_id, :method_name, :invocation_id, :request_payload, :allowed_callback_methods, :result_validator, :rpc_client_factory
 
       def invoke_remote!(invocation:, session:, session_bearer:)
         result = rpc_client(session: session, session_bearer: session_bearer, invocation: invocation).call(method_name, remote_params(session_bearer))
+        validated_result = validate_result!(invocation: invocation, result: result, session: session)
         InvocationStore.mark_succeeded!(invocation: invocation, result_snapshot: result, session: session)
         close_session!(session, invocation: invocation)
-        result
+        validated_result
       rescue LostReplyError => e
         InvocationStore.mark_reply_unknown!(
           invocation: invocation,
@@ -115,6 +120,9 @@ module AgentRPC
           code: "cybros.agent_rpc.reply_unknown",
           details: { agent_rpc_invocation_id: invocation.id, method_name: method_name },
         )
+      rescue AgentCore::ValidationError
+        close_session!(session, invocation: invocation)
+        raise
       rescue StandardError => e
         InvocationStore.mark_failed!(
           invocation: invocation,
@@ -122,6 +130,20 @@ module AgentRPC
           session: session,
         )
         close_session!(session, invocation: invocation)
+        raise
+      end
+
+      def validate_result!(invocation:, result:, session: nil)
+        return result if result_validator.nil?
+
+        result_validator.call(result)
+      rescue AgentCore::ValidationError => e
+        InvocationStore.mark_failed!(
+          invocation: invocation,
+          error_snapshot: { "message" => e.message, "code" => e.code, "details" => e.details },
+          result_snapshot: result,
+          session: session,
+        )
         raise
       end
 

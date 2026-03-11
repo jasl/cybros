@@ -261,9 +261,10 @@ module RunDrafts
             "draft" => {
               "id" => draft.id,
               "trigger_snapshot" => draft.trigger_snapshot,
-              "prepared_plan" => draft.prepared_plan,
+              "planning" => draft.planning,
               "approval_state" => draft.approval_state,
             },
+            "capability_snapshot" => normalize_hash(draft.agent_deployment&.capability_snapshot),
           },
           debug: debug,
           error: error,

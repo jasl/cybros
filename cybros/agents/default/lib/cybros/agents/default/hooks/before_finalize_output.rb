@@ -2,24 +2,32 @@ module Cybros
   module Agents
     module Default
       module Hooks
-        class Compose
+        class BeforeFinalizeOutput
           def initialize(application:)
             @application = application
           end
 
           def call(params:)
             {
-              "output" => {
-                "role" => "assistant",
-                "content" => compose_content(params),
-              },
+              "actions" => [
+                {
+                  "type" => "emit_message",
+                  "message" => {
+                    "role" => "assistant",
+                    "content" => compose_content(params),
+                  },
+                },
+              ],
             }
           end
 
           private
 
           def compose_content(params)
-            summary = params.dig("prepared_plan", "summary").to_s.strip
+            draft_output = params.dig("draft_output", "content").to_s.strip
+            return draft_output unless draft_output.empty?
+
+            summary = params.dig("planning", "step_plan", "summary").to_s.strip
             latest_user = latest_user_message(params)
             lines = []
             lines << "Bundled default agent plan: #{summary}" unless summary.empty?

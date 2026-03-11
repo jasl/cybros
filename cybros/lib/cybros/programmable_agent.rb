@@ -1,0 +1,15 @@
+require_relative "programmable_agent/capability_snapshot"
+require_relative "programmable_agent/capability_handshake"
+require_relative "programmable_agent/execution_context"
+require_relative "programmable_agent/hook_envelope"
+require_relative "programmable_agent/hook_caller"
+require_relative "programmable_agent/hook_action_executor"
+require_relative "programmable_agent/kernel_capability_catalog"
+require_relative "programmable_agent/session_context"
+require_relative "programmable_agent/tool_execution"
+require_relative "programmable_agent/tool_surface_manifest"
+
+module Cybros
+  module ProgrammableAgent
+  end
+end

@@ -330,11 +330,9 @@ class Conversation::TurnExecutionProjector
     def subagent_links_for(snapshot)
       return nil unless snapshot.is_a?(Hash)
 
-      child_conversation_id = snapshot["child_conversation_id"].to_s.presence
-      child_graph_id = snapshot["child_graph_id"].to_s.presence
+      subagent_id = snapshot["subagent_id"].to_s.presence
       links = {}
-      links["child_conversation_id"] = child_conversation_id if child_conversation_id
-      links["child_graph_id"] = child_graph_id if child_graph_id
+      links["subagent_id"] = subagent_id if subagent_id
       links.presence
     end
 
@@ -422,7 +420,7 @@ class Conversation::TurnExecutionProjector
       return nil unless status == "failed"
 
       if snapshot.is_a?(Hash) && snapshot["status"].to_s == "missing"
-        return { "summary" => "child conversation missing" }
+        return { "summary" => "subagent missing" }
       end
 
       activity_error_for(task, status: status, last_payload: last_payload)

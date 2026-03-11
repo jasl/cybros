@@ -39,12 +39,41 @@ module Cybros
               "global_config_schema" => @application.manifest.fetch("global_config_schema"),
               "conversation_config_schema" => @application.manifest.fetch("conversation_config_schema"),
             }
-          when "turn.prepare"
-            Hooks::Prepare.new(application: @application).call(params: normalized_params)
-          when "turn.compose"
-            Hooks::Compose.new(application: @application).call(params: normalized_params)
-          when "turn.handle_error"
-            Hooks::HandleError.new(application: @application).call(params: normalized_params)
+          when "capabilities.handshake"
+            cached_version = normalized_params.fetch("cached_agent_capabilities_version", "").to_s
+            current_version = @application.agent_capabilities_version
+
+            if cached_version == current_version
+              {
+                "status" => "unchanged",
+                "agent_capabilities_version" => current_version,
+              }
+            else
+              {
+                "status" => "refreshed",
+                "agent_capabilities_version" => current_version,
+                "agent_tool_catalog" => @application.agent_tool_catalog,
+              }
+            end
+          when "capabilities.refresh"
+            {
+              "status" => "refreshed",
+              "refresh_reason" => normalized_params.fetch("reason", "").to_s,
+              "agent_capabilities_version" => @application.agent_capabilities_version,
+              "agent_tool_catalog" => @application.agent_tool_catalog,
+            }
+          when "before_agent_step"
+            Hooks::BeforeAgentStep.new(application: @application).call(params: normalized_params)
+          when "on_context_pressure"
+            Hooks::OnContextPressure.new(application: @application).call(params: normalized_params)
+          when "before_subagent_spawn"
+            Hooks::BeforeSubagentSpawn.new(application: @application).call(params: normalized_params)
+          when "before_finalize_output"
+            Hooks::BeforeFinalizeOutput.new(application: @application).call(params: normalized_params)
+          when "after_task_notice"
+            Hooks::AfterTaskNotice.new(application: @application).call(params: normalized_params)
+          when "after_subagent_result"
+            Hooks::AfterSubagentResult.new(application: @application).call(params: normalized_params)
           else
             raise KeyError, "unsupported bundled default RPC method: #{method_name}"
           end

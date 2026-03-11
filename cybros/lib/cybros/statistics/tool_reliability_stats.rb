@@ -22,6 +22,11 @@ module Cybros
           "summary" => build_summary(filtered_scope),
           "by_model_ref" => grouped_rows(filtered_scope, group_key: :model_ref, label_key: "model_ref"),
           "by_tool_name" => grouped_rows(filtered_scope, group_key: :resolved_name, label_key: "resolved_name"),
+          "by_logical_tool_name" => grouped_rows(filtered_scope, group_key: :logical_tool_name, label_key: "logical_tool_name"),
+          "by_implementation_source" => grouped_rows(filtered_scope, group_key: :implementation_source, label_key: "implementation_source"),
+          "by_tool_surface_id" => grouped_rows(filtered_scope, group_key: :tool_surface_id, label_key: "tool_surface_id"),
+          "by_agent_program_id" => grouped_rows(filtered_scope, group_key: :agent_program_id, label_key: "agent_program_id"),
+          "by_agent_program_version" => grouped_rows(filtered_scope, group_key: :agent_program_version, label_key: "agent_program_version"),
           "by_failure_class" => failure_class_rows(filtered_scope),
           "by_day" => day_rows(filtered_scope),
           "by_execution_scope" => execution_scope_rows(filtered_scope),
@@ -87,7 +92,7 @@ module Cybros
         def execution_scope_rows(base_scope)
           order = {
             "parent" => 0,
-            "subagent_child" => 1,
+            "subagent" => 1,
           }
 
           grouped_rows(base_scope, group_key: :execution_scope, label_key: "execution_scope")
@@ -102,6 +107,8 @@ module Cybros
             "total_calls" => base_scope.count,
             "model_attempts" => model_scope.count,
             "tool_executions" => tool_scope.count,
+            "result_status" => result_status_counts(base_scope),
+            "latency_ms" => latency_summary(tool_scope),
             "executable_rate" => rate_row(model_scope.where(execution_readiness: "executable").count, model_scope.count),
             "first_pass_success_rate" => rate_row(model_scope.where(model_attempt_class: "first_pass", tool_outcome: "success").count, model_scope.count),
             "repair_assisted_success_rate" => rate_row(model_scope.where(model_attempt_class: REPAIR_ASSISTED_MODEL_ATTEMPT_CLASSES, tool_outcome: "success").count, model_scope.count),
@@ -126,6 +133,27 @@ module Cybros
             "count" => count,
             "total" => total,
             "value" => total.positive? ? count.to_f / total : nil,
+          }
+        end
+
+        def result_status_counts(base_scope)
+          counts = base_scope.group(:tool_outcome).count
+
+          ::Statistics::ToolCallFact::TOOL_OUTCOMES.each_with_object({ "total" => 0 }) do |value, memo|
+            count = counts[value].to_i
+            memo[value] = count
+            memo["total"] += count
+          end
+        end
+
+        def latency_summary(base_scope)
+          values = base_scope.where.not(duration_ms: nil).pluck(:duration_ms).map(&:to_i)
+          return { "count" => 0, "avg" => nil, "max" => nil } if values.empty?
+
+          {
+            "count" => values.length,
+            "avg" => (values.sum.to_f / values.length).round,
+            "max" => values.max,
           }
         end
     end

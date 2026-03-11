@@ -19,7 +19,7 @@ class Statistics::ToolCallFactTest < ActiveSupport::TestCase
     refute Statistics::ToolCallFact.new(valid_attributes(tool_outcome: "partial")).valid?
 
     assert_equal %w[runtime eval debug replay], Statistics::ToolCallFact::SAMPLE_ORIGINS
-    assert_equal %w[parent subagent_child], Statistics::ToolCallFact::EXECUTION_SCOPES
+    assert_equal %w[parent subagent], Statistics::ToolCallFact::EXECUTION_SCOPES
     assert_equal %w[first_pass repaired_name repaired_args repaired_both], Statistics::ToolCallFact::MODEL_ATTEMPT_CLASSES
     assert_equal %w[executable invalid_args tool_not_found policy_denied awaiting_approval approval_rejected], Statistics::ToolCallFact::EXECUTION_READINESS_VALUES
     assert_equal %w[success failed not_executed], Statistics::ToolCallFact::TOOL_OUTCOMES
@@ -78,6 +78,34 @@ class Statistics::ToolCallFactTest < ActiveSupport::TestCase
     assert_equal finished_at.to_i, fact.finished_at.to_i
     assert_equal Date.new(2026, 3, 8), fact.effective_on
     assert_equal 912, fact.duration_ms
+  end
+
+  test "stores programmable runtime routing and capability dimensions" do
+    fact =
+      Statistics::ToolCallFact.create!(
+        valid_attributes(
+          logical_tool_name: "compact_context",
+          capability_registry_snapshot_id: "cap_snapshot_123",
+          kernel_capability_registry_version: "kernel:v1",
+          tool_surface_id: "tool_surface_123",
+          tool_surface_label: "bundled_default.before_agent_step",
+          implementation_source: "agent_program",
+          implementation_ref: "agent://compact_context",
+          agent_program_id: uuidv7,
+          agent_program_version: "default-agent-capabilities:v1",
+        )
+      )
+
+    fact.reload
+    assert_equal "compact_context", fact.logical_tool_name
+    assert_equal "cap_snapshot_123", fact.capability_registry_snapshot_id
+    assert_equal "kernel:v1", fact.kernel_capability_registry_version
+    assert_equal "tool_surface_123", fact.tool_surface_id
+    assert_equal "bundled_default.before_agent_step", fact.tool_surface_label
+    assert_equal "agent_program", fact.implementation_source
+    assert_equal "agent://compact_context", fact.implementation_ref
+    assert fact.agent_program_id.present?
+    assert_equal "default-agent-capabilities:v1", fact.agent_program_version
   end
 
   private

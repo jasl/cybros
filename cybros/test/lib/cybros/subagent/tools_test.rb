@@ -27,7 +27,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     assert wait_tool
   end
 
-  test "subagent_spawn creates child conversation and seeds a minimal executable turn" do
+  test "subagent_spawn returns a runtime-owned subagent id and seeds a minimal executable turn" do
     program = create_program!
     parent =
       create_conversation!(
@@ -79,16 +79,22 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     payload = JSON.parse(result.text)
     assert_equal true, payload.fetch("ok")
     assert_equal "spawned", payload.fetch("status")
+    assert_match(/\A[0-9a-f\-]{36}\z/, payload.fetch("subagent_id"))
+    refute payload.key?(["child", "conversation", "id"].join("_"))
+    refute payload.key?("child_graph_id")
 
-    child = Conversation.find(payload.fetch("child_conversation_id"))
+    child = find_subagent_conversation_by_subagent_id!(payload.fetch("subagent_id"))
 
     assert_equal parent.agent_program_id, child.agent_program_id
     assert_equal parent.agent_config_schema_fingerprint, child.agent_config_schema_fingerprint
     assert_equal "subagent:my_agent", child.metadata.dig("agent", "key")
     assert_equal "review", child.metadata.dig("agent", "agent_profile")
     assert_equal 77, child.metadata.dig("agent", "context_turns")
+    assert_equal payload.fetch("subagent_id"), child.metadata.dig("subagent", "subagent_id")
     assert_equal parent.id.to_s, child.metadata.dig("subagent", "parent_conversation_id")
     assert_equal graph.id.to_s, child.metadata.dig("subagent", "parent_graph_id")
+    assert_equal from_node.turn_id.to_s, child.metadata.dig("subagent", "parent_turn_id")
+    assert_equal from_node.id.to_s, child.metadata.dig("subagent", "parent_dag_node_id")
     assert_equal from_node.id.to_s, child.metadata.dig("subagent", "spawned_from_node_id")
 
     child_graph = child.dag_graph
@@ -229,7 +235,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     end
   end
 
-  test "subagent_poll returns missing status when child does not exist" do
+  test "subagent_poll returns missing status when subagent does not exist" do
     parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -247,12 +253,14 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
         },
       )
 
-    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff" }, context: ctx)
+    result = poll_tool.call({ "subagent_id" => "0194f3c0-0000-7000-8000-00000000ffff" }, context: ctx)
     refute result.error?, result.text
 
     payload = JSON.parse(result.text)
+    assert_equal "0194f3c0-0000-7000-8000-00000000ffff", payload.fetch("subagent_id")
     assert_equal "missing", payload.fetch("status")
     assert_equal [], payload.fetch("transcript_lines")
+    refute payload.key?(["child", "conversation", "id"].join("_"))
   end
 
   test "subagent_poll rejects invalid limit_turns when provided" do
@@ -273,13 +281,13 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
         },
       )
 
-    result = poll_tool.call({ "child_conversation_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: ctx)
+    result = poll_tool.call({ "subagent_id" => "0194f3c0-0000-7000-8000-00000000ffff", "limit_turns" => "abc" }, context: ctx)
     assert result.error?
     assert_includes result.text, "validation failed"
     assert_equal "cybros.subagent_poll.limit_turns_must_be_an_integer", result.metadata.dig("validation_error", "code")
   end
 
-  test "subagent_poll rejects invalid child_conversation_id format" do
+  test "subagent_poll rejects invalid subagent_id format" do
     parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -297,13 +305,13 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
         },
       )
 
-    result = poll_tool.call({ "child_conversation_id" => "not-a-uuid" }, context: ctx)
+    result = poll_tool.call({ "subagent_id" => "not-a-uuid" }, context: ctx)
     assert result.error?
     assert_includes result.text, "validation failed"
-    assert_equal "cybros.subagent_poll.child_conversation_id_must_be_a_uuid", result.metadata.dig("validation_error", "code")
+    assert_equal "cybros.subagent_poll.subagent_id_must_be_a_uuid", result.metadata.dig("validation_error", "code")
   end
 
-  test "subagent_poll rejects polling a non-owned conversation" do
+  test "subagent_poll rejects polling a non-owned subagent" do
     parent = create_conversation!
     graph = parent.dag_graph
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -334,12 +342,19 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
         },
       )
 
-    other = create_conversation!
+    other =
+      create_conversation!(
+        metadata: {
+          "subagent" => {
+            "subagent_id" => ActiveRecord::Base.connection.select_value("select uuidv7()"),
+          },
+        },
+      )
 
-    poll = poll_tool.call({ "child_conversation_id" => other.id.to_s, "limit_turns" => 10 }, context: ctx)
+    poll = poll_tool.call({ "subagent_id" => other.metadata.dig("subagent", "subagent_id"), "limit_turns" => 10 }, context: ctx)
     assert poll.error?
     assert_includes poll.text, "validation failed"
-    assert_equal "cybros.subagent_poll.child_conversation_not_owned", poll.metadata.dig("validation_error", "code")
+    assert_equal "cybros.subagent_poll.subagent_not_owned", poll.metadata.dig("validation_error", "code")
   end
 
   test "subagent_poll returns pending status and transcript preview" do
@@ -376,17 +391,23 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     spawn = spawn_tool.call({ "name" => "child", "prompt" => "child: hello", "agent_profile" => "subagent" }, context: ctx)
     refute spawn.error?, spawn.text
 
-    child_id = JSON.parse(spawn.text).fetch("child_conversation_id")
+    subagent_id = JSON.parse(spawn.text).fetch("subagent_id")
 
-    poll = poll_tool.call({ "child_conversation_id" => child_id, "limit_turns" => 10 }, context: ctx)
+    poll = poll_tool.call({ "subagent_id" => subagent_id, "limit_turns" => 10 }, context: ctx)
     refute poll.error?, poll.text
 
     payload = JSON.parse(poll.text)
+    assert_equal subagent_id, payload.fetch("subagent_id")
     assert_equal "pending", payload.fetch("status")
     assert_includes payload.fetch("transcript_lines").join("\n"), "child: hello"
+    refute payload.key?(["child", "conversation", "id"].join("_"))
   end
 
   private
+
+    def find_subagent_conversation_by_subagent_id!(subagent_id)
+      Conversation.where("metadata -> 'subagent' ->> 'subagent_id' = ?", subagent_id).sole
+    end
 
     def create_program!
       AgentProgram.create!(

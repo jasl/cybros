@@ -18,7 +18,7 @@ class RunDraftTest < ActiveSupport::TestCase
     end
   end
 
-  test "persists prepared plans and staged draft mutations" do
+  test "persists planning envelopes and staged draft mutations" do
     draft = build_draft
 
     assert_predicate draft, :valid?
@@ -26,7 +26,7 @@ class RunDraftTest < ActiveSupport::TestCase
 
     assert_equal "default", draft.permission_mode
     assert_equal({ "kind" => "user_turn" }, draft.trigger_snapshot)
-    assert_equal({ "steps" => ["draft"] }, draft.prepared_plan)
+    assert_equal({ "steps" => ["draft"] }, draft.planning)
     assert_equal({ "title" => "Updated" }, draft.staged_public_settings_patch)
     assert_equal([{ "op" => "set", "key" => "shared.stage" }], draft.staged_kv_ops)
     assert_equal(
@@ -227,7 +227,7 @@ class RunDraftTest < ActiveSupport::TestCase
         selected_model_ref: "openai/gpt-5.4",
         runtime_governors: runtime_governors,
         prepare_invocation_id: "prepare-1",
-        prepared_plan: { "steps" => ["draft"] },
+        planning: { "steps" => ["draft"] },
         staged_public_settings_patch: { "title" => "Updated" },
         staged_agent_config_patch: { "mode" => "coding" },
         staged_kv_ops: [{ "op" => "set", "key" => "shared.stage" }],
@@ -275,7 +275,7 @@ class RunDraftTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},

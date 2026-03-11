@@ -23,31 +23,50 @@ module AgentCore
         @execution_context = ExecutionContext.from(execution_context, instrumenter: runtime.instrumenter)
       end
 
-      def prepare(context_nodes:)
+      def prepare(context_nodes:, excluded_prompt_buffer_names: [])
         adapted = ContextAdapter.new(context_nodes: context_nodes).call
         latest_user_message = adapted.latest_user_message
 
         Prepared.new(
           latest_user_message: latest_user_message,
           memory_results: lookup_memory(latest_user_message),
-          prompt_injection_items: build_prompt_injection_items(latest_user_message),
+          prompt_injection_items: build_prompt_injection_items(
+            latest_user_message,
+            excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+          ),
         )
       end
 
-      def final_prompt_injection_items(prompt_injection_items: :auto, latest_user_message: nil)
+      def final_prompt_injection_items(prompt_injection_items: :auto, latest_user_message: nil, excluded_prompt_buffer_names: [])
         base_items =
           if prompt_injection_items == :auto
-            build_prompt_injection_items(latest_user_message)
+            build_prompt_injection_items(
+              latest_user_message,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+            )
           else
-            Array(prompt_injection_items)
+            filter_prompt_injection_items(
+              Array(prompt_injection_items),
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+            )
           end
 
         Array(base_items).dup + context_budget_prompt_injection_items(visible_tools: visible_tool_definitions)
       rescue StandardError
-        prompt_injection_items == :auto ? build_prompt_injection_items(latest_user_message) : Array(prompt_injection_items)
+        if prompt_injection_items == :auto
+          build_prompt_injection_items(
+            latest_user_message,
+            excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+          )
+        else
+          filter_prompt_injection_items(
+            Array(prompt_injection_items),
+            excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+          )
+        end
       end
 
-      def build(context_nodes:, memory_results: :auto, prompt_injection_items: :auto)
+      def build(context_nodes:, memory_results: :auto, prompt_injection_items: :auto, excluded_prompt_buffer_names: [])
         adapted = ContextAdapter.new(context_nodes: context_nodes).call
         latest_user_message = adapted.latest_user_message
 
@@ -60,9 +79,13 @@ module AgentCore
             final_prompt_injection_items(
               latest_user_message: latest_user_message,
               prompt_injection_items: :auto,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
             )
           else
-            Array(prompt_injection_items).dup + context_budget_prompt_injection_items(visible_tools: visible_tools)
+            filter_prompt_injection_items(
+              Array(prompt_injection_items),
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+            ).dup + context_budget_prompt_injection_items(visible_tools: visible_tools)
           end
 
         prompt_context =
@@ -104,8 +127,9 @@ module AgentCore
           []
         end
 
-        def build_prompt_injection_items(latest_user_message)
-          source_prompt_injection_items(latest_user_message) + lane_prompt_buffer_prompt_injection_items
+        def build_prompt_injection_items(latest_user_message, excluded_prompt_buffer_names: [])
+          source_prompt_injection_items(latest_user_message) +
+            lane_prompt_buffer_prompt_injection_items(excluded_prompt_buffer_names: excluded_prompt_buffer_names)
         rescue StandardError
           source_prompt_injection_items(latest_user_message)
         end
@@ -130,13 +154,34 @@ module AgentCore
           []
         end
 
-        def lane_prompt_buffer_prompt_injection_items
+        def lane_prompt_buffer_prompt_injection_items(excluded_prompt_buffer_names: [])
           lane = current_lane
           return [] if lane.nil?
 
-          LanePromptBufferSections.new(lane: lane).prompt_injection_items
+          LanePromptBufferSections.new(lane: lane).prompt_injection_items(
+            excluded_buffer_names: Array(excluded_prompt_buffer_names),
+          )
         rescue StandardError
           []
+        end
+
+        def filter_prompt_injection_items(items, excluded_prompt_buffer_names:)
+          excluded = Array(excluded_prompt_buffer_names).map { |name| name.to_s.strip }.reject(&:empty?).uniq
+          return Array(items) if excluded.empty?
+
+          Array(items).reject do |item|
+            metadata =
+              if item.respond_to?(:metadata) && item.metadata.is_a?(Hash)
+                item.metadata
+              else
+                {}
+              end
+
+            metadata.fetch(:source, metadata.fetch("source", "")).to_s == "lane_prompt_buffer" &&
+              excluded.include?(metadata.fetch(:buffer_name, metadata.fetch("buffer_name", "")).to_s)
+          end
+        rescue StandardError
+          Array(items)
         end
 
         def current_lane
@@ -162,7 +207,11 @@ module AgentCore
 
           policy = @runtime.tool_policy || AgentCore::Resources::Tools::Policy::DenyAll.new
           tools = @runtime.tools_registry.definitions
-          Array(policy.filter(tools: tools, context: @execution_context))
+          visible = Array(policy.filter(tools: tools, context: @execution_context))
+          visible = filter_visible_tools_by_surface(visible)
+          annotate_tool_routes(visible)
+        rescue AgentCore::ValidationError
+          raise
         rescue StandardError
           []
         end
@@ -226,6 +275,78 @@ module AgentCore
           tool_def.fetch(:name, tool_def.fetch("name", tool_def.dig(:function, :name) || tool_def.dig("function", "name") || "")).to_s
         rescue StandardError
           ""
+        end
+
+        def annotate_tool_routes(tools)
+          snapshot = capability_snapshot
+          return tools unless snapshot
+
+          Array(tools).map do |tool|
+            tool_name = tool_name_from_definition(tool)
+            route = snapshot.route_for!(tool_name)
+
+            AgentCore::Utils.deep_stringify_keys(tool).merge(
+              "logical_tool_name" => route.logical_tool_name,
+              "effective_tool_id" => route.effective_tool_id,
+              "implementation_source" => route.implementation_source,
+              "implementation_ref" => route.implementation_ref,
+            )
+          end
+        end
+
+        def filter_visible_tools_by_surface(tools)
+          manifest = tool_surface_manifest
+          return tools unless manifest
+
+          Array(tools).select do |tool|
+            manifest.effective_tool_for(tool_name_from_definition(tool))
+          end
+        end
+
+        def tool_surface_manifest
+          return @tool_surface_manifest if defined?(@tool_surface_manifest)
+
+          payload =
+            @execution_context.attributes.dig(:cybros, :tool_surface) ||
+              @execution_context.attributes.dig(:cybros, "tool_surface") ||
+              @execution_context.attributes.dig("cybros", :tool_surface) ||
+              @execution_context.attributes.dig("cybros", "tool_surface")
+          snapshot = capability_snapshot
+
+          @tool_surface_manifest =
+            if payload.is_a?(Hash) && payload.any? && snapshot
+              AgentCore::RuntimeSurface::ToolSurfaceManifest.restore(
+                payload,
+                capability_registry_snapshot: snapshot,
+              )
+            else
+              nil
+            end
+        rescue AgentCore::ValidationError
+          raise
+        rescue StandardError
+          @tool_surface_manifest = nil
+        end
+
+        def capability_snapshot
+          return @capability_snapshot if defined?(@capability_snapshot)
+
+          payload =
+            @execution_context.attributes.dig(:cybros, :capability_snapshot) ||
+              @execution_context.attributes.dig(:cybros, "capability_snapshot") ||
+              @execution_context.attributes.dig("cybros", :capability_snapshot) ||
+              @execution_context.attributes.dig("cybros", "capability_snapshot")
+
+          @capability_snapshot =
+            if payload.is_a?(Hash) && payload.any?
+              AgentCore::RuntimeSurface::ToolRoutingSnapshot.restore(payload)
+            else
+              nil
+            end
+        rescue AgentCore::ValidationError
+          raise
+        rescue StandardError
+          @capability_snapshot = nil
         end
     end
   end

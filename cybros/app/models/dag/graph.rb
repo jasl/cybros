@@ -919,6 +919,18 @@ module DAG
             WHERE dag_node_bodies.id = deleted_nodes.body_id
           SQL
 
+          connection.delete(<<~SQL.squish, "purge_lane_kv_entries")
+            DELETE FROM lane_kv_entries
+            USING dag_lanes
+            WHERE lane_kv_entries.lane_id = dag_lanes.id AND dag_lanes.graph_id = #{graph_id_quoted}
+          SQL
+
+          connection.delete(<<~SQL.squish, "purge_lane_prompt_buffer_entries")
+            DELETE FROM lane_prompt_buffer_entries
+            USING dag_lanes
+            WHERE lane_prompt_buffer_entries.lane_id = dag_lanes.id AND dag_lanes.graph_id = #{graph_id_quoted}
+          SQL
+
           connection.delete(<<~SQL.squish, "purge_dag_lanes")
             DELETE FROM dag_lanes WHERE graph_id = #{graph_id_quoted}
           SQL

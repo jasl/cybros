@@ -2,7 +2,7 @@ module Cybros
   module Agents
     module Default
       module Hooks
-        class Prepare
+        class BeforeAgentStep
           def initialize(application:)
             @application = application
           end
@@ -11,26 +11,52 @@ module Cybros
             user_input = params.fetch("user_input", "").to_s.strip
             tokens = scenario_tokens(user_input)
             callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
+            system_entry = build_system_entry
 
             result = {
-              "prepared_plan" => {
-                "kind" => "bundled_default.prepare.v1",
-                "summary" => build_summary(user_input),
+              "planning" => {
+                "step_plan" => {
+                  "kind" => "bundled_default.before_agent_step.v2",
+                  "summary" => build_summary(user_input),
+                },
+                "tool_surface" => build_tool_surface(params),
+                "staged_mutations" => {
+                  "prompt_buffer_ops" => [
+                    {
+                      "op" => "clear",
+                      "buffer_name" => "system",
+                    },
+                    {
+                      "op" => "put",
+                      "entry" => system_entry,
+                    },
+                  ],
+                },
               },
-              "prompt_fragments" => [
-                { "role" => "system", "content" => @application.full_system_prompt },
-              ],
             }
-            result["prepared_plan"]["fixture_scenarios"] = tokens if tokens.any?
+            result.dig("planning", "step_plan")["fixture_scenarios"] = tokens if tokens.any?
 
-            stage_state(callback_session) if tokens.include?("stage-state")
-            replay_kv(callback_session) if tokens.include?("replay-kv")
+            stage_state(result) if tokens.include?("stage-state")
+            replay_kv(result) if tokens.include?("replay-kv")
             switch_target(callback_session:, params:, result:) if tokens.include?("switch-target")
             require_approval(result) if tokens.include?("approval")
             result
           end
 
           private
+
+          def build_system_entry
+            {
+              "id" => SecureRandom.uuid,
+              "buffer_name" => "system",
+              "seq" => 10,
+              "kind" => "instruction",
+              "content" => @application.full_system_prompt,
+              "priority" => 100,
+              "estimated_tokens" => 0,
+              "metadata" => { "source" => "before_agent_step" },
+            }
+          end
 
           def build_summary(user_input)
             return "inspect the current request and produce a concise assistant response" if user_input.empty?
@@ -42,27 +68,21 @@ module Cybros
             user_input.to_s.scan(/\[fixture:([a-z0-9_-]+)\]/i).flatten.map(&:downcase)
           end
 
-          def stage_state(callback_session)
-            callback_rpc(callback_session, "conversation.settings.update",
-                         { "operation_id" => "fixture-settings", "patch" => { "tone" => "concise" } })
-            callback_rpc(callback_session, "conversation.config.update",
-                         { "operation_id" => "fixture-config", "patch" => { "mode" => "review" } })
-            callback_rpc(
-              callback_session,
-              "lane.kv.set",
-              { "operation_id" => "fixture-kv", "key" => "shared.fixture.plan", "value" => { "status" => "planned" } }
+          def stage_state(result)
+            result["planning"]["staged_mutations"].merge!(
+              "public_settings_patch" => { "tone" => "concise" },
+              "agent_config_patch" => { "mode" => "review" },
+              "kv_ops" => [
+                { "op" => "set", "key" => "shared.fixture.plan", "value" => { "status" => "planned" } },
+              ],
             )
           end
 
-          def replay_kv(callback_session)
-            2.times do
-              callback_rpc(
-                callback_session,
-                "lane.kv.set",
-                { "operation_id" => "fixture-kv-replay", "key" => "shared.fixture.replay",
-                  "value" => { "status" => "deduped" } }
-              )
-            end
+          def replay_kv(result)
+            result["planning"]["staged_mutations"]["kv_ops"] = [
+              { "op" => "set", "key" => "shared.fixture.replay", "value" => { "status" => "deduped" } },
+              { "op" => "set", "key" => "shared.fixture.replay", "value" => { "status" => "deduped" } },
+            ]
           end
 
           def switch_target(callback_session:, params:, result:)
@@ -80,7 +100,7 @@ module Cybros
               )
             return unless proposal.dig("switch_decision", "decision").to_s == "confirm"
 
-            result["approval_state"] = {
+            result["planning"]["approval_request"] = {
               "status" => "pending_confirmation",
               "reason" => "target_switch",
               "proposed_execution_target_id" => alternate_target.fetch("id"),
@@ -88,7 +108,26 @@ module Cybros
           end
 
           def require_approval(result)
-            result["approval_state"] ||= { "status" => "pending_confirmation", "reason" => "fixture_approval" }
+            result["planning"]["approval_request"] ||= { "status" => "pending_confirmation", "reason" => "fixture_approval" }
+          end
+
+          def build_tool_surface(params)
+            snapshot = params["capability_snapshot"].is_a?(Hash) ? Manifest.deep_stringify(params["capability_snapshot"]) : {}
+            snapshot_id = snapshot["capability_registry_snapshot_id"].to_s.strip
+            selected_tool_ids =
+              Array(snapshot["effective_tools"]).filter_map do |tool|
+                next unless tool.is_a?(Hash)
+
+                effective_tool_id = tool["effective_tool_id"].to_s.strip
+                effective_tool_id unless effective_tool_id.empty?
+              end.uniq
+            return nil if snapshot_id.empty? || selected_tool_ids.empty?
+
+            {
+              "capability_registry_snapshot_id" => snapshot_id,
+              "selected_tool_ids" => selected_tool_ids,
+              "tool_surface_label" => "bundled_default.before_agent_step",
+            }
           end
 
           def paired_target_for(targets:, current_target_id:)
@@ -108,7 +147,7 @@ module Cybros
           end
 
           def callback_rpc(callback_session, method_name, params)
-            return default_callback_result(method_name) if callback_session.empty?
+            return default_callback_result(method_name, params) if callback_session.empty?
 
             uri = URI(callback_session.fetch("endpoint"))
             request = Net::HTTP::Post.new(uri)
@@ -126,8 +165,13 @@ module Cybros
             payload.fetch("result")
           end
 
-          def default_callback_result(method_name)
-            method_name == "execution_target.list" ? { "targets" => [] } : { "status" => "staged" }
+          def default_callback_result(method_name, _params)
+            case method_name
+            when "execution_target.list"
+              { "targets" => [] }
+            else
+              { "status" => "staged" }
+            end
           end
         end
       end

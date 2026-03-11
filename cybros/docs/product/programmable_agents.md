@@ -8,6 +8,16 @@ It is the app layer on top of the Cybros kernel, not a second control plane besi
 
 The default interactive Cybros agent now follows this same model. The official bundled agent is keyed as `default`, ships under `agents/default`, and is bootstrapped as a normal `AgentProgram` plus `AgentDeployment`.
 
+Current shipped runtime note:
+
+- the active planning hook is `before_agent_step`
+- the active live-step context-pressure hook is `on_context_pressure`
+- the active delegated-worker preflight hook is `before_subagent_spawn`
+- the active terminal task notice hooks are `after_task_notice` / `after_subagent_result`
+- the active programmable output hook is `before_finalize_output`
+- lane-scoped kernel state (`lane.kv.*`, `lane.prompt_buffer.*`) and `tokens.*` run under that cutover path
+- the runtime cutover is complete on the typed hook/capability surface; what remains separate is proving and tuning concrete agent behavior quality on top of it
+
 ## V1 Constraints
 
 - self-hosted only
@@ -36,7 +46,9 @@ Future Python or Rust implementations should use the same contract.
 - hook logic
 - domain-specific workflow logic
 - conversation-level control through Cybros public APIs
-- use of shared per-conversation KV
+- use of lane-scoped mutable state through `lane.kv.*`
+- use of prompt-working-set state through `lane.prompt_buffer.*`
+- token estimation through `tokens.*`
 - optional external integrations and off-loop capabilities if the operator enables them
 
 ## What The Agent Does Not Own
@@ -127,6 +139,15 @@ The agent contract should provide:
 - healthcheck entrypoint
 - turn handlers
 
+Today those turn handlers are:
+
+- `before_agent_step`
+- `on_context_pressure`
+- `before_subagent_spawn`
+- `after_task_notice`
+- `after_subagent_result`
+- `before_finalize_output`
+
 Contract ownership rule:
 
 - `AgentProgram` owns the canonical manifest and contract fingerprints
@@ -156,13 +177,15 @@ This includes:
 
 - public settings
 - per-conversation config
-- shared KV
+- `lane.kv.*`
+- `lane.prompt_buffer.*`
+- `tokens.*`
 - execution-target discovery
 - requests to change execution target
 
 This control is declarative and policy-gated.
 
-During `turn.prepare`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
+During `before_agent_step`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
 
 If approval is required, Cybros persists the prepared draft result, ends the planning session, and resumes finalization locally after approval instead of reopening planning.
 

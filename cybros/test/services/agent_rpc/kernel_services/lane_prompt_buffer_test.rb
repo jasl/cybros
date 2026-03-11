@@ -151,7 +151,7 @@ class AgentRPC::KernelServices::LanePromptBufferTest < ActiveSupport::TestCase
         runtime_governors: runtime_governors_snapshot(provider_credential: credential, selected_model_ref: "dev/mock-model", execution_target: target),
         agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint,
         prepare_invocation_id: SecureRandom.uuid,
-        prepared_plan: {},
+        planning: {},
         staged_public_settings_patch: {},
         staged_agent_config_patch: {},
         staged_kv_ops: [],

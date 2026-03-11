@@ -1,7 +1,7 @@
 require "test_helper"
 
 class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
-  test "projects parent-side subagent run and wait tasks as subagent activities with child snapshot fields" do
+  test "projects parent-side subagent run and wait tasks as subagent activities with runtime-owned subagent links" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
 
@@ -9,7 +9,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     agent = turn.fetch(:agent_node)
     agent.mark_running!
 
-    child = create_child_conversation!(user: conversation.user, hidden_task_name: "child_internal_task")
+    child = create_subagent_runtime_conversation!(user: conversation.user, hidden_task_name: "child_internal_task")
 
     run_task =
       create_subagent_task!(
@@ -35,7 +35,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
         state: DAG::Node::FINISHED,
         name: "subagent_wait",
         tool_call_id: "tc_wait",
-        arguments: { "child_conversation_id" => child.id.to_s },
+        arguments: { "subagent_id" => child.metadata.dig("subagent", "subagent_id") },
         payload: subagent_payload(
           child: child,
           status: "idle",
@@ -59,8 +59,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     assert_equal "Research Agent", run_activity.fetch("title")
     assert_equal "running", run_activity.fetch("status")
     assert_equal "execution", run_activity.fetch("phase")
-    assert_equal child.id.to_s, run_activity.dig("links", "child_conversation_id")
-    assert_equal child.dag_graph.id.to_s, run_activity.dig("links", "child_graph_id")
+    assert_equal child.metadata.dig("subagent", "subagent_id"), run_activity.dig("links", "subagent_id")
     assert_equal "running", run_activity.dig("snapshot", "status")
     assert_equal 1, run_activity.dig("snapshot", "counts", "running")
     assert_equal ["U:child: hello", "A:child: investigating"], run_activity.dig("snapshot", "transcript_lines")
@@ -75,7 +74,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     assert_equal 1, wait_activity.dig("snapshot", "elapsed_ms")
   end
 
-  test "debug mode keeps canonical subagent activity shape stable while adding richer child diagnostics" do
+  test "debug mode keeps canonical subagent activity shape stable while adding richer subagent diagnostics" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
 
@@ -83,7 +82,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     agent = turn.fetch(:agent_node)
     agent.mark_running!
 
-    child = create_child_conversation!(user: conversation.user)
+    child = create_subagent_runtime_conversation!(user: conversation.user)
 
     task =
       create_subagent_task!(
@@ -93,7 +92,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
         state: DAG::Node::FINISHED,
         name: "subagent_wait",
         tool_call_id: "tc_wait",
-        arguments: { "child_conversation_id" => child.id.to_s },
+        arguments: { "subagent_id" => child.metadata.dig("subagent", "subagent_id") },
         payload: subagent_payload(
           child: child,
           status: "running",
@@ -134,8 +133,8 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
 
   private
 
-    def create_child_conversation!(user:, hidden_task_name: nil)
-      child =
+    def create_subagent_runtime_conversation!(user:, hidden_task_name: nil)
+      subagent_conversation =
         Conversation.create!(
           user: user,
           title: "Child",
@@ -145,10 +144,13 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
               "agent_profile" => "subagent",
               "context_turns" => 50,
             },
+            "subagent" => {
+              "subagent_id" => ActiveRecord::Base.connection.select_value("select uuidv7()"),
+            },
           },
         )
 
-      graph = child.dag_graph
+      graph = subagent_conversation.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 
       graph.mutate!(turn_id: turn_id) do |m|
@@ -188,7 +190,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
         m.create_edge(from_node: user_node, to_node: task, edge_type: DAG::Edge::SEQUENCE)
       end
 
-      child
+      subagent_conversation
     end
 
     def create_subagent_task!(graph:, lane_id:, turn_id:, state:, name:, tool_call_id:, arguments:, payload:)
@@ -237,8 +239,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
       payload = {
         "ok" => true,
         "operation" => wait_status.present? ? "wait" : "run",
-        "child_conversation_id" => child.id.to_s,
-        "child_graph_id" => child.dag_graph.id.to_s,
+        "subagent_id" => child.metadata.dig("subagent", "subagent_id"),
         "status" => status,
         "counts" => counts,
         "leaf" => {

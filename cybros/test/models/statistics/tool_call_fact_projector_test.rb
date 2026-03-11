@@ -254,7 +254,7 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     assert_equal "not_executed", retry_fact.tool_outcome
   end
 
-  test "ordinary child conversations are not mislabeled as subagent_child" do
+  test "ordinary branch conversations are not mislabeled as subagent execution scope" do
     parent = create_conversation!
     child =
       Conversation.create!(
@@ -296,7 +296,7 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     assert_equal parent.root_conversation_id, fact.root_conversation_id
   end
 
-  test "real subagent child conversations are labeled subagent_child while parent wrapper tasks stay parent" do
+  test "real subagent worker conversations are labeled subagent while parent wrapper tasks stay parent" do
     parent = create_conversation!
 
     child =
@@ -378,8 +378,104 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     child_fact = Statistics::ToolCallFact.find_by!(task_node_id: child_task.id)
 
     assert_equal "parent", parent_fact.execution_scope
-    assert_equal "subagent_child", child_fact.execution_scope
+    assert_equal "subagent", child_fact.execution_scope
     assert_equal parent.root_conversation_id, child_fact.root_conversation_id
+  end
+
+  test "projects programmable routing and capability snapshot dimensions from task metadata and run snapshot" do
+    conversation = create_conversation!
+    graph = conversation.root_graph
+    lane_id = graph.main_lane.id
+    turn_id = uuidv7
+    deployment = conversation.agent_program.active_healthy_deployment
+    provider_credential = LLMProviderCredential.find_by!(provider_key: "dev")
+
+    agent =
+      create_agent_node!(
+        graph: graph,
+        lane_id: lane_id,
+        turn_id: turn_id,
+        provider_key: "openai",
+        model_ref: "openai/gpt-5.4",
+      )
+
+    ConversationRun.create!(
+      conversation: conversation,
+      dag_node_id: agent.id,
+      state: "queued",
+      queued_at: Time.current.change(usec: 0),
+      snapshot_version: 1,
+      initiated_by_user: conversation.user,
+      effective_permission_mode: "default",
+      agent_program: conversation.agent_program,
+      contract_fingerprint: deployment.contract_fingerprint,
+      agent_deployment: deployment,
+      deployment_fingerprint: deployment.deployment_fingerprint,
+      deployment_activated_at: deployment.activated_at,
+      provider_credential: nil,
+      execution_target: conversation.default_execution_target,
+      selected_model_ref: "openai/gpt-5.4",
+      effective_public_settings: {},
+      effective_agent_config: {},
+      agent_config_schema_fingerprint: conversation.agent_program.config_schema_fingerprint,
+      effective_policy: {},
+      runtime_governors:
+        runtime_governors_snapshot(
+          provider_credential: provider_credential,
+          selected_model_ref: "openai/gpt-5.4",
+          execution_target: conversation.default_execution_target,
+        ),
+      snapshot: {
+        "draft" => {
+          "planning" => {
+            "tool_surface" => {
+              "tool_surface_label" => "bundled_default.before_agent_step",
+            },
+          },
+        },
+        "capability_snapshot" => {
+          "capability_registry_snapshot_id" => "cap_snapshot_123",
+          "kernel_capability_registry_version" => "kernel:v1",
+          "agent_program_version" => "default-agent-capabilities:v1",
+        },
+      },
+    )
+
+    task =
+      create_connected_task!(
+        graph: graph,
+        from_node: agent,
+        lane_id: lane_id,
+        turn_id: turn_id,
+        state: DAG::Node::FINISHED,
+        name: "compact_context",
+        requested_name: "compact_context",
+        tool_call_id: "tc_programmable",
+        source: "agent_program",
+        metadata: {
+          "tool" => {
+            "logical_tool_name" => "compact_context",
+            "effective_tool_id" => "etool_compact",
+            "implementation_source" => "agent_program",
+            "implementation_ref" => "agent://compact_context",
+            "capability_registry_snapshot_id" => "cap_snapshot_123",
+            "tool_surface_id" => "tool_surface_123",
+          },
+        },
+        result: AgentCore::Resources::Tools::ToolResult.success(text: "ok"),
+      )
+
+    fact = Statistics::ToolCallFact.find_by!(task_node_id: task.id)
+
+    assert_equal "compact_context", fact.logical_tool_name
+    assert_equal "cap_snapshot_123", fact.capability_registry_snapshot_id
+    assert_equal "kernel:v1", fact.kernel_capability_registry_version
+    assert_equal "tool_surface_123", fact.tool_surface_id
+    assert_equal "bundled_default.before_agent_step", fact.tool_surface_label
+    assert_equal "agent_program", fact.implementation_source
+    assert_equal "agent://compact_context", fact.implementation_ref
+    assert_equal conversation.agent_program_id, fact.agent_program_id
+    assert_equal "default-agent-capabilities:v1", fact.agent_program_version
   end
 
   private

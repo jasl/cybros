@@ -4,6 +4,8 @@ require "json"
 module AgentCore
   module DAG
     class ContextBudgetManager
+      EARLY_PROMPT_BUFFER_SHRINK_ORDER = %w[working_notes].freeze
+      PRE_HISTORY_PROMPT_BUFFER_SHRINK_ORDER = %w[summaries handoff].freeze
       Result =
         Data.define(
           :built_prompt,
@@ -79,6 +81,7 @@ module AgentCore
         def build_until_within_budget(prompt_assembly:, prepared:, context_nodes:)
           limit = effective_token_limit
           decisions = []
+          excluded_prompt_buffer_names = []
 
           return build_without_budget(prompt_assembly: prompt_assembly, prepared: prepared, context_nodes: context_nodes) if limit.nil?
 
@@ -87,6 +90,7 @@ module AgentCore
               context_nodes: context_nodes,
               memory_results: prepared.memory_results,
               prompt_injection_items: prepared.prompt_injection_items,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
             )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
 
@@ -102,6 +106,30 @@ module AgentCore
             )
           end
 
+          excluded_prompt_buffer_names, built_prompt, estimate =
+            drop_prompt_buffer_sections_until_fit(
+              prompt_assembly: prompt_assembly,
+              prepared: prepared,
+              context_nodes: context_nodes,
+              limit: limit,
+              memory_results: prepared.memory_results,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+              shrink_order: EARLY_PROMPT_BUFFER_SHRINK_ORDER,
+              decisions: decisions,
+            )
+
+          if within_budget?(estimate, limit: limit)
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: false,
+              decisions: decisions,
+              limit_turns: current_limit_turns(context_nodes),
+              fit_tactics_applied: fit_decisions_applied?(decisions),
+            )
+          end
+
           memory_dropped = Array(prepared.memory_results).any?
           decisions << { "type" => "drop_memory_results" } if memory_dropped
 
@@ -110,6 +138,7 @@ module AgentCore
               context_nodes: context_nodes,
               memory_results: [],
               prompt_injection_items: prepared.prompt_injection_items,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
             )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
 
@@ -145,6 +174,30 @@ module AgentCore
             )
           end
 
+          excluded_prompt_buffer_names, built_prompt, estimate =
+            drop_prompt_buffer_sections_until_fit(
+              prompt_assembly: prompt_assembly,
+              prepared: prepared,
+              context_nodes: context_nodes,
+              limit: limit,
+              memory_results: memory_dropped ? [] : prepared.memory_results,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
+              shrink_order: PRE_HISTORY_PROMPT_BUFFER_SHRINK_ORDER,
+              decisions: decisions,
+            )
+
+          if within_budget?(estimate, limit: limit)
+            return Build.new(
+              built_prompt: built_prompt,
+              context_nodes: context_nodes,
+              estimate: estimate,
+              memory_dropped: memory_dropped,
+              decisions: decisions,
+              limit_turns: current_limit_turns(context_nodes),
+              fit_tactics_applied: memory_dropped || fit_decisions_applied?(decisions),
+            )
+          end
+
           shrink_turns_until_fit(
             prompt_assembly: prompt_assembly,
             prepared: prepared,
@@ -152,6 +205,7 @@ module AgentCore
             limit: limit,
             memory_dropped: memory_dropped,
             decisions: decisions,
+            excluded_prompt_buffer_names: excluded_prompt_buffer_names,
           )
         end
 
@@ -174,7 +228,7 @@ module AgentCore
           )
         end
 
-        def shrink_turns_until_fit(prompt_assembly:, prepared:, initial_context_nodes:, limit:, memory_dropped:, decisions:)
+        def shrink_turns_until_fit(prompt_assembly:, prepared:, initial_context_nodes:, limit:, memory_dropped:, decisions:, excluded_prompt_buffer_names:)
           limit_turns = current_limit_turns(initial_context_nodes)
           initial_limit_turns = limit_turns
 
@@ -186,6 +240,7 @@ module AgentCore
               context_nodes: context_nodes,
               memory_results: [],
               prompt_injection_items: prepared.prompt_injection_items,
+              excluded_prompt_buffer_names: excluded_prompt_buffer_names,
             )
 
             estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
@@ -220,6 +275,7 @@ module AgentCore
             context_nodes: context_nodes,
             memory_results: [],
             prompt_injection_items: prepared.prompt_injection_items,
+            excluded_prompt_buffer_names: excluded_prompt_buffer_names,
           )
           estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
 
@@ -895,6 +951,42 @@ module AgentCore
           [prompt_after_hard, estimate_after_hard]
         rescue StandardError
           [built_prompt, estimate]
+        end
+
+        def drop_prompt_buffer_sections_until_fit(prompt_assembly:, prepared:, context_nodes:, limit:, memory_results:, excluded_prompt_buffer_names:, shrink_order:, decisions:)
+          excluded = Array(excluded_prompt_buffer_names).dup
+          built_prompt = nil
+          estimate = nil
+          dropped = []
+
+          Array(shrink_order).each do |buffer_name|
+            next if excluded.include?(buffer_name)
+
+            excluded << buffer_name
+            dropped << buffer_name
+
+            built_prompt =
+              prompt_assembly.build(
+                context_nodes: context_nodes,
+                memory_results: memory_results,
+                prompt_injection_items: prepared.prompt_injection_items,
+                excluded_prompt_buffer_names: excluded,
+              )
+            estimate = built_prompt.estimate_tokens(token_counter: @runtime.token_counter)
+
+            if within_budget?(estimate, limit: limit)
+              decisions << { "type" => "drop_prompt_buffer_sections", "buffer_names" => dropped.dup }
+              return [excluded, built_prompt, estimate]
+            end
+          end
+
+          if dropped.any?
+            decisions << { "type" => "drop_prompt_buffer_sections", "buffer_names" => dropped.dup }
+          end
+
+          [excluded, built_prompt, estimate]
+        rescue StandardError
+          [Array(excluded_prompt_buffer_names), built_prompt, estimate]
         end
 
         def current_limit_turns(context_nodes)

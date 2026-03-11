@@ -71,7 +71,7 @@
              if activity_kind == "subagent"
                bits = []
                child_status = snapshot.fetch("status", "").to_s
-               bits << "Child #{child_status.humanize.downcase}" if child_status.present?
+               bits << "Subagent #{child_status.humanize.downcase}" if child_status.present?
                bits << "#{counts.fetch("running", 0).to_i} running" if counts.fetch("running", 0).to_i.positive?
                bits << "#{counts.fetch("pending", 0).to_i} pending" if counts.fetch("pending", 0).to_i.positive?
                bits << "#{counts.fetch("awaiting_approval", 0).to_i} waiting" if counts.fetch("awaiting_approval", 0).to_i.positive?
@@ -91,8 +91,7 @@
         <li data-role="run-state-activity"
             data-activity-status="<%= activity_status %>"
             data-activity-kind="<%= activity_kind %>"
-            data-child-conversation-id="<%= links.fetch("child_conversation_id", "").to_s %>"
-            data-child-graph-id="<%= links.fetch("child_graph_id", "").to_s %>"
+            data-subagent-id="<%= links.fetch("subagent_id", "").to_s %>"
             class="rounded-2xl border border-base-300/80 bg-base-100/80 px-3 py-2">
           <div class="flex items-start justify-between gap-3">
             <div>

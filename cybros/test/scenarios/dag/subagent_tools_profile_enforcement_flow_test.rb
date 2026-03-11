@@ -69,8 +69,8 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
 
     refute spawn.error?, spawn.text
 
-    child_id = JSON.parse(spawn.text).fetch("child_conversation_id")
-    child = Conversation.find(child_id)
+    subagent_id = JSON.parse(spawn.text).fetch("subagent_id")
+    child = Conversation.where("metadata -> 'subagent' ->> 'subagent_id' = ?", subagent_id).sole
     child_graph = child.dag_graph
 
     initial_leaf = child_graph.leaf_nodes.where(lane_id: child_graph.main_lane.id).order(:id).last
@@ -162,7 +162,7 @@ class DAG::SubagentToolsProfileEnforcementFlowTest < ActiveSupport::TestCase
       assert tool_msg, "expected tool_result message with tool_call_id tc_1"
       assert_includes tool_msg.text, "tool_not_in_profile"
 
-      poll = poll_tool.call({ "child_conversation_id" => child.id.to_s, "limit_turns" => 10 }, context: spawn_ctx)
+      poll = poll_tool.call({ "subagent_id" => subagent_id, "limit_turns" => 10 }, context: spawn_ctx)
       refute poll.error?, poll.text
 
       poll_payload = JSON.parse(poll.text)

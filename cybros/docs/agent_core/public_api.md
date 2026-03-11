@@ -24,7 +24,7 @@
 - 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自选中的 `Conversation.agent_program`
 - `conversations.metadata["agent"]` 不再是顶层 interactive runtime 的主 authority；它只保留给：
   - 显式 legacy `agent_profile` 兼容行
-  - subagent / child conversation 的 worker-boundary payload
+  - subagent worker-boundary payload
 - 当 `conversations.metadata["agent"]` 中显式存在 `agent_profile` / `context_turns` 时，resolver 仍会立刻生效：
   - `agent_profile`：通过 `Policy::Profiled` 包裹 base policy，影响 tools 可见性与 `authorize`（拒绝原因 `tool_not_in_profile` 可审计）
   - `context_turns`：覆盖 runtime 的 context turns 窗口（范围 1..1000）
@@ -109,6 +109,12 @@ runtime surface 约束：
 
 - surface lifecycle：`prepare_turn` / `compact_context` / `review_tool_call` / `project_tool_result` / `finalize_output` / `handle_error`
 - 所有 stage 都只收 typed input，返回 typed decision；不要在 app 侧依赖布尔 hook
+- 对 programmable-agent 而言，这些是 AgentCore 通用 runtime middleware stage，不是 `agent_rpc` 的 canonical hook 名：
+  - programmable planning 走 `before_agent_step`
+  - live-step context pressure 走 `on_context_pressure`
+  - spawn-family control 走 `before_subagent_spawn`
+  - terminal task notices 走 `after_task_notice` / `after_subagent_result`
+  - programmable final output 走 `before_finalize_output`
 - surface 永远是 advisory middleware：
   - 静态 tool policy、schema 校验、审批、DAG invariants、sandbox ceilings 仍是最终 authority
   - runner 或 surface 出错时必须回退 runtime-owned default path
@@ -117,7 +123,8 @@ runtime surface 约束：
 默认 context-budget 约定（Cybros app 侧）：
 
 - `Cybros::ContextBudget::DefaultPolicy` 是 bundled helper：把 `budget_state` 映射到 `none|advise_compact|enqueue_compact`
-- `PromptAssembly` 的默认上下文管理器会按当前 `execution_context.attributes[:dag][:lane_id]` 读取 `lane.prompt_buffer`，并在 budget 计算前把 summaries / notes / handoff material 渲染进 prompt
+- `PromptAssembly` 的默认上下文管理器会按当前 `execution_context.attributes[:dag][:lane_id]` 读取 `lane.prompt_buffer`，并在 budget 计算前把 summaries / notes / handoff material 作为 grouped system sections 渲染进 prompt
+- `lane.prompt_buffer.render(max_tokens:)` 已经是 canonical kernel service，但当前 shipped 默认 prompt builder 还不直接走这个 selective render 路径；它更适合 agent-side 自定义 prompt 组装或后续 runtime 演进
 - `compact_context` 始终存在于 canonical registry，但默认对模型隐藏
 - `merge_lane_state` 也注册在 canonical registry 中，但仅用于 product-owned merge task，不向模型暴露
 - 当 bundled policy 产出 `advise_compact` 时，resolver / tool policy 会在该 step 解除 `compact_context` 的可见性掩码
@@ -181,8 +188,15 @@ Tool result / output surface：
 - `TaskExecutor` 会 durable 保存 `raw_result`、`result`（projected）、`activity_preview`、`artifact_refs`
 - provider prompt history 与 `ContextAdapter` 只消费 projected `result`
 - `TurnExecutionProjector` / refresh / replay 可继续依赖 durable `activity_preview` 或 raw preview，因此 UI 预览不要求与模型可见 projection 完全相同
-- 非 streaming 最终输出会经过 `finalize_output`
-- 用户可见错误会经过 `handle_error`
+- 非 streaming 最终输出在 AgentCore generic runtime stage 上会经过 `finalize_output`
+- 用户可见错误在 AgentCore generic runtime stage 上会经过 `handle_error`
+- 若 provider 是 programmable-agent，Cybros 会把 agent-facing runtime events映射到 typed programmable hooks：
+  - 终态 assistant output 走 `before_finalize_output`
+  - live-step context budget pressure 走 `on_context_pressure`
+  - spawn-family task preflight 走 `before_subagent_spawn`
+  - 当前已接上的 provider-side / hard-cap agent-step failure notices 走 `after_task_notice`
+  - `subagent_wait` 完成后的 delegated-worker 结果走 `after_subagent_result`
+- provider/kernel fail-fast 错误若没有安全的 agent callback 通道，仍保持 runtime-owned failed result，不再通过一个泛化的 programmable runtime-error hook 兜底
 
 Programmable-agent 现状：
 
@@ -231,22 +245,22 @@ registry.register(AgentCore::Resources::Tools::Tool.new(name: "echo", descriptio
 - `subagent_run`
 - `subagent_wait`
 
-并以 `conversations.metadata["agent"]` 控制 child conversation 的 `agent_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
+并以 worker-boundary metadata 控制 subagent thread 的 `agent_profile/context_turns`（见 `docs/dag/subagent_patterns.md`）。
 
 安全/限制（当前默认）：
 
 - 禁止 nested spawn（subagent 内再 spawn 直接报错）
 - `subagent_poll.limit_turns` 最大 50，且 transcript_lines 为预览用途（单行会做 bytes 截断）
-- `subagent_run` = `spawn + child_graph.kick! + 初始 snapshot`；返回字段稳定包含 `child_conversation_id`、`child_graph_id`、`status`、`counts`、`leaf`、`transcript_lines`、`diagnostic_level`
-- `subagent_wait` 返回 bounded child snapshot，并支持 `timeout_ms`；超时时仍返回成功结果，但会带 `wait_status = "timeout"` / `timed_out = true`
-- `subagent_run.diagnostic_level` 可显式传 `standard|debug`，只会写入 child 初始 turn 的 execution diagnostics；不会放宽 `subagent` worker 的默认窄权限边界
-- `subagent_poll` 会校验 parent ownership：只能 poll “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验）；不满足会返回 validation error
-- `subagent_poll.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）
+- `subagent_run` = `spawn + kick + 初始 snapshot`；返回字段稳定包含 `subagent_id`、`status`、`counts`、`leaf`、`transcript_lines`、`diagnostic_level`
+- `subagent_wait` 返回 bounded subagent snapshot，并支持 `timeout_ms`；超时时仍返回成功结果，但会带 `wait_status = "timeout"` / `timed_out = true`
+- `subagent_run.diagnostic_level` 可显式传 `standard|debug`，只会写入 subagent 初始 turn 的 execution diagnostics；不会放宽 `subagent` worker 的默认窄权限边界
+- `subagent_poll` 会校验 parent ownership：只能 poll “本会话 spawn 的 subagent”（当前实现基于 parent dag context + subagent worker provenance metadata 校验）；不满足会返回 validation error
+- `subagent_poll.subagent_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）
 - `subagent_wait` 继承相同的 ownership / UUID 校验约束
 
 已知限制 / 建议后续（未落地）：
 
-- 建议为 `subagent_spawn` / `subagent_run` 加入配额/速率限制（避免滥用造成大量 child 会话）。
+- 建议为 `subagent_spawn` / `subagent_run` 加入配额/速率限制（避免滥用造成大量 subagent threads）。
 - 可选新增 `subagent_cancel` / `subagent_kill`（终止/取消子会话）。
 
 ### 3.2 Skills tools

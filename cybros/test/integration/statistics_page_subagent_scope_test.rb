@@ -20,7 +20,7 @@ class StatisticsPageSubagentScopeTest < ActionDispatch::IntegrationTest
     )
 
     create_tool_fact!(
-      execution_scope: "subagent_child",
+      execution_scope: "subagent",
       model_ref: "openai/gpt-5.4",
       resolved_name: "shell_exec",
       execution_readiness: "executable",
@@ -34,7 +34,7 @@ class StatisticsPageSubagentScopeTest < ActionDispatch::IntegrationTest
     )
 
     create_tool_fact!(
-      execution_scope: "subagent_child",
+      execution_scope: "subagent",
       model_ref: "openai/gpt-5.4",
       resolved_name: "read_file",
       execution_readiness: "executable",
@@ -49,7 +49,7 @@ class StatisticsPageSubagentScopeTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, "By execution scope"
     assert_includes response.body, "parent"
-    assert_includes response.body, "subagent_child"
+    assert_includes response.body, "subagent"
     assert_includes response.body, "subagent_run"
   end
 

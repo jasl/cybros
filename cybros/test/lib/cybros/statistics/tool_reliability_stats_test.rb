@@ -114,7 +114,7 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
       model_ref: "openai/gpt-5.4",
       provider_key: "openai",
       resolved_name: "shell_exec",
-      execution_scope: "subagent_child",
+      execution_scope: "subagent",
       execution_readiness: "executable",
       entered_execution: true,
       tool_outcome: "failed",
@@ -218,7 +218,7 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
 
     by_scope = stats.fetch("by_execution_scope")
     parent = by_scope.find { |row| row.fetch("execution_scope") == "parent" }
-    subagent = by_scope.find { |row| row.fetch("execution_scope") == "subagent_child" }
+    subagent = by_scope.find { |row| row.fetch("execution_scope") == "subagent" }
 
     assert_equal 8, parent.fetch("total_calls")
     assert_equal 7, parent.fetch("model_attempts")
@@ -227,6 +227,83 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
     assert_equal 1, subagent.fetch("total_calls")
     assert_equal 1, subagent.fetch("model_attempts")
     assert_rate subagent.fetch("tool_success_rate"), count: 0, total: 1, value: 0.0
+  end
+
+  test "groups reliability slices by programmable runtime routing dimensions" do
+    program_id = uuidv7
+
+    create_fact!(
+      task_node_id: uuidv7,
+      logical_tool_name: "compact_context",
+      resolved_name: "compact_context",
+      implementation_source: "agent_program",
+      implementation_ref: "agent://compact_context",
+      capability_registry_snapshot_id: "cap_snapshot_123",
+      kernel_capability_registry_version: "kernel:v1",
+      tool_surface_id: "tool_surface_123",
+      tool_surface_label: "bundled_default.before_agent_step",
+      agent_program_id: program_id,
+      agent_program_version: "default-agent-capabilities:v1",
+      execution_scope: "parent",
+      execution_readiness: "executable",
+      entered_execution: true,
+      tool_outcome: "success",
+      model_attempt_class: "first_pass",
+      duration_ms: 42,
+      effective_on: Date.new(2026, 3, 10),
+    )
+
+    create_fact!(
+      task_node_id: uuidv7,
+      logical_tool_name: "compact_context",
+      resolved_name: "compact_context",
+      implementation_source: "kernel",
+      implementation_ref: "kernel://compact_context",
+      capability_registry_snapshot_id: "cap_snapshot_123",
+      kernel_capability_registry_version: "kernel:v1",
+      tool_surface_id: "tool_surface_123",
+      tool_surface_label: "bundled_default.before_agent_step",
+      agent_program_id: program_id,
+      agent_program_version: "default-agent-capabilities:v1",
+      execution_scope: "parent",
+      execution_readiness: "executable",
+      entered_execution: true,
+      tool_outcome: "failed",
+      failure_class: "implementation_error",
+      model_attempt_class: "first_pass",
+      duration_ms: 84,
+      effective_on: Date.new(2026, 3, 10),
+    )
+
+    stats = Cybros::Statistics::ToolReliabilityStats.snapshot
+
+    by_logical_tool = stats.fetch("by_logical_tool_name")
+    by_implementation_source = stats.fetch("by_implementation_source")
+    by_tool_surface = stats.fetch("by_tool_surface_id")
+    by_agent_program_id = stats.fetch("by_agent_program_id")
+    by_agent_program_version = stats.fetch("by_agent_program_version")
+
+    summary = stats.fetch("summary")
+    compact_context = by_logical_tool.find { |row| row.fetch("logical_tool_name") == "compact_context" }
+    agent_program = by_implementation_source.find { |row| row.fetch("implementation_source") == "agent_program" }
+    kernel = by_implementation_source.find { |row| row.fetch("implementation_source") == "kernel" }
+    tool_surface = by_tool_surface.find { |row| row.fetch("tool_surface_id") == "tool_surface_123" }
+    agent_program_id_row = by_agent_program_id.find { |row| row.fetch("agent_program_id") == program_id }
+    agent_version = by_agent_program_version.find { |row| row.fetch("agent_program_version") == "default-agent-capabilities:v1" }
+
+    assert_equal 2, summary.dig("result_status", "total")
+    assert_equal 1, summary.dig("result_status", "success")
+    assert_equal 1, summary.dig("result_status", "failed")
+    assert_equal 0, summary.dig("result_status", "not_executed")
+    assert_equal 2, summary.dig("latency_ms", "count")
+    assert_equal 63, summary.dig("latency_ms", "avg")
+    assert_equal 84, summary.dig("latency_ms", "max")
+    assert_equal 2, compact_context.fetch("total_calls")
+    assert_equal 1, agent_program.fetch("total_calls")
+    assert_equal 1, kernel.fetch("total_calls")
+    assert_equal 2, tool_surface.fetch("total_calls")
+    assert_equal 2, agent_program_id_row.fetch("total_calls")
+    assert_equal 2, agent_version.fetch("total_calls")
   end
 
   private

@@ -21,9 +21,14 @@ module Cybros
             agent.describe
             agent.health
             agent.schemas.get
-            turn.prepare
-            turn.compose
-            turn.handle_error
+            capabilities.handshake
+            capabilities.refresh
+            before_agent_step
+            on_context_pressure
+            before_subagent_spawn
+            before_finalize_output
+            after_task_notice
+            after_subagent_result
           ],
         }
 
@@ -82,89 +87,144 @@ module Cybros
           "global_config_schema" => { "type" => "object", "properties" => {} },
           "conversation_config_schema" => { "type" => "object", "properties" => {} },
         }
-      when "turn.prepare"
+      when "capabilities.handshake"
+        capabilities_handshake_result(params)
+      when "capabilities.refresh"
+        capabilities_refresh_result(params)
+      when "before_agent_step"
         conversation_id = params["conversation_id"]
         user_input = params["user_input"].to_s.strip
 
         result = {
-          "prepared_plan" => {
-            "fixture" => true,
-            "kind" => "fixture_plan_v1",
-            "conversation_id" => conversation_id,
-            "summary" => user_input.empty? ? "fixture prepare plan" : "fixture prepare plan for #{user_input}",
+          "planning" => {
+            "step_plan" => {
+              "fixture" => true,
+              "kind" => "fixture_plan_v2",
+              "conversation_id" => conversation_id,
+              "summary" => user_input.empty? ? "fixture planning summary" : "fixture planning summary for #{user_input}",
+            },
+            "tool_surface" => default_tool_surface(params),
+            "staged_mutations" => {},
+            "planned_tasks" => [],
           },
-          "prompt_fragments" => [
+        }
+        apply_before_agent_step_scenarios!(params, result)
+      when "before_finalize_output"
+        {
+          "actions" => [
             {
-              "role" => "system",
-              "content" => "fixture prepare fragment",
+              "type" => "emit_message",
+              "message" => {
+                "role" => "assistant",
+                "content" => params.dig("draft_output", "content").to_s.presence || "fixture finalized response",
+              },
             },
           ],
         }
-        apply_turn_prepare_scenarios!(params, result)
-      when "turn.compose"
+      when "on_context_pressure"
         {
-          "output" => {
-            "role" => "assistant",
-            "content" => "fixture compose response",
-          },
+          "actions" => [
+            {
+              "type" => "set_step_status",
+              "text" => "Handling context pressure | Action: #{params.dig("context_pressure", "budget_action")}",
+            },
+          ],
         }
-      when "turn.handle_error"
+      when "before_subagent_spawn"
         {
-          "output" => {
-            "role" => "assistant",
-            "content" => "fixture handle error response",
-          },
+          "actions" => [
+            {
+              "type" => "set_step_status",
+              "text" => "Preparing delegated subagent work | Tool: #{params.dig("subagent_request", "tool_name")}",
+            },
+          ],
+        }
+      when "after_task_notice"
+        {
+          "actions" => [
+            {
+              "type" => "emit_message",
+              "message" => {
+                "role" => "assistant",
+                "content" => "fixture runtime error response",
+              },
+            },
+          ],
+        }
+      when "after_subagent_result"
+        {
+          "actions" => [
+            {
+              "type" => "set_step_status",
+              "text" => "Summarizing subagent results | Subagent: #{params.dig("subagent_result", "subagent_id")}",
+            },
+          ],
         }
       else
         raise KeyError, "unsupported fixture RPC method: #{method_name}"
       end
     end
 
-    def apply_turn_prepare_scenarios!(params, result)
+    def capabilities_handshake_result(params)
+      current_version = "fixture-agent-capabilities:v1"
+      cached_version = params["cached_agent_capabilities_version"].to_s
+
+      if cached_version == current_version
+        {
+          "status" => "unchanged",
+          "agent_capabilities_version" => current_version,
+        }
+      else
+        {
+          "status" => "refreshed",
+          "agent_capabilities_version" => current_version,
+          "agent_tool_catalog" => [],
+        }
+      end
+    end
+
+    def capabilities_refresh_result(params)
+      {
+        "status" => "refreshed",
+        "refresh_reason" => params["reason"].to_s,
+        "agent_capabilities_version" => "fixture-agent-capabilities:v1",
+        "agent_tool_catalog" => [],
+      }
+    end
+
+    def apply_before_agent_step_scenarios!(params, result)
       tokens = scenario_tokens(params["user_input"])
       callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
-      result["prepared_plan"]["fixture_scenarios"] = tokens if tokens.any?
+      result.dig("planning", "step_plan")["fixture_scenarios"] = tokens if tokens.any?
 
       if tokens.include?("stage-state")
-        callback_rpc(
-          callback_session,
-          "conversation.settings.update",
-          {
-            "operation_id" => "fixture-settings",
-            "patch" => { "tone" => "concise" },
-          },
-        )
-        callback_rpc(
-          callback_session,
-          "conversation.config.update",
-          {
-            "operation_id" => "fixture-config",
-            "patch" => { "mode" => "review" },
-          },
-        )
-        callback_rpc(
-          callback_session,
-          "lane.kv.set",
-          {
-            "operation_id" => "fixture-kv",
-            "key" => "shared.fixture.plan",
-            "value" => { "status" => "planned" },
-          },
-        )
+        result["planning"]["staged_mutations"] = {
+          "public_settings_patch" => { "tone" => "concise" },
+          "agent_config_patch" => { "mode" => "review" },
+          "kv_ops" => [
+            {
+              "op" => "set",
+              "key" => "shared.fixture.plan",
+              "value" => { "status" => "planned" },
+            },
+          ],
+        }
       end
 
       if tokens.include?("replay-kv")
-        2.times do
-          callback_rpc(
-            callback_session,
-            "lane.kv.set",
-            {
-              "operation_id" => "fixture-kv-replay",
-              "key" => "shared.fixture.replay",
-              "value" => { "status" => "deduped" },
-            },
-          )
-        end
+        result["planning"]["staged_mutations"] ||= {}
+        result["planning"]["staged_mutations"]["kv_ops"] = [
+          {
+            "op" => "set",
+            "key" => "shared.fixture.replay",
+            "value" => { "status" => "deduped" },
+          },
+          {
+            "op" => "set",
+            "key" => "shared.fixture.replay",
+            "value" => { "status" => "deduped" },
+          },
+        ]
       end
 
       if tokens.include?("switch-target")
@@ -185,7 +245,7 @@ module Cybros
               },
             )
           if proposal.dig("switch_decision", "decision").to_s == "confirm"
-            result["approval_state"] = {
+            result["planning"]["approval_request"] = {
               "status" => "pending_confirmation",
               "reason" => "target_switch",
               "proposed_execution_target_id" => alternate_target.fetch("id"),
@@ -195,13 +255,32 @@ module Cybros
       end
 
       if tokens.include?("approval")
-        result["approval_state"] ||= {
+        result["planning"]["approval_request"] ||= {
           "status" => "pending_confirmation",
           "reason" => "fixture_approval",
         }
       end
 
       result
+    end
+
+    def default_tool_surface(params)
+      snapshot = params["capability_snapshot"].is_a?(Hash) ? deep_copy(params["capability_snapshot"]) : {}
+      snapshot_id = snapshot["capability_registry_snapshot_id"].to_s.strip
+      selected_tool_ids =
+        Array(snapshot["effective_tools"]).filter_map do |tool|
+          next unless tool.is_a?(Hash)
+
+          effective_tool_id = tool["effective_tool_id"].to_s.strip
+          effective_tool_id unless effective_tool_id.empty?
+        end.uniq
+      return nil if snapshot_id.empty? || selected_tool_ids.empty?
+
+      {
+        "capability_registry_snapshot_id" => snapshot_id,
+        "selected_tool_ids" => selected_tool_ids,
+        "tool_surface_label" => "fixture.before_agent_step",
+      }
     end
 
     def scenario_tokens(user_input)

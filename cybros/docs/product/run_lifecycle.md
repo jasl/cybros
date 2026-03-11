@@ -34,8 +34,8 @@ For the top-level manifest-driven interactive path:
    - any entrypoint-specific settings
 3. Cybros resolves the selected program's current contract fingerprint and active healthy deployment.
 4. Cybros resolves provider credential, runtime-governor facts, and the selected program's effective config-schema fingerprint for the draft.
-5. Cybros opens a bounded `agent_rpc` session and calls `turn.prepare`.
-6. During planning, the agent may read approved state and request staged public mutations through Cybros kernel surfaces.
+5. Cybros opens a bounded `agent_rpc` session and calls `before_agent_step`.
+6. During planning, the agent may read approved state, estimate token usage, and request staged public mutations through Cybros kernel surfaces.
 7. If the agent proposes a different execution target, Cybros evaluates visibility, policy, and hard validation before continuing.
 8. If policy or approval requires a human decision, Cybros persists the prepared draft and parks it without materializing a run.
 9. Once finalization is allowed, Cybros atomically:
@@ -44,18 +44,19 @@ For the top-level manifest-driven interactive path:
    - snapshots the finalized runtime inputs, including the draft-pinned config-schema fingerprint
    - hands execution to the runtime kernel
 10. Cybros executes the run under the pinned deployment binding, provider binding, target binding, and governor snapshot.
-11. When execution completes or fails, Cybros calls `turn.compose` or `turn.handle_error` as appropriate.
+11. During execution, Cybros may dispatch live-step or terminal-notice hooks such as `on_context_pressure`, `before_subagent_spawn`, `after_task_notice`, and `after_subagent_result`; when one assistant step reaches final user-visible output, Cybros calls `before_finalize_output`.
 12. Cybros persists transcript output, final run facts, and audit events.
 
 ## Planning Rule
 
-`turn.prepare` is planning-only.
+`before_agent_step` is planning-only when invoked on a `RunDraft`.
 
 It may:
 
-- return prompt fragments
-- return workflow decisions
-- cause staged settings, config, or KV mutations through Cybros surfaces
+- return durable `planning`
+- return step-local `actions[]`
+- cause staged settings, config, `lane.kv`, or `lane.prompt_buffer` mutations through Cybros surfaces
+- estimate prompt/material token usage through `tokens.*`
 - inspect or propose execution targets
 
 It may not:
@@ -77,7 +78,7 @@ If approval is required:
 When approval resumes:
 
 - Cybros continues local finalization from the persisted prepared draft
-- Cybros does not send a second `turn.prepare` for the same prepared draft
+- Cybros does not send a second `before_agent_step` for the same prepared draft
 - Cybros validates that the parked binding is still fresh before finalization succeeds
 
 ## Finalization Rule
@@ -109,7 +110,7 @@ Two kinds of retry must stay separate:
 
 ### Approval Resume
 
-- approval resume is not a replay of `turn.prepare`
+- approval resume is not a replay of `before_agent_step`
 - it is a continuation from the persisted prepared draft
 
 ## Failure Paths

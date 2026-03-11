@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -275,7 +275,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
     t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
-    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying, 'dependency'::character varying, 'branch'::character varying]::text[])", name: "check_dag_edges_edge_type_enum"
+    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying::text, 'dependency'::character varying::text, 'branch'::character varying::text])", name: "check_dag_edges_edge_type_enum"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
   end
 
@@ -312,7 +312,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.index ["graph_id"], name: "index_dag_lanes_on_graph_id"
     t.check_constraint "merged_into_lane_id IS NULL OR merged_into_lane_id <> id", name: "check_dag_lanes_no_self_merge"
     t.check_constraint "parent_lane_id IS NULL OR parent_lane_id <> id", name: "check_dag_lanes_no_self_parent"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_dag_lanes_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_dag_lanes_role_enum"
   end
 
   create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -392,9 +392,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'awaiting_approval'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying::text, 'awaiting_approval'::character varying::text, 'running'::character varying::text, 'finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -590,8 +590,8 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.uuid "initiated_by_user_id"
     t.uuid "materialized_conversation_run_id"
     t.string "permission_mode", null: false
+    t.jsonb "planning", default: {}, null: false
     t.string "prepare_invocation_id"
-    t.jsonb "prepared_plan", default: {}, null: false
     t.uuid "proposed_execution_target_id"
     t.uuid "provider_credential_id"
     t.jsonb "runtime_governors", default: {}, null: false
@@ -654,7 +654,10 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
   end
 
   create_table "statistics_tool_call_facts", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "agent_program_id"
+    t.string "agent_program_version"
     t.string "arguments_resolution"
+    t.string "capability_registry_snapshot_id"
     t.uuid "conversation_id", null: false
     t.datetime "created_at", null: false
     t.integer "duration_ms"
@@ -666,6 +669,10 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.string "failure_code"
     t.datetime "finished_at"
     t.uuid "graph_id", null: false
+    t.string "implementation_ref"
+    t.string "implementation_source"
+    t.string "kernel_capability_registry_version"
+    t.string "logical_tool_name"
     t.boolean "manual_retry", default: false, null: false
     t.string "model_attempt_class", null: false
     t.string "model_ref"
@@ -682,20 +689,26 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_000012) do
     t.uuid "task_node_id", null: false
     t.string "tool_call_id"
     t.string "tool_outcome", null: false
+    t.string "tool_surface_id"
+    t.string "tool_surface_label"
     t.uuid "turn_id", null: false
     t.datetime "updated_at", null: false
     t.uuid "user_id"
+    t.index ["sample_origin", "agent_program_id"], name: "idx_tool_call_facts_sample_origin_agent_program"
     t.index ["sample_origin", "effective_on"], name: "idx_on_sample_origin_effective_on_225d0d9a0c"
     t.index ["sample_origin", "execution_scope"], name: "idx_on_sample_origin_execution_scope_4e168d667a"
     t.index ["sample_origin", "finished_at"], name: "idx_on_sample_origin_finished_at_f04efb09f2"
+    t.index ["sample_origin", "implementation_source"], name: "idx_tool_call_facts_sample_origin_impl_source"
+    t.index ["sample_origin", "logical_tool_name"], name: "idx_tool_call_facts_sample_origin_logical_name"
     t.index ["sample_origin", "model_ref"], name: "idx_on_sample_origin_model_ref_82ffc5e2b6"
     t.index ["sample_origin", "resolved_name"], name: "idx_on_sample_origin_resolved_name_fb102ebc1f"
     t.index ["sample_origin", "started_at"], name: "idx_on_sample_origin_started_at_e983eab176"
+    t.index ["sample_origin", "tool_surface_id"], name: "idx_tool_call_facts_sample_origin_tool_surface"
     t.index ["sample_origin", "user_id"], name: "index_statistics_tool_call_facts_on_sample_origin_and_user_id"
     t.index ["task_node_id"], name: "index_statistics_tool_call_facts_on_task_node_id", unique: true
     t.check_constraint "duration_ms IS NULL OR duration_ms >= 0", name: "check_statistics_tool_call_facts_duration_ms_non_negative"
     t.check_constraint "execution_readiness::text = ANY (ARRAY['executable'::character varying::text, 'invalid_args'::character varying::text, 'tool_not_found'::character varying::text, 'policy_denied'::character varying::text, 'awaiting_approval'::character varying::text, 'approval_rejected'::character varying::text])", name: "check_statistics_tool_call_facts_execution_readiness_enum"
-    t.check_constraint "execution_scope::text = ANY (ARRAY['parent'::character varying::text, 'subagent_child'::character varying::text])", name: "check_statistics_tool_call_facts_execution_scope_enum"
+    t.check_constraint "execution_scope::text = ANY (ARRAY['parent'::character varying::text, 'subagent'::character varying::text])", name: "check_statistics_tool_call_facts_execution_scope_enum"
     t.check_constraint "failure_class IS NULL OR (failure_class::text = ANY (ARRAY['validation_error'::character varying::text, 'implementation_error'::character varying::text, 'remote_api_error'::character varying::text, 'timeout'::character varying::text, 'rate_limit'::character varying::text, 'auth'::character varying::text, 'unknown'::character varying::text]))", name: "check_statistics_tool_call_facts_failure_class_enum"
     t.check_constraint "model_attempt_class::text = ANY (ARRAY['first_pass'::character varying::text, 'repaired_name'::character varying::text, 'repaired_args'::character varying::text, 'repaired_both'::character varying::text])", name: "check_statistics_tool_call_facts_model_attempt_class_enum"
     t.check_constraint "sample_origin::text = ANY (ARRAY['runtime'::character varying::text, 'eval'::character varying::text, 'debug'::character varying::text, 'replay'::character varying::text])", name: "check_statistics_tool_call_facts_sample_origin_enum"

@@ -1,15 +1,13 @@
 require "test_helper"
-require "net/http"
-require "rackup/handler/webrick"
 
 class RunDraftFinalizationTest < ActiveSupport::TestCase
-  test "conversation append_user_message materializes a run from a durable prepared draft" do
+  test "conversation append_user_message materializes a run from a durable typed planning draft" do
     seen_draft_ids = []
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            seen_draft_ids << params.fetch("run_draft_id")
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            seen_draft_ids << params.dig("step", "run_draft_id")
             base_result
           end,
         },
@@ -25,7 +23,8 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal [draft.id], seen_draft_ids
     assert_equal "finalized", draft.status
     assert_equal run.id, draft.materialized_conversation_run_id
-    assert_equal true, draft.prepared_plan.fetch("fixture")
+    assert_equal true, draft.planning.dig("step_plan", "fixture")
+    assert_equal "fixture_plan_v2", draft.planning.dig("step_plan", "kind")
     assert_equal runtime.fetch(:target).id, run.execution_target_id
     assert_equal runtime.fetch(:deployment).id, run.agent_deployment_id
     assert_equal "default", run.effective_permission_mode
@@ -165,7 +164,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning pins turn prepare to the draft deployment selected at open time" do
+  test "planning pins before_agent_step to the draft deployment selected at open time" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
@@ -323,41 +322,22 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning stages callback mutations on the draft and commits them only at finalization" do
-    callback_server = CallbackAppServer.new.start
-    original_url_options = ActionMailer::Base.default_url_options.dup
-    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+  test "planning stages typed mutations on the draft and commits them only at finalization" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            callback = params.fetch("callback_session")
-            fixture_callback!(
-              callback: callback,
-              method_name: "conversation.settings.update",
-              params: {
-                "operation_id" => "op-settings",
-                "patch" => { "tone" => "concise" },
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            base_result.deep_merge(
+              "planning" => {
+                "staged_mutations" => {
+                  "public_settings_patch" => { "tone" => "concise" },
+                  "agent_config_patch" => { "mode" => "review" },
+                  "kv_ops" => [
+                    { "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } },
+                  ],
+                },
               },
             )
-            fixture_callback!(
-              callback: callback,
-              method_name: "conversation.config.update",
-              params: {
-                "operation_id" => "op-config",
-                "patch" => { "mode" => "review" },
-              },
-            )
-            fixture_callback!(
-              callback: callback,
-              method_name: "lane.kv.set",
-              params: {
-                "operation_id" => "op-kv",
-                "key" => "shared.stage",
-                "value" => { "status" => "planned" },
-              },
-            )
-            base_result
           end,
         },
       ).start
@@ -394,28 +374,21 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal({ "status" => "planned" }, LaneKVEntry.find_by!(lane: conversation.chat_lane, key: "shared.stage").value)
     assert_equal run.id, draft.reload.materialized_conversation_run_id
   ensure
-    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
     server&.shutdown
-    callback_server&.shutdown
   end
 
-  test "conservative mode parks for approval when a callback stages public settings mutation without agent approval_state" do
-    callback_server = CallbackAppServer.new.start
-    original_url_options = ActionMailer::Base.default_url_options.dup
-    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+  test "conservative mode parks for approval when planning stages a public settings mutation without an approval request" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            fixture_callback!(
-              callback: params.fetch("callback_session"),
-              method_name: "conversation.settings.update",
-              params: {
-                "operation_id" => "op-settings-confirm",
-                "patch" => { "tone" => "concise" },
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            base_result.deep_merge(
+              "planning" => {
+                "staged_mutations" => {
+                  "public_settings_patch" => { "tone" => "concise" },
+                },
               },
             )
-            base_result
           end,
         },
       ).start
@@ -441,28 +414,21 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal({ "tone" => "concise" }, draft.staged_public_settings_patch)
     assert_equal({}, conversation.reload.public_settings)
   ensure
-    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
     server&.shutdown
-    callback_server&.shutdown
   end
 
-  test "default mode allows staged public settings mutation without parking the draft" do
-    callback_server = CallbackAppServer.new.start
-    original_url_options = ActionMailer::Base.default_url_options.dup
-    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+  test "default mode allows typed public settings mutations without parking the draft" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            fixture_callback!(
-              callback: params.fetch("callback_session"),
-              method_name: "conversation.settings.update",
-              params: {
-                "operation_id" => "op-settings-allow",
-                "patch" => { "tone" => "concise" },
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            base_result.deep_merge(
+              "planning" => {
+                "staged_mutations" => {
+                  "public_settings_patch" => { "tone" => "concise" },
+                },
               },
             )
-            base_result
           end,
         },
       ).start
@@ -486,32 +452,23 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal({ "tone" => "concise" }, draft.staged_public_settings_patch)
     assert_equal({}, conversation.reload.public_settings)
   ensure
-    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
     server&.shutdown
-    callback_server&.shutdown
   end
 
-  test "replayed conservative kv mutation callbacks do not append duplicate staged operations" do
-    callback_server = CallbackAppServer.new.start
-    original_url_options = ActionMailer::Base.default_url_options.dup
-    ActionMailer::Base.default_url_options = { host: callback_server.host, port: callback_server.port, protocol: "http" }
+  test "conservative mode parks for approval when planning stages a lane kv mutation" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
-            callback = params.fetch("callback_session")
-            2.times do
-              fixture_callback!(
-                callback: callback,
-                method_name: "lane.kv.set",
-                params: {
-                  "operation_id" => "op-kv-confirm",
-                  "key" => "shared.stage",
-                  "value" => { "status" => "planned" },
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            base_result.deep_merge(
+              "planning" => {
+                "staged_mutations" => {
+                  "kv_ops" => [
+                    { "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } },
+                  ],
                 },
-              )
-            end
-            base_result
+              },
+            )
           end,
         },
       ).start
@@ -532,11 +489,10 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
     assert_equal "awaiting_approval", draft.reload.status
     assert_equal "public_state_mutation", draft.approval_state.fetch("reason")
+    assert_equal "lane.kv.set", draft.approval_state.fetch("method_name")
     assert_equal [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }], draft.staged_kv_ops
   ensure
-    ActionMailer::Base.default_url_options = original_url_options if defined?(original_url_options)
     server&.shutdown
-    callback_server&.shutdown
   end
 
   test "planning params read the draft-selected program config after the live conversation selection changes" do
@@ -629,11 +585,11 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning ignores direct staged mutation payloads returned by turn prepare" do
+  test "planning rejects legacy staged mutation payloads returned outside the typed planning envelope" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
               "staged_public_settings_patch" => { "tone" => "concise" },
               "staged_agent_config_patch" => { "mode" => "review" },
@@ -645,24 +601,21 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
 
-    draft =
-      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
-        conversation: conversation,
-        initiated_by_user: conversation.user,
-        selected_model_ref: "openai/gpt-5.4",
-        trigger_snapshot: {
-          "kind" => "user_turn",
-          "dag_node_id" => SecureRandom.uuid,
-          "user_input" => "Plan it",
-        },
-      )
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+          conversation: conversation,
+          initiated_by_user: conversation.user,
+          selected_model_ref: "openai/gpt-5.4",
+          trigger_snapshot: {
+            "kind" => "user_turn",
+            "dag_node_id" => SecureRandom.uuid,
+            "user_input" => "Plan it",
+          },
+        )
+      end
 
-    assert_equal({}, draft.reload.staged_public_settings_patch)
-    assert_equal({}, draft.staged_agent_config_patch)
-    assert_equal([], draft.staged_kv_ops)
-    assert_equal({}, conversation.reload.public_settings)
-    assert_equal({}, conversation.selected_agent_config)
-    assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
+    assert_equal "cybros.programmable_agent.hook_contract.unknown_top_level_key", error.code
   ensure
     server&.shutdown
   end
@@ -743,77 +696,6 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
   private
 
-    class CallbackAppServer
-      attr_reader :host, :port
-
-      def initialize(host: "127.0.0.1", port: 0)
-        @host = host
-        @port = Integer(port)
-      end
-
-      def start
-        return self if @webrick_server
-
-        @webrick_server =
-          Rackup::Handler::WEBrick::Server.new(
-            Rails.application,
-            BindAddress: host,
-            Port: port,
-            AccessLog: [],
-            Logger: WEBrick::Log.new(File::NULL, WEBrick::Log::FATAL),
-            StartCallback: -> { @ready = true },
-          )
-        @thread = Thread.new { @webrick_server.start }
-        wait_until_ready!
-        @port = @webrick_server.config.fetch(:Port)
-        self
-      end
-
-      def shutdown
-        @webrick_server&.shutdown
-        @thread&.join(1.0)
-      ensure
-        @webrick_server = nil
-        @thread = nil
-        @ready = false
-      end
-
-      private
-
-        def wait_until_ready!
-          40.times do
-            return if @ready
-
-            sleep 0.05
-          end
-
-          raise "callback app server did not become ready"
-        end
-    end
-
-    def fixture_callback!(callback:, method_name:, params:)
-      uri = URI(callback.fetch("endpoint"))
-      request = Net::HTTP::Post.new(uri)
-      request["Content-Type"] = "application/json"
-      request["Authorization"] = "Bearer #{callback.fetch("bearer")}"
-      request.body = JSON.generate({
-        "jsonrpc" => "2.0",
-        "id" => SecureRandom.uuid,
-        "method" => method_name,
-        "params" => params,
-      })
-
-      response = Net::HTTP.start(uri.hostname, uri.port) { |http| http.request(request) }
-      raise "callback #{response.code}: #{response.body}" unless response.is_a?(Net::HTTPSuccess)
-
-      payload = JSON.parse(response.body)
-      if payload["error"].present?
-        raise "callback error: #{payload.fetch("error").inspect}"
-      end
-
-      payload.fetch("result")
-    end
-
     def create_programmable_runtime!(server:, permission_mode: "default")
       user = create_user!
       program = create_program!
@@ -856,10 +738,11 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         selected_model_ref: resolved.fetch(:selected_model_ref),
         runtime_governors: resolved.fetch(:runtime_governors),
         prepare_invocation_id: SecureRandom.uuid,
-        prepared_plan: {},
+        planning: {},
         staged_public_settings_patch: {},
         staged_agent_config_patch: {},
         staged_kv_ops: [],
+        staged_prompt_buffer_ops: [],
         approval_state: { "status" => "not_required" },
         expires_at: 30.minutes.from_now.change(usec: 0),
       )

@@ -24,7 +24,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
@@ -108,7 +108,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
@@ -166,7 +166,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
@@ -223,7 +223,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
@@ -265,6 +265,145 @@ class ConversationRunTest < ActiveSupport::TestCase
     assert_equal "default", run.effective_permission_mode
   end
 
+  test "latest_for_node falls back to the same-turn agent run for task nodes" do
+    conversation = create_conversation!
+    turn = conversation.append_user_message!(content: "Hello")
+    agent_node = turn.fetch(:agent_node)
+    task_node =
+      conversation.root_graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::PENDING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent_node.turn_id,
+        metadata: {},
+        body_input: {
+          "name" => "compact_context",
+          "requested_name" => "compact_context",
+          "tool_call_id" => "tc_1",
+          "arguments" => { "reason" => "test" },
+          "arguments_summary" => "{\"reason\":\"test\"}",
+        },
+      )
+    program = AgentProgram.create!(
+      name: "Fixture Program",
+      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+      published_contract_fingerprint: "contract:v1",
+      manifest_snapshot: {},
+      global_config: {},
+      global_config_schema: { "type" => "object" },
+      conversation_config_schema: { "type" => "object" },
+      config_schema_fingerprint: "config:v1",
+    )
+    deployment = AgentDeployment.create!(
+      agent_program: program,
+      transport_kind: "http_jsonrpc",
+      endpoint_url: "http://127.0.0.1:4319/rpc",
+      deployment_bearer_secret_ref: "secret://fixture",
+      contract_fingerprint: "contract:v1",
+      deployment_fingerprint: "deployment:v1",
+      status: "active",
+      health_status: "healthy",
+      protocol_version: "agent_rpc.v1",
+      agent_sdk_version: "fixture-ruby-sdk/1.0",
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
+      manifest_snapshot: {},
+      schema_snapshot: {},
+      capability_snapshot: {},
+      inspection_details: {},
+      activated_at: Time.current.change(usec: 0),
+    )
+
+    run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: agent_node.id,
+        state: "queued",
+        queued_at: Time.current.change(usec: 0),
+        snapshot_version: 1,
+        initiated_by_user: conversation.user,
+        effective_permission_mode: "default",
+        agent_program: program,
+        contract_fingerprint: "contract:v1",
+        agent_deployment: deployment,
+        deployment_fingerprint: "deployment:v1",
+        deployment_activated_at: deployment.activated_at,
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: { "draft" => { "id" => SecureRandom.uuid } },
+      )
+
+    assert_equal run, ConversationRun.latest_for_node(task_node)
+  end
+
+  test "latest_for_node falls back to the same-turn run for follow-up agent nodes" do
+    conversation = create_conversation!
+    turn = conversation.append_user_message!(content: "Hello")
+    agent_node = turn.fetch(:agent_node)
+    follow_up_agent =
+      conversation.root_graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::PENDING,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent_node.turn_id,
+        metadata: {},
+      )
+    program = AgentProgram.create!(
+      name: "Fixture Program",
+      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+      published_contract_fingerprint: "contract:v1",
+      manifest_snapshot: {},
+      global_config: {},
+      global_config_schema: { "type" => "object" },
+      conversation_config_schema: { "type" => "object" },
+      config_schema_fingerprint: "config:v1",
+    )
+    deployment = AgentDeployment.create!(
+      agent_program: program,
+      transport_kind: "http_jsonrpc",
+      endpoint_url: "http://127.0.0.1:4319/rpc",
+      deployment_bearer_secret_ref: "secret://fixture",
+      contract_fingerprint: "contract:v1",
+      deployment_fingerprint: "deployment:v1",
+      status: "active",
+      health_status: "healthy",
+      protocol_version: "agent_rpc.v1",
+      agent_sdk_version: "fixture-ruby-sdk/1.0",
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
+      manifest_snapshot: {},
+      schema_snapshot: {},
+      capability_snapshot: {},
+      inspection_details: {},
+      activated_at: Time.current.change(usec: 0),
+    )
+
+    run =
+      ConversationRun.create!(
+        conversation: conversation,
+        dag_node_id: agent_node.id,
+        state: "queued",
+        queued_at: Time.current.change(usec: 0),
+        snapshot_version: 1,
+        initiated_by_user: conversation.user,
+        effective_permission_mode: "default",
+        agent_program: program,
+        contract_fingerprint: "contract:v1",
+        agent_deployment: deployment,
+        deployment_fingerprint: "deployment:v1",
+        deployment_activated_at: deployment.activated_at,
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: { "draft" => { "id" => SecureRandom.uuid } },
+      )
+
+    assert_equal run, ConversationRun.latest_for_node(follow_up_agent)
+  end
+
   test "state transitions do not rewrite immutable snapshot fields" do
     conversation = create_conversation!
     program = AgentProgram.create!(
@@ -288,7 +427,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
@@ -371,7 +510,7 @@ class ConversationRunTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: %w[initialize turn.prepare turn.compose],
+      supported_methods: AgentDeployments::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},

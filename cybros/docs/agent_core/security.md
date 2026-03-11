@@ -55,7 +55,7 @@ AgentCore 内建的 policy 组合（可选）：
 
 Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于跨图子会话模式），但仍遵循 **deny-by-default**：
 
-- 顶层 interactive conversation 的默认 model / input policy / runtime surface 已由 `Conversation.agent_program` / manifest 拥有；这里的 `agent_profile` 只描述 child worker boundary。
+- 顶层 interactive conversation 的默认 model / input policy / runtime surface 已由 `Conversation.agent_program` / manifest 拥有；这里的 `agent_profile` 只描述 subagent worker boundary。
 - runtime 默认 base policy 仍可保持 `Policy::DenyAll`，因此即便 `agent_profile` 为 `coding`（允许 `*`），tools 也不会自动暴露给模型。
 - 当 app 注入的 base policy 允许时，`agent_profile` 会通过 `Policy::Profiled` 作为额外收敛层生效：
   - 未命中 profile 的工具会被拒绝（reason=`tool_not_in_profile`），并产出可审计的 tool_result。
@@ -66,12 +66,12 @@ Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于
 
 - 禁止 nested spawn：subagent 会话内调用 `subagent_spawn` / `subagent_run` 会直接返回校验错误。
 - `subagent_poll` 做 bounded 输出：`limit_turns` 最大 50，且 transcript 单行会做 bytes 截断（预览用途）。
-- `subagent_run` 已落地为 `spawn + child_graph.kick! + 初始 bounded snapshot`；`subagent_wait` 已落地为 bounded child snapshot + timeout-safe wait surface（超时返回成功快照，不抛 tool error）。
-- `subagent_poll` 做 parent ownership 强校验：只能读取 “本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 校验），否则返回校验错误（避免越权读取）。
-- `subagent_poll.child_conversation_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
+- `subagent_run` 已落地为 `spawn + kick + 初始 bounded snapshot`；`subagent_wait` 已落地为 bounded subagent snapshot + timeout-safe wait surface（超时返回成功快照，不抛 tool error）。
+- `subagent_poll` 做 parent ownership 强校验：只能读取 “本会话 spawn 的 subagent”（当前实现基于 parent dag context + subagent worker provenance metadata 校验），否则返回校验错误（避免越权读取）。
+- `subagent_poll.subagent_id` 做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
 - `subagent_wait` 继承相同的 parent ownership / UUID 校验约束。
 - debug / diagnostic mode 仅增加观察信息，不会隐式放宽 subagent worker 的工具权限。
-- `subagent_run.diagnostic_level = "debug"` 只会写入 child 初始 turn 的 execution diagnostics，不会改变 worker profile、tool policy、业务流转或执行结果。
+- `subagent_run.diagnostic_level = "debug"` 只会写入 subagent 初始 turn 的 execution diagnostics，不会改变 worker profile、tool policy、业务流转或执行结果。
 
 建议后续加强（未落地）：
 

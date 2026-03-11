@@ -1,4 +1,4 @@
-require "test_helper"
+require_relative "../test_helper"
 
 class ManifestTest < Minitest::Test
   REQUIRED_METHODS = %w[
@@ -6,9 +6,14 @@ class ManifestTest < Minitest::Test
     agent.describe
     agent.health
     agent.schemas.get
-    turn.prepare
-    turn.compose
-    turn.handle_error
+    capabilities.handshake
+    capabilities.refresh
+    before_agent_step
+    on_context_pressure
+    before_subagent_spawn
+    before_finalize_output
+    after_task_notice
+    after_subagent_result
   ].freeze
 
   def test_loads_bundled_manifest_from_source_root
@@ -18,7 +23,7 @@ class ManifestTest < Minitest::Test
     assert_equal "Default", manifest.fetch("name")
     assert_equal "agent_rpc.v1", manifest.fetch("protocol_version")
     assert_equal REQUIRED_METHODS, manifest.fetch("supported_methods")
-    assert_equal "noop", manifest.dig("runtime_surface", "type")
+    refute manifest.key?("runtime_surface")
     assert_equal "prompts/system.md.liquid", manifest.dig("prompts", "system")
   end
 end

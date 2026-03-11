@@ -68,11 +68,57 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
     end
   end
 
+  test "clear_agent_deployments! deletes cyclic agent rpc session and invocation rows left by prior tests" do
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    deployment = program.agent_deployments.order(:created_at).last
+    assert deployment, "expected bundled default bootstrap to provide a deployment"
+    conversation = create_conversation!(agent_program: program)
+    invocation =
+      AgentRPCInvocation.create!(
+        agent_deployment: deployment,
+        conversation: conversation,
+        binding_fingerprint: deployment.deployment_fingerprint,
+        deployment_activated_at: deployment.activated_at,
+        invocation_id: SecureRandom.uuid,
+        method: "before_finalize_output",
+        request_payload_hash: SecureRandom.hex(32),
+        result_snapshot: {},
+        error_snapshot: {},
+        scope_type: "conversation_run",
+        scope_id: SecureRandom.uuid,
+        status: "succeeded",
+      )
+    session =
+      AgentRPCSession.create!(
+        agent_deployment: deployment,
+        agent_program: program,
+        agent_rpc_invocation: invocation,
+        conversation: conversation,
+        deployment_fingerprint: deployment.deployment_fingerprint,
+        deployment_activated_at: deployment.activated_at,
+        session_token_digest: SecureRandom.hex(32),
+        allowed_methods: ["tool_surface.manifest"],
+        expires_at: 5.minutes.from_now.change(usec: 0),
+        scope_type: invocation.scope_type,
+        scope_id: invocation.scope_id,
+        status: "closed",
+      )
+    invocation.update!(last_session: session)
+
+    assert_nothing_raised { clear_agent_deployments! }
+    assert_equal 0, AgentRPCOperationReceipt.count
+    assert_equal 0, AgentRPCSession.count
+    assert_equal 0, AgentRPCInvocation.count
+    assert_equal 0, AgentDeployment.count
+  end
+
   private
 
     def clear_agent_deployments!
       # Some tests disable transactions and can leave deployment-linked rows behind.
       AgentRPCOperationReceipt.delete_all
+      AgentRPCInvocation.update_all(last_session_id: nil)
+      AgentRPCSession.update_all(agent_rpc_invocation_id: nil)
       AgentRPCSession.delete_all
       AgentRPCInvocation.delete_all
       RunDraft.delete_all

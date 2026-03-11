@@ -40,12 +40,14 @@ class RunDraft < ApplicationRecord
     bound_agent_node&.lane || bound_conversation&.chat_lane
   end
 
+  def plan_invocation_id = prepare_invocation_id
+
   private
 
     def normalize_payloads
       self.trigger_snapshot = normalize_hash(self[:trigger_snapshot])
       self.runtime_governors = normalize_hash(self[:runtime_governors])
-      self.prepared_plan = normalize_hash(self[:prepared_plan])
+      self.planning = normalize_hash(self[:planning])
       self.staged_public_settings_patch = normalize_hash(self[:staged_public_settings_patch])
       self.staged_agent_config_patch = normalize_hash(self[:staged_agent_config_patch])
       self.approval_state = normalize_hash(self[:approval_state])

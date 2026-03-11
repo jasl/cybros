@@ -3,17 +3,19 @@ require "test_helper"
 class RunDraftApprovalResumeTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
 
-  test "approval park marks the agent node awaiting approval and resume finalizes without a second turn prepare" do
+  test "approval park marks the agent node awaiting approval and resume finalizes without a second before_agent_step" do
     prepare_calls = []
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             prepare_calls << :called
-            base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "target_switch",
+            base_result.deep_merge(
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "target_switch",
+                },
               },
             )
           end,
@@ -26,7 +28,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     draft = RunDraft.order(:created_at).last
 
     assert_equal "awaiting_approval", draft.status
-    assert_equal true, draft.prepared_plan.fetch("fixture")
+    assert_equal true, draft.planning.dig("step_plan", "fixture")
     assert_equal 1, prepare_calls.size
     assert_nil draft.materialized_conversation_run_id
     assert_equal DAG::Node::AWAITING_APPROVAL, agent_node.reload.state
@@ -48,7 +50,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning preserves kernel-owned target switch approval when turn prepare omits approval_state" do
+  test "planning preserves kernel-owned target switch approval when before_agent_step omits approval_request" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
@@ -66,20 +68,31 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       )
     captured_draft = nil
     service_singleton = class << service; self; end
-    lifecycle_singleton = class << AgentRPC::LifecycleCaller; self; end
+    hook_caller_singleton = class << Cybros::ProgrammableAgent::HookCaller; self; end
 
     service_singleton.alias_method :__test_original_create_draft!, :create_draft!
     service_singleton.define_method(:create_draft!) do
       captured_draft = __test_original_create_draft!
     end
 
-    lifecycle_singleton.alias_method :__test_original_call!, :call!
-    lifecycle_singleton.define_method(:call!) do |**_kwargs|
+    hook_caller_singleton.alias_method :__test_original_call!, :call!
+    hook_caller_singleton.define_method(:call!) do |**kwargs|
       AgentRPC::KernelServices::ExecutionTargets.propose!(
         draft: captured_draft,
         execution_target_id: alternate_target.id,
       )
-      { "prepared_plan" => { "fixture" => true } }
+      Cybros::ProgrammableAgent::HookEnvelope.parse!(
+        hook_name: kwargs.fetch(:hook_name),
+        request_payload: kwargs.fetch(:request_payload),
+        payload: {
+          "planning" => {
+            "step_plan" => {
+              "fixture" => true,
+              "kind" => "fixture_plan_v2",
+            },
+          },
+        },
+      )
     end
 
     service.open_and_prepare!
@@ -95,9 +108,9 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       service_singleton.alias_method :create_draft!, :__test_original_create_draft!
       service_singleton.remove_method :__test_original_create_draft!
     end
-    if defined?(lifecycle_singleton) && lifecycle_singleton.method_defined?(:__test_original_call!)
-      lifecycle_singleton.alias_method :call!, :__test_original_call!
-      lifecycle_singleton.remove_method :__test_original_call!
+    if defined?(hook_caller_singleton) && hook_caller_singleton.method_defined?(:__test_original_call!)
+      hook_caller_singleton.alias_method :call!, :__test_original_call!
+      hook_caller_singleton.remove_method :__test_original_call!
     end
     server&.shutdown
   end
@@ -106,11 +119,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -143,11 +158,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -184,11 +201,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -312,11 +331,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -343,11 +364,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -380,11 +403,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -415,17 +440,19 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "conversation approval resumes a parked draft locally and enqueues execution without a second turn prepare" do
+  test "conversation approval resumes a parked draft locally and enqueues execution without a second before_agent_step" do
     prepare_calls = []
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             prepare_calls << :called
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -456,11 +483,13 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,

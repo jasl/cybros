@@ -70,11 +70,11 @@ class AgentDeploymentTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: %w[initialize turn.prepare turn.compose],
+        supported_methods: AgentDeployments::REQUIRED_METHODS,
         transport_config: {},
         manifest_snapshot: { "name" => "Fixture" },
         schema_snapshot: { "protocol_version" => "agent_rpc.v1" },
-        capability_snapshot: { "supports" => %w[turn.prepare] },
+        capability_snapshot: { "supports" => %w[before_agent_step] },
         inspection_details: { "healthy" => true },
       }.merge(attributes),
     )

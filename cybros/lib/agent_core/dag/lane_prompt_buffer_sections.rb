@@ -16,8 +16,8 @@ module AgentCore
         @lane = lane
       end
 
-      def prompt_injection_items
-        sections.map do |section|
+      def prompt_injection_items(excluded_buffer_names: [])
+        sections(excluded_buffer_names: excluded_buffer_names).map do |section|
           AgentCore::Resources::PromptInjections::Item.new(
             target: :system_section,
             id: "lane_prompt_buffer:#{section.buffer_name}",
@@ -28,8 +28,8 @@ module AgentCore
         end
       end
 
-      def fingerprint_payload
-        sections.map do |section|
+      def fingerprint_payload(excluded_buffer_names: [])
+        sections(excluded_buffer_names: excluded_buffer_names).map do |section|
           {
             buffer_name: section.buffer_name,
             entry_ids: section.entry_ids,
@@ -39,9 +39,9 @@ module AgentCore
         end
       end
 
-      def sections
+      def sections(excluded_buffer_names: [])
         grouped_entries =
-          ordered_entries
+          filtered_entries(excluded_buffer_names: excluded_buffer_names)
             .group_by(&:buffer_name)
             .sort_by { |(buffer_name, _)| [BUFFER_ORDERS.fetch(buffer_name, DEFAULT_ORDER), buffer_name.to_s] }
 
@@ -67,6 +67,15 @@ module AgentCore
       end
 
       private
+
+        def filtered_entries(excluded_buffer_names: [])
+          excluded = Array(excluded_buffer_names).map { |name| name.to_s.strip }.reject(&:empty?).uniq
+          return ordered_entries if excluded.empty?
+
+          ordered_entries.reject { |entry| excluded.include?(entry.buffer_name.to_s) }
+        rescue StandardError
+          ordered_entries
+        end
 
         def ordered_entries
           return [] unless @lane.respond_to?(:lane_prompt_buffer_entries)

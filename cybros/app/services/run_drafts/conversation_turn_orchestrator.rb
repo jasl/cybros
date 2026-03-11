@@ -32,6 +32,8 @@ module RunDrafts
       if draft.status.to_s == RunDrafts::ConversationTurnPlanningService::AWAITING_APPROVAL_STATUS
         park_agent_node_for_approval!(draft)
         { draft: draft, conversation_run: nil }
+      elsif draft.status.to_s == "discarded"
+        { draft: draft, conversation_run: nil }
       else
         {
           draft: draft,

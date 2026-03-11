@@ -3,7 +3,7 @@ module Statistics
     self.table_name = "statistics_tool_call_facts"
 
     SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
-    EXECUTION_SCOPES = %w[parent subagent_child].freeze
+    EXECUTION_SCOPES = %w[parent subagent].freeze
     MODEL_ATTEMPT_CLASSES = %w[first_pass repaired_name repaired_args repaired_both].freeze
     EXECUTION_READINESS_VALUES = %w[executable invalid_args tool_not_found policy_denied awaiting_approval approval_rejected].freeze
     TOOL_OUTCOMES = %w[success failed not_executed].freeze

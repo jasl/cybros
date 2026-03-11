@@ -4,6 +4,12 @@
 
 Approved design notes for improving long-conversation performance and code quality without introducing a new DAG entity.
 
+Checkpoint note for the 2026-03-11 cut:
+
+- keep assistant-bubble `run_state` on the current `bounded preview + summary` contract
+- do not switch this batch to `summary-only`
+- treat any future `summary-only` cut as a separate product/UI contract change, not as implicit scope inside the current hot-path rollout
+
 ## Problem
 
 The current DAG model already has the semantics needed for a "black-box task bundle":

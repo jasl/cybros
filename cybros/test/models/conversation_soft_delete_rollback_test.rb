@@ -110,7 +110,7 @@ class ConversationSoftDeleteRollbackTest < ActiveSupport::TestCase
     assert_equal "canceled", run2.reload.state
   end
 
-  test "soft_delete_node! rollback does not stop pending work on other lanes (child conversations)" do
+  test "soft_delete_node! rollback does not stop pending work on other lanes (branch conversations)" do
     root = create_conversation!(title: "Root")
     graph = root.root_graph
 

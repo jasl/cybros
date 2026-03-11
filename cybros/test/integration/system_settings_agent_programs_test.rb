@@ -56,7 +56,19 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_equal AgentPrograms::BootstrapBundledDefaultService::DEFAULT_PROGRAM_NAME, bundled.reload.name
   end
 
-  test "show falls back to noop runtime surface for invalid config" do
+  test "bundled default show does not advertise manifest error runtime messaging" do
+    sign_in_owner!
+    bundled = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+
+    assert_equal "missing", bundled.runtime_surface_status
+
+    get system_settings_agent_program_path(bundled)
+    assert_response :success
+    refute_includes response.body, "Missing from manifest"
+    refute_includes response.body, "Invalid manifest config"
+  end
+
+  test "show marks invalid runtime surface config as invalid manifest config" do
     sign_in_owner!
 
     workspace_root = Dir.mktmpdir("cybros-agent-workspace-")
@@ -96,13 +108,14 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, "Runtime surface"
     assert_includes response.body, "noop"
-    assert_includes response.body, "Fallback to safe no-op"
+    assert_includes response.body, "Invalid manifest config"
+    refute_includes response.body, "Missing from manifest"
   ensure
     FileUtils.rm_rf(abs_dir)
     FileUtils.rm_rf(workspace_root) if workspace_root.present?
   end
 
-  test "show falls back to noop runtime surface when config is missing" do
+  test "show marks missing runtime surface config as missing from manifest" do
     sign_in_owner!
 
     workspace_root = Dir.mktmpdir("cybros-agent-workspace-")
@@ -133,6 +146,13 @@ class SystemSettingsAgentProgramsTest < ActionDispatch::IntegrationTest
       program.runtime_surface_config,
     )
     assert_equal "missing", program.runtime_surface_status
+
+    get system_settings_agent_program_path(program)
+    assert_response :success
+    assert_includes response.body, "Runtime surface"
+    assert_includes response.body, "noop"
+    assert_includes response.body, "Missing from manifest"
+    refute_includes response.body, "Invalid manifest config"
   ensure
     FileUtils.rm_rf(abs_dir)
     FileUtils.rm_rf(workspace_root) if workspace_root.present?

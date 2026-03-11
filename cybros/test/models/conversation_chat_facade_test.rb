@@ -255,7 +255,7 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal first.fetch(:user_node).id, sequence_parent_id
   end
 
-  test "create_child! forks a lane and attaches it to a child conversation" do
+  test "create_child! forks a lane and attaches it to a branch conversation" do
     conversation = create_conversation!(title: "Root")
     graph = conversation.root_graph
     main_lane = conversation.chat_lane

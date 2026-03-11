@@ -15,7 +15,7 @@ class AgentDeploymentsInspectionTest < ActionDispatch::IntegrationTest
     assert_equal "healthy", deployment.health_status
     assert_equal "agent_rpc.v1", deployment.protocol_version
     assert_equal "fixture-ruby-sdk/1.0", deployment.agent_sdk_version
-    assert_includes deployment.supported_methods, "turn.prepare"
+    assert_includes deployment.supported_methods, "before_agent_step"
     assert_equal "Fixture Programmable Agent", deployment.manifest_snapshot.fetch("name")
     assert_equal({ "type" => "object", "properties" => {} }, deployment.schema_snapshot.fetch("global_config_schema"))
     assert_equal true, deployment.inspection_details.dig("health", "healthy")
@@ -45,7 +45,7 @@ class AgentDeploymentsInspectionTest < ActionDispatch::IntegrationTest
 
     deployment.reload
     assert_equal "healthy", deployment.health_status
-    assert_includes deployment.supported_methods, "turn.prepare"
+    assert_includes deployment.supported_methods, "before_agent_step"
     assert_equal "default", deployment.manifest_snapshot.dig("identity", "agent_program_key")
   ensure
     host&.shutdown

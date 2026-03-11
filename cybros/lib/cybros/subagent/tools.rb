@@ -1,4 +1,5 @@
 require "json"
+require "securerandom"
 
 module Cybros
   module Subagent
@@ -25,7 +26,7 @@ module Cybros
       def build_spawn_tool
         AgentCore::Resources::Tools::Tool.new(
           name: "subagent_spawn",
-          description: "Spawn a subagent as an independent conversation and start it with a prompt.",
+          description: "Spawn a background subagent thread and start it with a prompt.",
           parameters: {
             type: "object",
             additionalProperties: false,
@@ -34,7 +35,7 @@ module Cybros
               prompt: { type: "string", description: "Initial user prompt for the subagent." },
               agent_profile: { type: "string", enum: ALLOWED_AGENT_PROFILES },
               context_turns: { type: "integer", minimum: 1, maximum: MAX_CONTEXT_TURNS },
-              title: { type: "string", description: "Optional child conversation title." },
+              title: { type: "string", description: "Optional subagent thread title." },
             },
             required: ["name", "prompt"],
           },
@@ -57,10 +58,12 @@ module Cybros
 
           parent = parent_conversation_from_context!(context)
           parent_graph_id = context.attributes.dig(:dag, :graph_id).to_s
+          parent_turn_id = context.attributes.dig(:dag, :turn_id).to_s
           spawned_from_node_id = context.attributes.dig(:dag, :node_id).to_s
 
           normalized = normalize_name(name)
           agent_key = normalized.empty? ? "subagent" : "subagent:#{normalized}"
+          subagent_id = next_subagent_id
 
           profile =
             if args.key?("agent_profile")
@@ -100,10 +103,12 @@ module Cybros
                   profile: profile,
                   context_turns: context_turns,
                   name: name,
+                  subagent_id: subagent_id,
                   sample_origin: parent.statistics_sample_origin,
                   parent_conversation_id: parent.id.to_s,
                   parent_graph_id: parent_graph_id,
-                  spawned_from_node_id: spawned_from_node_id,
+                  parent_turn_id: parent_turn_id,
+                  parent_dag_node_id: spawned_from_node_id,
                 ),
               )
 
@@ -112,8 +117,7 @@ module Cybros
 
           payload = {
             ok: true,
-            child_conversation_id: child.id.to_s,
-            child_graph_id: child.dag_graph.id.to_s,
+            subagent_id: subagent_id,
             agent_key: agent_key,
             agent_profile: profile,
             status: "spawned",
@@ -127,19 +131,19 @@ module Cybros
       def build_poll_tool
         AgentCore::Resources::Tools::Tool.new(
           name: "subagent_poll",
-          description: "Poll a subagent conversation for status and a bounded transcript preview.",
+          description: "Poll a background subagent thread for status and a bounded transcript preview.",
           parameters: {
             type: "object",
             additionalProperties: false,
             properties: {
-              child_conversation_id: { type: "string" },
+              subagent_id: { type: "string" },
               limit_turns: { type: "integer", minimum: 1, maximum: MAX_POLL_LIMIT_TURNS, default: DEFAULT_POLL_LIMIT_TURNS },
             },
-            required: ["child_conversation_id"],
+            required: ["subagent_id"],
           },
           metadata: { source: :cybros, category: :subagent, permission_class: "read" },
         ) do |args, context:|
-          child_id = parse_child_conversation_id!(args.fetch("child_conversation_id", nil), code_prefix: "cybros.subagent_poll")
+          subagent_id = parse_subagent_id!(args.fetch("subagent_id", nil), code_prefix: "cybros.subagent_poll")
           parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_poll")
           parent_id = parent.id.to_s
           parent_graph_id = context.attributes.dig(:dag, :graph_id).to_s
@@ -152,15 +156,15 @@ module Cybros
             end
 
           child =
-            resolve_child_conversation(
-              child_id: child_id,
+            resolve_subagent_conversation(
+              subagent_id: subagent_id,
               parent: parent,
               parent_id: parent_id,
               parent_graph_id: parent_graph_id,
               code_prefix: "cybros.subagent_poll",
             )
 
-          payload = snapshot_payload_for_child(child: child, child_id: child_id, limit_turns: limit_turns, operation: "poll")
+          payload = snapshot_payload_for_subagent(child: child, subagent_id: subagent_id, limit_turns: limit_turns, operation: "poll")
           success_result_with_subagent_payload(payload)
         end
       end
@@ -169,7 +173,7 @@ module Cybros
       def build_run_tool
         AgentCore::Resources::Tools::Tool.new(
           name: "subagent_run",
-          description: "Spawn a subagent, kick its child graph, and return an initial bounded status snapshot.",
+          description: "Spawn a background subagent thread, kick it, and return an initial bounded status snapshot.",
           parameters: {
             type: "object",
             additionalProperties: false,
@@ -178,7 +182,7 @@ module Cybros
               prompt: { type: "string", description: "Initial user prompt for the subagent." },
               agent_profile: { type: "string", enum: ALLOWED_AGENT_PROFILES },
               context_turns: { type: "integer", minimum: 1, maximum: MAX_CONTEXT_TURNS },
-              title: { type: "string", description: "Optional child conversation title." },
+              title: { type: "string", description: "Optional subagent thread title." },
               limit_turns: { type: "integer", minimum: 1, maximum: MAX_POLL_LIMIT_TURNS, default: DEFAULT_POLL_LIMIT_TURNS },
               diagnostic_level: { type: "string", enum: ALLOWED_DIAGNOSTIC_LEVELS },
             },
@@ -203,10 +207,12 @@ module Cybros
 
           parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_run")
           parent_graph_id = context.attributes.dig(:dag, :graph_id).to_s
+          parent_turn_id = context.attributes.dig(:dag, :turn_id).to_s
           spawned_from_node_id = context.attributes.dig(:dag, :node_id).to_s
 
           normalized = normalize_name(name)
           agent_key = normalized.empty? ? "subagent" : "subagent:#{normalized}"
+          subagent_id = next_subagent_id
 
           profile =
             if args.key?("agent_profile")
@@ -260,10 +266,12 @@ module Cybros
                   profile: profile,
                   context_turns: context_turns,
                   name: name,
+                  subagent_id: subagent_id,
                   sample_origin: parent.statistics_sample_origin,
                   parent_conversation_id: parent.id.to_s,
                   parent_graph_id: parent_graph_id,
-                  spawned_from_node_id: spawned_from_node_id,
+                  parent_turn_id: parent_turn_id,
+                  parent_dag_node_id: spawned_from_node_id,
                 ),
               )
 
@@ -273,9 +281,9 @@ module Cybros
           child.dag_graph.kick!
 
           payload =
-            snapshot_payload_for_child(
+            snapshot_payload_for_subagent(
               child: child,
-              child_id: child.id.to_s,
+              subagent_id: subagent_id,
               limit_turns: limit_turns,
               operation: "run",
               diagnostic_level: diagnostic_level,
@@ -292,20 +300,20 @@ module Cybros
       def build_wait_tool
         AgentCore::Resources::Tools::Tool.new(
           name: "subagent_wait",
-          description: "Wait for a child conversation to reach a stable state and return a bounded status snapshot.",
+          description: "Wait for a background subagent thread to reach a stable state and return a bounded status snapshot.",
           parameters: {
             type: "object",
             additionalProperties: false,
             properties: {
-              child_conversation_id: { type: "string" },
+              subagent_id: { type: "string" },
               limit_turns: { type: "integer", minimum: 1, maximum: MAX_POLL_LIMIT_TURNS, default: DEFAULT_POLL_LIMIT_TURNS },
               timeout_ms: { type: "integer", minimum: 0, maximum: MAX_WAIT_TIMEOUT_MS, default: DEFAULT_WAIT_TIMEOUT_MS },
             },
-            required: ["child_conversation_id"],
+            required: ["subagent_id"],
           },
           metadata: { source: :cybros, category: :subagent, permission_class: "read" },
         ) do |args, context:|
-          child_id = parse_child_conversation_id!(args.fetch("child_conversation_id", nil), code_prefix: "cybros.subagent_wait")
+          subagent_id = parse_subagent_id!(args.fetch("subagent_id", nil), code_prefix: "cybros.subagent_wait")
           parent = parent_conversation_from_context!(context, code_prefix: "cybros.subagent_wait")
           parent_id = parent.id.to_s
           parent_graph_id = context.attributes.dig(:dag, :graph_id).to_s
@@ -329,15 +337,15 @@ module Cybros
 
           loop do
             child =
-              resolve_child_conversation(
-                child_id: child_id,
+              resolve_subagent_conversation(
+                subagent_id: subagent_id,
                 parent: parent,
                 parent_id: parent_id,
                 parent_graph_id: parent_graph_id,
                 code_prefix: "cybros.subagent_wait",
               )
 
-            snapshot = snapshot_payload_for_child(child: child, child_id: child_id, limit_turns: limit_turns, operation: "wait")
+            snapshot = snapshot_payload_for_subagent(child: child, subagent_id: subagent_id, limit_turns: limit_turns, operation: "wait")
             elapsed_ms = monotonic_ms - started_ms
 
             if snapshot.fetch("status") == "missing"
@@ -406,41 +414,41 @@ module Cybros
       end
       private_class_method :parent_conversation_from_context!
 
-      def parse_child_conversation_id!(value, code_prefix:)
-        child_id = value.to_s.strip
+      def parse_subagent_id!(value, code_prefix:)
+        subagent_id = value.to_s.strip
         AgentCore::ValidationError.raise!(
-          "child_conversation_id is required",
-          code: "#{code_prefix}.child_conversation_id_is_required",
-        ) if child_id.empty?
+          "subagent_id is required",
+          code: "#{code_prefix}.subagent_id_is_required",
+        ) if subagent_id.empty?
 
         AgentCore::ValidationError.raise!(
-          "child_conversation_id must be a UUID",
-          code: "#{code_prefix}.child_conversation_id_must_be_a_uuid",
-          details: { child_conversation_id: child_id },
-        ) unless AgentCore::Utils.uuid_like?(child_id)
+          "subagent_id must be a UUID",
+          code: "#{code_prefix}.subagent_id_must_be_a_uuid",
+          details: { subagent_id: subagent_id },
+        ) unless AgentCore::Utils.uuid_like?(subagent_id)
 
-        child_id
+        subagent_id
       end
-      private_class_method :parse_child_conversation_id!
+      private_class_method :parse_subagent_id!
 
-      def resolve_child_conversation(child_id:, parent:, parent_id:, parent_graph_id:, code_prefix:)
-        child = Conversation.find_by(id: child_id)
+      def resolve_subagent_conversation(subagent_id:, parent:, parent_id:, parent_graph_id:, code_prefix:)
+        child = Conversation.find_by("metadata -> 'subagent' ->> 'subagent_id' = ?", subagent_id)
         return nil if child.nil?
 
         unless child.user_id == parent.user_id
           AgentCore::ValidationError.raise!(
-            "child conversation is not owned by this parent",
-            code: "#{code_prefix}.child_conversation_not_owned",
-            details: { child_conversation_id: child.id.to_s },
+            "subagent is not owned by this parent",
+            code: "#{code_prefix}.subagent_not_owned",
+            details: { subagent_id: subagent_id },
           )
         end
 
-        validate_child_ownership!(child, parent_id: parent_id, parent_graph_id: parent_graph_id, code_prefix: code_prefix)
+        validate_subagent_ownership!(child, subagent_id: subagent_id, parent_id: parent_id, parent_graph_id: parent_graph_id, code_prefix: code_prefix)
         child
       end
-      private_class_method :resolve_child_conversation
+      private_class_method :resolve_subagent_conversation
 
-      def validate_child_ownership!(child, parent_id:, parent_graph_id:, code_prefix:)
+      def validate_subagent_ownership!(child, subagent_id:, parent_id:, parent_graph_id:, code_prefix:)
         meta = child.metadata
         meta = meta.is_a?(Hash) ? meta : {}
 
@@ -455,21 +463,21 @@ module Cybros
 
         unless claimed_parent_id == parent_id && claimed_parent_graph_id == parent_graph_id
           AgentCore::ValidationError.raise!(
-            "child conversation is not owned by this parent",
-            code: "#{code_prefix}.child_conversation_not_owned",
-            details: { child_conversation_id: child.id.to_s },
+            "subagent is not owned by this parent",
+            code: "#{code_prefix}.subagent_not_owned",
+            details: { subagent_id: subagent_id },
           )
         end
 
         true
       rescue StandardError
         AgentCore::ValidationError.raise!(
-          "child conversation is not owned by this parent",
-          code: "#{code_prefix}.child_conversation_not_owned",
-          details: { child_conversation_id: child.id.to_s },
+          "subagent is not owned by this parent",
+          code: "#{code_prefix}.subagent_not_owned",
+          details: { subagent_id: subagent_id },
         )
       end
-      private_class_method :validate_child_ownership!
+      private_class_method :validate_subagent_ownership!
 
       def normalize_name(name)
         s = name.to_s.strip.downcase
@@ -537,9 +545,9 @@ module Cybros
         parsed = Integer(raw, exception: false)
         return parsed if parsed && parsed >= 1 && parsed <= MAX_CONTEXT_TURNS
 
-        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
+        DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
       rescue StandardError
-        AgentCore::DAG::Runtime::DEFAULT_CONTEXT_TURNS
+        DAG::ContextWindowAssembly::DEFAULT_CONTEXT_TURNS
       end
       private_class_method :inherit_context_turns
 
@@ -617,7 +625,9 @@ module Cybros
         sample_origin:,
         parent_conversation_id:,
         parent_graph_id:,
-        spawned_from_node_id:
+        parent_turn_id:,
+        parent_dag_node_id:,
+        subagent_id:
       )
         {
           "agent" => {
@@ -626,10 +636,13 @@ module Cybros
             "context_turns" => context_turns,
           },
           "subagent" => {
+            "subagent_id" => subagent_id,
             "name" => name,
             "parent_conversation_id" => parent_conversation_id,
             "parent_graph_id" => parent_graph_id,
-            "spawned_from_node_id" => spawned_from_node_id,
+            "parent_turn_id" => parent_turn_id,
+            "parent_dag_node_id" => parent_dag_node_id,
+            "spawned_from_node_id" => parent_dag_node_id,
           },
           "statistics" => {
             "sample_origin" => sample_origin,
@@ -674,40 +687,48 @@ module Cybros
       end
       private_class_method :seed_child_graph!
 
-      def snapshot_payload_for_child(child:, child_id:, limit_turns:, operation:, diagnostic_level: nil)
+      def snapshot_payload_for_subagent(child:, subagent_id:, limit_turns:, operation:, diagnostic_level: nil)
         payload =
           if child.nil?
             {
               ok: true,
+              subagent_id: subagent_id,
               operation: operation,
-              child_conversation_id: child_id,
-              child_graph_id: nil,
               status: "missing",
               counts: { pending: 0, running: 0, awaiting_approval: 0 },
               leaf: nil,
               transcript_lines: [],
+              error: {
+                code: "subagent_missing",
+                message: "subagent missing",
+              },
               diagnostic_level: normalize_diagnostic_level(diagnostic_level),
             }
           else
             graph = child.dag_graph
             counts = node_state_counts(graph)
+            status = status_for_counts(counts)
+            result = structured_result_for_subagent(graph)
+            assistant_output_candidate = assistant_output_candidate_for_subagent(graph, status: status)
 
             {
               ok: true,
+              subagent_id: subagent_id,
               operation: operation,
-              child_conversation_id: child.id.to_s,
-              child_graph_id: graph.id.to_s,
-              status: status_for_counts(counts),
+              status: status,
               counts: counts,
               leaf: leaf_for_main_lane(graph),
               transcript_lines: transcript_lines_for(graph, limit_turns: limit_turns),
+              result: result,
+              artifacts: artifacts_for_subagent(graph),
+              assistant_output_candidate: assistant_output_candidate,
               diagnostic_level: normalize_diagnostic_level(diagnostic_level_for_child(child, override: diagnostic_level)),
             }
           end
 
         AgentCore::Utils.deep_stringify_keys(payload)
       end
-      private_class_method :snapshot_payload_for_child
+      private_class_method :snapshot_payload_for_subagent
 
       def diagnostic_level_for_child(child, override: nil)
         explicit = override.to_s
@@ -751,6 +772,13 @@ module Cybros
         AgentCore::Resources::Tools::ToolResult.success(text: JSON.generate(normalized), metadata: { subagent: normalized })
       end
       private_class_method :success_result_with_subagent_payload
+
+      def next_subagent_id
+        ActiveRecord::Base.lease_connection.select_value("select uuidv7()").to_s
+      rescue StandardError
+        SecureRandom.uuid
+      end
+      private_class_method :next_subagent_id
 
       def node_state_counts(graph)
         rows =
@@ -829,6 +857,61 @@ module Cybros
         []
       end
       private_class_method :transcript_lines_for
+
+      def structured_result_for_subagent(graph)
+        content = latest_assistant_content_for(graph)
+        return nil if content.blank?
+
+        { final_output: content }
+      rescue StandardError
+        nil
+      end
+      private_class_method :structured_result_for_subagent
+
+      def artifacts_for_subagent(graph)
+        artifacts = latest_assistant_node_for(graph)&.body_output&.dig("artifacts")
+        return artifacts if artifacts.is_a?(Array)
+        return artifacts if artifacts.is_a?(Hash)
+
+        nil
+      rescue StandardError
+        nil
+      end
+      private_class_method :artifacts_for_subagent
+
+      def assistant_output_candidate_for_subagent(graph, status:)
+        content = latest_assistant_content_for(graph)
+        return nil if content.blank?
+
+        {
+          format: "text",
+          content: content,
+          scope: status.to_s == "idle" ? "full" : "partial",
+        }
+      rescue StandardError
+        nil
+      end
+      private_class_method :assistant_output_candidate_for_subagent
+
+      def latest_assistant_content_for(graph)
+        node = latest_assistant_node_for(graph)
+        return nil if node.nil?
+
+        node.body_output["content"].to_s.presence || node.body_output_preview["content"].to_s.presence
+      rescue StandardError
+        nil
+      end
+      private_class_method :latest_assistant_content_for
+
+      def latest_assistant_node_for(graph)
+        graph.nodes.active
+          .where(lane_id: graph.main_lane.id, node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key])
+          .order(:id)
+          .last
+      rescue StandardError
+        nil
+      end
+      private_class_method :latest_assistant_node_for
     end
   end
 end

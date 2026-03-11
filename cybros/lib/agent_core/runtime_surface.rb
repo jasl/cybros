@@ -5,6 +5,7 @@ require_relative "runtime_surface/inputs"
 require_relative "runtime_surface/base"
 require_relative "runtime_surface/runner"
 require_relative "runtime_surface/audit_serializer"
+require_relative "runtime_surface/tool_routing"
 require_relative "runtime_surface/tool_result_projection"
 
 module AgentCore

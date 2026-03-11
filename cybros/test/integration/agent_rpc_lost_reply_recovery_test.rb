@@ -4,7 +4,7 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
   test "lost reply recovery replays the same invocation on the same binding and reuses the logical invocation record" do
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
     runtime = create_runtime!(endpoint_url: server.rpc_url)
-    responses = [AgentRPC::LostReplyError.new("lost reply after dispatch"), { "prepared_plan" => { "fixture" => true } }]
+    responses = [AgentRPC::LostReplyError.new("lost reply after dispatch"), { "planning" => { "step_plan" => { "fixture" => true } } }]
     call_count = 0
 
     first_error =
@@ -14,7 +14,7 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
           scope_id: "draft-123",
-          method_name: "turn.prepare",
+          method_name: "before_agent_step",
           invocation_id: "invoke-123",
           request_payload: { "user_input" => "Hello" },
           allowed_callback_methods: %w[conversation.settings.get],
@@ -42,7 +42,7 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-          method_name: "turn.prepare",
+          method_name: "before_agent_step",
           invocation_id: "invoke-123",
           request_payload: { "user_input" => "Hello" },
           allowed_callback_methods: %w[conversation.settings.get],
@@ -56,7 +56,7 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
         end,
       )
 
-    assert_equal true, recovered.fetch("prepared_plan", {}).fetch("fixture")
+    assert_equal true, recovered.dig("planning", "step_plan", "fixture")
     assert_equal 2, call_count
     assert_equal invocation.id, AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123").id
     assert_equal "succeeded", invocation.reload.status

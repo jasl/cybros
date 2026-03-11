@@ -9,7 +9,7 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
         required_bearer: "secret://fixture-v2",
         identity_overrides: { "deployment_fingerprint" => "fixture-deployment-v2" },
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
+          "before_agent_step" => lambda do |params, base_result, _identity|
             replacement_prepare_calls << params.fetch("invocation_id")
             base_result
           end,
@@ -29,7 +29,7 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
           scope_id: "draft-123",
-          method_name: "turn.prepare",
+          method_name: "before_agent_step",
           invocation_id: "invoke-123",
           request_payload: { "user_input" => "Hello" },
           allowed_callback_methods: %w[conversation.settings.get],
@@ -62,7 +62,7 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
           scope_id: "draft-123",
-          method_name: "turn.prepare",
+          method_name: "before_agent_step",
           invocation_id: "invoke-123",
           request_payload: { "user_input" => "Hello" },
           allowed_callback_methods: %w[conversation.settings.get],

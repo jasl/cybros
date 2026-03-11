@@ -2,6 +2,54 @@ require "test_helper"
 
 module AgentRPC
   class LifecycleCallerTest < ActiveSupport::TestCase
+    test "marks invocation failed when result validation fails after the remote reply" do
+      runtime = create_runtime!
+      server =
+        Cybros::ProgrammableAgentFixture::Server.new(
+          required_bearer: "secret://fixture",
+          rpc_overrides: {
+            "after_task_notice" => lambda do |_params, _base_result, _identity|
+              { "actions" => [{ "type" => "not_a_real_action" }] }
+            end,
+          },
+        ).start
+      runtime.fetch(:deployment).update!(
+        endpoint_url: server.rpc_url,
+        deployment_bearer_secret_ref: "secret://fixture",
+        supported_methods: AgentDeployments::REQUIRED_METHODS + %w[after_task_notice],
+      )
+
+      error =
+        assert_raises(AgentCore::ValidationError) do
+          LifecycleCaller.call!(
+            deployment: runtime.fetch(:deployment).reload,
+            conversation: runtime.fetch(:conversation),
+            scope_type: "conversation_run",
+            scope_id: "run-123",
+            method_name: "after_task_notice",
+            invocation_id: "invoke-invalid-envelope",
+            request_payload: { "task_notice" => { "notice" => { "kind" => "provider_error" } } },
+            allowed_callback_methods: [],
+            result_validator: lambda do |result|
+              Cybros::ProgrammableAgent::HookEnvelope.parse!(
+                hook_name: "after_task_notice",
+                request_payload: {},
+                payload: result,
+              )
+            end,
+          )
+        end
+
+      invocation = AgentRPCInvocation.find_by!(invocation_id: "invoke-invalid-envelope")
+
+      assert_equal "cybros.programmable_agent.hook_contract.invalid_action_type", error.code
+      assert_equal "failed", invocation.reload.status
+      assert_equal({ "actions" => [{ "type" => "not_a_real_action" }] }, invocation.result_snapshot)
+      assert_equal "cybros.programmable_agent.hook_contract.invalid_action_type", invocation.error_snapshot.fetch("code")
+    ensure
+      server&.shutdown
+    end
+
     test "rejects reply unknown replay once the deployment binding is no longer active and healthy" do
       runtime = create_runtime!
       invocation =
@@ -10,7 +58,7 @@ module AgentRPC
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
           scope_id: "draft-123",
-          method_name: "turn.prepare",
+          method_name: "before_agent_step",
           invocation_id: "invoke-123",
           request_payload: { "user_input" => "Hello" },
         ).fetch(:invocation)
@@ -33,7 +81,7 @@ module AgentRPC
             conversation: runtime.fetch(:conversation),
             scope_type: "run_draft",
             scope_id: "draft-123",
-            method_name: "turn.prepare",
+            method_name: "before_agent_step",
             invocation_id: "invoke-123",
             request_payload: { "user_input" => "Hello" },
             allowed_callback_methods: %w[conversation.settings.get],

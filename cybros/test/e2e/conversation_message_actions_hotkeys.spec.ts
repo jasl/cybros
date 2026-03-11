@@ -108,7 +108,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     await expect(page.getByTestId("conversation-composer-status-rail")).not.toContainText(queuedFollowUp, { timeout: 30_000 })
   })
 
-  test("copy copies the agent message markdown; branch navigates to a child conversation", async ({ page }) => {
+  test("copy copies the agent message markdown; branch navigates to a branch conversation", async ({ page }) => {
     await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
     await createConversationAndWaitForMarkdown(page)
 

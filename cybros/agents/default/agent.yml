@@ -9,11 +9,14 @@ supported_methods:
   - agent.describe
   - agent.health
   - agent.schemas.get
-  - turn.prepare
-  - turn.compose
-  - turn.handle_error
-runtime_surface:
-  type: noop
+  - capabilities.handshake
+  - capabilities.refresh
+  - before_agent_step
+  - on_context_pressure
+  - before_subagent_spawn
+  - before_finalize_output
+  - after_task_notice
+  - after_subagent_result
 prompts:
   agent: prompts/AGENT.md
   soul: prompts/SOUL.md

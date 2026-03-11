@@ -48,7 +48,7 @@ Goal: lock the invariants that must not drift during implementation.
 
 Deliverables:
 
-- staged mutation semantics for `turn.prepare`
+- staged mutation semantics for `before_agent_step`
 - approval park and resume rules
 - session scope and deployment identity rules
 - replay and idempotency rules

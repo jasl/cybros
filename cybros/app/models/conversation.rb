@@ -24,7 +24,7 @@ class Conversation < ApplicationRecord
 
   belongs_to :parent_conversation, class_name: "Conversation", optional: true
   belongs_to :root_conversation, class_name: "Conversation", optional: true
-  has_many :child_conversations,
+  has_many :branch_conversations,
            class_name: "Conversation",
            foreign_key: :parent_conversation_id,
            dependent: :destroy,
@@ -1136,7 +1136,7 @@ class Conversation < ApplicationRecord
       end
       lane
     else
-      dag_lane || raise(Cybros::Error, "child conversation is missing dag_lane")
+      dag_lane || raise(Cybros::Error, "branch conversation is missing dag_lane")
     end
   end
 
@@ -1283,7 +1283,7 @@ class Conversation < ApplicationRecord
             }
           end,
         "prompt_buffer_entries" =>
-          lane.lane_prompt_buffer_entries.ordered.map do |entry|
+          lane.lane_prompt_buffer_entries.ordered.reject { |entry| entry.buffer_name == "system" }.map do |entry|
             {
               "buffer_name" => entry.buffer_name,
               "seq" => entry.seq,

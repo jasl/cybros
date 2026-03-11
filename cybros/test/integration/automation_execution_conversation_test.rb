@@ -72,11 +72,13 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -110,11 +112,13 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,

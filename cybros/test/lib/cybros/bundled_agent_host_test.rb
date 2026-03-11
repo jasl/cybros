@@ -7,10 +7,7 @@ class Cybros::BundledAgentHostTest < ActiveSupport::TestCase
   test "default bundled agent host responds to required methods" do
     host = Cybros::BundledAgentHost::Application.new(source_root: Rails.root.join("agents/default"))
 
-    assert_includes host.supported_methods, "initialize"
-    assert_includes host.supported_methods, "turn.prepare"
-    assert_includes host.supported_methods, "turn.compose"
-    assert_includes host.supported_methods, "turn.handle_error"
+    assert_equal AgentDeployments::REQUIRED_METHODS, host.supported_methods
   end
 
   test "bundled host serves initialize and health over http json-rpc" do

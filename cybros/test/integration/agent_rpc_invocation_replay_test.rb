@@ -9,14 +9,14 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
 
     AgentRPC::InvocationStore.mark_succeeded!(
       invocation: first.fetch(:invocation),
-      result_snapshot: { "prepared_plan" => { "fixture" => true } },
+      result_snapshot: { "planning" => { "step_plan" => { "fixture" => true } } },
     )
 
     replay =
@@ -25,7 +25,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
@@ -42,7 +42,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
@@ -60,7 +60,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
@@ -78,13 +78,13 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
     AgentRPC::InvocationStore.mark_succeeded!(
       invocation: first.fetch(:invocation),
-      result_snapshot: { "prepared_plan" => { "fixture" => true } },
+      result_snapshot: { "planning" => { "step_plan" => { "fixture" => true } } },
     )
 
     reactivated_at = 2.minutes.from_now.change(usec: 0)
@@ -96,7 +96,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       )
@@ -114,7 +114,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
         scope_id: "draft-123",
-        method_name: "turn.prepare",
+        method_name: "before_agent_step",
         invocation_id: "invoke-123",
         request_payload: { "user_input" => "Hello" },
       ).fetch(:invocation)
@@ -159,7 +159,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
       conversation: runtime.fetch(:conversation),
       scope_type: "run_draft",
       scope_id: "draft-123",
-      method_name: "turn.prepare",
+      method_name: "before_agent_step",
       invocation_id: "invoke-123",
       request_payload: { "user_input" => "Hello" },
       allowed_callback_methods: %w[conversation.settings.update],
@@ -167,7 +167,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         Object.new.tap do |client|
           client.define_singleton_method(:call) do |_method_name, _params|
             observed_session_invocation_ids << session.reload.agent_rpc_invocation_id
-            { "prepared_plan" => { "fixture" => true, "invocation_id" => invocation.id } }
+            { "planning" => { "step_plan" => { "fixture" => true, "invocation_id" => invocation.id } } }
           end
         end
       end,

@@ -1,5 +1,6 @@
 <div class="space-y-6">
   <h2 class="text-lg font-semibold"><%= @agent_program.name %></h2>
+  <% bundled_hook_managed_runtime = @agent_program.bundled_source? && @loaded.runtime_surface_status == "missing" %>
 
   <% if flash[:alert].present? %>
     <div role="alert" class="alert alert-error">
@@ -24,15 +25,19 @@
         </div>
         <div>
           <div class="text-xs opacity-60">Runtime surface</div>
-          <div class="font-mono text-sm"><%= @loaded.runtime_surface_config.fetch("type", "noop") %></div>
+          <div class="font-mono text-sm"><%= bundled_hook_managed_runtime ? "hook-driven" : @loaded.runtime_surface_config.fetch("type", "noop") %></div>
         </div>
         <div>
           <div class="text-xs opacity-60">Runtime status</div>
           <div class="text-sm">
-            <% if @loaded.runtime_surface_status == "configured" %>
+            <% if bundled_hook_managed_runtime %>
+              Managed by programmable hooks
+            <% elsif @loaded.runtime_surface_status == "configured" %>
               Configured
+            <% elsif @loaded.runtime_surface_status == "invalid" %>
+              Invalid manifest config
             <% else %>
-              Fallback to safe no-op
+              Missing from manifest
             <% end %>
           </div>
         </div>

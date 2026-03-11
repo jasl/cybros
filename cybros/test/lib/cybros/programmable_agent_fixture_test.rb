@@ -6,18 +6,17 @@ require "timeout"
 require "uri"
 
 class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
-  test "identity is deterministic and exposes turn hooks" do
+  test "identity is deterministic and exposes planning and execution methods" do
     identity = Cybros::ProgrammableAgentFixture.identity
 
     assert_equal "fixture-program", identity.fetch("agent_program_key")
     assert_equal "fixture-deployment", identity.fetch("agent_deployment_key")
     assert_equal "fixture-deployment-v1", identity.fetch("deployment_fingerprint")
     assert_equal "fixture-ruby-sdk/1.0", identity.fetch("agent_sdk_version")
-    assert_includes identity.fetch("supported_methods"), "turn.prepare"
-    assert_includes identity.fetch("supported_methods"), "turn.compose"
+    assert_equal AgentDeployments::REQUIRED_METHODS, identity.fetch("supported_methods")
   end
 
-  test "server responds to health prepare and compose over http" do
+  test "server responds to health before_agent_step on_context_pressure before_subagent_spawn and before_finalize_output over http" do
     server = Cybros::ProgrammableAgentFixture::Server.new
     server.start
 
@@ -30,28 +29,100 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
         rpc_json(
           "#{server.base_url}/rpc",
           id: 1,
-          method: "turn.prepare",
+          method: "before_agent_step",
           params: { "conversation_id" => "conv_123" },
         )
 
       assert_equal "2.0", prepare.fetch("jsonrpc")
       assert_equal 1, prepare.fetch("id")
-      assert_equal true, prepare.dig("result", "prepared_plan", "fixture")
-      assert_equal "conv_123", prepare.dig("result", "prepared_plan", "conversation_id")
+      assert_equal true, prepare.dig("result", "planning", "step_plan", "fixture")
+      assert_equal "conv_123", prepare.dig("result", "planning", "step_plan", "conversation_id")
 
-      compose =
+      finalize =
         rpc_json(
           "#{server.base_url}/rpc",
           id: 2,
-          method: "turn.compose",
-          params: { "conversation_run_id" => "run_123" },
+          method: "before_finalize_output",
+          params: {
+            "conversation_run_id" => "run_123",
+            "draft_output" => {
+              "content" => "fixture finalized response",
+            },
+          },
+        )
+      on_context_pressure =
+        rpc_json(
+          "#{server.base_url}/rpc",
+          id: 5,
+          method: "on_context_pressure",
+          params: {
+            "context_pressure" => {
+              "budget_action" => "advise_compact",
+            },
+          },
+        )
+      before_subagent_spawn =
+        rpc_json(
+          "#{server.base_url}/rpc",
+          id: 4,
+          method: "before_subagent_spawn",
+          params: {
+            "subagent_request" => {
+              "tool_name" => "subagent_run",
+            },
+          },
         )
 
-      assert_equal "2.0", compose.fetch("jsonrpc")
-      assert_equal "fixture compose response", compose.dig("result", "output", "content")
+      after_subagent_result =
+        rpc_json(
+          "#{server.base_url}/rpc",
+          id: 3,
+          method: "after_subagent_result",
+          params: {
+            "subagent_result" => {
+              "subagent_id" => "subagent-fixture",
+              "status" => "succeeded",
+            },
+          },
+        )
+
+      assert_equal "2.0", finalize.fetch("jsonrpc")
+      assert_equal "emit_message", finalize.dig("result", "actions", 0, "type")
+      assert_equal "fixture finalized response", finalize.dig("result", "actions", 0, "message", "content")
+      assert_equal "set_step_status", on_context_pressure.dig("result", "actions", 0, "type")
+      assert_includes on_context_pressure.dig("result", "actions", 0, "text").to_s, "advise_compact"
+      assert_equal "set_step_status", before_subagent_spawn.dig("result", "actions", 0, "type")
+      assert_includes before_subagent_spawn.dig("result", "actions", 0, "text").to_s, "subagent_run"
+      assert_equal "set_step_status", after_subagent_result.dig("result", "actions", 0, "type")
+      assert_includes after_subagent_result.dig("result", "actions", 0, "text").to_s, "subagent-fixture"
     ensure
       server.shutdown
     end
+  end
+
+  test "before_agent_step exposes planning-owned tool_surface when capability snapshot is supplied" do
+    prepare =
+      Cybros::ProgrammableAgentFixture.rpc_result(
+        "before_agent_step",
+        {
+          "conversation_id" => "conv_surface",
+          "capability_snapshot" => {
+            "capability_registry_snapshot_id" => "csnap_fixture",
+            "effective_tools" => [
+              {
+                "logical_tool_name" => "compact_context",
+                "effective_tool_id" => "etool_compact",
+                "implementation_source" => "kernel",
+                "implementation_ref" => "kernel://compact_context",
+              },
+            ],
+          },
+        },
+      )
+
+    assert_equal "csnap_fixture", prepare.dig("planning", "tool_surface", "capability_registry_snapshot_id")
+    assert_equal ["etool_compact"], prepare.dig("planning", "tool_surface", "selected_tool_ids")
+    assert_equal "fixture.before_agent_step", prepare.dig("planning", "tool_surface", "tool_surface_label")
   end
 
   test "server supports identity and rpc overrides for failure-path coverage" do
@@ -109,12 +180,12 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
         rpc_json(
           "http://127.0.0.1:#{port}/rpc",
           id: 1,
-          method: "turn.prepare",
+          method: "before_agent_step",
           params: { "conversation_id" => "conv_cli" },
         )
 
-      assert_equal true, prepare.dig("result", "prepared_plan", "fixture")
-      assert_equal "conv_cli", prepare.dig("result", "prepared_plan", "conversation_id")
+      assert_equal true, prepare.dig("result", "planning", "step_plan", "fixture")
+      assert_equal "conv_cli", prepare.dig("result", "planning", "step_plan", "conversation_id")
     end
   ensure
     if pid
@@ -127,7 +198,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     end
   end
 
-  test "turn prepare switch-target proposes the paired alternate target when older visible targets exist" do
+  test "before_agent_step switch-target proposes the paired alternate target when older visible targets exist" do
     current_target_id = "target-current"
     proposed_target_id = nil
 
@@ -164,7 +235,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     begin
       prepare =
         fixture.rpc_result(
-          "turn.prepare",
+          "before_agent_step",
           {
             "conversation_id" => "conv_switch",
             "user_input" => "[fixture:switch-target]",
@@ -174,7 +245,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
         )
 
       assert_equal "target-alternate", proposed_target_id
-      assert_equal "target-alternate", prepare.dig("approval_state", "proposed_execution_target_id")
+      assert_equal "target-alternate", prepare.dig("planning", "approval_request", "proposed_execution_target_id")
     ensure
       eigenclass.send(:define_method, :callback_rpc, original_callback_rpc)
     end

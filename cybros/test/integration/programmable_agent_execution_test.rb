@@ -1,103 +1,148 @@
 require "test_helper"
+require_relative "../support/programmable_agent_runtime_test_support"
 
 class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
+  include ProgrammableAgentRuntimeTestSupport
 
   setup do
     clear_enqueued_jobs
     clear_performed_jobs
   end
 
-  test "programmable conversation runs execute through turn compose on the pinned deployment" do
-    server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
-    runtime = create_programmable_runtime!(server:)
-    conversation = runtime.fetch(:conversation)
-
-    conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
-    agent_node_id =
-      conversation.root_graph.nodes
-        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
-        .order(:id)
-        .last
-        .id
-    conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-    assert_includes claimed, agent_node_id
-
-    DAG::Runner.run_node!(agent_node_id)
-
-    agent =
-      conversation.root_graph.nodes
-        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
-        .order(:id)
-        .last
-    run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
-    invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
-    session = invocation.last_session
-
-    assert_equal DAG::Node::FINISHED, agent.reload.state
-    assert_equal "fixture compose response", agent.body_output.fetch("content")
-    assert_equal "succeeded", run.reload.state
-    assert_equal "succeeded", invocation.status
-    assert_not_nil session
-    assert_equal "closed", session.status
-  ensure
-    server&.shutdown
-  end
-
-  test "programmable conversation runs invoke turn handle_error when turn compose fails" do
-    handled_errors = []
+  test "programmable conversation runs finalize through before_finalize_output on the pinned deployment" do
+    observed_payloads = []
+    llm_server = MockLLMServer.new do |_payload|
+      MockLLMServer.chat_response(content: "llm draft answer")
+    end.start
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
         rpc_overrides: {
-          "turn.compose" => lambda do |_params, _base_result, _identity|
-            raise StandardError, "compose exploded"
-          end,
-          "turn.handle_error" => lambda do |params, _base_result, _identity|
-            handled_errors << params.fetch("error")
+          "before_finalize_output" => lambda do |params, _base_result, _identity|
+            observed_payloads << params.deep_dup
             {
-              "output" => {
-                "role" => "assistant",
-                "content" => "fixture recovery response",
-              },
+              "actions" => [
+                {
+                  "type" => "emit_message",
+                  "message" => {
+                    "role" => "assistant",
+                    "content" => "fixture finalized response",
+                  },
+                },
+              ],
             }
           end,
         },
       ).start
-    runtime = create_programmable_runtime!(server:)
-    conversation = runtime.fetch(:conversation)
+    runtime = nil
+    conversation = nil
 
-    conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4")
-    agent_node_id =
-      conversation.root_graph.nodes
-        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
-        .order(:id)
-        .last
-        .id
-    conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
-    claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-    assert_includes claimed, agent_node_id
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_programmable_runtime!(server:)
+      conversation = runtime.fetch(:conversation)
 
-    DAG::Runner.run_node!(agent_node_id)
+      conversation.append_user_message!(content: "Ship it", model_ref: "dev/mock-model")
+      agent_node_id =
+        conversation.root_graph.nodes
+          .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+          .order(:id)
+          .last
+          .id
+      conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+      assert_includes claimed, agent_node_id
 
-    agent =
-      conversation.root_graph.nodes
-        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
-        .order(:id)
-        .last
-    run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
-    compose_invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.compose")
-    handle_error_invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "turn.handle_error")
+      DAG::Runner.run_node!(agent_node_id)
 
-    assert_equal DAG::Node::FINISHED, agent.reload.state
-    assert_equal "fixture recovery response", agent.body_output.fetch("content")
-    assert_equal "succeeded", run.reload.state
-    assert_equal "failed", compose_invocation.status
-    assert_equal "succeeded", handle_error_invocation.status
-    assert handled_errors.dig(0, "class").present?
-    assert_includes handled_errors.dig(0, "message"), "compose exploded"
+      agent =
+        conversation.root_graph.nodes
+          .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+          .order(:id)
+          .last
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
+      invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "before_finalize_output")
+      session = invocation.last_session
+
+      assert_equal DAG::Node::FINISHED, agent.reload.state
+      assert_equal "fixture finalized response", agent.body_output.fetch("content")
+      assert_equal "succeeded", run.reload.state
+      assert_equal "succeeded", invocation.status
+      assert_not_nil session
+      assert_equal "closed", session.status
+      assert_equal "llm draft answer", observed_payloads.dig(0, "draft_output", "content")
+      assert_equal "dev/mock-model", observed_payloads.dig(0, "selected_model_ref")
+      assert_equal ["before_finalize_output"], AgentRPCInvocation.where(scope_type: "conversation_run", scope_id: run.id).order(:created_at).pluck(:method)
+    end
   ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
+  test "programmable conversation runs invoke after_task_notice when the llm provider fails" do
+    handled_errors = []
+    llm_server = MockLLMServer.new do |_payload|
+      MockLLMServer.error_response(status: 500, message: "llm exploded")
+    end.start
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "after_task_notice" => lambda do |params, _base_result, _identity|
+            handled_errors << params.fetch("task_notice")
+            {
+              "actions" => [
+                {
+                  "type" => "emit_message",
+                  "message" => {
+                    "role" => "assistant",
+                    "content" => "fixture recovery response",
+                  },
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+    runtime = nil
+    conversation = nil
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_programmable_runtime!(server:)
+      conversation = runtime.fetch(:conversation)
+
+      conversation.append_user_message!(content: "Ship it", model_ref: "dev/mock-model")
+      agent_node_id =
+        conversation.root_graph.nodes
+          .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+          .order(:id)
+          .last
+          .id
+      conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+      assert_includes claimed, agent_node_id
+
+      DAG::Runner.run_node!(agent_node_id)
+
+      agent =
+        conversation.root_graph.nodes
+          .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+          .order(:id)
+          .last
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
+      error_invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "after_task_notice")
+
+      assert_equal DAG::Node::FINISHED, agent.reload.state
+      assert_equal "fixture recovery response", agent.body_output.fetch("content")
+      assert_equal "succeeded", run.reload.state
+      assert_equal "succeeded", error_invocation.status
+      assert_equal "provider_error", handled_errors.dig(0, "notice", "kind")
+      assert handled_errors.dig(0, "error", "class").present?
+      assert_includes handled_errors.dig(0, "error", "message"), "llm exploded"
+      assert_equal ["after_task_notice"], AgentRPCInvocation.where(scope_type: "conversation_run", scope_id: run.id).order(:created_at).pluck(:method)
+    end
+  ensure
+    llm_server&.shutdown
     server&.shutdown
   end
 
@@ -131,24 +176,13 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_finalize_output after_task_notice],
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      credential = LLMProviderCredential.find_or_initialize_by(provider_key: "openai", status: "active")
-      credential.assign_attributes(
-        credential_type: "api_key",
-        api_key: "sk-test",
-        max_concurrent_requests: 3,
-        requests_per_minute: 90,
-        tokens_per_minute: 180_000,
-        burst_limit: 6,
-        backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
-      )
-      credential.save!
       location =
         ExecutionLocation.create!(
           name: "Primary host",

@@ -5,9 +5,14 @@ module AgentDeployments
     agent.describe
     agent.health
     agent.schemas.get
-    turn.prepare
-    turn.compose
-    turn.handle_error
+    capabilities.handshake
+    capabilities.refresh
+    before_agent_step
+    on_context_pressure
+    before_subagent_spawn
+    before_finalize_output
+    after_task_notice
+    after_subagent_result
   ].freeze
 
   class Error < StandardError; end

@@ -25,7 +25,12 @@
 - `lane.prompt_buffer`
 - token budget
 
-`PromptAssembly` 会先把 lane-scoped prompt buffer material 渲染进 system sections，再由 `ContextBudgetManager` 对完整 prompt 做 fit 与 budget state 计算。
+`PromptAssembly` 会先把 lane-scoped prompt buffer material 作为 grouped system sections 渲染进 system prompt，再由 `ContextBudgetManager` 对完整 prompt 做 fit 与 budget state 计算。
+
+补充说明：
+
+- `lane.prompt_buffer.render(max_tokens:)` 已作为 public API 暴露给 agent-side 代码使用
+- 但当前 shipped 默认上下文管理器还不会先调用该 API 做 section-level selective render；默认热路径仍是把当前 lane 的 grouped buffer sections 直接注入 prompt，再统一进入 budget fit
 
 ---
 
@@ -45,7 +50,7 @@
 
 `ContextBudgetManager` 在真正调用 provider 前按如下顺序做 fit：
 
-1. 组装 full prompt（history + `lane.prompt_buffer` + visible tools + injections + memory）
+1. 组装 full prompt（history + grouped `lane.prompt_buffer` sections + visible tools + injections + memory）
 2. 若超 hard cap，先移除 memory results
 3. 若仍超 hard cap，对旧 tool outputs 做 prompt-only pruning
 4. 若仍超 hard cap，递减 `limit_turns` 并重建 context

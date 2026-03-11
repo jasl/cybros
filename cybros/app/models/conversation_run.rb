@@ -50,8 +50,40 @@ class ConversationRun < ApplicationRecord
     node_id = node_or_id.respond_to?(:id) ? node_or_id.id : node_or_id
     return nil if node_id.blank?
 
-    where(dag_node_id: node_id).order(:id).last
+    run = where(dag_node_id: node_id).order(:id).last
+    return run if run
+    return nil unless node_or_id.respond_to?(:turn_id)
+
+    turn_id = node_or_id.turn_id.to_s
+    lane_id = node_or_id.respond_to?(:lane_id) ? node_or_id.lane_id.to_s : ""
+    graph_id = node_or_id.respond_to?(:graph_id) ? node_or_id.graph_id.to_s : ""
+    return nil if turn_id.blank? || lane_id.blank? || graph_id.blank?
+
+    conversation = conversation_for_runtime_node(node_or_id)
+    scope = conversation ? where(conversation_id: conversation.id) : all
+    agent_node_ids =
+      DAG::Node.where(
+        graph_id: graph_id,
+        lane_id: lane_id,
+        turn_id: turn_id,
+        node_type: [Messages::AgentMessage.node_type_key, Messages::CharacterMessage.node_type_key],
+      ).select(:id)
+
+    scope.where(dag_node_id: agent_node_ids).order(:id).last
   end
+
+  def self.conversation_for_runtime_node(node)
+    lane_attachable = node.respond_to?(:lane) ? node.lane&.attachable : nil
+    return lane_attachable if lane_attachable.is_a?(Conversation)
+
+    graph_attachable = node.respond_to?(:graph) ? node.graph&.attachable : nil
+    return graph_attachable if graph_attachable.is_a?(Conversation)
+
+    nil
+  rescue StandardError
+    nil
+  end
+  private_class_method :conversation_for_runtime_node
 
   def queued? = state == "queued"
   def running? = state == "running"
@@ -59,8 +91,11 @@ class ConversationRun < ApplicationRecord
   def failed? = state == "failed"
   def canceled? = state == "canceled"
   def programmable? = snapshot["draft"].is_a?(Hash)
-  def compose_invocation_id = "conversation_run:#{id}:turn.compose"
-  def handle_error_invocation_id = "conversation_run:#{id}:turn.handle_error"
+  def on_context_pressure_invocation_id(node:) = runtime_hook_invocation_id("on_context_pressure", node: node)
+  def before_subagent_spawn_invocation_id(node:) = runtime_hook_invocation_id("before_subagent_spawn", node: node)
+  def before_finalize_output_invocation_id(node:) = runtime_hook_invocation_id("before_finalize_output", node: node)
+  def after_task_notice_invocation_id(node:) = runtime_hook_invocation_id("after_task_notice", node: node)
+  def after_subagent_result_invocation_id(node:) = runtime_hook_invocation_id("after_subagent_result", node: node)
   def execution_capacity_snapshot
     runtime_governors["execution_capacity"] if runtime_governors.is_a?(Hash)
   end
@@ -110,6 +145,11 @@ class ConversationRun < ApplicationRecord
 
     def normalize_hash(value)
       value.is_a?(Hash) ? value.deep_stringify_keys : {}
+    end
+
+    def runtime_hook_invocation_id(hook_name, node:)
+      node_id = node.respond_to?(:id) ? node.id : node
+      "conversation_run:#{id}:#{hook_name}:#{node_id}"
     end
 
     def binding_consistency

@@ -41,6 +41,7 @@ module Statistics
           sample_origin: sample_origin,
           execution_scope: execution_scope,
           tool_call_id: body_input["tool_call_id"].to_s.presence,
+          logical_tool_name: logical_tool_name,
           requested_name: requested_name,
           resolved_name: resolved_name,
           name_resolution: body_input["name_resolution"].to_s.presence,
@@ -49,6 +50,14 @@ module Statistics
           source: source,
           provider_key: provider_key,
           model_ref: model_ref,
+          capability_registry_snapshot_id: capability_registry_snapshot_id,
+          kernel_capability_registry_version: kernel_capability_registry_version,
+          tool_surface_id: tool_surface_id,
+          tool_surface_label: tool_surface_label,
+          implementation_source: implementation_source,
+          implementation_ref: implementation_ref,
+          agent_program_id: agent_program_id,
+          agent_program_version: agent_program_version,
           execution_readiness: execution_readiness,
           entered_execution: entered_execution?,
           tool_outcome: tool_outcome,
@@ -104,7 +113,7 @@ module Statistics
         subagent = subagent.is_a?(Hash) ? subagent : {}
 
         if subagent["parent_conversation_id"].present? && subagent["parent_graph_id"].present? && subagent["spawned_from_node_id"].present?
-          "subagent_child"
+          "subagent"
         else
           "parent"
         end
@@ -112,6 +121,23 @@ module Statistics
 
       def body_input
         @body_input ||= task.body_input.is_a?(Hash) ? task.body_input.deep_stringify_keys : {}
+      end
+
+      def task_metadata
+        @task_metadata ||= task.metadata.is_a?(Hash) ? task.metadata.deep_stringify_keys : {}
+      end
+
+      def tool_metadata
+        @tool_metadata ||= begin
+          metadata = task_metadata["tool"]
+          metadata.is_a?(Hash) ? metadata.deep_stringify_keys : {}
+        end
+      end
+
+      def logical_tool_name
+        tool_metadata["logical_tool_name"].to_s.presence ||
+          body_input["logical_tool_name"].to_s.presence ||
+          resolved_name
       end
 
       def body_output
@@ -164,12 +190,77 @@ module Statistics
         upstream_agent_output["model_ref"].to_s.presence || upstream_agent_output["model"].to_s.presence
       end
 
+      def capability_registry_snapshot_id
+        tool_metadata["capability_registry_snapshot_id"].to_s.presence ||
+          body_input["capability_registry_snapshot_id"].to_s.presence ||
+          capability_snapshot["capability_registry_snapshot_id"].to_s.presence
+      end
+
+      def kernel_capability_registry_version
+        capability_snapshot["kernel_capability_registry_version"].to_s.presence
+      end
+
+      def tool_surface_id
+        tool_metadata["tool_surface_id"].to_s.presence ||
+          body_input["tool_surface_id"].to_s.presence
+      end
+
+      def tool_surface_label
+        tool_surface_payload["tool_surface_label"].to_s.presence
+      end
+
+      def implementation_source
+        tool_metadata["implementation_source"].to_s.presence ||
+          body_input["implementation_source"].to_s.presence ||
+          "kernel"
+      end
+
+      def implementation_ref
+        tool_metadata["implementation_ref"].to_s.presence ||
+          body_input["implementation_ref"].to_s.presence ||
+          logical_tool_name&.then { |name| "kernel://#{name}" }
+      end
+
+      def agent_program_id
+        upstream_conversation_run&.agent_program_id || conversation&.agent_program_id
+      end
+
+      def agent_program_version
+        capability_snapshot["agent_program_version"].to_s.presence ||
+          capability_snapshot["agent_capabilities_version"].to_s.presence
+      end
+
       def upstream_agent_output
         @upstream_agent_output ||=
           begin
             output = upstream_agent_node&.body_output
             output.is_a?(Hash) ? output.deep_stringify_keys : {}
           end
+      end
+
+      def upstream_conversation_run
+        @upstream_conversation_run ||= begin
+          agent_node = upstream_agent_node
+          agent_node ? ConversationRun.latest_for_node(agent_node) : nil
+        end
+      end
+
+      def capability_snapshot
+        @capability_snapshot ||= begin
+          snapshot = upstream_conversation_run&.snapshot
+          snapshot = snapshot.is_a?(Hash) ? snapshot.deep_stringify_keys : {}
+          capability = snapshot["capability_snapshot"]
+          capability.is_a?(Hash) ? capability.deep_stringify_keys : {}
+        end
+      end
+
+      def tool_surface_payload
+        @tool_surface_payload ||= begin
+          snapshot = upstream_conversation_run&.snapshot
+          snapshot = snapshot.is_a?(Hash) ? snapshot.deep_stringify_keys : {}
+          payload = snapshot.dig("draft", "planning", "tool_surface")
+          payload.is_a?(Hash) ? payload.deep_stringify_keys : {}
+        end
       end
 
       def upstream_agent_node

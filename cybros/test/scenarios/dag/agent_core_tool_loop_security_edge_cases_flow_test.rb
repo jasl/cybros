@@ -27,7 +27,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "agent tool loop: subagent_poll denies non-owned conversation and does not leak transcript" do
+  test "agent tool loop: subagent_poll denies non-owned subagent threads and does not leak transcript" do
     spawn_tool = Cybros::Subagent::Tools.build.find { |t| t.name == "subagent_spawn" }
 
     other_parent = create_conversation!
@@ -68,7 +68,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
       )
 
     refute spawn.error?, spawn.text
-    child_id = JSON.parse(spawn.text).fetch("child_conversation_id")
+    subagent_id = JSON.parse(spawn.text).fetch("subagent_id")
 
     parent = create_conversation!
     graph = parent.dag_graph
@@ -107,7 +107,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
                   AgentCore::ToolCall.new(
                     id: "tc_1",
                     name: "subagent_poll",
-                    arguments: { "child_conversation_id" => child_id, "limit_turns" => 10 },
+                    arguments: { "subagent_id" => subagent_id, "limit_turns" => 10 },
                   ),
                 ],
               ),
@@ -164,7 +164,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
 
       tool_result = AgentCore::Resources::Tools::ToolResult.from_h(task.body_output.fetch("result"))
       assert tool_result.error?
-      assert_equal "cybros.subagent_poll.child_conversation_not_owned", tool_result.metadata.dig("validation_error", "code")
+      assert_equal "cybros.subagent_poll.subagent_not_owned", tool_result.metadata.dig("validation_error", "code")
       refute_includes tool_result.text, secret
 
       next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).order(:id).last

@@ -46,7 +46,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |_params, base_result, _identity|
+          "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
               "approval_state" => {
                 "status" => "pending_confirmation",

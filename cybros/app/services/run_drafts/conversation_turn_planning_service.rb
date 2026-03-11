@@ -4,19 +4,12 @@ module RunDrafts
     AWAITING_APPROVAL_STATUS = "awaiting_approval".freeze
     CALLBACK_METHODS = %w[
       conversation.settings.get
-      conversation.settings.update
       conversation.config.get
-      conversation.config.update
       lane.kv.get
-      lane.kv.set
-      lane.kv.delete
       lane.kv.list
       lane.kv.snapshot
-      lane.prompt_buffer.put
       lane.prompt_buffer.get
       lane.prompt_buffer.list
-      lane.prompt_buffer.delete
-      lane.prompt_buffer.clear
       lane.prompt_buffer.snapshot
       lane.prompt_buffer.render
       tokens.estimate_text
@@ -45,27 +38,39 @@ module RunDrafts
     def open_and_prepare!
       draft = create_draft!
       response =
-        AgentRPC::LifecycleCaller.call!(
+        Cybros::ProgrammableAgent::HookCaller.call!(
           deployment: draft.agent_deployment,
           conversation: conversation,
           scope_type: "run_draft",
           scope_id: draft.id,
-          method_name: "turn.prepare",
-          invocation_id: draft.prepare_invocation_id,
+          hook_name: "before_agent_step",
+          invocation_id: draft.plan_invocation_id,
           request_payload: prepare_params(draft),
           allowed_callback_methods: CALLBACK_METHODS,
         )
 
       draft.with_lock do
         draft.reload
-        draft.prepared_plan = normalize_hash(response["prepared_plan"])
+        planning = response.planning&.to_h || {}
+        apply_planning_to_draft!(draft, planning)
         draft.approval_state =
           effective_approval_state(
             draft_approval_state: draft.approval_state,
-            response_approval_state: response["approval_state"],
+            planning_approval_request: planning["approval_request"],
           )
         draft.status = approval_required?(draft.approval_state) ? AWAITING_APPROVAL_STATUS : PREPARED_STATUS
-        draft.save!
+        action_result =
+          Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+            hook_name: "before_agent_step",
+            actions: response.actions,
+            placeholder_node: draft.bound_agent_node,
+          )
+
+        if action_result.terminal_action&.type.to_s == "halt"
+          discard_terminal_draft!(draft, terminal_action: action_result.terminal_action)
+        else
+          draft.save!
+        end
       end
 
       enqueue_expiry!(draft) if draft.status == AWAITING_APPROVAL_STATUS
@@ -79,6 +84,8 @@ module RunDrafts
 
       def create_draft!
         deployment = resolve_deployment!
+        Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+        deployment.reload
         resolved = RuntimeGovernance::DraftGovernorResolver.resolve!(entrypoint: conversation, selected_model_ref: selected_model_ref)
 
         RunDraft.create!(
@@ -98,7 +105,7 @@ module RunDrafts
           runtime_governors: resolved.fetch(:runtime_governors),
           agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint.presence || conversation.agent_program.config_schema_fingerprint,
           prepare_invocation_id: SecureRandom.uuid,
-          prepared_plan: {},
+          planning: {},
           staged_public_settings_patch: {},
           staged_agent_config_patch: {},
           staged_kv_ops: [],
@@ -128,13 +135,28 @@ module RunDrafts
       end
 
       def prepare_params(draft)
+        node = draft.bound_agent_node
+
         {
-          "invocation_id" => draft.prepare_invocation_id,
+          "invocation_id" => draft.plan_invocation_id,
           "run_draft_id" => draft.id,
           "conversation_id" => conversation.id,
+          "session_context" => Cybros::ProgrammableAgent::SessionContext.from_conversation(conversation).to_h,
+          "execution_context" => Cybros::ProgrammableAgent::ExecutionContext.from_conversation_step(
+            conversation: conversation,
+            dag_node_id: draft.trigger_snapshot["dag_node_id"],
+            node: node,
+          ).to_h,
+          "step" => {
+            "phase" => "planning",
+            "run_draft_id" => draft.id,
+            "dag_node_id" => draft.trigger_snapshot["dag_node_id"].to_s,
+            "turn_id" => node&.turn_id,
+          }.compact,
           "user_input" => trigger_snapshot["user_input"].to_s,
           "trigger_snapshot" => draft.trigger_snapshot,
           "selected_model_ref" => draft.selected_model_ref,
+          "capability_snapshot" => normalize_hash(draft.agent_deployment&.capability_snapshot),
           "permission_mode" => draft.permission_mode,
           "execution_target_id" => draft.proposed_execution_target_id,
           "public_settings" => conversation.public_settings,
@@ -146,22 +168,123 @@ module RunDrafts
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
       end
 
+      def normalize_array(value)
+        Array(value).map { |entry| entry.is_a?(Hash) ? entry.deep_stringify_keys : entry }
+      end
+
+      def apply_planning_to_draft!(draft, planning)
+        planning = normalize_hash(planning)
+        staged_mutations = normalize_hash(planning["staged_mutations"])
+        tool_surface = normalize_tool_surface!(draft: draft, payload: planning["tool_surface"])
+        planning["tool_surface"] = tool_surface if tool_surface
+
+        draft.planning = planning
+        draft.staged_public_settings_patch = normalize_hash(staged_mutations["public_settings_patch"])
+        draft.staged_agent_config_patch = normalize_hash(staged_mutations["agent_config_patch"])
+        draft.staged_kv_ops = normalize_array(staged_mutations["kv_ops"])
+        draft.staged_prompt_buffer_ops = normalize_array(staged_mutations["prompt_buffer_ops"])
+        apply_public_state_mutation_policy!(draft)
+      end
+
+      def normalize_tool_surface!(draft:, payload:)
+        normalized = normalize_hash(payload)
+        return nil if normalized.empty?
+
+        snapshot_payload = normalize_hash(draft.agent_deployment&.capability_snapshot)
+        snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(snapshot_payload)
+        manifest =
+          Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+            capability_registry_snapshot: snapshot,
+            selected_tool_ids: normalized.fetch("selected_tool_ids", []),
+            tool_surface_label: normalized["tool_surface_label"],
+          )
+
+        {
+          "capability_registry_snapshot_id" => snapshot.snapshot_id,
+          "tool_surface_id" => manifest.tool_surface_id,
+          "tool_surface_label" => manifest.tool_surface_label,
+          "selected_tool_ids" => manifest.selected_tool_ids,
+          "logical_tool_names" => manifest.selected_tools.map(&:logical_tool_name),
+        }.compact
+      end
+
       def normalize_approval_state(value)
         normalized = normalize_hash(value)
         normalized["status"] = normalized["status"].to_s.presence || "not_required"
         normalized
       end
 
-      def effective_approval_state(draft_approval_state:, response_approval_state:)
+      def effective_approval_state(draft_approval_state:, planning_approval_request:)
         kernel_state = normalize_approval_state(draft_approval_state)
         return kernel_state if approval_required?(kernel_state)
 
-        normalize_approval_state(response_approval_state)
+        normalize_approval_state(planning_approval_request)
       end
 
       def approval_required?(approval_state)
         status = approval_state["status"].to_s
         status.present? && !%w[not_required approved].include?(status)
+      end
+
+      def apply_public_state_mutation_policy!(draft)
+        return if pending_approval_status?(draft.approval_state["status"])
+
+        staged_mutation_methods(draft).each do |method_name|
+          mutation_decision =
+            RuntimeGovernance::PublicStateMutationPolicy.evaluate(
+              method_name: method_name,
+              permission_mode: draft.permission_mode,
+            )
+
+          case mutation_decision.fetch("decision")
+          when "confirm"
+            draft.approval_state = {
+              "status" => "pending_confirmation",
+              "reason" => "public_state_mutation",
+              "method_name" => method_name,
+            }
+            return
+          when "deny"
+            AgentCore::ValidationError.raise!(
+              "Planning requested a disallowed public state mutation.",
+              code: "cybros.run_drafts.public_state_mutation_denied",
+              details: { run_draft_id: draft.id, method_name: method_name, permission_mode: draft.permission_mode },
+            )
+          end
+        end
+      end
+
+      def staged_mutation_methods(draft)
+        methods = []
+        methods << "conversation.settings.update" if draft.staged_public_settings_patch.present?
+        methods << "conversation.config.update" if draft.staged_agent_config_patch.present?
+
+        Array(draft.staged_kv_ops).each do |operation|
+          case operation["op"].to_s
+          when "set"
+            methods << "lane.kv.set"
+          when "delete"
+            methods << "lane.kv.delete"
+          end
+        end
+
+        Array(draft.staged_prompt_buffer_ops).each do |operation|
+          case operation["op"].to_s
+          when "put"
+            methods << "lane.prompt_buffer.put"
+          when "delete"
+            methods << "lane.prompt_buffer.delete"
+          when "clear"
+            methods << "lane.prompt_buffer.clear"
+          end
+        end
+
+        methods.uniq
+      end
+
+      def pending_approval_status?(status)
+        normalized = status.to_s
+        normalized.present? && normalized.start_with?("pending", "awaiting")
       end
 
       def enqueue_expiry!(draft)
@@ -183,6 +306,26 @@ module RunDrafts
           code: "cybros.run_drafts.agent_deployment_missing",
           details: { agent_program_id: program.id, published_contract_fingerprint: program.published_contract_fingerprint },
         )
+      end
+
+      def discard_terminal_draft!(draft, terminal_action:)
+        draft.status = "discarded"
+        draft.staged_public_settings_patch = {}
+        draft.staged_agent_config_patch = {}
+        draft.staged_kv_ops = []
+        draft.staged_prompt_buffer_ops = []
+        draft.save!
+        metadata = {
+          "generated_by" => "programmable_agent_hook",
+          "hook_name" => "before_agent_step",
+          "action_type" => terminal_action.type,
+        }
+        metadata["message"] = terminal_action.message if terminal_action.message.present?
+        draft.bound_agent_node&.stop!(
+          reason: terminal_action.reason.to_s.presence || "programmable_agent_halt",
+          metadata: metadata,
+        )
+        draft.reload
       end
   end
 end

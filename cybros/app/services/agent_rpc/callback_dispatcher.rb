@@ -124,6 +124,11 @@ module AgentRPC
           draft: draft,
           execution_target_id: payload.fetch("execution_target_id"),
         )
+      when "tool_surface.manifest"
+        AgentRPC::KernelServices::ToolSurfaceManifest.call!(
+          deployment: session.agent_deployment,
+          payload: payload,
+        )
       when "execution_target.propose"
         apply_mutation! { AgentRPC::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: payload.fetch("execution_target_id")) }
       else

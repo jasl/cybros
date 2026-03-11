@@ -303,7 +303,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     )
   end
 
-  test "missing or invalid runtime_surface config falls back to safe no-op defaults" do
+  test "missing or invalid runtime_surface config resolves to default noop runtime surface" do
     missing_node =
       build_pending_agent_node(
         metadata: {

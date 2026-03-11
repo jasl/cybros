@@ -5,6 +5,7 @@ module Cybros
     require_relative "llm/codex_oauth"
     require_relative "context_budget/default_policy"
     require_relative "context_budget/tools"
+    require_relative "programmable_agent"
     require_relative "programmable_agent_provider"
 
     MAX_CONTEXT_TURNS = 1000
@@ -344,7 +345,14 @@ module Cybros
 
       agent_metadata = agent_metadata_for(conversation)
       agent_program = agent_program_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
-      programmable_provider = programmable_provider_for(conversation_run)
+      llm_selection =
+        resolve_llm_selection(
+          node: node,
+          agent_metadata: agent_metadata,
+          agent_program: agent_program,
+          selected_model_ref_override: conversation_run&.selected_model_ref,
+        )
+      programmable_provider = programmable_provider_for(conversation_run, delegate: llm_selection.fetch(:provider, nil))
       ensure_programmable_runtime_available!(
         node: node,
         conversation: conversation,
@@ -354,13 +362,6 @@ module Cybros
         provider: provider,
         programmable_provider: programmable_provider,
       )
-      llm_selection =
-        resolve_llm_selection(
-          node: node,
-          agent_metadata: agent_metadata,
-          agent_program: agent_program,
-          selected_model_ref_override: conversation_run&.selected_model_ref,
-        )
       profile_resolution = resolve_profile(agent_metadata)
       profile_name = profile_resolution.fetch(:profile_name)
       definition = profile_resolution.fetch(:definition)
@@ -448,9 +449,14 @@ module Cybros
       runtime_kwargs[:context_soft_limit_tokens] = llm_selection.fetch(:context_soft_limit_tokens, nil) if llm_selection.key?(:context_soft_limit_tokens)
       runtime_kwargs[:context_soft_limit_ratio] = llm_selection.fetch(:context_soft_limit_ratio, nil) if llm_selection.key?(:context_soft_limit_ratio)
       runtime_kwargs[:context_budget_policy] = llm_selection.fetch(:context_budget_policy, nil) if llm_selection.key?(:context_budget_policy)
-      if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
-        runtime_kwargs[:llm_options] = { runtime_governance: runtime_governance }
-      end
+      runtime_llm_options =
+        runtime_llm_options_for(
+          conversation: conversation,
+          conversation_run: conversation_run,
+          agent_program: agent_program,
+          llm_selection: llm_selection,
+        )
+      runtime_kwargs[:llm_options] = runtime_llm_options if runtime_llm_options.any?
 
       runtime_kwargs[:context_turns] = context_turns if context_turns
 
@@ -479,11 +485,49 @@ module Cybros
       if (runtime_governance = llm_selection.fetch(:runtime_governance, nil)).is_a?(Hash) && runtime_governance.any?
         ctx_attrs[:runtime_governance] = runtime_governance
       end
+      if conversation.present?
+        cybros_attrs = {
+          session_context: Cybros::ProgrammableAgent::SessionContext.from_conversation(conversation).to_h,
+          execution_context: Cybros::ProgrammableAgent::ExecutionContext.from_conversation_node(
+            conversation: conversation,
+            node: node,
+          ).to_h,
+        }
+        capability_snapshot = conversation_run&.snapshot&.dig("capability_snapshot")
+        capability_snapshot = conversation_run&.agent_deployment&.capability_snapshot unless capability_snapshot.is_a?(Hash)
+        if capability_snapshot.is_a?(Hash) && capability_snapshot.any?
+          cybros_attrs[:capability_snapshot] = AgentCore::Utils.deep_stringify_keys(capability_snapshot)
+        end
+        tool_surface = conversation_run&.snapshot&.dig("draft", "planning", "tool_surface")
+        if tool_surface.is_a?(Hash) && tool_surface.any?
+          cybros_attrs[:tool_surface] = AgentCore::Utils.deep_stringify_keys(tool_surface)
+        end
+        ctx_attrs[:cybros] = cybros_attrs
+      end
       ctx_attrs[:runtime_surface] = runtime_surface_resolution.fetch(:execution_context_attributes)
       runtime_kwargs[:execution_context_attributes] = ctx_attrs
 
       AgentCore::DAG::Runtime.new(**runtime_kwargs)
     end
+
+    def runtime_llm_options_for(conversation:, conversation_run:, agent_program:, llm_selection:)
+      base_llm_options =
+        if conversation_run&.effective_agent_config.is_a?(Hash)
+          conversation_run.effective_agent_config["llm_options"]
+        elsif conversation.present? && agent_program.present?
+          conversation.selected_agent_config_for(agent_program)["llm_options"]
+        end
+
+      options = base_llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base_llm_options) : {}
+
+      runtime_governance = llm_selection.fetch(:runtime_governance, nil)
+      if runtime_governance.is_a?(Hash) && runtime_governance.any?
+        options[:runtime_governance] = runtime_governance
+      end
+
+      options
+    end
+    private_class_method :runtime_llm_options_for
 
     def resolve_llm_selection(node:, agent_metadata:, agent_program:, selected_model_ref_override: nil)
       catalog = Cybros::LLM::Catalog.effective
@@ -519,10 +563,11 @@ module Cybros
     end
     private_class_method :resolve_llm_selection
 
-    def programmable_provider_for(conversation_run)
+    def programmable_provider_for(conversation_run, delegate:)
       return nil unless conversation_run&.programmable?
+      return nil if delegate.nil?
 
-      Cybros::ProgrammableAgentProvider.new(conversation_run: conversation_run)
+      Cybros::ProgrammableAgentProvider.new(conversation_run: conversation_run, delegate: delegate)
     end
     private_class_method :programmable_provider_for
 

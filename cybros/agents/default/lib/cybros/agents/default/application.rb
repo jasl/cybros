@@ -52,6 +52,14 @@ module Cybros
           identity.fetch("supported_methods")
         end
 
+        def agent_capabilities_version
+          "default-agent-capabilities:v1"
+        end
+
+        def agent_tool_catalog
+          []
+        end
+
         def call(method_name:, params:)
           RPCDispatcher.new(application: self).dispatch(method_name: method_name, params: params)
         end

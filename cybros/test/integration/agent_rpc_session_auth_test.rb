@@ -143,12 +143,41 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
 
     assert_equal runtime.fetch(:deployment).id, invocation.agent_deployment_id
     assert_equal draft.id, invocation.scope_id
-    assert_equal "turn.prepare", invocation.method
+    assert_equal "before_agent_step", invocation.method
     assert_equal "succeeded", invocation.status
     assert_equal "closed", session.status
     assert_equal draft.id, session.scope_id
   ensure
     server&.shutdown
+  end
+
+  test "conversation run callback sessions validate tool surfaces against the pinned capability snapshot" do
+    session, callback_bearer =
+      create_open_session!(
+        scope_type: "conversation_run",
+        allowed_methods: %w[tool_surface.manifest],
+        capability_snapshot: capability_snapshot_payload,
+      )
+
+    result =
+      AgentRPC::CallbackDispatcher.call!(
+        bearer: callback_bearer,
+        method_name: "tool_surface.manifest",
+        scope_type: session.scope_type,
+        scope_id: session.scope_id,
+        payload: {
+          "execution_context" => { "conversation_id" => session.conversation_id },
+          "capability_registry_snapshot_id" => capability_snapshot_payload.fetch("capability_registry_snapshot_id"),
+          "selected_tool_ids" => [
+            capability_snapshot_payload.fetch("effective_tools").first.fetch("effective_tool_id"),
+          ],
+          "tool_surface_label" => "bundled-default",
+        },
+      )
+
+    assert_equal capability_snapshot_payload.fetch("capability_registry_snapshot_id"), result.fetch("capability_registry_snapshot_id")
+    assert_equal ["compact_context"], result.fetch("logical_tool_names")
+    assert_match(/\Asurface_/, result.fetch("tool_surface_id"))
   end
 
   private
@@ -179,9 +208,15 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
       { conversation: conversation, deployment: deployment, program: program, target: target }
     end
 
-    def create_open_session!
+    def create_open_session!(scope_type: "run_draft", allowed_methods: %w[conversation.settings.get execution_target.list], capability_snapshot: {})
       program = create_program!
-      deployment = create_deployment!(endpoint_url: "http://127.0.0.1:4319/rpc", deployment_bearer_secret_ref: "secret://fixture", program: program)
+      deployment =
+        create_deployment!(
+          endpoint_url: "http://127.0.0.1:4319/rpc",
+          deployment_bearer_secret_ref: "secret://fixture",
+          program: program,
+          capability_snapshot: capability_snapshot,
+        )
       conversation = create_conversation!
       raw_bearer = "arpc_#{SecureRandom.hex(24)}"
       session =
@@ -189,12 +224,12 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
           agent_deployment: deployment,
           agent_program: program,
           conversation: conversation,
-          scope_type: "run_draft",
+          scope_type: scope_type,
           scope_id: SecureRandom.uuid,
           deployment_fingerprint: deployment.deployment_fingerprint,
           deployment_activated_at: deployment.activated_at,
           session_token_digest: Digest::SHA256.hexdigest(raw_bearer),
-          allowed_methods: %w[conversation.settings.get execution_target.list],
+          allowed_methods: allowed_methods,
           expires_at: 5.minutes.from_now.change(usec: 0),
           status: "open",
         )
@@ -215,7 +250,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
       )
     end
 
-    def create_deployment!(endpoint_url:, deployment_bearer_secret_ref:, program: create_program!)
+    def create_deployment!(endpoint_url:, deployment_bearer_secret_ref:, program: create_program!, capability_snapshot: {})
       AgentDeployment.create!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
@@ -230,10 +265,49 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
         supported_methods: AgentDeployments::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
-        capability_snapshot: {},
+        capability_snapshot: capability_snapshot,
         inspection_details: {},
         activated_at: Time.current.change(usec: 0),
       )
+    end
+
+    def capability_snapshot_payload
+      @capability_snapshot_payload ||=
+        begin
+          snapshot =
+            Cybros::ProgrammableAgent::CapabilitySnapshot.build(
+              kernel_registry_version: "kernel:v1",
+              agent_program_id: "fixture-program",
+              agent_program_version: "2026-03-11",
+              kernel_tools: [
+                {
+                  logical_tool_name: "cybros_shell_exec",
+                  implementation_ref: "kernel://cybros_shell_exec",
+                },
+              ],
+              agent_tools: [
+                {
+                  logical_tool_name: "compact_context",
+                  implementation_ref: "agent://compact_context",
+                },
+              ],
+            )
+
+          {
+            "capability_registry_snapshot_id" => snapshot.snapshot_id,
+            "kernel_capability_registry_version" => snapshot.kernel_registry_version,
+            "agent_capabilities_version" => snapshot.agent_program_version,
+            "effective_tools" =>
+              snapshot.effective_tools.map do |tool|
+                {
+                  "logical_tool_name" => tool.logical_tool_name,
+                  "effective_tool_id" => tool.effective_tool_id,
+                  "implementation_source" => tool.implementation_source,
+                  "implementation_ref" => tool.implementation_ref,
+                }
+              end,
+          }
+        end
     end
 
     def create_execution_target!

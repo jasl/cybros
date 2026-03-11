@@ -13,7 +13,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
+          "before_agent_step" => lambda do |params, base_result, _identity|
             seen_conversation_ids << params["conversation_id"]
             base_result
           end,
@@ -63,7 +63,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
-          "turn.prepare" => lambda do |params, base_result, _identity|
+          "before_agent_step" => lambda do |params, base_result, _identity|
             seen_user_inputs << params["user_input"]
             base_result
           end,

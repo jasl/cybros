@@ -5,287 +5,501 @@ module AgentCore
   module DAG
     module Executors
       class AgentMessageExecutor
+        FinalizeOutputOutcome = Data.define(:output_payload, :terminal_action)
+
         def context_mode = :full
 
         def execute(node:, context:, stream:)
           runtime = nil
           execution_context = nil
           llm_recovery_metadata = {}
+          built_prompt = nil
 
           runtime = AgentCore::DAG.runtime_for(node: node)
           execution_context = ExecutionContextBuilder.build(node: node, runtime: runtime)
           agent_metadata = { agent: execution_context.attributes.fetch(:agent, {}) }
 
           instrumenter = execution_context.instrumenter
+          result = nil
+          runtime_wait_result = nil
+          runtime_error_payload = nil
+          task_notice_payload = nil
 
-          instrumenter.instrument(
-            "agent_core.turn",
-            run_id: execution_context.run_id,
-            dag: { graph_id: node.graph_id.to_s, node_id: node.id.to_s, turn_id: node.turn_id.to_s },
-          ) do
-            budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context)
-            execution_context = execution_context_with_context_budget(execution_context, metadata: budget.metadata, node: node)
-
-            llm =
-              call_llm_with_recovery(
-                runtime,
-                budget.built_prompt,
-                stream: stream,
-                execution_context: execution_context,
-                recovery_metadata_out: llm_recovery_metadata,
-              )
-
-            message = llm.fetch(:message)
-            stop_reason = llm.fetch(:stop_reason)
-            usage = llm.fetch(:usage)
-            streamed_output = llm.fetch(:streamed_output)
-            used_model = llm.fetch(:used_model)
-            llm_metadata = deep_merge_metadata(llm.fetch(:metadata, {}), llm_recovery_metadata)
-            directives = llm.fetch(:directives, nil)
-
-            message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
-
-            output_payload =
-              build_agent_output_payload(
-                message,
-                runtime: runtime,
-                stop_reason: stop_reason,
-                model: used_model,
-                directives: directives,
-              )
-
-            if message.has_tool_calls? && !can_expand_tool_loop?(node, runtime: runtime)
-              content = "Stopped: exceeded max_steps_per_turn."
-              override_message = Message.new(role: :assistant, content: content)
-
-              output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn, model: used_model)
-              output_payload["tool_calls"] = message.tool_calls.map(&:to_h)
-              output_payload =
-                apply_finalize_output(
-                  output_payload: output_payload,
-                  message: override_message,
-                  runtime: runtime,
-                  execution_context: execution_context,
-                  context: context,
-                  stop_reason: :end_turn,
-                  model: used_model,
-                  streamed_output: false,
-                )
-
-              metadata =
-                deep_merge_metadata(
-                  budget.metadata,
-                  deep_merge_metadata(
-                    llm_metadata,
-                    deep_merge_metadata(tool_call_limit_metadata, { reason: "max_steps_exceeded" })
-                  )
-                )
-              metadata = deep_merge_metadata(metadata, agent_metadata)
-
-              ::DAG::ExecutionResult.finished(content: content, payload: output_payload, metadata: metadata, usage: usage)
-            else
-              if message.has_tool_calls?
-                tool_loop_metadata =
-                  expand_tool_loop!(
-                    node,
-                    message,
-                    visible_tools: budget.built_prompt.tools,
+          begin
+            result =
+              instrumenter.instrument(
+                "agent_core.turn",
+                run_id: execution_context.run_id,
+                dag: { graph_id: node.graph_id.to_s, node_id: node.id.to_s, turn_id: node.turn_id.to_s },
+              ) do
+                budget = build_prompt_with_budget(node, context_nodes: context, runtime: runtime, execution_context: execution_context)
+                built_prompt = budget.built_prompt
+                execution_context = execution_context_with_context_budget(execution_context, metadata: budget.metadata, node: node)
+                context_pressure_result =
+                  apply_context_pressure(
+                    node: node,
                     runtime: runtime,
                     execution_context: execution_context,
+                    built_prompt: built_prompt,
                   )
-              else
-                tool_loop_metadata = {}
-              end
+                return context_pressure_result if context_pressure_result
 
-              metadata =
-                deep_merge_metadata(
-                  budget.metadata,
-                  deep_merge_metadata(
-                    llm_metadata,
-                    deep_merge_metadata(tool_call_limit_metadata, tool_loop_metadata)
+                llm =
+                  call_llm_with_recovery(
+                    runtime,
+                    budget.built_prompt,
+                    stream: stream,
+                    execution_context: execution_context,
+                    recovery_metadata_out: llm_recovery_metadata,
                   )
-                )
-              metadata = deep_merge_metadata(metadata, agent_metadata)
-              output_payload =
-                apply_finalize_output(
-                  output_payload: output_payload,
-                  message: message,
-                  runtime: runtime,
-                  execution_context: execution_context,
-                  context: context,
-                  stop_reason: stop_reason,
-                  model: used_model,
-                  streamed_output: streamed_output,
-                )
 
-              if streamed_output
-                ::DAG::ExecutionResult.finished(payload: output_payload, metadata: metadata, usage: usage, streamed_output: true)
-              else
-                ::DAG::ExecutionResult.finished(content: output_payload.fetch("content"), payload: output_payload, metadata: metadata, usage: usage)
+                message = llm.fetch(:message)
+                stop_reason = llm.fetch(:stop_reason)
+                usage = llm.fetch(:usage)
+                streamed_output = llm.fetch(:streamed_output)
+                used_model = llm.fetch(:used_model)
+                llm_metadata = deep_merge_metadata(llm.fetch(:metadata, {}), llm_recovery_metadata)
+                directives = llm.fetch(:directives, nil)
+
+                message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
+
+                output_payload =
+                  build_agent_output_payload(
+                    message,
+                    runtime: runtime,
+                    stop_reason: stop_reason,
+                    model: used_model,
+                    directives: directives,
+                  )
+
+                if message.has_tool_calls? && !can_expand_tool_loop?(node, runtime: runtime)
+                  content = "Stopped: exceeded max_steps_per_turn."
+                  override_message = Message.new(role: :assistant, content: content)
+
+                  output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn, model: used_model)
+                  output_payload["tool_calls"] = message.tool_calls.map(&:to_h)
+                  finalize_output =
+                    apply_finalize_output(
+                      node: node,
+                      output_payload: output_payload,
+                      message: override_message,
+                      runtime: runtime,
+                      execution_context: execution_context,
+                      context: context,
+                      built_prompt: built_prompt,
+                      stop_reason: :end_turn,
+                      model: used_model,
+                      streamed_output: false,
+                    )
+                  if finalize_output.terminal_action
+                    return terminal_execution_result_for(
+                      terminal_action: finalize_output.terminal_action,
+                      metadata: budget.metadata,
+                      hook_name: "before_finalize_output",
+                    )
+                  end
+                  output_payload = finalize_output.output_payload
+
+                  metadata =
+                    deep_merge_metadata(
+                      budget.metadata,
+                      deep_merge_metadata(
+                        llm_metadata,
+                        deep_merge_metadata(tool_call_limit_metadata, { reason: "max_steps_exceeded" })
+                      )
+                    )
+                  metadata = deep_merge_metadata(metadata, agent_metadata)
+
+                  ::DAG::ExecutionResult.finished(content: content, payload: output_payload, metadata: metadata, usage: usage)
+                else
+                  if message.has_tool_calls?
+                    tool_loop_metadata =
+                      expand_tool_loop!(
+                        node,
+                        message,
+                        visible_tools: budget.built_prompt.tools,
+                        runtime: runtime,
+                        execution_context: execution_context,
+                        provider_metadata: llm.fetch(:metadata, {}),
+                      )
+                  else
+                    tool_loop_metadata = {}
+                  end
+
+                  metadata =
+                    deep_merge_metadata(
+                      budget.metadata,
+                      deep_merge_metadata(
+                        llm_metadata,
+                        deep_merge_metadata(tool_call_limit_metadata, tool_loop_metadata)
+                      )
+                    )
+                  metadata = deep_merge_metadata(metadata, agent_metadata)
+                  finalize_output =
+                    apply_finalize_output(
+                      node: node,
+                      output_payload: output_payload,
+                      message: message,
+                      runtime: runtime,
+                      execution_context: execution_context,
+                      context: context,
+                      built_prompt: built_prompt,
+                      stop_reason: stop_reason,
+                      model: used_model,
+                      streamed_output: streamed_output,
+                    )
+                  if finalize_output.terminal_action
+                    return terminal_execution_result_for(
+                      terminal_action: finalize_output.terminal_action,
+                      metadata: metadata,
+                      hook_name: "before_finalize_output",
+                    )
+                  end
+                  output_payload = finalize_output.output_payload
+
+                  if streamed_output && output_payload.fetch("content", "").to_s != message.text.to_s
+                    ::DAG::ExecutionResult.finished(content: output_payload.fetch("content"), payload: output_payload, metadata: metadata, usage: usage)
+                  elsif streamed_output
+                    ::DAG::ExecutionResult.finished(payload: output_payload, metadata: metadata, usage: usage, streamed_output: true)
+                  else
+                    ::DAG::ExecutionResult.finished(content: output_payload.fetch("content"), payload: output_payload, metadata: metadata, usage: usage)
+                  end
+                end
               end
-            end
+            rescue AgentCore::ContextWindowExceededError => e
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              metadata = {
+                "context_cost" => {
+                  "context_window_tokens" => e.context_window,
+                  "reserved_output_tokens" => e.reserved_output,
+                  "limit" => e.limit,
+                  "estimated_tokens" => {
+                    "total" => e.estimated_tokens,
+                    "messages" => e.message_tokens,
+                    "tools" => e.tool_tokens,
+                  }.compact,
+                }.compact,
+                "agent" => agent,
+              }
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              common_payload = {
+                node: node,
+                error: e,
+                default_error: "ContextWindowExceededError: #{e.message}",
+                default_metadata: metadata,
+                runtime: runtime,
+                execution_context: execution_context,
+                context: context,
+                built_prompt: built_prompt,
+              }
+              if programmable_provider_for(runtime)
+                task_notice_payload = common_payload.merge(notice_kind: :hardcap_reached)
+              else
+                runtime_error_payload = common_payload.merge(stage: :prepare_turn)
+              end
+            rescue AgentCore::RuntimeWaitError => e
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              publish_runtime_wait(
+                execution_context: execution_context,
+                runtime: runtime,
+                runtime_wait_error: e,
+              )
+              metadata = {
+                "runtime_wait" => runtime_wait_metadata(e),
+                "agent" => agent,
+              }
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              runtime_wait_result =
+                ::DAG::ExecutionResult.pending(
+                  reason: e.reason_type,
+                  retry_at: e.retry_at,
+                  metadata: metadata,
+                )
+            rescue AgentCore::ProviderError => e
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              metadata = {
+                provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
+                status: e.status,
+                agent: agent,
+              }.compact
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              common_payload = {
+                node: node,
+                error: e,
+                default_error: "ProviderError: #{e.message}",
+                default_metadata: metadata,
+                runtime: runtime,
+                execution_context: execution_context,
+                context: context,
+                built_prompt: built_prompt,
+              }
+              if programmable_provider_for(runtime)
+                task_notice_payload = common_payload.merge(notice_kind: :provider_error)
+              else
+                runtime_error_payload = common_payload.merge(stage: :provider)
+              end
+            rescue AgentCore::StreamError => e
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              metadata = {
+                provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
+                stream: { "output_committed" => e.output_committed == true },
+                agent: agent,
+              }.compact
+              if e.respond_to?(:body) && e.body.present?
+                body_safe = e.body.is_a?(Hash) ? e.body : (e.body.to_s[0..2000] rescue nil)
+                metadata["provider_error_body"] = body_safe
+              end
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              common_payload = {
+                node: node,
+                error: e,
+                default_error: "#{e.class}: #{e.message}",
+                default_metadata: metadata,
+                runtime: runtime,
+                execution_context: execution_context,
+                context: context,
+                built_prompt: built_prompt,
+              }
+              if programmable_provider_for(runtime)
+                task_notice_payload = common_payload.merge(notice_kind: :provider_error)
+              else
+                runtime_error_payload = common_payload.merge(stage: :provider_stream)
+              end
+            rescue AgentCore::ValidationError => e
+              raise if fail_fast_programmable_error?(e)
+
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              metadata = { agent: agent }.compact
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              runtime_error_payload = {
+                node: node,
+                error: e,
+                stage: :runtime,
+                default_error: "#{e.class}: #{e.message}",
+                default_metadata: metadata,
+                runtime: runtime,
+                execution_context: execution_context,
+                context: context,
+                built_prompt: built_prompt,
+              }
+            rescue StandardError => e
+              raise if fail_fast_programmable_error?(e)
+
+              agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
+              metadata = { agent: agent }.compact
+              metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
+              runtime_error_payload = {
+                node: node,
+                error: e,
+                stage: :runtime,
+                default_error: "#{e.class}: #{e.message}",
+                default_metadata: metadata,
+                runtime: runtime,
+                execution_context: execution_context,
+                context: context,
+                built_prompt: built_prompt,
+              }
           end
-        rescue AgentCore::ContextWindowExceededError => e
-          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          metadata = {
-            "context_cost" => {
-              "context_window_tokens" => e.context_window,
-              "reserved_output_tokens" => e.reserved_output,
-              "limit" => e.limit,
-              "estimated_tokens" => {
-                "total" => e.estimated_tokens,
-                "messages" => e.message_tokens,
-                "tools" => e.tool_tokens,
-              }.compact,
-            }.compact,
-            "agent" => agent,
-          }
-          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          handle_runtime_error(
-            error: e,
-            stage: :prepare_turn,
-            default_error: "ContextWindowExceededError: #{e.message}",
-            default_metadata: metadata,
-            runtime: runtime,
-            execution_context: execution_context,
-            context: context,
-          )
-        rescue AgentCore::RuntimeWaitError => e
-          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          publish_runtime_wait(
-            execution_context: execution_context,
-            runtime: runtime,
-            runtime_wait_error: e,
-          )
-          metadata = {
-            "runtime_wait" => runtime_wait_metadata(e),
-            "agent" => agent,
-          }
-          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          ::DAG::ExecutionResult.pending(
-            reason: e.reason_type,
-            retry_at: e.retry_at,
-            metadata: metadata,
-          )
-        rescue AgentCore::ProviderError => e
-          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          metadata = {
-            provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
-            status: e.status,
-            agent: agent,
-          }.compact
-          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          handle_runtime_error(
-            error: e,
-            stage: :provider,
-            default_error: "ProviderError: #{e.message}",
-            default_metadata: metadata,
-            runtime: runtime,
-            execution_context: execution_context,
-            context: context,
-          )
-        rescue AgentCore::StreamError => e
-          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          metadata = {
-            provider: runtime ? runtime_name(runtime) : runtime_name_safe(node),
-            stream: { "output_committed" => e.output_committed == true },
-            agent: agent,
-          }.compact
-          if e.respond_to?(:body) && e.body.present?
-            body_safe = e.body.is_a?(Hash) ? e.body : (e.body.to_s[0..2000] rescue nil)
-            metadata["provider_error_body"] = body_safe
+
+          return result if result
+          return runtime_wait_result if runtime_wait_result
+          if task_notice_payload
+            return handle_task_notice(**task_notice_payload)
           end
-          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          handle_runtime_error(
-            error: e,
-            stage: :provider_stream,
-            default_error: "#{e.class}: #{e.message}",
-            default_metadata: metadata,
-            runtime: runtime,
-            execution_context: execution_context,
-            context: context,
-          )
-        rescue StandardError => e
-          agent = agent_attributes_from(execution_context: execution_context, runtime: runtime)
-          metadata = { agent: agent }.compact
-          metadata = deep_merge_metadata(metadata, llm_recovery_metadata)
-          handle_runtime_error(
-            error: e,
-            stage: :runtime,
-            default_error: "#{e.class}: #{e.message}",
-            default_metadata: metadata,
-            runtime: runtime,
-            execution_context: execution_context,
-            context: context,
-          )
+          if runtime_error_payload
+            handle_runtime_error(**runtime_error_payload)
+          end
         end
 
         private
 
-          def apply_finalize_output(output_payload:, message:, runtime:, execution_context:, context:, stop_reason:, model:, streamed_output:)
-            return output_payload if streamed_output
-            return output_payload if message.has_tool_calls?
+          def apply_finalize_output(node:, output_payload:, message:, runtime:, execution_context:, context:, built_prompt:, stop_reason:, model:, streamed_output:)
+            return FinalizeOutputOutcome.new(output_payload: output_payload, terminal_action: nil) if message.has_tool_calls?
 
-            result =
-              runtime.runtime_surface_runner.run(
-                surface: runtime.runtime_surface,
-                stage: :finalize_output,
-                input:
-                  AgentCore::RuntimeSurface::Inputs::FinalizeOutput.new(
-                    draft_output: AgentCore::Utils.deep_stringify_keys(output_payload),
-                    context: Array(context),
-                    budget: {
-                      runtime_surface: AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:runtime_surface, {})),
-                      context_window_tokens: runtime.context_window_tokens,
-                      reserved_output_tokens: runtime.reserved_output_tokens,
-                    },
-                    helpers: {},
-                  ),
-                execution_context: execution_context,
-              )
+            programmable_provider = programmable_provider_for(runtime)
+            if programmable_provider
+              result =
+                programmable_provider.run_before_finalize_output!(
+                  node: node,
+                  built_prompt: built_prompt,
+                  draft_output: output_payload,
+                )
+              if result.terminal_action
+                return FinalizeOutputOutcome.new(
+                  output_payload: output_payload,
+                  terminal_action: result.terminal_action,
+                )
+              end
+              emitted_message = result.emitted_message
+              if emitted_message.is_a?(Hash)
+                return FinalizeOutputOutcome.new(
+                  output_payload:
+                    normalize_final_output_payload(
+                      emitted_message,
+                      fallback: output_payload,
+                      runtime: runtime,
+                      stop_reason: stop_reason,
+                      model: model,
+                    ),
+                  terminal_action: nil,
+                )
+              end
 
-            decision = result.decision
-            unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::FinalOutput)
+              return FinalizeOutputOutcome.new(output_payload: output_payload, terminal_action: nil)
+            end
+
+            return FinalizeOutputOutcome.new(output_payload: output_payload, terminal_action: nil) if streamed_output
+
+            begin
+              result =
+                runtime.runtime_surface_runner.run(
+                  surface: runtime.runtime_surface,
+                  stage: :finalize_output,
+                  input:
+                    AgentCore::RuntimeSurface::Inputs::FinalizeOutput.new(
+                      draft_output: AgentCore::Utils.deep_stringify_keys(output_payload),
+                      context: Array(context),
+                      budget: {
+                        runtime_surface: AgentCore::Utils.deep_stringify_keys(execution_context.attributes.fetch(:runtime_surface, {})),
+                        context_window_tokens: runtime.context_window_tokens,
+                        reserved_output_tokens: runtime.reserved_output_tokens,
+                      },
+                      helpers: {},
+                    ),
+                  execution_context: execution_context,
+                )
+
+              decision = result.decision
+              unless decision.is_a?(AgentCore::RuntimeSurface::Decisions::FinalOutput)
+                AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
+                  execution_context: execution_context,
+                  stage: :finalize_output,
+                  surface: runtime.runtime_surface,
+                  outcome: {
+                    applied: false,
+                    fallback: result.fallback?,
+                    final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(output_payload),
+                  },
+                )
+                return FinalizeOutputOutcome.new(output_payload: output_payload, terminal_action: nil)
+              end
+
+              normalized =
+                normalize_final_output_payload(
+                  decision.output,
+                  fallback: output_payload,
+                  runtime: runtime,
+                  stop_reason: stop_reason,
+                  model: model,
+                )
+
               AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
                 execution_context: execution_context,
                 stage: :finalize_output,
                 surface: runtime.runtime_surface,
                 outcome: {
-                  applied: false,
+                  applied: true,
                   fallback: result.fallback?,
-                  final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(output_payload),
+                  final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(normalized),
                 },
               )
-              return output_payload
+
+              FinalizeOutputOutcome.new(output_payload: normalized, terminal_action: nil)
+            rescue StandardError
+              FinalizeOutputOutcome.new(output_payload: output_payload, terminal_action: nil)
             end
-
-            normalized =
-              normalize_final_output_payload(
-                decision.output,
-                fallback: output_payload,
-                runtime: runtime,
-                stop_reason: stop_reason,
-                model: model,
-              )
-
-            AgentCore::RuntimeSurface::AuditSerializer.publish_outcome(
-              execution_context: execution_context,
-              stage: :finalize_output,
-              surface: runtime.runtime_surface,
-              outcome: {
-                applied: true,
-                fallback: result.fallback?,
-                final_output: AgentCore::RuntimeSurface::AuditSerializer.output_summary(normalized),
-              },
-            )
-
-            normalized
-          rescue StandardError
-            output_payload
           end
 
-          def handle_runtime_error(error:, stage:, default_error:, default_metadata:, runtime:, execution_context:, context:)
+          def handle_task_notice(node:, error:, notice_kind:, default_error:, default_metadata:, runtime:, execution_context:, context:, built_prompt:)
+            raise error if fail_fast_programmable_error?(error)
+
             return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless runtime && execution_context
+            return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless handleable_error?(error)
+
+            programmable_provider = programmable_provider_for(runtime)
+            unless programmable_provider
+              return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
+            end
+
+            result =
+              programmable_provider.run_after_task_notice!(
+                node: node,
+                built_prompt: built_prompt,
+                notice_kind: notice_kind,
+                error: error,
+                status: "failed",
+                subject_kind: "agent_step",
+                retryable: retryable_task_notice_error?(error),
+                user_decision_required: user_decision_required_for_task_notice(notice_kind),
+              )
+            emitted_message = result.emitted_message
+            if emitted_message.is_a?(Hash)
+              payload =
+                normalize_final_output_payload(
+                  emitted_message,
+                  fallback: { "content" => default_error_message_for(:user_safe_message) },
+                  runtime: runtime,
+                  stop_reason: :end_turn,
+                  model: runtime.model,
+                )
+
+              return ::DAG::ExecutionResult.finished(
+                content: payload.fetch("content"),
+                payload: payload,
+                metadata: default_metadata,
+              )
+            end
+
+            ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
+          rescue StandardError => e
+            raise if fail_fast_programmable_error?(e)
+
+            ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
+          end
+
+          def apply_context_pressure(node:, runtime:, execution_context:, built_prompt:)
+            programmable_provider = programmable_provider_for(runtime)
+            return nil unless programmable_provider
+
+            context_budget = execution_context&.attributes&.fetch(:context_budget, nil)
+            context_budget = context_budget.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(context_budget) : {}
+            budget_action = context_budget["budget_action"].to_s.presence
+            return nil if budget_action.blank? || budget_action == "none"
+
+            result =
+              programmable_provider.run_on_context_pressure!(
+                node: node,
+                built_prompt: built_prompt,
+                context_pressure: context_budget,
+              )
+
+            if result.terminal_action
+              return terminal_execution_result_for(
+                terminal_action: result.terminal_action,
+                metadata: { "context_budget" => context_budget },
+                hook_name: "on_context_pressure",
+              )
+            end
+
+            return nil unless result.deferred_anchor
+
+            ::DAG::ExecutionResult.stopped(
+              reason: "deferred_by_hook",
+              metadata: {
+                "hook_name" => "on_context_pressure",
+                "action_type" => "create_task",
+                "placement" => "prepend",
+                "deferred_anchor" => true,
+                "context_budget" => context_budget,
+              }.compact,
+            )
+          end
+
+          def handle_runtime_error(node:, error:, stage:, default_error:, default_metadata:, runtime:, execution_context:, context:, built_prompt:)
+            raise error if fail_fast_programmable_error?(error)
+
+            return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless runtime && execution_context
+            return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) if programmable_provider_for(runtime)
             return ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata) unless handleable_error?(error)
 
             result =
@@ -352,6 +566,20 @@ module AgentCore
             ::DAG::ExecutionResult.errored(error: default_error, metadata: default_metadata)
           end
 
+          def programmable_provider_for(runtime)
+            provider = runtime&.provider
+            required_methods = %i[
+              run_before_finalize_output!
+              run_after_task_notice!
+              run_on_context_pressure!
+            ]
+            return provider if required_methods.all? { |method_name| provider.respond_to?(method_name) }
+
+            nil
+          rescue StandardError
+            nil
+          end
+
           def normalize_final_output_payload(value, fallback:, runtime:, stop_reason:, model:)
             fallback = fallback.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(fallback) : {}
             message = normalize_assistant_message(value, fallback: fallback)
@@ -359,6 +587,18 @@ module AgentCore
             build_agent_output_payload(message, runtime: runtime, stop_reason: stop_reason, model: model, directives: directives)
           rescue StandardError
             fallback
+          end
+
+          def terminal_execution_result_for(terminal_action:, metadata:, hook_name:)
+            metadata = AgentCore::Utils.deep_stringify_keys(metadata.is_a?(Hash) ? metadata : {})
+            metadata["hook_name"] = hook_name.to_s
+            metadata["action_type"] = terminal_action.type.to_s
+            metadata["message"] = terminal_action.message.to_s if terminal_action.message.to_s.present?
+
+            ::DAG::ExecutionResult.stopped(
+              reason: terminal_action.reason.to_s.presence || "programmable_agent_halt",
+              metadata: metadata,
+            )
           end
 
           def normalize_assistant_message(value, fallback:)
@@ -399,6 +639,32 @@ module AgentCore
             true
           rescue StandardError
             true
+          end
+
+          def retryable_task_notice_error?(error)
+            case error
+            when AgentCore::ProviderError
+              retryable_provider_status?(error.status)
+            when AgentCore::StreamError
+              retryable_provider_status?(error.status)
+            else
+              false
+            end
+          rescue StandardError
+            false
+          end
+
+          def user_decision_required_for_task_notice(notice_kind)
+            %w[permission_denied remote_tool_denied].include?(notice_kind.to_s)
+          end
+
+          def fail_fast_programmable_error?(error)
+            return false unless error.is_a?(AgentCore::ValidationError)
+
+            code = error.code.to_s
+            code.start_with?("cybros.programmable_agent.", "cybros.agent_rpc.")
+          rescue StandardError
+            false
           end
 
           def error_view_for(error)
@@ -1032,11 +1298,12 @@ module AgentCore
             true
           end
 
-          def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:)
+          def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:, provider_metadata:)
             graph = node.graph
             tool_policy = runtime.tool_policy
             diagnostic_level = diagnostic_level_for(node)
             budget_compact_task = enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
+            tool_surface_manifest = programmable_tool_surface_manifest(execution_context: execution_context)
 
             tool_calls = message.tool_calls
             tool_loop_metadata = {}
@@ -1188,6 +1455,7 @@ module AgentCore
                 parse_error = tool_call.arguments_parse_error
                 repair = task_repair_flags(name_repaired: name_repaired, arguments_repaired: arguments_repaired)
                 arguments_resolution = arguments_repaired ? "repaired" : "original"
+                tool_route = nil
 
                 if parse_error
                   invalid += 1
@@ -1252,6 +1520,8 @@ module AgentCore
                         arguments_resolution: arguments_resolution,
                         repair: repair,
                         source: "policy",
+                        tool_route: tool_route,
+                        tool_surface_manifest: tool_surface_manifest,
                       ),
                       body_output: { "result" => tool_error.to_h },
                     )
@@ -1299,6 +1569,38 @@ module AgentCore
                 name_resolution = reviewed_tool_call.fetch(:name_resolution)
                 arguments = reviewed_tool_call.fetch(:arguments)
                 decision = reviewed_tool_call.fetch(:decision)
+                tool_route =
+                  programmable_tool_route(
+                    tool_surface_manifest: tool_surface_manifest,
+                    requested_name: requested_name,
+                    resolved_name: resolved_name,
+                  )
+
+                if tool_surface_manifest
+                  if tool_route
+                    resolved =
+                      ResolvedTool.new(
+                        name: tool_route.logical_tool_name,
+                        source: tool_route.implementation_source,
+                        exists: true,
+                        resolution_method: resolved.resolution_method,
+                      )
+                    resolved_name = resolved.name
+                    source = resolved.source
+                  else
+                    resolved =
+                      ResolvedTool.new(
+                        name: requested_name.to_s,
+                        source: "policy",
+                        exists: false,
+                        resolution_method: :tool_surface,
+                      )
+                    resolved_name = resolved.name
+                    source = resolved.source
+                    name_resolution = :tool_surface
+                    decision = AgentCore::Resources::Tools::Policy::Decision.deny(reason: "tool_surface_excluded")
+                  end
+                end
 
                 instrument_authorization(execution_context, resolved_name, decision)
 
@@ -1399,6 +1701,8 @@ module AgentCore
                             arguments_resolution: "invalid",
                             repair: repair,
                             source: "invalid_args",
+                            tool_route: tool_route,
+                            tool_surface_manifest: tool_surface_manifest,
                           ),
                           body_output: { "result" => tool_error.to_h },
                         )
@@ -1435,6 +1739,8 @@ module AgentCore
                         arguments_resolution: arguments_resolution,
                         repair: repair,
                         source: task_source,
+                        tool_route: tool_route,
+                        tool_surface_manifest: tool_surface_manifest,
                       ),
                     )
 
@@ -1496,6 +1802,8 @@ module AgentCore
                             arguments_resolution: "invalid",
                             repair: repair,
                             source: "invalid_args",
+                            tool_route: tool_route,
+                            tool_surface_manifest: tool_surface_manifest,
                           ),
                           body_output: { "result" => tool_error.to_h },
                         )
@@ -1542,6 +1850,8 @@ module AgentCore
                         arguments_resolution: arguments_resolution,
                         repair: repair,
                         source: task_source,
+                        tool_route: tool_route,
+                        tool_surface_manifest: tool_surface_manifest,
                       ),
                     )
 
@@ -1577,6 +1887,8 @@ module AgentCore
                         arguments_resolution: arguments_resolution,
                         repair: repair,
                         source: "policy",
+                        tool_route: tool_route,
+                        tool_surface_manifest: tool_surface_manifest,
                       ),
                       body_output: { "result" => tool_error.to_h },
                     )
@@ -1929,7 +2241,47 @@ module AgentCore
             }
           end
 
-          def task_input_hash(tool_call_id:, requested_name:, name:, name_resolution:, arguments:, source:, arguments_resolution: "original", repair: nil)
+          def programmable_tool_surface_manifest(execution_context:)
+            payload =
+              execution_context.attributes.dig(:cybros, :tool_surface) ||
+                execution_context.attributes.dig(:cybros, "tool_surface") ||
+                execution_context.attributes.dig("cybros", :tool_surface) ||
+                execution_context.attributes.dig("cybros", "tool_surface")
+            return nil unless payload.is_a?(Hash) && payload.any?
+
+            snapshot_payload =
+              execution_context.attributes.dig(:cybros, :capability_snapshot) ||
+                execution_context.attributes.dig(:cybros, "capability_snapshot") ||
+                execution_context.attributes.dig("cybros", :capability_snapshot) ||
+                execution_context.attributes.dig("cybros", "capability_snapshot")
+            return nil unless snapshot_payload.is_a?(Hash) && snapshot_payload.any?
+
+            snapshot = AgentCore::RuntimeSurface::ToolRoutingSnapshot.restore(snapshot_payload)
+            AgentCore::RuntimeSurface::ToolSurfaceManifest.restore(
+              payload,
+              capability_registry_snapshot: snapshot,
+            )
+          end
+
+          def programmable_tool_route(tool_surface_manifest:, requested_name:, resolved_name:)
+            return nil unless tool_surface_manifest
+
+            tool_surface_manifest.effective_tool_for(resolved_name) ||
+              tool_surface_manifest.effective_tool_for(requested_name)
+          end
+
+          def task_input_hash(
+            tool_call_id:,
+            requested_name:,
+            name:,
+            name_resolution:,
+            arguments:,
+            source:,
+            arguments_resolution: "original",
+            repair: nil,
+            tool_route: nil,
+            tool_surface_manifest: nil
+          )
             arguments = arguments.is_a?(Hash) ? arguments : {}
             repair = AgentCore::Utils.deep_stringify_keys(repair) if repair.is_a?(Hash)
 
@@ -1944,6 +2296,16 @@ module AgentCore
               "source" => source.to_s,
             }.tap do |input|
               input["repair"] = repair if repair.present?
+              if tool_route
+                input["logical_tool_name"] = tool_route.logical_tool_name
+                input["effective_tool_id"] = tool_route.effective_tool_id
+                input["implementation_source"] = tool_route.implementation_source
+                input["implementation_ref"] = tool_route.implementation_ref
+              end
+              if tool_surface_manifest
+                input["capability_registry_snapshot_id"] = tool_surface_manifest.capability_registry_snapshot.snapshot_id
+                input["tool_surface_id"] = tool_surface_manifest.tool_surface_id
+              end
             end
           end
 

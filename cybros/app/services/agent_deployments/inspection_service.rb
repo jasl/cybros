@@ -26,7 +26,6 @@ module AgentDeployments
           "identity" => identity,
         }.compact,
         schema_snapshot: normalize_hash(schemas_result),
-        capability_snapshot: { "supported_methods" => Array(identity["supported_methods"]).map(&:to_s) },
         inspection_details: {
           "initialize" => normalize_hash(initialize_result),
           "describe" => normalize_hash(describe_result),
@@ -38,8 +37,9 @@ module AgentDeployments
         last_inspected_at: Time.current,
         last_health_checked_at: Time.current,
       )
+      Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment) if health_status == "healthy"
       deployment.close_open_rpc_sessions! if health_status != "healthy"
-    rescue Error => e
+    rescue Error, AgentCore::ValidationError => e
       deployment.close_open_rpc_sessions!
       deployment.update!(
         status: "inactive",

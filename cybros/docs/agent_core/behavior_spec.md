@@ -241,6 +241,15 @@ required approval gate 的 child 节点会保持 `pending` 并被 dependency 阻
   - 已经写出可见 streaming delta 的错误不会再让 surface 改写已提交内容
   - 失败时回退 runtime 默认错误路径，保证 turn correctness 优先
 
+对 Cybros programmable-agent runtime 的补充约束：
+
+- `finalize_output` / `handle_error` 是 AgentCore 通用 runtime stage，不是 programmable `agent_rpc` 的 canonical hook 名
+- programmable final output canonical hook 是 `before_finalize_output`
+- programmable live-step context-pressure canonical hook 是 `on_context_pressure`
+- programmable delegated-worker preflight canonical hook 是 `before_subagent_spawn`
+- programmable terminal task notices 走 `after_task_notice` / `after_subagent_result`
+- provider/kernel fail-fast 错误没有安全 callback 通道时，保持 runtime-owned failure，而不是走泛化 programmable error hook
+
 ---
 
 ## 6) max_steps_per_turn（防止无限 tool loop）

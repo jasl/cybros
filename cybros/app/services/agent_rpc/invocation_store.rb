@@ -68,10 +68,10 @@ module AgentRPC
       invocation
     end
 
-    def self.mark_failed!(invocation:, error_snapshot:, session: nil)
+    def self.mark_failed!(invocation:, error_snapshot:, session: nil, result_snapshot: nil)
       invocation.update!(
         status: "failed",
-        result_snapshot: {},
+        result_snapshot: normalize_hash(result_snapshot),
         error_snapshot: normalize_hash(error_snapshot),
         last_session: session,
       )

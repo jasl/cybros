@@ -17,14 +17,18 @@ module TestSupport
       end
     end
 
-    attr_reader :calls, :required_bearer, :targets
+    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries
 
-    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil)
+    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil)
       @required_bearer = required_bearer
       @proposal_decision = proposal_decision
       @targets =
         Array(targets || default_targets).map do |target|
           deep_copy(target)
+        end
+      @prompt_buffer_entries =
+        Array(prompt_buffer_entries).map do |entry|
+          deep_copy(entry)
         end
       @calls = []
       @server = nil
@@ -100,6 +104,13 @@ module TestSupport
         { "value" => nil }
       when "lane.kv.list"
         { "entries" => [] }
+      when "lane.prompt_buffer.list", "lane.prompt_buffer.snapshot"
+        buffer_name = params["buffer_name"].to_s.strip
+        entries = deep_copy(prompt_buffer_entries)
+        unless buffer_name.empty?
+          entries.select! { |entry| entry["buffer_name"].to_s == buffer_name }
+        end
+        { "entries" => entries }
       when "execution_target.list"
         { "targets" => deep_copy(targets) }
       when "execution_target.get"
@@ -110,6 +121,13 @@ module TestSupport
             "decision" => @proposal_decision,
             "execution_target_id" => params["execution_target_id"],
           },
+        }
+      when "tool_surface.manifest"
+        {
+          "capability_registry_snapshot_id" => params["capability_registry_snapshot_id"],
+          "selected_tool_ids" => Array(params["selected_tool_ids"]),
+          "tool_surface_id" => "surface_callback_harness",
+          "logical_tool_names" => [],
         }
       else
         raise KeyError, "unsupported callback method: #{method_name}"

@@ -324,7 +324,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
         activated_at: Time.current.change(usec: 0),
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: %w[initialize turn.prepare turn.compose],
+        supported_methods: AgentDeployments::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

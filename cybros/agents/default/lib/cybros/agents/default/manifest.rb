@@ -9,7 +9,6 @@ module Cybros
           protocol_version
           agent_sdk_version
           supported_methods
-          runtime_surface
           global_config_schema
           conversation_config_schema
           prompts
@@ -24,7 +23,6 @@ module Cybros
           raise KeyError, "agent.yml missing required keys: #{missing.join(", ")}" if missing.any?
 
           manifest["supported_methods"] = Array(manifest["supported_methods"]).map(&:to_s)
-          manifest["runtime_surface"] = deep_stringify(manifest["runtime_surface"])
           manifest["global_config_schema"] = deep_stringify(manifest["global_config_schema"])
           manifest["conversation_config_schema"] = deep_stringify(manifest["conversation_config_schema"])
           manifest["prompts"] = deep_stringify(manifest["prompts"])

@@ -20,7 +20,7 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
     agent.body.merge_output!("content" => "Parent thinking")
     agent.body.save!
 
-    child = create_child_conversation!(user: user, hidden_task_name: "child_internal_task")
+    child = create_subagent_runtime_conversation!(user: user, hidden_task_name: "child_internal_task")
 
     task =
       graph.nodes.create!(
@@ -42,9 +42,8 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
               JSON.generate(
                 {
                   "ok" => true,
+                  "subagent_id" => child.metadata.dig("subagent", "subagent_id"),
                   "operation" => "run",
-                  "child_conversation_id" => child.id.to_s,
-                  "child_graph_id" => child.dag_graph.id.to_s,
                   "status" => "running",
                   "counts" => { "pending" => 0, "running" => 1, "awaiting_approval" => 0 },
                   "leaf" => {
@@ -58,9 +57,8 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
             metadata: {
               subagent: {
                 "ok" => true,
+                "subagent_id" => child.metadata.dig("subagent", "subagent_id"),
                 "operation" => "run",
-                "child_conversation_id" => child.id.to_s,
-                "child_graph_id" => child.dag_graph.id.to_s,
                 "status" => "running",
                 "counts" => { "pending" => 0, "running" => 1, "awaiting_approval" => 0 },
                 "leaf" => {
@@ -93,7 +91,7 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_select '[data-role="run-state-activity"][data-activity-kind="subagent"]', count: 1
-    assert_select %(li[data-role="run-state-activity"][data-child-conversation-id="#{child.id}"]), count: 1
+    assert_select %(li[data-role="run-state-activity"][data-subagent-id="#{child.metadata.dig("subagent", "subagent_id")}"]), count: 1
     assert_includes response.body, "Research Agent"
     assert_includes response.body, "Parent thinking"
     refute_includes response.body, "child_internal_task"
@@ -101,8 +99,8 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
 
   private
 
-    def create_child_conversation!(user:, hidden_task_name:)
-      child =
+    def create_subagent_runtime_conversation!(user:, hidden_task_name:)
+      subagent_conversation =
         Conversation.create!(
           user: user,
           title: "Child",
@@ -112,10 +110,13 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
               "agent_profile" => "subagent",
               "context_turns" => 50,
             },
+            "subagent" => {
+              "subagent_id" => ActiveRecord::Base.connection.select_value("select uuidv7()"),
+            },
           },
         )
 
-      graph = child.dag_graph
+      graph = subagent_conversation.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
 
       graph.mutate!(turn_id: turn_id) do |m|
@@ -151,6 +152,6 @@ class ConversationSubagentActivityUiTest < ActionDispatch::IntegrationTest
         m.create_edge(from_node: user_node, to_node: task, edge_type: DAG::Edge::SEQUENCE)
       end
 
-      child
+      subagent_conversation
     end
 end

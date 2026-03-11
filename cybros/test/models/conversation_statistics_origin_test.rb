@@ -8,15 +8,15 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
     assert_equal "runtime", conversation.statistics_sample_origin
   end
 
-  test "subagent child conversations inherit runtime sample_origin by default" do
+  test "subagent backing conversations inherit runtime sample_origin by default" do
     parent = create_conversation!
-    child = spawn_subagent_child!(parent: parent)
+    child = spawn_subagent_backing_conversation!(parent: parent)
 
     assert_equal "runtime", child.metadata.dig("statistics", "sample_origin")
     assert_equal "runtime", child.statistics_sample_origin
   end
 
-  test "subagent child conversations inherit explicit non-runtime sample_origin" do
+  test "subagent backing conversations inherit explicit non-runtime sample_origin" do
     parent =
       create_conversation!(
         metadata: {
@@ -25,7 +25,7 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
         },
       )
 
-    child = spawn_subagent_child!(parent: parent)
+    child = spawn_subagent_backing_conversation!(parent: parent)
 
     assert_equal "debug", child.metadata.dig("statistics", "sample_origin")
     assert_equal "debug", child.statistics_sample_origin
@@ -41,7 +41,7 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
 
   private
 
-    def spawn_subagent_child!(parent:)
+    def spawn_subagent_backing_conversation!(parent:)
       tool = Cybros::Subagent::Tools.build.find { |entry| entry.name == "subagent_spawn" }
       graph = parent.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -80,6 +80,6 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
       refute result.error?, result.text
 
       payload = JSON.parse(result.text)
-      Conversation.find(payload.fetch("child_conversation_id"))
+      Conversation.find_by!("metadata -> 'subagent' ->> 'subagent_id' = ?", payload.fetch("subagent_id"))
     end
 end

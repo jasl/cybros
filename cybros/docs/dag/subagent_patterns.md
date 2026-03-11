@@ -1,130 +1,88 @@
-# DAG Subagent Patterns（v1）
+# DAG Subagent Patterns
 
-本文件描述 **在不改变 DAG 拓扑/调度语义** 的前提下，App 域如何用 “多 Conversation（每个 Conversation 内部由 DAG 引擎承载）” 组合出 subagent（子代理/子会话）能力。
+本文件描述 programmable-agent runtime 中的 subagent 语义。
 
-> v1 约束：DAG 只对 **单图内** 的调度与审计负责；跨图依赖/等待/桥接由 App 的 executor 自行实现（轮询、回调、事件桥接等）。
+## 1. Boundary
 
-## 1) 推荐建模：subagent = 独立 Conversation/Graph
+- `conversation` 是人类与 agent 的 transcript / turn 边界。
+- 显式人类可见的 conversation branch 仍可存在于产品里，但它不是 programmable-agent runtime 的 subagent 主语义。
+- `subagent` 是父 turn 拥有的非交互后台 worker。
 
-**父图**用一个 `task` 节点（或自定义 node_type）表示 “创建/唤起 subagent”，并在该节点的 `metadata` 或 `output` 中保存 child 引用：
+这意味着：
 
-- `metadata["subagent"]["child_conversation_id"]`
-- `metadata["subagent"]["child_graph_id"]`
+- subagent 不能直接写父 placeholder。
+- subagent 不能直接追加 transcript message。
+- subagent 的结果只能作为 parent-owned join input 被消费。
 
-完成后，父图的下游 `agent_message`/`character_message` 节点在执行时：
+## 2. Runtime Tools
 
-1) 从 context 读取 child 引用
-2) 通过 child graph 的 **bounded read API** 读取子会话的最近记录
-3) 把读取到的内容拼接/总结为父图的最终输出
+Cybros 当前提供四个 subagent runtime tools：
 
-典型读 API 选择：
+- `subagent_spawn`
+- `subagent_poll`
+- `subagent_run`
+- `subagent_wait`
 
-- `child_conversation.transcript_recent_turns(limit_turns: N)`（最常用）
-- `child_conversation.transcript_page(limit_turns: N, before_turn_id: ...)`（需要分页/游标时）
-- 若要“锚定某个节点做审计”：`child_conversation.transcript_for(target_node_id, limit_turns: N)`
+它们的公开 contract 以 `subagent_id` 作为稳定标识，而不是任何 conversation-row identifier。
 
-## 1.1) Native tools（P1 已落地）
+- `subagent_spawn`：创建后台 subagent thread，并返回 `subagent_id`
+- `subagent_poll`：基于 `subagent_id` 返回 bounded status snapshot
+- `subagent_run`：`spawn + kick + 初始 snapshot`
+- `subagent_wait`：等待 subagent 到达稳定态或超时，并返回 bounded snapshot
 
-为了把上述“跨图”模式变成模型可调用的原语，Cybros 提供四个 native tools：
+当前 snapshot 字段包括：
 
-- `subagent_spawn`：创建 child `Conversation/Graph`，写入 metadata 契约，并在 child 图中生成最小可执行 turn（`developer_message` finished + `user_message` finished + `agent_message` pending + `sequence` edges）。
-- `subagent_poll`：基于 child id 返回子会话状态（`running/pending/awaiting_approval/idle/missing`）、main lane leaf、以及 bounded transcript 预览（默认 10 turns，最大 50）。
-- `subagent_run`：`spawn + child_graph.kick! + 初始 snapshot`，返回 child ids、status/counts、leaf、bounded transcript preview，以及 child 初始 turn 的 `diagnostic_level`。
-- `subagent_wait`：在不合并 child DAG 的前提下等待 child 到达稳定态（`idle/awaiting_approval/missing`）或超时；超时仍返回 bounded snapshot，并带 `wait_status/timed_out/elapsed_ms/timeout_ms`。
+- `subagent_id`
+- `operation`
+- `status`
+- `counts`
+- `leaf`
+- `transcript_lines`
+- `diagnostic_level`
+- `wait_status` / `timed_out` / `timeout_ms` / `elapsed_ms`（仅 wait）
 
-当前能力定位应明确为 **MVP 原语**，不是完整的多代理 orchestration：
+这些 payload 是 parent-consumable runtime status，不是 transcript mutation。
 
-- `subagent_spawn` 只负责创建并 seed child conversation
-- `subagent_spawn` 当前不会自动 `kick!` child graph，也不会等待 child 跑到稳定态
-- `subagent_run` / `subagent_wait` 是父侧 orchestration 原语，但仍只消费 parent 可见的 child snapshot，不会把 child 内部 task/activity 并回父图
-- 父图若要真正“等待/聚合” child 结果，优先使用 `subagent_run` / `subagent_wait`
+## 3. Internal Storage
 
-child conversation metadata 契约（写入 `conversations.metadata`）：
+当前实现内部仍可借用 `Conversation` / `DAG::Graph` 承载 subagent 执行状态，但那只是 internal storage choice，不是 public runtime contract。
 
-```json
-{
-  "agent": {
-    "key": "subagent:<name>",
-    "agent_profile": "coding|review|subagent|repair",
-    "context_turns": 50
-  },
-  "subagent": {
-    "name": "<name>",
-    "parent_conversation_id": "<uuid>",
-    "parent_graph_id": "<uuid>",
-    "spawned_from_node_id": "<uuid>"
-  }
-}
-```
+父侧 authority 始终保留在 parent turn：
 
-同时，child conversation 会显式继承父会话的 `agent_program`。
+- placeholder lifecycle
+- user-visible status
+- final transcript mutation
+- approval / denial
+- telemetry attribution
 
-运行时 profile 生效（关键）：
+## 4. Ownership And Safety
 
-- 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自所选 `agent_program`。
-- subagent child conversation 仍由 `conversation.metadata["agent"]` 携带 worker-boundary `agent_profile/context_turns`，resolver 会读取这些字段，并用 `Policy::Profiled` 包裹 base policy，使其立刻影响该 child 会话的工具可见性与授权判定。
+- 禁止 nested spawn：subagent worker 内再次 `subagent_spawn` / `subagent_run` 会 fail-fast
+- `subagent_poll.limit_turns` / `subagent_wait.limit_turns` 为 bounded preview，当前最大 50
+- `subagent_wait.timeout_ms` 当前范围为 `0..30000`
+- `subagent_poll` / `subagent_wait` 只允许读取“本 parent turn 派生的 subagent”
+- `subagent_id` 会做 UUID 校验，错误为 fail-fast validation error
+- `diagnostic_level = debug` 只增加观察信息，不会放宽 worker 权限边界
 
-当前已知 caveat：
+## 5. Parent-Side Join
 
-- phase 0 convenience auto-allow 只保留给父侧 `coding` / `review` / `repair` profile；`subagent` worker 不再继承 `memory_*` / `skills_*` 自动放行
-- 因此 `subagent` profile 现在是“默认零工具、显式授权才放开”的最小 worker profile
+subagent 的结果应通过父侧显式任务聚合，而不是走 lane merge 或 child transcript 直写。
 
-安全约束（当前默认）：
+推荐 join 流程：
 
-- 禁止 nested spawn：当 `execution_context.attributes[:agent][:key]` 为 `subagent` 或以 `subagent:` 开头时，`subagent_spawn` / `subagent_run` 直接返回错误。
-- bounded 输出（避免 tool 输出膨胀）：
-  - `subagent_poll.limit_turns` 默认 10、最大 50；当显式传入非整数/越界值时返回校验错误（不做 silent coercion）。
-  - `subagent_wait.limit_turns` 复用相同约束；`timeout_ms` 当前为 0..30000，超时返回成功快照而不是 tool error。
-  - `transcript_lines` 为预览用途；单行会做 bytes 截断（当前约 1000 bytes）。
-- `subagent_poll` / `subagent_wait` 会做 parent ownership 强校验：只能读取“本会话 spawn 的 child”（基于 parent dag context + child metadata 的 `parent_conversation_id` / `parent_graph_id` 一致性校验）。
-- `subagent_poll.child_conversation_id` / `subagent_wait.child_conversation_id` 会做 UUID 格式校验（fail-fast，减少数据库层异常噪声）。
-- profiles 现在是 worker boundary 的硬收敛层；debug 诊断也不会绕过该边界。
-- `context_turns` 仅接受 1..1000；非法值会触发校验错误（避免 silent coercion）。
-- `subagent_run.diagnostic_level = "debug"` 只会让 child 初始 turn 投影出更丰富的诊断字段；不会改变 child `agent_profile`、tool policy、权限边界或业务流转。
+1. `subagent_run` 启动 delegated worker
+2. `subagent_wait` 观察生命周期
+3. 父侧收集 structured result / artifacts / optional `assistant_output_candidate`
+4. 父侧聚合决定最终输出草稿
+5. 只有 parent `before_finalize_output` / `emit_message` 可以替换当前 placeholder
 
-### 1.2) 未来增强（建议，未落地）
+`assistant_output_candidate` 只是 parent-owned draft material，不是独立消息 authority。
 
-下述能力当前仍未落地：
+## 6. Testing
 
-- 自动推进 child conversation：
-  - `subagent_spawn` 之后自动 `kick!` child graph，或由更高层原语负责触发执行
-- 更正式的 parent-child 关系建模：
-  - 当前 parent 信息只写在 `conversations.metadata["subagent"]`
-  - `Conversation.parent_conversation` / `child_conversations` 关联尚未被 `subagent_spawn` 正式使用
-- 输入校验/防滥用：
-  - subagent spawn 配额：限制单个 parent conversation 的 spawn 数量/频率（例如 per minute/per day），并记录可审计的拒绝原因（rate_limited/quota_exceeded）
-- 更强的 worker 隔离：
-  - 继续收紧高权限 profile 的默认能力面，并为 subagent worker 增加更细粒度的显式授权模板
-- 更高层编排原语（可选）：
-  - `subagent_cancel` / `subagent_kill`：对子会话的 pending/running 节点执行 stop/deny 等操作（需定义清晰的语义：软取消/硬终止、对已完成节点的幂等行为、审计字段等）。
-
-## 2) 父子图之间如何等待/同步？
-
-v1 不提供跨图 edges；推荐由 App executor 定义同步策略：
-
-- **同步等待**：父图 task executor 创建子图、显式触发 child 执行，并等待 child 图 leaf 完成，再返回结果给父图。
-- **异步等待**：父图 task executor 仅创建/触发 child 图执行，然后返回一个引用；父图后续节点可轮询 child 图状态，或订阅 child 的 node events/graph events 做回调式推进。
-
-## 3) 事件与回放
-
-子图自身的 streaming/events（`dag_node_events`）与 transcript/context 都是独立的审计面。父图只需要保存 child 引用即可：
-
-- UI 可把 child conversation 当作一个可导航的子线程入口（“打开 subagent 会话”）
-- 审计时可分别扫描父/子两张图（`DAG::GraphAudit.scan`）
-
-## 4) 示例测试（产品级场景）
-
-参考场景测试：
-
-- `test/scenarios/dag/subagent_child_conversation_flow_test.rb`
-
-该测试展示：
-
-- 父图 `task` 创建 child Conversation/Graph
-- 父图 `agent_message` 用 bounded API 读取子图 transcript 并输出总结
-- 父/子两张图的 `GraphAudit.scan` 均为空
-
-另见：
+参考：
 
 - `test/lib/cybros/subagent/tools_test.rb`
+- `test/lib/cybros/subagent/run_wait_tools_test.rb`
 - `test/scenarios/dag/subagent_tools_profile_enforcement_flow_test.rb`
+- `test/models/conversation/turn_execution_subagent_activity_test.rb`

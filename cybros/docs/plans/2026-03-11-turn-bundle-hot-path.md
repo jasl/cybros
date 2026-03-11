@@ -10,6 +10,15 @@
 
 ---
 
+## Checkpoint Status
+
+Checkpoint note for the 2026-03-11 hot-path cut:
+
+- Accepted and complete in this batch: Tasks 1-3, plus the persisted rollup-backed assistant-bubble hot path.
+- Explicitly not part of this batch: switching assistant-bubble `run_state` to `summary-only`.
+- Current contract remains `bounded preview + summary`; the hot path now reads persisted turn rollups without requiring full execution drill-down for default rendering.
+- If we want to keep pushing this plan later, Tasks 4-6 remain follow-on optimization/documentation work rather than hidden acceptance criteria for this checkpoint.
+
 ### Task 1: Lock Long-Turn Performance Expectations With Red Tests
 
 **Files:**
