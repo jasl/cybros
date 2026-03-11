@@ -282,7 +282,7 @@ export function programmableConversationState(conversationId: string) {
         AgentRPCInvocation.where(scope_type: "run_draft", scope_id: draft.id).order(created_at: :desc).first
       end
 
-    kv = conversation.conversation_kv_entries.order(:key).each_with_object({}) do |entry, out|
+    kv = conversation.chat_lane.lane_kv_entries.order(:key).each_with_object({}) do |entry, out|
       out[entry.key] = entry.value
     end
 
