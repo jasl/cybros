@@ -27,6 +27,11 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     assert wait_tool
   end
 
+  test "subagent_run is declared parallel-safe for append queue materialization" do
+    assert_equal "parallel_safe", run_tool.metadata[:execution_mode]
+    assert_nil spawn_tool.metadata[:execution_mode]
+  end
+
   test "subagent_spawn returns a runtime-owned subagent id and seeds a minimal executable turn" do
     program = create_program!
     parent =

@@ -206,6 +206,136 @@ class RetryGenerationTest < ActionDispatch::IntegrationTest
     assert original_edge.reload.compressed_at.present?
   end
 
+  test "retry endpoint reanchors preserved queued turn-internal rows to the retry replacement node" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user_node = nil
+    failed = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+      failed =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::ERRORED,
+          metadata: agent_metadata,
+        )
+
+      m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    queued =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: conversation.chat_lane,
+        turn_id: failed.turn_id,
+        source_node: failed,
+        source_hook_name: "after_task_notice",
+        source_fingerprint: "retry-preserves-queue",
+        logical_tool_name: "subagent_run",
+        input: { "name" => "helper", "prompt" => "Investigate failure" },
+        authored_metadata: {},
+        execution_mode: "parallel_safe",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    post retry_conversation_path(conversation), params: { node_id: failed.id }
+    assert_response :success
+
+    new_node = DAG::Node.find(JSON.parse(response.body).fetch("node_id"))
+
+    assert_equal "queued", queued.reload.status
+    assert_nil queued.materialized_task_node_id
+    assert_equal new_node.id, queued.source_node_id
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+
+    queued.reload
+    assert_equal "materialized", queued.status
+    assert queued.materialized_task_node_id.present?
+    assert graph.edges.active.exists?(
+      from_node_id: new_node.id,
+      to_node_id: queued.materialized_task_node_id,
+      edge_type: DAG::Edge::SEQUENCE,
+    )
+  end
+
+  test "retry endpoint keeps already materialized turn-internal rows anchored to the failed branch" do
+    user = sign_in_owner!
+
+    conversation = create_conversation!(user: user, title: "Chat")
+    graph = conversation.dag_graph
+
+    user_node = nil
+    failed = nil
+    materialized_task = nil
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hi",
+          metadata: {},
+        )
+      failed =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::ERRORED,
+          metadata: agent_metadata,
+        )
+      materialized_task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: { "generated_by" => "turn_internal_task_queue" },
+          body_input: { "requested_name" => "subagent_run", "logical_tool_name" => "subagent_run" },
+        )
+
+      m.create_edge(from_node: user_node, to_node: failed, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: failed, to_node: materialized_task, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    queued =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: conversation.chat_lane,
+        turn_id: failed.turn_id,
+        source_node: failed,
+        source_hook_name: "after_task_notice",
+        source_fingerprint: "retry-preserves-materialized",
+        logical_tool_name: "subagent_run",
+        input: { "name" => "helper", "prompt" => "Investigate failure" },
+        authored_metadata: {},
+        execution_mode: "parallel_safe",
+        queue_position: 10,
+        status: "materialized",
+        materialized_task_node: materialized_task,
+      )
+
+    post retry_conversation_path(conversation), params: { node_id: failed.id }
+    assert_response :success
+
+    new_node = DAG::Node.find(JSON.parse(response.body).fetch("node_id"))
+
+    queued.reload
+    assert_equal "materialized", queued.status
+    assert_equal failed.id, queued.source_node_id
+    assert_equal materialized_task.id, queued.materialized_task_node_id
+  end
+
   test "retry endpoint allows manual retry beyond historical depth 5" do
     user = sign_in_owner!
 

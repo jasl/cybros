@@ -204,6 +204,12 @@ Bootstrap hooks operate on conversation lifecycle boundaries before or beside or
 - main lanes typically append `cybros_generate_title`
 - branch lanes may append both `cybros_generate_title` and `cybros_enqueue_lane_summary`
 
+Those appended authority tasks now enter a durable turn-local internal queue first:
+
+- queue ordering and serial barriers are evaluated within one turn
+- another turn's active serial row must not block this hook's queue head
+- `on_conversation_created` remains outside that queue because it is not turn-scoped yet
+
 Those authority tasks are then executed by Cybros inside the DAG so bootstrap state changes remain auditable.
 
 Generic AgentCore runtime-surface lifecycle methods such as `finalize_output` and `handle_error` still exist as internal middleware stages, but they are not the canonical programmable `agent_rpc` hook names.

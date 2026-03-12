@@ -83,6 +83,39 @@ class DAG::GraphTest < ActiveSupport::TestCase
     assert_not DAG::Lane.exists?(lane_id)
   end
 
+  test "destroy purges turn-internal task rows for the graph" do
+    assert Object.const_defined?(:TurnInternalTask), "Expected TurnInternalTask model to exist"
+
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    created = conversation.append_user_message!(content: "Hello")
+    source_node = created.fetch(:user_node)
+    turn = graph.turns.find(source_node.turn_id)
+    row =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: conversation.chat_lane,
+        turn: turn,
+        turn_id: turn.id,
+        source_node: source_node,
+        source_hook_name: "after_task_notice",
+        source_fingerprint: "notice-1:action-0",
+        logical_tool_name: "subagent_spawn",
+        input: { "name" => "researcher" },
+        authored_metadata: {},
+        execution_mode: "parallel_safe",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    assert TurnInternalTask.exists?(row.id)
+
+    graph.destroy!
+
+    assert_not TurnInternalTask.exists?(row.id)
+  end
+
   test "mutate can skip kicking even when executable pending nodes are created" do
     conversation = create_conversation!
     graph = conversation.dag_graph

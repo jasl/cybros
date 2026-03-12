@@ -51,12 +51,48 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
     assert_equal "cybros.programmable_agent.capability_snapshot.agent_tools_must_not_use_reserved_namespace", error.code
   end
 
+  test "preserves execution_mode and defaults missing execution_mode to serial" do
+    built =
+      Cybros::ProgrammableAgent::CapabilitySnapshot.build(
+        kernel_registry_version: "kernel:v1",
+        agent_program_id: "agent-program-123",
+        agent_program_version: "2026-03-12",
+        kernel_tools: [
+          tool(logical_tool_name: "subagent_run", implementation_ref: "kernel://subagent_run", execution_mode: "parallel_safe"),
+          tool(logical_tool_name: "cybros_generate_title", implementation_ref: "kernel://cybros_generate_title"),
+        ],
+        agent_tools: [],
+      )
+
+    restored =
+      Cybros::ProgrammableAgent::CapabilitySnapshot.restore(
+        "capability_registry_snapshot_id" => built.snapshot_id,
+        "kernel_capability_registry_version" => built.kernel_registry_version,
+        "agent_program_id" => built.agent_program_id,
+        "agent_capabilities_version" => built.agent_program_version,
+        "effective_tools" =>
+          built.effective_tools.map do |tool|
+            {
+              "logical_tool_name" => tool.logical_tool_name,
+              "effective_tool_id" => tool.effective_tool_id,
+              "implementation_source" => tool.implementation_source,
+              "implementation_ref" => tool.implementation_ref,
+              "execution_mode" => tool.execution_mode,
+            }
+          end,
+      )
+
+    assert_equal "parallel_safe", restored.route_for!("subagent_run").execution_mode
+    assert_equal "serial", restored.route_for!("cybros_generate_title").execution_mode
+  end
+
   private
 
-    def tool(logical_tool_name:, implementation_ref:)
+    def tool(logical_tool_name:, implementation_ref:, execution_mode: nil)
       {
         logical_tool_name: logical_tool_name,
         implementation_ref: implementation_ref,
+        execution_mode: execution_mode,
       }
     end
 end

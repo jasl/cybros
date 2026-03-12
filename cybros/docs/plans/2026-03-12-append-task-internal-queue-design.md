@@ -211,6 +211,8 @@ Queue ordering and execution concurrency should be explicitly separate.
 ### Ordering
 
 - strict FIFO by `queue_position`
+- FIFO ordering and serial barriers are evaluated per turn, not graph-global
+- one turn's active serial row must not block another turn's queue head
 
 ### Execution
 
@@ -232,6 +234,7 @@ This gives:
 
 - FIFO queue semantics
 - safe automatic fanout
+- turn-local blocking rather than graph-wide head-of-line blocking
 - no need for explicit parallel batch actions in V1
 
 ## Parallelism Declaration

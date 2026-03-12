@@ -1,7 +1,7 @@
 require "test_helper"
 
 class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCase
-  test "create_task append materializes a routed follow-up task chain from the pinned conversation run snapshot" do
+  test "create_task append does not materialize a routed follow-up task chain immediately from the pinned conversation run snapshot" do
     conversation = create_conversation!(title: "Hook action append")
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     agent_node = nil
@@ -36,7 +36,8 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       )
     run = create_conversation_run!(conversation: conversation, dag_node_id: agent_node.id, program: program, snapshot: snapshot, tool_surface: tool_surface)
 
-    Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+    result =
+      Cybros::ProgrammableAgent::HookActionExecutor.execute!(
       hook_name: "after_task_notice",
       conversation_run: run,
       actions: [
@@ -51,23 +52,29 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       placeholder_node: agent_node,
     )
 
-    tasks =
-      conversation.root_graph.nodes
-        .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
-        .order(:id)
-        .to_a
-    assert_equal 1, tasks.size
+    queued_rows = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.to_a
+    assert_equal 1, queued_rows.size
+    assert_empty result.created_tasks
 
-    task = tasks.first
-    assert_equal DAG::Node::PENDING, task.state
-    assert_equal "subagent_spawn", task.body_input.fetch("requested_name")
-    assert_equal "subagent_spawn", task.body_input.fetch("logical_tool_name")
+    queued = queued_rows.first
+    assert_equal "subagent_spawn", queued.logical_tool_name
+    assert_equal({ "name" => "Helper", "prompt" => "Summarize this" }, queued.input)
+    assert_equal tool_surface.tool_surface_id, queued.tool_surface_id
+    assert_equal snapshot.snapshot_id, queued.capability_registry_snapshot_id
+    assert_equal route.effective_tool_id, queued.effective_tool_id
+    assert_equal route.implementation_source, queued.implementation_source
+    assert_equal route.implementation_ref, queued.implementation_ref
+    assert_equal "queued", queued.status
+    assert_equal "serial", queued.execution_mode
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: conversation.dag_graph)
+
+    task = conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
     assert_equal route.effective_tool_id, task.body_input.fetch("effective_tool_id")
     assert_equal route.implementation_source, task.body_input.fetch("implementation_source")
     assert_equal route.implementation_ref, task.body_input.fetch("implementation_ref")
-    assert_equal snapshot.snapshot_id, task.body_input.fetch("capability_registry_snapshot_id")
     assert_equal tool_surface.tool_surface_id, task.body_input.fetch("tool_surface_id")
-    assert_equal({ "name" => "Helper", "prompt" => "Summarize this" }, task.body_input.fetch("arguments"))
+    assert_equal snapshot.snapshot_id, task.body_input.fetch("capability_registry_snapshot_id")
 
     continuation_nodes =
       conversation.root_graph.nodes
@@ -75,20 +82,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
         .where.not(id: agent_node.id)
         .order(:id)
         .to_a
-    assert_equal 1, continuation_nodes.size
-
-    continuation = continuation_nodes.first
-    assert_equal DAG::Node::PENDING, continuation.state
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: agent_node.id,
-      to_node_id: task.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: task.id,
-      to_node_id: continuation.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
+    assert_empty continuation_nodes
   end
 
   test "emit_message returns a final assistant payload while preserving the current placeholder node" do
@@ -245,40 +239,76 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       anchor_node: task_node,
     )
 
-    appended_task =
+    queued = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.sole
+
+    assert_equal "Summarizing subagent", agent_node.reload.body_output_preview.fetch("content")
+    assert_equal task_node.id, queued.source_node_id
+    assert_equal({ "source" => "after_subagent_result" }, queued.authored_metadata)
+    assert_equal({ "name" => "Helper", "prompt" => "Follow up on the result" }, queued.input)
+    assert_empty(
       conversation.root_graph.nodes
         .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
         .where.not(id: task_node.id)
-        .order(:id)
-        .sole
-    continuation =
-      conversation.root_graph.nodes
-        .where(node_type: Messages::AgentMessage.node_type_key, turn_id: turn_id)
-        .where.not(id: agent_node.id)
-        .order(:id)
-        .sole
-
-    assert_equal "Summarizing subagent", agent_node.reload.body_output_preview.fetch("content")
-    assert_equal task_node.id, appended_task.metadata.fetch("source_node_id")
-    assert_equal({ "source" => "after_subagent_result" }, appended_task.metadata.fetch("authored_metadata"))
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: task_node.id,
-      to_node_id: appended_task.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: appended_task.id,
-      to_node_id: continuation.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    refute conversation.root_graph.edges.exists?(
-      from_node_id: agent_node.id,
-      to_node_id: appended_task.id,
-      edge_type: DAG::Edge::SEQUENCE,
+        .pluck(:id)
     )
   end
 
-  test "append follow-up tasks on a task anchor reuse an existing continuation agent instead of creating a duplicate" do
+  test "create_task append freezes parallel-safe execution mode for subagent_run" do
+    conversation = create_conversation!(title: "Hook action parallel append")
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    agent_node = nil
+
+    conversation.dag_graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      agent_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    program = create_program!
+    snapshot = build_capability_snapshot(program_id: program.id)
+    route = snapshot.route_for!("subagent_run")
+    tool_surface =
+      Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+        capability_registry_snapshot: snapshot,
+        selected_tool_ids: [route.effective_tool_id],
+        tool_surface_label: "fixture-subagent-run",
+      )
+    run = create_conversation_run!(conversation: conversation, dag_node_id: agent_node.id, program: program, snapshot: snapshot, tool_surface: tool_surface)
+
+    Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+      hook_name: "after_task_notice",
+      conversation_run: run,
+      actions: [
+        Cybros::ProgrammableAgent::HookActions::CreateTask.new(
+          type: "create_task",
+          logical_tool_name: "subagent_run",
+          input: { "name" => "Worker", "prompt" => "Parallelize this" },
+          placement: "append",
+          metadata: nil,
+        ),
+      ],
+      placeholder_node: agent_node,
+    )
+
+    queued = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.sole
+    assert_equal "subagent_run", queued.logical_tool_name
+    assert_equal "parallel_safe", queued.execution_mode
+  end
+
+  test "append follow-up tasks on a task anchor do not create a duplicate continuation before materialization" do
     conversation = create_conversation!(title: "Hook action task append splice")
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     agent_node = nil
@@ -354,12 +384,6 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       anchor_node: task_node,
     )
 
-    appended_task =
-      conversation.root_graph.nodes
-        .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
-        .where.not(id: task_node.id)
-        .order(:id)
-        .sole
     continuations =
       conversation.root_graph.nodes
         .where(node_type: Messages::AgentMessage.node_type_key, turn_id: turn_id)
@@ -367,30 +391,25 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
         .order(:id)
         .to_a
 
+    queued = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.sole
+
     assert_equal [existing_continuation.id], continuations.map(&:id)
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: task_node.id,
-      to_node_id: appended_task.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    assert conversation.root_graph.edges.exists?(
-      from_node_id: appended_task.id,
-      to_node_id: existing_continuation.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    refute conversation.root_graph.edges.active.exists?(
+    assert_equal task_node.id, queued.source_node_id
+    assert_equal({ "source" => "after_subagent_result" }, queued.authored_metadata)
+    assert conversation.root_graph.edges.active.exists?(
       from_node_id: task_node.id,
       to_node_id: existing_continuation.id,
       edge_type: DAG::Edge::SEQUENCE,
     )
-    assert conversation.root_graph.edges.where(
-      from_node_id: task_node.id,
-      to_node_id: existing_continuation.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    ).where.not(compressed_at: nil).exists?
+    assert_empty(
+      conversation.root_graph.nodes
+        .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
+        .where.not(id: task_node.id)
+        .pluck(:id)
+    )
   end
 
-  test "append continuation splice remains idempotent across repeated hook execution" do
+  test "append queue admission remains idempotent across repeated hook execution" do
     conversation = create_conversation!(title: "Hook action task append splice replay")
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     agent_node = nil
@@ -468,36 +487,101 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       )
     end
 
-    appended_tasks =
-      conversation.root_graph.nodes
-        .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
-        .where.not(id: task_node.id)
-        .order(:id)
-        .to_a
     continuations =
       conversation.root_graph.nodes
         .where(node_type: Messages::AgentMessage.node_type_key, turn_id: turn_id)
         .where.not(id: agent_node.id)
         .order(:id)
         .to_a
+    queued_rows = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.to_a
 
-    assert_equal 1, appended_tasks.size
+    assert_equal 1, queued_rows.size
     assert_equal [existing_continuation.id], continuations.map(&:id)
     assert conversation.root_graph.edges.active.exists?(
       from_node_id: task_node.id,
-      to_node_id: appended_tasks.first.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    assert conversation.root_graph.edges.active.exists?(
-      from_node_id: appended_tasks.first.id,
       to_node_id: existing_continuation.id,
       edge_type: DAG::Edge::SEQUENCE,
     )
-    refute conversation.root_graph.edges.active.exists?(
-      from_node_id: task_node.id,
-      to_node_id: existing_continuation.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
+    assert_equal task_node.id, queued_rows.first.source_node_id
+  end
+
+  test "append queue replay does not rewind a progressed row back to queued" do
+    conversation = create_conversation!(title: "Hook action task append progressed replay")
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    agent_node = nil
+    task_node = nil
+
+    conversation.dag_graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      agent_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: { "existing" => "agent-metadata" },
+        )
+
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+          body_input: {
+            "name" => "subagent_wait",
+            "requested_name" => "subagent_wait",
+            "tool_call_id" => "tc_wait_progressed_replay",
+            "arguments" => { "subagent_id" => SecureRandom.uuid },
+            "arguments_summary" => "{}",
+          },
+        )
+
+      m.create_edge(from_node: user, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: agent_node, to_node: task_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    program = create_program!
+    snapshot = build_capability_snapshot(program_id: program.id)
+    route = snapshot.route_for!("subagent_spawn")
+    tool_surface =
+      Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+        capability_registry_snapshot: snapshot,
+        selected_tool_ids: [route.effective_tool_id],
+        tool_surface_label: "fixture-after-subagent-result-progressed-replay",
+      )
+    run = create_conversation_run!(conversation: conversation, dag_node_id: agent_node.id, program: program, snapshot: snapshot, tool_surface: tool_surface)
+
+    2.times do |index|
+      Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+        hook_name: "after_subagent_result",
+        conversation_run: run,
+        actions: [
+          Cybros::ProgrammableAgent::HookActions::CreateTask.new(
+            type: "create_task",
+            logical_tool_name: "subagent_spawn",
+            input: { "name" => "Helper", "prompt" => "Follow up on the result" },
+            placement: "append",
+            metadata: { "source" => "after_subagent_result", "attempt" => index },
+          ),
+        ],
+        placeholder_node: agent_node,
+        anchor_node: task_node,
+      )
+
+      next unless index.zero?
+
+      TurnInternalTasks::Materializer.materialize_ready!(graph: conversation.dag_graph)
+    end
+
+    queued = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.sole
+
+    assert_equal "materialized", queued.status
+    assert queued.materialized_task_node_id.present?
   end
 
   test "prepend tasks on a task anchor defer the current tool into a cloned continuation" do
@@ -923,6 +1007,11 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
             logical_tool_name: "compact_context",
             implementation_ref: "kernel://compact_context",
           },
+          {
+            logical_tool_name: "subagent_run",
+            implementation_ref: "kernel://subagent_run",
+            execution_mode: "parallel_safe",
+          },
         ],
         agent_tools: [
           {
@@ -959,6 +1048,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
         "effective_tool_id" => tool.effective_tool_id,
         "implementation_source" => tool.implementation_source,
         "implementation_ref" => tool.implementation_ref,
+        "execution_mode" => tool.execution_mode,
       }
     end
 end

@@ -31,7 +31,7 @@ module Cybros
             },
             required: ["content"],
           },
-          metadata: { source: :cybros, category: :bootstrap, permission_class: "write" },
+          metadata: { source: :cybros, category: :bootstrap, permission_class: "write", execution_mode: "serial" },
         ) do |args, context:|
           task_node = current_task_node!(context)
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])
@@ -103,7 +103,7 @@ module Cybros
               "prompt_buffer_ops" => { type: "array", items: { type: "object" } },
             },
           },
-          metadata: { source: :cybros, category: :bootstrap, permission_class: "write" },
+          metadata: { source: :cybros, category: :bootstrap, permission_class: "write", execution_mode: "serial" },
         ) do |args, context:|
           task_node = current_task_node!(context)
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])

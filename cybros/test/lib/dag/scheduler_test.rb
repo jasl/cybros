@@ -10,6 +10,7 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
     AgentRPCInvocation.delete_all
     Event.delete_all
     ConversationRun.delete_all
+    TurnInternalTask.delete_all
     DAG::Edge.delete_all
     DAG::Node.delete_all
     DAG::NodeBody.delete_all
@@ -130,5 +131,97 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   ensure
     release << true
     locker.join
+  end
+
+  test "claim_executable_nodes materializes queued turn-internal tasks before claiming them" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+    turn = graph.turns.create!(lane: lane, metadata: {})
+    source_node =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane: lane,
+        turn: turn,
+        metadata: {},
+      )
+    row =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: lane,
+        turn: turn,
+        source_node: source_node,
+        source_hook_name: "after_task_notice",
+        source_fingerprint: "notice-scheduler-materialize",
+        logical_tool_name: "subagent_spawn",
+        input: { "name" => "worker" },
+        authored_metadata: {},
+        execution_mode: "serial",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+
+    row.reload
+    assert_equal 1, claimed.size
+    assert_equal row.materialized_task_node_id, claimed.first.id
+    assert_equal DAG::Node::RUNNING, claimed.first.state
+    assert_equal "running", row.status
+  end
+
+  test "claim_executable_nodes does not resurrect a selected turn-internal row canceled before materialization completes" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+    turn = graph.turns.create!(lane: lane, metadata: {})
+    source_node =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane: lane,
+        turn: turn,
+        metadata: {},
+      )
+    row =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: lane,
+        turn: turn,
+        source_node: source_node,
+        source_hook_name: "after_task_notice",
+        source_fingerprint: "notice-scheduler-cancel-before-materialize",
+        logical_tool_name: "subagent_spawn",
+        input: { "name" => "worker" },
+        authored_metadata: {},
+        execution_mode: "serial",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    original_materialize_ready = TurnInternalTasks::Materializer.method(:materialize_ready!)
+    TurnInternalTasks::Materializer.define_singleton_method(:materialize_ready!) do |graph:|
+      materializer = new(graph: graph)
+      rows = materializer.send(:select_rows_to_materialize)
+
+      row.reload.update!(status: "canceled", canceled_reason: "turn_reset")
+
+      rows.each { |selected_row| materializer.send(:materialize_row!, selected_row) }
+    end
+
+    claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+
+    row.reload
+    assert_empty claimed
+    assert_equal "canceled", row.status
+    assert_nil row.materialized_task_node_id
+    assert_empty graph.nodes.active
+      .where(node_type: Messages::Task.node_type_key)
+      .where("metadata ->> 'generated_by' = ?", "turn_internal_task_queue")
+  ensure
+    TurnInternalTasks::Materializer.define_singleton_method(:materialize_ready!, &original_materialize_ready)
   end
 end

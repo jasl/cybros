@@ -112,7 +112,7 @@ git commit -m "feat: add bootstrap authority tools"
 Cover:
 
 - creating a root conversation fires `on_conversation_created`
-- creating a branch conversation fires both hooks for the child conversation / attached branch lane
+- creating a branch conversation fires both hooks for the new branch conversation / attached branch lane
 - repeated reloads do not replay bootstrap dispatch
 - the dispatcher runs only after conversation and lane persistence are stable
 

@@ -199,6 +199,8 @@ Bootstrap-family hooks are stricter:
 - they may only append reserved `cybros_*` authority tasks
 - they may not mutate conversation or lane state directly through callbacks
 - Cybros executes those authority tasks inside the DAG so bootstrap state changes stay auditable
+- `on_lane_first_user_message` appends through the durable turn-internal queue before later DAG materialization
+- `on_conversation_created` remains on its separate conversation-bootstrap path and does not enter the turn queue
 
 ## Permission Presets
 

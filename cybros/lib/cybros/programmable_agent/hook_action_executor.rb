@@ -6,6 +6,7 @@ module Cybros
       TerminalAction = Data.define(:type, :reason, :message)
       Result = Data.define(:emitted_message, :terminal_action, :deferred_anchor, :created_tasks)
       BOOTSTRAP_HOOKS = %w[on_conversation_created on_lane_first_user_message].freeze
+      QUEUE_BACKED_APPEND_HOOKS = (HookEnvelope::CREATE_TASK_PLACEMENT_POLICY.keys - ["on_conversation_created"]).freeze
 
       ACTIVE_PLACEHOLDER_STATES = [
         DAG::Node::PENDING,
@@ -76,7 +77,7 @@ module Cybros
 
         private
 
-        attr_reader :actions, :placeholder_node, :anchor_node, :hook_name, :lane
+        attr_reader :actions, :placeholder_node, :anchor_node, :hook_name, :lane, :conversation_run
 
         def apply_set_step_status!(action)
           node = placeholder_node
@@ -143,32 +144,15 @@ module Cybros
         end
 
         def apply_append_task!(action, action_index:)
-          if bootstrap_hook?
+          if direct_bootstrap_append_hook?
             apply_bootstrap_append_task!(action, action_index: action_index)
             return
           end
 
-          ensure_active_placeholder!(placeholder_node)
-          node = anchor_node
+          ensure_active_placeholder!(placeholder_node) unless queue_backed_append_hook?
+
           manifest, tool_route = route_for_created_task!(action)
-
-          graph = node.graph
-          task = nil
-          graph.mutate!(turn_id: node.turn_id) do |m|
-            anchor = appended_tasks.last || anchor_node
-            task =
-              m.create_node(
-                node_type: Messages::Task.node_type_key,
-                state: DAG::Node::PENDING,
-                idempotency_key: created_task_idempotency_key(action_index, placement: "append"),
-                lane_id: node.lane_id,
-                metadata: created_task_metadata(action, action_index: action_index),
-                body_input: created_task_input(action, tool_route: tool_route, manifest: manifest, action_index: action_index),
-              )
-            m.create_edge(from_node: anchor, to_node: task, edge_type: DAG::Edge::SEQUENCE)
-          end
-
-          appended_tasks << task
+          enqueue_append_task!(action, action_index: action_index, manifest: manifest, tool_route: tool_route)
         end
 
         def apply_bootstrap_append_task!(action, action_index:)
@@ -424,6 +408,14 @@ module Cybros
           BOOTSTRAP_HOOKS.include?(hook_name)
         end
 
+        def direct_bootstrap_append_hook?
+          hook_name == "on_conversation_created"
+        end
+
+        def queue_backed_append_hook?
+          QUEUE_BACKED_APPEND_HOOKS.include?(hook_name)
+        end
+
         def bootstrap_lane_for_append!
           return lane if lane.present?
 
@@ -447,6 +439,99 @@ module Cybros
 
         def task_creation_anchor_identifier
           anchor_node&.id&.to_s.presence || "lane:#{bootstrap_lane_for_append!.id}"
+        end
+
+        def enqueue_append_task!(action, action_index:, manifest:, tool_route:)
+          queue_lane = queue_lane_for_append!
+          queue_graph = queue_lane.graph
+          queue_turn_id = queue_turn_id_for_append!
+          queue_conversation = queue_conversation_for_append!(queue_lane: queue_lane)
+          source_fingerprint = created_task_source_fingerprint(action_index)
+          routing = queued_routing_metadata(manifest: manifest, tool_route: tool_route)
+
+          queue_graph.with_graph_lock! do
+            row =
+              TurnInternalTask.find_by(
+                turn_id: queue_turn_id,
+                source_fingerprint: source_fingerprint,
+              )
+            next row if row.present?
+
+            row = TurnInternalTask.new(
+              turn_id: queue_turn_id,
+              source_fingerprint: source_fingerprint,
+              conversation: queue_conversation,
+              graph: queue_graph,
+              lane: queue_lane,
+              source_node_id: anchor_node&.id || placeholder_node&.id,
+              source_hook_name: hook_name,
+              logical_tool_name: action.logical_tool_name.to_s,
+              input: AgentCore::Utils.deep_stringify_keys(action.input.is_a?(Hash) ? action.input : {}),
+              authored_metadata: AgentCore::Utils.deep_stringify_keys(action.metadata),
+              tool_surface_id: routing[:tool_surface_id],
+              capability_registry_snapshot_id: routing[:capability_registry_snapshot_id],
+              effective_tool_id: routing[:effective_tool_id],
+              implementation_source: routing[:implementation_source],
+              implementation_ref: routing[:implementation_ref],
+              execution_mode: routing[:execution_mode],
+              status: "queued",
+            )
+            row.queue_position ||= next_queue_position_for(queue_graph: queue_graph, turn_id: queue_turn_id)
+            row.save!
+          end
+        end
+
+        def queued_routing_metadata(manifest:, tool_route:)
+          return {
+            tool_surface_id: nil,
+            capability_registry_snapshot_id: nil,
+            effective_tool_id: nil,
+            implementation_source: nil,
+            implementation_ref: nil,
+            execution_mode: "serial",
+          } if manifest.nil? || tool_route.nil?
+
+          {
+            tool_surface_id: manifest.tool_surface_id,
+            capability_registry_snapshot_id: manifest.capability_registry_snapshot.snapshot_id,
+            effective_tool_id: tool_route.effective_tool_id.to_s.presence,
+            implementation_source: tool_route.implementation_source.to_s.presence,
+            implementation_ref: tool_route.implementation_ref.to_s.presence,
+            execution_mode: tool_route.respond_to?(:execution_mode) ? tool_route.execution_mode.to_s.presence || "serial" : "serial",
+          }
+        end
+
+        def next_queue_position_for(queue_graph:, turn_id:)
+          queue_graph.turn_internal_tasks.where(turn_id: turn_id).maximum(:queue_position).to_i + 10
+        end
+
+        def queue_lane_for_append!
+          lane || anchor_node&.lane || placeholder_node&.lane || bootstrap_lane_for_append!
+        end
+
+        def queue_turn_id_for_append!
+          anchor_node&.turn_id || placeholder_node&.turn_id ||
+            AgentCore::ValidationError.raise!(
+              "turn-scoped append task creation requires a turn id",
+              code: "cybros.programmable_agent.runtime.turn_id_required_for_append_queue",
+              details: { hook_name: hook_name, dag_node_id: anchor_node&.id&.to_s || placeholder_node&.id&.to_s },
+            )
+        end
+
+        def queue_conversation_for_append!(queue_lane:)
+          attached = queue_lane.attachable
+          return attached if attached.is_a?(Conversation)
+          return conversation_run.conversation if conversation_run.present?
+
+          AgentCore::ValidationError.raise!(
+            "turn-scoped append task creation requires a bound conversation",
+            code: "cybros.programmable_agent.runtime.conversation_required_for_append_queue",
+            details: { hook_name: hook_name, lane_id: queue_lane.id.to_s },
+          )
+        end
+
+        def created_task_source_fingerprint(action_index)
+          "#{hook_name}:#{task_creation_anchor_identifier}:append:#{action_index}"
         end
 
         def conversation_run_for_create_task!

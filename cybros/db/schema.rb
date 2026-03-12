@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_12_102000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -275,7 +275,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
     t.index ["graph_id", "to_node_id"], name: "index_dag_edges_active_to", where: "(compressed_at IS NULL)"
     t.index ["graph_id"], name: "index_dag_edges_on_graph_id"
     t.index ["to_node_id"], name: "index_dag_edges_on_to_node_id"
-    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying::text, 'dependency'::character varying::text, 'branch'::character varying::text])", name: "check_dag_edges_edge_type_enum"
+    t.check_constraint "edge_type::text = ANY (ARRAY['sequence'::character varying, 'dependency'::character varying, 'branch'::character varying]::text[])", name: "check_dag_edges_edge_type_enum"
     t.check_constraint "from_node_id <> to_node_id", name: "check_dag_edges_no_self_loop"
   end
 
@@ -312,7 +312,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
     t.index ["graph_id"], name: "index_dag_lanes_on_graph_id"
     t.check_constraint "merged_into_lane_id IS NULL OR merged_into_lane_id <> id", name: "check_dag_lanes_no_self_merge"
     t.check_constraint "parent_lane_id IS NULL OR parent_lane_id <> id", name: "check_dag_lanes_no_self_parent"
-    t.check_constraint "role::text = ANY (ARRAY['main'::character varying::text, 'branch'::character varying::text])", name: "check_dag_lanes_role_enum"
+    t.check_constraint "role::text = ANY (ARRAY['main'::character varying, 'branch'::character varying]::text[])", name: "check_dag_lanes_role_enum"
   end
 
   create_table "dag_node_bodies", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -392,9 +392,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
     t.index ["graph_id"], name: "index_dag_nodes_on_graph_id"
     t.index ["retry_of_id"], name: "index_dag_nodes_on_retry_of_id"
     t.check_constraint "(compressed_at IS NULL) = (compressed_by_id IS NULL)", name: "check_dag_nodes_compressed_fields_consistent"
-    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_context_excluded_terminal"
-    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text]))", name: "check_dag_nodes_deleted_terminal"
-    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying::text, 'awaiting_approval'::character varying::text, 'running'::character varying::text, 'finished'::character varying::text, 'errored'::character varying::text, 'rejected'::character varying::text, 'skipped'::character varying::text, 'stopped'::character varying::text])", name: "check_dag_nodes_state_enum"
+    t.check_constraint "context_excluded_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_context_excluded_terminal"
+    t.check_constraint "deleted_at IS NULL OR (state::text = ANY (ARRAY['finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[]))", name: "check_dag_nodes_deleted_terminal"
+    t.check_constraint "state::text = ANY (ARRAY['pending'::character varying, 'awaiting_approval'::character varying, 'running'::character varying, 'finished'::character varying, 'errored'::character varying, 'rejected'::character varying, 'skipped'::character varying, 'stopped'::character varying]::text[])", name: "check_dag_nodes_state_enum"
   end
 
   create_table "dag_turns", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -715,6 +715,46 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
     t.check_constraint "tool_outcome::text = ANY (ARRAY['success'::character varying::text, 'failed'::character varying::text, 'not_executed'::character varying::text])", name: "check_statistics_tool_call_facts_tool_outcome_enum"
   end
 
+  create_table "turn_internal_tasks", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.jsonb "authored_metadata", default: {}, null: false
+    t.string "canceled_reason"
+    t.string "capability_registry_snapshot_id"
+    t.uuid "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.string "effective_tool_id"
+    t.string "execution_mode", default: "serial", null: false
+    t.uuid "graph_id", null: false
+    t.string "implementation_ref"
+    t.string "implementation_source"
+    t.jsonb "input", default: {}, null: false
+    t.uuid "lane_id", null: false
+    t.string "logical_tool_name", null: false
+    t.uuid "materialized_task_node_id"
+    t.integer "queue_position", null: false
+    t.string "source_fingerprint", null: false
+    t.string "source_hook_name", null: false
+    t.uuid "source_node_id", null: false
+    t.string "status", default: "queued", null: false
+    t.uuid "superseded_by_id"
+    t.string "tool_surface_id"
+    t.uuid "turn_id", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id"], name: "index_turn_internal_tasks_on_conversation_id"
+    t.index ["graph_id", "status", "queue_position"], name: "idx_turn_internal_tasks_graph_status_position"
+    t.index ["graph_id"], name: "index_turn_internal_tasks_on_graph_id"
+    t.index ["lane_id"], name: "index_turn_internal_tasks_on_lane_id"
+    t.index ["materialized_task_node_id"], name: "index_turn_internal_tasks_on_materialized_task_node_id"
+    t.index ["superseded_by_id"], name: "index_turn_internal_tasks_on_superseded_by_id"
+    t.index ["turn_id", "queue_position"], name: "idx_turn_internal_tasks_turn_queue_position", unique: true
+    t.index ["turn_id", "source_fingerprint"], name: "idx_turn_internal_tasks_turn_source_fingerprint", unique: true
+    t.check_constraint "btrim(logical_tool_name::text) <> ''::text", name: "check_turn_internal_tasks_logical_tool_name_present"
+    t.check_constraint "btrim(source_fingerprint::text) <> ''::text", name: "check_turn_internal_tasks_source_fingerprint_present"
+    t.check_constraint "btrim(source_hook_name::text) <> ''::text", name: "check_turn_internal_tasks_source_hook_name_present"
+    t.check_constraint "execution_mode::text = ANY (ARRAY['serial'::character varying, 'parallel_safe'::character varying]::text[])", name: "check_turn_internal_tasks_execution_mode"
+    t.check_constraint "queue_position > 0", name: "check_turn_internal_tasks_queue_position_positive"
+    t.check_constraint "status::text = ANY (ARRAY['queued'::character varying, 'materializing'::character varying, 'materialized'::character varying, 'running'::character varying, 'finished'::character varying, 'canceled'::character varying, 'superseded'::character varying, 'failed_materialization'::character varying]::text[])", name: "check_turn_internal_tasks_status"
+  end
+
   create_table "users", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.datetime "created_at", null: false
     t.uuid "identity_id", null: false
@@ -806,6 +846,14 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_11_170000) do
   add_foreign_key "run_drafts", "llm_provider_credentials", column: "provider_credential_id"
   add_foreign_key "run_drafts", "users", column: "initiated_by_user_id"
   add_foreign_key "sessions", "identities"
+  add_foreign_key "turn_internal_tasks", "conversations"
+  add_foreign_key "turn_internal_tasks", "dag_graphs", column: "graph_id"
+  add_foreign_key "turn_internal_tasks", "dag_lanes", column: "lane_id"
+  add_foreign_key "turn_internal_tasks", "dag_lanes", column: ["graph_id", "lane_id"], primary_key: ["graph_id", "id"], name: "fk_turn_internal_tasks_lane_graph_scoped", on_delete: :cascade
+  add_foreign_key "turn_internal_tasks", "dag_nodes", column: "materialized_task_node_id"
+  add_foreign_key "turn_internal_tasks", "dag_nodes", column: ["graph_id", "source_node_id"], primary_key: ["graph_id", "id"], name: "fk_turn_internal_tasks_source_node_graph_scoped", on_delete: :cascade
+  add_foreign_key "turn_internal_tasks", "dag_turns", column: ["graph_id", "lane_id", "turn_id"], primary_key: ["graph_id", "lane_id", "id"], name: "fk_turn_internal_tasks_turn_graph_scoped", on_delete: :cascade
+  add_foreign_key "turn_internal_tasks", "turn_internal_tasks", column: "superseded_by_id"
   add_foreign_key "users", "identities"
   add_foreign_key "workspaces", "execution_locations"
 end

@@ -18,6 +18,8 @@ module DAG
     end
 
     def claim_executable_nodes
+      TurnInternalTasks::Materializer.materialize_ready!(graph: @graph)
+
       claimed_nodes = []
       processed_ids = []
       events = []
@@ -157,6 +159,11 @@ module DAG
           )
 
         return ClaimOutcome.new(node: nil, node_id: node.id, events: []) unless affected_rows == 1
+
+        TurnInternalTask.where(materialized_task_node_id: node.id, status: "materialized").update_all(
+          status: "running",
+          updated_at: now
+        )
 
         ClaimOutcome.new(
           node: DAG::Node.find(node.id),

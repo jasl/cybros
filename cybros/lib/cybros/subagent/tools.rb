@@ -188,7 +188,7 @@ module Cybros
             },
             required: ["name", "prompt"],
           },
-          metadata: { source: :cybros, category: :subagent, permission_class: "delegate" },
+          metadata: { source: :cybros, category: :subagent, permission_class: "delegate", execution_mode: "parallel_safe" },
         ) do |args, context:|
           enforce_no_nested_spawn!(context, code_prefix: "cybros.subagent_run", tool_name: "subagent_run")
 

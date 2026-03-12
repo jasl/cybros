@@ -164,6 +164,8 @@ module DAG
           end
 
         if transitioned
+          sync_turn_internal_task_status!(node: node, result: result)
+
           node.graph.emit_event(
             event_type: DAG::GraphHooks::EventTypes::NODE_STATE_CHANGED,
             subject: node,
@@ -231,6 +233,25 @@ module DAG
         metadata["timing"] = timing.merge(timing_patch)
 
         node.update_columns(metadata: metadata, updated_at: Time.current)
+      end
+
+      def sync_turn_internal_task_status!(node:, result:)
+        row = TurnInternalTask.find_by(materialized_task_node_id: node.id)
+        return if row.nil?
+
+        status =
+          case result.state
+          when DAG::Node::PENDING
+            "materialized"
+          when DAG::Node::FINISHED, DAG::Node::ERRORED, DAG::Node::REJECTED, DAG::Node::SKIPPED, DAG::Node::STOPPED
+            "finished"
+          else
+            nil
+          end
+
+        return if status.nil? || row.status == status
+
+        row.update_columns(status: status, updated_at: Time.current)
       end
   end
 end

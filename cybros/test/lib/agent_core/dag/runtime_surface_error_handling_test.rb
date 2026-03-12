@@ -246,32 +246,26 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
       )
     agent_node = run.conversation.root_graph.nodes.find(run.dag_node_id)
 
-    task =
-      run.conversation.root_graph.nodes
-        .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
-        .order(:id)
-        .sole
-    continuation =
-      run.conversation.root_graph.nodes
-        .where(node_type: Messages::AgentMessage.node_type_key, turn_id: agent_node.turn_id)
-        .where.not(id: run.dag_node_id)
-        .order(:id)
-        .sole
+    queued = run.conversation.turn_internal_tasks.where(turn_id: agent_node.turn_id).ordered.sole
 
     assert_equal DAG::Node::ERRORED, result.state
     assert_includes result.error, "ProviderError"
+    assert_equal "subagent_spawn", queued.logical_tool_name
+    assert_equal agent_node.id, queued.source_node_id
+    assert_nil queued.materialized_task_node_id
+    assert_equal routed_tool.effective_tool_id, queued.effective_tool_id
+    assert_equal routed_tool.implementation_source, queued.implementation_source
+    assert_equal routed_tool.implementation_ref, queued.implementation_ref
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: run.conversation.root_graph)
+
+    task = run.conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
     assert_equal DAG::Node::PENDING, task.state
-    assert_equal DAG::Node::PENDING, continuation.state
-    assert_equal "subagent_spawn", task.body_input.fetch("logical_tool_name")
+    assert_equal "subagent_spawn", task.body_input.fetch("requested_name")
     assert_equal routed_tool.effective_tool_id, task.body_input.fetch("effective_tool_id")
     assert run.conversation.root_graph.edges.exists?(
       from_node_id: run.dag_node_id,
       to_node_id: task.id,
-      edge_type: DAG::Edge::SEQUENCE,
-    )
-    assert run.conversation.root_graph.edges.exists?(
-      from_node_id: task.id,
-      to_node_id: continuation.id,
       edge_type: DAG::Edge::SEQUENCE,
     )
   ensure

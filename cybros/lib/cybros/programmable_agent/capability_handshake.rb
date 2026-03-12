@@ -148,6 +148,7 @@ module Cybros
                 "effective_tool_id" => tool.effective_tool_id,
                 "implementation_source" => tool.implementation_source,
                 "implementation_ref" => tool.implementation_ref,
+                "execution_mode" => tool.execution_mode,
               }
             end,
         }

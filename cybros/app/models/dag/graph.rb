@@ -21,6 +21,10 @@ module DAG
     has_many :edges,
              class_name: "DAG::Edge",
              inverse_of: :graph
+    has_many :turn_internal_tasks,
+             class_name: "TurnInternalTask",
+             foreign_key: :graph_id,
+             inverse_of: :graph
 
     after_create :ensure_main_lane
     before_destroy :purge_graph_records
@@ -928,6 +932,10 @@ module DAG
 
           connection.delete(<<~SQL.squish, "purge_dag_edges")
             DELETE FROM dag_edges WHERE graph_id = #{graph_id_quoted}
+          SQL
+
+          connection.delete(<<~SQL.squish, "purge_turn_internal_tasks")
+            DELETE FROM turn_internal_tasks WHERE graph_id = #{graph_id_quoted}
           SQL
 
           connection.delete(<<~SQL.squish, "purge_dag_nodes_and_bodies")

@@ -9,17 +9,30 @@ module Cybros
         :effective_tool_id,
         :implementation_source,
         :implementation_ref,
+        :execution_mode,
       )
 
     class CapabilitySnapshot
       RESERVED_LOGICAL_NAME_PREFIX = "cybros_".freeze
       EFFECTIVE_TOOL_ID_PREFIX = "etool_".freeze
       SNAPSHOT_ID_PREFIX = "csnap_".freeze
+      EXECUTION_MODES = %w[serial parallel_safe].freeze
 
       attr_reader :agent_program_id, :agent_program_version, :effective_tools, :kernel_registry_version, :snapshot_id
 
       def self.build(**attributes)
         new(**attributes)
+      end
+
+      def self.normalize_execution_mode(value)
+        mode = value.to_s.presence || "serial"
+        return mode if EXECUTION_MODES.include?(mode)
+
+        AgentCore::ValidationError.raise!(
+          "execution_mode must be one of #{EXECUTION_MODES.join(", ")}",
+          code: "cybros.programmable_agent.capability_snapshot.execution_mode_must_be_supported",
+          details: { execution_mode: value },
+        )
       end
 
       def self.restore(payload)
@@ -40,6 +53,7 @@ module Cybros
               effective_tool_id: attributes.fetch(:effective_tool_id, "").to_s,
               implementation_source: attributes.fetch(:implementation_source, "").to_s,
               implementation_ref: attributes.fetch(:implementation_ref, "").to_s,
+              execution_mode: normalize_execution_mode(attributes.fetch(:execution_mode, "serial")),
             )
           end
 
@@ -115,6 +129,7 @@ module Cybros
               ),
               implementation_source: implementation_source,
               implementation_ref: implementation_ref,
+              execution_mode: self.class.normalize_execution_mode(normalized.fetch(:execution_mode, "serial")),
             )
           end
         end
@@ -178,6 +193,7 @@ module Cybros
                   effective_tool_id: tool.effective_tool_id,
                   implementation_source: tool.implementation_source,
                   implementation_ref: tool.implementation_ref,
+                  execution_mode: tool.execution_mode,
                 }
               end,
           }

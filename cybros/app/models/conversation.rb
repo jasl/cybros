@@ -33,6 +33,7 @@ class Conversation < ApplicationRecord
   has_many :events, dependent: :destroy
   has_many :conversation_runs, dependent: :destroy
   has_many :run_drafts, dependent: :destroy
+  has_many :turn_internal_tasks, dependent: :destroy
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil? && root?
@@ -291,6 +292,14 @@ class Conversation < ApplicationRecord
         created_new_run = agent_node.present?
       end
 
+      reset_turn_internal_execution!(
+        graph: graph,
+        turn_id: user_node.turn_id,
+        preserve_node_ids: [user_node&.id, guard_node&.id, compact_task&.id, agent_node&.id, product_node&.id].compact,
+        compressed_by_id: agent_node&.id || product_node&.id || user_node.id,
+        reason: "turn_reset",
+      )
+
       if created_new_run
         if enqueue_conversation_run!(
              agent_node: agent_node,
@@ -412,6 +421,11 @@ class Conversation < ApplicationRecord
       )
 
       new_agent = failed_node.retry!
+      reanchor_turn_internal_tasks_for_retry!(
+        turn_id: failed_node.turn_id,
+        from_node_id: failed_node.id,
+        to_node_id: new_agent.id,
+      )
       apply_turn_execution_diagnostic_level!(new_agent, diagnostic_level: diagnostic_level)
 
       if enqueue_conversation_run!(
@@ -864,6 +878,14 @@ class Conversation < ApplicationRecord
       archive_leaf_terminal_sidecars!(graph: graph, node: target)
       target.reload
       new_agent = target.rerun!(metadata_patch: { "generated_by" => "regenerate" })
+
+      reset_turn_internal_execution!(
+        graph: graph,
+        turn_id: target.turn_id,
+        preserve_node_ids: [new_agent.id, *turn_user_node_ids(graph: graph, turn_id: target.turn_id)],
+        compressed_by_id: new_agent.id,
+        reason: "turn_reset",
+      )
 
       if enqueue_conversation_run!(
            agent_node: new_agent,
@@ -1762,6 +1784,57 @@ class Conversation < ApplicationRecord
         updated_at: now,
       )
       graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now) if edge_ids.any?
+    end
+
+    def reset_turn_internal_execution!(graph:, turn_id:, preserve_node_ids:, compressed_by_id:, reason:)
+      preserve_ids = Array(preserve_node_ids).compact.map(&:to_s)
+      now = Time.current
+      candidate_ids = []
+
+      graph.with_graph_lock! do
+        queue_scope = turn_internal_tasks.nonterminal.where(turn_id: turn_id)
+        queue_scope.update_all(
+          status: "canceled",
+          canceled_reason: reason,
+          updated_at: now,
+        ) if queue_scope.exists?
+
+        candidate_ids =
+          graph.nodes.active
+            .where(turn_id: turn_id)
+            .where.not(id: preserve_ids)
+            .where.not(node_type: Messages::UserMessage.node_type_key)
+            .pluck(:id)
+      end
+
+      graph.nodes.where(id: candidate_ids).find_each do |node|
+        stop_node_if_needed!(node, reason: reason)
+        cancel_runs_for_node!(node)
+      end
+
+      graph.with_graph_lock! do
+        next unless candidate_ids.any?
+
+        graph.nodes.active.where(id: candidate_ids).update_all(
+          compressed_at: now,
+          compressed_by_id: compressed_by_id,
+          updated_at: now,
+        )
+        graph.edges.active.where(from_node_id: candidate_ids).or(
+          graph.edges.active.where(to_node_id: candidate_ids)
+        ).update_all(compressed_at: now, updated_at: now)
+      end
+    end
+
+    def turn_user_node_ids(graph:, turn_id:)
+      graph.nodes.active.where(turn_id: turn_id, node_type: Messages::UserMessage.node_type_key).pluck(:id)
+    end
+
+    def reanchor_turn_internal_tasks_for_retry!(turn_id:, from_node_id:, to_node_id:)
+      turn_internal_tasks.where(turn_id: turn_id, source_node_id: from_node_id)
+        .where.not(status: TurnInternalTask::TERMINAL_STATUSES)
+        .where(materialized_task_node_id: nil)
+        .update_all(source_node_id: to_node_id, updated_at: Time.current)
     end
 
     def queue_anchor_agent_for_lane(graph:, lane:)

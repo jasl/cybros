@@ -435,16 +435,18 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     end
     invocation = AgentRPCInvocation.find_by(scope_type: "conversation_run", scope_id: run.id, method: "after_subagent_result")
 
-    appended_task =
-      conversation.root_graph.nodes
-        .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
-        .where.not(id: task_node.id)
-        .order(:id)
-        .last
+    queued = conversation.turn_internal_tasks.where(turn_id: agent_node.turn_id).ordered.sole
 
     assert_equal DAG::Node::FINISHED, execution_result.state, execution_result.error
     assert invocation.present?, "expected after_subagent_result invocation"
     assert_equal "Summarizing subagent result", agent_node.reload.body_output_preview.fetch("content")
+    assert_equal "subagent_spawn", queued.logical_tool_name
+    assert_equal task_node.id, queued.source_node_id
+    assert_nil queued.materialized_task_node_id
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: conversation.root_graph)
+
+    appended_task = conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
     assert_equal "subagent_spawn", appended_task.body_input.fetch("requested_name")
     assert conversation.root_graph.edges.exists?(
       from_node_id: task_node.id,

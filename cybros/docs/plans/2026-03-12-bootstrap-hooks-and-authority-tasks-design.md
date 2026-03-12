@@ -148,9 +148,9 @@ The ordering rule should be explicit:
 
 For branch creation:
 
-1. child `Conversation` persists
+1. branch `Conversation` persists
 2. branch lane/root node is created and attached
-3. `on_conversation_created` fires for the child conversation
+3. `on_conversation_created` fires for the branch conversation
 4. later, the first user-authored message on that branch lane may fire `on_lane_first_user_message`
 
 These hooks are intentionally distinct:
