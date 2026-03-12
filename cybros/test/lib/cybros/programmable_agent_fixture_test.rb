@@ -125,6 +125,24 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     assert_equal "fixture.before_agent_step", prepare.dig("planning", "tool_surface", "tool_surface_label")
   end
 
+  test "before_agent_step fixture scenarios merge staged kv ops instead of overwriting them" do
+    prepare =
+      Cybros::ProgrammableAgentFixture.rpc_result(
+        "before_agent_step",
+        {
+          "conversation_id" => "conv_fixture",
+          "user_input" => "[fixture:stage-state] [fixture:replay-kv]",
+        },
+      )
+
+    kv_ops = prepare.dig("planning", "staged_mutations", "kv_ops")
+
+    assert_equal "shared.fixture.plan", kv_ops.dig(0, "key")
+    assert_equal({ "status" => "planned" }, kv_ops.dig(0, "value"))
+    assert_equal "shared.fixture.replay", kv_ops.dig(1, "key")
+    assert_equal "shared.fixture.replay", kv_ops.dig(2, "key")
+  end
+
   test "server supports identity and rpc overrides for failure-path coverage" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -183,9 +201,23 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
           method: "before_agent_step",
           params: { "conversation_id" => "conv_cli" },
         )
+      finalize =
+        rpc_json(
+          "http://127.0.0.1:#{port}/rpc",
+          id: 2,
+          method: "before_finalize_output",
+          params: {
+            "conversation_run_id" => "run_cli",
+            "draft_output" => {
+              "content" => "",
+            },
+          },
+        )
 
       assert_equal true, prepare.dig("result", "planning", "step_plan", "fixture")
       assert_equal "conv_cli", prepare.dig("result", "planning", "step_plan", "conversation_id")
+      assert_equal "emit_message", finalize.dig("result", "actions", 0, "type")
+      assert_equal "fixture finalized response", finalize.dig("result", "actions", 0, "message", "content")
     end
   ensure
     if pid
@@ -200,7 +232,6 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
 
   test "before_agent_step switch-target proposes the paired alternate target when older visible targets exist" do
     current_target_id = "target-current"
-    proposed_target_id = nil
 
     callback_rpc =
       lambda do |_session, method_name, params|
@@ -212,13 +243,6 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
               { "id" => current_target_id, "name" => "target-switch-123 Primary" },
               { "id" => "target-alternate", "name" => "target-switch-123 Alternate" },
             ],
-          }
-        when "execution_target.propose"
-          proposed_target_id = params.fetch("execution_target_id")
-          {
-            "switch_decision" => {
-              "decision" => "confirm",
-            },
           }
         else
           flunk("unexpected callback #{method_name}")
@@ -244,8 +268,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
           },
         )
 
-      assert_equal "target-alternate", proposed_target_id
-      assert_equal "target-alternate", prepare.dig("planning", "approval_request", "proposed_execution_target_id")
+      assert_equal "target-alternate", prepare.dig("planning", "execution_target_proposal", "execution_target_id")
     ensure
       eigenclass.send(:define_method, :callback_rpc, original_callback_rpc)
     end

@@ -3,6 +3,7 @@ module Cybros
     require_relative "llm/catalog"
     require_relative "llm/capability_gated_provider"
     require_relative "llm/codex_oauth"
+    require_relative "bootstrap/tools"
     require_relative "context_budget/default_policy"
     require_relative "context_budget/tools"
     require_relative "programmable_agent"
@@ -352,6 +353,7 @@ module Cybros
           agent_program: agent_program,
           selected_model_ref_override: conversation_run&.selected_model_ref,
         )
+      tools_registry ||= build_tools_registry
       programmable_provider = programmable_provider_for(conversation_run, delegate: llm_selection.fetch(:provider, nil))
       ensure_programmable_runtime_available!(
         node: node,
@@ -361,6 +363,7 @@ module Cybros
         agent_program: agent_program,
         provider: provider,
         programmable_provider: programmable_provider,
+        tools_registry: tools_registry,
       )
       profile_resolution = resolve_profile(agent_metadata)
       profile_name = profile_resolution.fetch(:profile_name)
@@ -405,7 +408,6 @@ module Cybros
       tool_policy = context_budget_tool_policy(delegate: tool_policy)
 
       provider ||= programmable_provider || llm_selection.fetch(:provider)
-      tools_registry ||= build_tools_registry
       instrumenter ||= build_instrumenter
 
       prompt_injection_sources =
@@ -571,11 +573,12 @@ module Cybros
     end
     private_class_method :programmable_provider_for
 
-    def ensure_programmable_runtime_available!(node:, conversation:, conversation_run:, agent_metadata:, agent_program:, provider:, programmable_provider:)
+    def ensure_programmable_runtime_available!(node:, conversation:, conversation_run:, agent_metadata:, agent_program:, provider:, programmable_provider:, tools_registry:)
       return if provider.present?
       return if explicit_agent_profile_metadata?(agent_metadata)
       return unless agent_program.present?
       return if programmable_provider.present?
+      return if kernel_task_executable_without_materialized_run?(node: node, tools_registry: tools_registry)
 
       AgentCore::ValidationError.raise!(
         "Interactive programmable runtime requires a materialized ConversationRun.",
@@ -589,6 +592,24 @@ module Cybros
       )
     end
     private_class_method :ensure_programmable_runtime_available!
+
+    def kernel_task_executable_without_materialized_run?(node:, tools_registry:)
+      return false unless node&.node_type.to_s == Messages::Task.node_type_key
+
+      input = node.body_input.is_a?(Hash) ? node.body_input : {}
+      return false if input["implementation_source"].to_s == "agent_program"
+
+      tool_name =
+        input["logical_tool_name"].to_s.presence ||
+          input["name"].to_s.presence ||
+          input["requested_name"].to_s.presence
+      return false if tool_name.blank?
+
+      tools_registry.include?(tool_name)
+    rescue StandardError
+      false
+    end
+    private_class_method :kernel_task_executable_without_materialized_run?
 
     def latest_conversation_run_for(node)
       ConversationRun.latest_for_node(node)
@@ -844,6 +865,7 @@ module Cybros
 
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
+      registry.register_many(Cybros::Bootstrap::Tools.build)
       registry.register_many(Cybros::ContextBudget::Tools.build)
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
@@ -1026,6 +1048,7 @@ module Cybros
       false
     end
     private_class_method :explicit_agent_profile_metadata?
+
 
     def routing_channel_from_metadata(metadata)
       return nil unless metadata.is_a?(Hash)

@@ -20,7 +20,6 @@ class Cybros::ProgrammableAgent::HookEnvelopeTest < ActiveSupport::TestCase
                 { "op" => "put", "entry" => { "id" => "entry-1" } },
               ],
             },
-            "planned_tasks" => [],
           },
           "actions" => [
             { "type" => "set_step_status", "text" => "Planning" },
@@ -223,5 +222,105 @@ class Cybros::ProgrammableAgent::HookEnvelopeTest < ActiveSupport::TestCase
       end
 
     assert_equal "cybros.programmable_agent.hook_policy.create_task_not_allowed", error.code
+  end
+
+  test "bootstrap hooks accept append-only cybros authority tasks" do
+    envelope =
+      Cybros::ProgrammableAgent::HookEnvelope.parse!(
+        hook_name: "on_conversation_created",
+        request_payload: {},
+        payload: {
+          "actions" => [
+            {
+              "type" => "create_task",
+              "logical_tool_name" => "cybros_seed_message",
+              "input" => { "content" => "Welcome" },
+              "placement" => "append",
+            },
+          ],
+        },
+      )
+
+    assert_equal "create_task", envelope.actions.sole.type
+    assert_equal "cybros_seed_message", envelope.actions.sole.logical_tool_name
+    assert_equal "append", envelope.actions.sole.placement
+  end
+
+  test "bootstrap hooks reject planning payloads" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "on_lane_first_user_message",
+          request_payload: {},
+          payload: {
+            "planning" => {
+              "step_plan" => { "kind" => "bootstrap.plan" },
+            },
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_contract.planning_not_allowed", error.code
+  end
+
+  test "bootstrap hooks reject non authority tool names" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "on_lane_first_user_message",
+          request_payload: {},
+          payload: {
+            "actions" => [
+              {
+                "type" => "create_task",
+                "logical_tool_name" => "compact_context",
+                "input" => { "reason" => "summary" },
+                "placement" => "append",
+              },
+            ],
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_policy.bootstrap_task_must_use_reserved_namespace", error.code
+  end
+
+  test "bootstrap hooks reject prepend tasks" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "on_conversation_created",
+          request_payload: {},
+          payload: {
+            "actions" => [
+              {
+                "type" => "create_task",
+                "logical_tool_name" => "cybros_bootstrap_state",
+                "input" => { "lane_id" => "lane-1" },
+                "placement" => "prepend",
+              },
+            ],
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_policy.create_task_not_allowed", error.code
+  end
+
+  test "bootstrap hooks reject step-status actions" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "on_conversation_created",
+          request_payload: {},
+          payload: {
+            "actions" => [
+              { "type" => "set_step_status", "text" => "bootstrapping" },
+            ],
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_policy.set_step_status_not_allowed", error.code
   end
 end

@@ -1,43 +1,29 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
 
-test.describe("Conversation mock LLM: error + retry flow", () => {
+test.describe("Conversation mock LLM: error recovery flow", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
-    await createHighPriorityMockProvider(page)
   })
 
-  test("mock error triggers retry UI; after retry user can continue and receive markdown without reload", async ({ page }) => {
+  test("mock error is surfaced in the transcript and the app remains usable without reload", async ({ page }) => {
     test.setTimeout(150_000)
 
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Error Retry ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Error Retry ${Date.now()}`)
 
     await page.getByPlaceholder("Message…").fill('!mock error=500 message="boom" -- hello')
     await page.getByRole("button", { name: "Send" }).click()
 
     await expect(page.getByText('!mock error=500 message="boom" -- hello')).toBeVisible({ timeout: 10_000 })
 
-    // The UI should surface retry once the run transitions to errored.
-    await expect(page.getByRole("button", { name: "Retry" })).toBeVisible({ timeout: 90_000 })
-
-    const agentWrappers = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])')
-    await expect(agentWrappers).toHaveCount(1)
-    await expect(agentWrappers.first().getByText("boom")).toBeVisible()
-
-    await page.getByRole("button", { name: "Retry" }).click()
-
-    // Retry triggers a new agent node; after reload, we should see both the errored one and the retry placeholder.
-    await expect(agentWrappers).toHaveCount(2, { timeout: 30_000 })
+    const errorWrapper = page.locator('div[id^="message_"]:has-text("Task notice: provider_error")')
+    await expect(errorWrapper).toBeVisible({ timeout: 90_000 })
+    await expect(errorWrapper.getByText("Reported error: boom")).toBeVisible()
+    await expect(page.getByRole("button", { name: "Retry" })).toHaveCount(0)
 
     // Start a fresh conversation to prove the app remains usable after an error/retry flow,
-    // without being coupled to the retry node's runtime scheduling.
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E After Retry ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    // without being coupled to the failed turn's runtime scheduling.
+    await openConversationWithMockRuntime(page, `E2E After Retry ${Date.now()}`)
 
     await page.getByPlaceholder("Message…").fill("!md after retry")
     await page.getByRole("button", { name: "Send" }).click()

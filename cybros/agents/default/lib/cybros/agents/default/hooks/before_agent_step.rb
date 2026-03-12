@@ -92,18 +92,8 @@ module Cybros
             alternate_target ||= targets.find { |target| target["id"].to_s != current_target_id }
             return if alternate_target.nil?
 
-            proposal =
-              callback_rpc(
-                callback_session,
-                "execution_target.propose",
-                { "operation_id" => "fixture-target-switch", "execution_target_id" => alternate_target.fetch("id") }
-              )
-            return unless proposal.dig("switch_decision", "decision").to_s == "confirm"
-
-            result["planning"]["approval_request"] = {
-              "status" => "pending_confirmation",
-              "reason" => "target_switch",
-              "proposed_execution_target_id" => alternate_target.fetch("id"),
+            result["planning"]["execution_target_proposal"] = {
+              "execution_target_id" => alternate_target.fetch("id"),
             }
           end
 
@@ -123,11 +113,27 @@ module Cybros
               end.uniq
             return nil if snapshot_id.empty? || selected_tool_ids.empty?
 
-            {
+            payload = {
               "capability_registry_snapshot_id" => snapshot_id,
               "selected_tool_ids" => selected_tool_ids,
               "tool_surface_label" => "bundled_default.before_agent_step",
             }
+            callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
+            return payload if callback_session.empty?
+
+            callback_rpc(callback_session, "tool_surface.manifest", payload)
+          rescue StandardError
+            manifest =
+              Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+                capability_registry_snapshot: Cybros::ProgrammableAgent::CapabilitySnapshot.restore(snapshot),
+                selected_tool_ids: selected_tool_ids,
+                tool_surface_label: payload["tool_surface_label"],
+              )
+
+            payload.merge(
+              "tool_surface_id" => manifest.tool_surface_id,
+              "logical_tool_names" => manifest.selected_tools.map(&:logical_tool_name),
+            )
           end
 
           def paired_target_for(targets:, current_target_id:)
@@ -169,6 +175,8 @@ module Cybros
             case method_name
             when "execution_target.list"
               { "targets" => [] }
+            when "tool_surface.manifest"
+              {}
             else
               { "status" => "staged" }
             end

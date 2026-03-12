@@ -14,9 +14,16 @@ fi
 PORT="${E2E_PORT:-3000}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
 export CYBROS_BASE_URL="${CYBROS_BASE_URL:-${E2E_BASE_URL}}"
+export CYBROS_MANAGED_AGENT_AUTOLAUNCH="${CYBROS_MANAGED_AGENT_AUTOLAUNCH:-1}"
+export CYBROS_AGENT_WORKSPACE_ROOT="${CYBROS_AGENT_WORKSPACE_ROOT:-$PWD/tmp/agent-workspace}"
+export CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT="${CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT:-$PWD}"
 DRY_RUN="${CI_E2E_DRY_RUN:-0}"
 
 auto_enable_programmable_agent_fixture() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
   for arg in "$@"; do
     case "${arg}" in
       *programmable_agent_*.spec.ts)
@@ -39,17 +46,17 @@ fi
 echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"
 
-mkdir -p tmp tmp/pids
+mkdir -p tmp tmp/pids "${CYBROS_AGENT_WORKSPACE_ROOT}"
 
 cleanup() {
   echo ""
   echo "CI E2E: stopping server + jobs"
-  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+  for pid in "${FIXTURE_PID:-}" "${AGENTS_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
     [[ -n "${pid}" ]] || continue
     kill "${pid}" 2>/dev/null || true
   done
 
-  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+  for pid in "${FIXTURE_PID:-}" "${AGENTS_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
     [[ -n "${pid}" ]] || continue
     for _ in {1..40}; do
       kill -0 "${pid}" 2>/dev/null || break
@@ -99,6 +106,8 @@ fi
 bundle exec ruby -v >/dev/null
 bun run build >/dev/null
 bun run build:css >/dev/null
+bin/rails db:prepare >/dev/null
+bin/rails cybros:ensure_secondary_database_schemas >/dev/null
 
 bin/rails runner - <<'RUBY'
 identity = Identity.find_by(email: "admin@example.com")
@@ -110,6 +119,9 @@ RUBY
 
 bin/jobs >tmp/ci_e2e_jobs.log 2>&1 &
 JOBS_PID="$!"
+
+bin/managed_agent_deployments >tmp/ci_e2e_agents.log 2>&1 &
+AGENTS_PID="$!"
 
 PIDFILE="tmp/pids/server-e2e-${PORT}.pid"
 rm -f "${PIDFILE}"

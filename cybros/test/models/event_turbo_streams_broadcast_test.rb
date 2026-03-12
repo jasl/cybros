@@ -6,6 +6,9 @@ class EventTurboStreamsBroadcastTest < ActiveSupport::TestCase
 
   teardown do
     ActiveRecord::Base.lease_connection.disable_referential_integrity do
+      AgentRPCInvocation.update_all(last_session_id: nil)
+      AgentRPCSession.delete_all
+      AgentRPCInvocation.delete_all
       RunDraft.delete_all
       ConversationRun.delete_all
       Event.delete_all

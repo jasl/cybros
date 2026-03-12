@@ -9,7 +9,7 @@ module AgentDeployments
       raise ActivationError, "unsupported protocol version" unless deployment.protocol_version == SUPPORTED_PROTOCOL_VERSION
       raise ActivationError, "deployment is not healthy" unless deployment.health_status == "healthy"
 
-      missing_methods = REQUIRED_METHODS - Array(deployment.supported_methods).map(&:to_s)
+      missing_methods = required_methods_for_activation - Array(deployment.supported_methods).map(&:to_s)
       raise ActivationError, "deployment is missing required methods" if missing_methods.any?
 
       identity = deployment.inspection_details.fetch("identity", {})
@@ -54,6 +54,21 @@ module AgentDeployments
           deployment.inspection_details.key?("describe") &&
           deployment.inspection_details.key?("health") &&
           deployment.inspection_details.key?("schemas")
+      end
+
+      def required_methods_for_activation
+        methods = AgentDeployments::REQUIRED_METHODS.dup
+        methods << "tool.execute" if agent_owned_tools_exposed?
+        methods
+      end
+
+      def agent_owned_tools_exposed?
+        snapshot = deployment.capability_snapshot
+        return false unless snapshot.is_a?(Hash)
+
+        Array(snapshot["effective_tools"]).any? do |tool|
+          tool.is_a?(Hash) && tool["implementation_source"].to_s == "agent_program"
+        end
       end
   end
 end

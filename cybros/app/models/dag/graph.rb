@@ -25,7 +25,7 @@ module DAG
     after_create :ensure_main_lane
     before_destroy :purge_graph_records
 
-    def mutate!(turn_id: nil)
+    def mutate!(turn_id: nil, kick: true)
       ValidationError.raise!(
         "block required",
         code: "dag.graph.block_required",
@@ -41,7 +41,7 @@ module DAG
           mutations.executable_pending_nodes_created? || validate_leaf_invariant!
       end
 
-      if executable_pending_nodes_created
+      if executable_pending_nodes_created && kick
         kick!
       end
     end
@@ -573,12 +573,19 @@ module DAG
 
     def leaf_valid?(node)
       return true unless attachable&.respond_to?(:dag_node_body_namespace)
+      return true if authored_leaf_terminal?(node)
 
       if leaf_terminal_node_types.include?(node.node_type.to_s)
         true
       else
         node.pending? || node.awaiting_approval? || node.running?
       end
+    end
+
+    def leaf_terminal?(node)
+      return false unless node.is_a?(DAG::Node)
+
+      authored_leaf_terminal?(node) || leaf_terminal_node_types.include?(node.node_type.to_s)
     end
 
     def leaf_repair_node_attributes(leaf)
@@ -846,6 +853,20 @@ module DAG
           rescue NameError
             nil
           end
+      end
+
+      def authored_leaf_terminal?(node)
+        metadata_value =
+          if node.respond_to?(:has_attribute?) && !node.has_attribute?(:metadata)
+            nil
+          else
+            node.metadata
+          end
+        metadata = metadata_value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(metadata_value) : {}
+        authored = metadata["authored_metadata"]
+        return false unless authored.is_a?(Hash)
+
+        ActiveModel::Type::Boolean.new.cast(authored["leaf_terminal"])
       end
 
       def node_type_keys_for_hook(hook_name)

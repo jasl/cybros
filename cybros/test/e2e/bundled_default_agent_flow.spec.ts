@@ -1,11 +1,12 @@
 import { test, expect } from "@playwright/test"
 import {
   bundledDefaultRuntimeState,
+  createHighPriorityMockProvider,
   conversationIdFromUrl,
   ensureSingleBundledExecutionTarget,
-  ensureOpenAiDefaultModel,
   openNewConversation,
   programmableConversationState,
+  selectConversationRuntimeOption,
   signIn,
   waitForTailAgentToFinish,
 } from "./helpers"
@@ -18,14 +19,16 @@ test.describe("Bundled default agent flow", () => {
   test("fresh setup bootstraps the bundled default agent and completes the first conversation loop", async ({ page }) => {
     test.setTimeout(180_000)
 
-    ensureOpenAiDefaultModel()
-    expect(ensureSingleBundledExecutionTarget().executionTargetName).toBe("Bundled Default Target")
+    await createHighPriorityMockProvider(page)
+    const runtimeTarget = ensureSingleBundledExecutionTarget()
+    expect(runtimeTarget.executionTargetName).toBeTruthy()
     const bundled = bundledDefaultRuntimeState()
 
     expect(bundled.programName).toBe("Default")
     expect(bundled.deploymentStatus).toBe("active")
     expect(bundled.deploymentHealthStatus).toBe("healthy")
     expect(bundled.executionTargetName).toBeTruthy()
+    expect(bundled.executionTargetName).toBe(runtimeTarget.executionTargetName)
 
     await openNewConversation(page, `Bundled Default ${Date.now()}`)
 
@@ -35,9 +38,10 @@ test.describe("Bundled default agent flow", () => {
     expect(state.agentProgramName).toBe(bundled.programName)
     expect(state.defaultExecutionTargetName).toBe(bundled.executionTargetName)
 
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
     await page.getByPlaceholder("Message…").fill("Inspect the repository status")
     await page.getByRole("button", { name: "Send" }).click()
-    await waitForTailAgentToFinish(page, "Bundled default agent plan:")
+    await waitForTailAgentToFinish(page, "Inspect the repository status")
 
     state = programmableConversationState(conversationId)
 

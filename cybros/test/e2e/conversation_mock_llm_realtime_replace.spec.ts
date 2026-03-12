@@ -1,19 +1,15 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
 
 test.describe("Conversation dual-channel (ActionCable ephemeral + Turbo truth)", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
-    await createHighPriorityMockProvider(page)
   })
 
   test("Turbo replace renders final markdown in-place (no reload)", async ({ page }) => {
     test.setTimeout(150_000)
 
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Realtime ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Realtime ${Date.now()}`)
 
     await expect(page.locator('turbo-cable-stream-source[channel="Turbo::StreamsChannel"]')).toHaveCount(1)
     await expect(page.locator('[data-controller~="conversation-channel"]')).toHaveAttribute(

@@ -13,6 +13,8 @@ class RPCContractTest < Minitest::Test
 
     assert_equal "default", initialize_payload.dig("result", "identity", "agent_program_key")
     assert_equal "deployment:test-default", initialize_payload.dig("result", "identity", "deployment_fingerprint")
+    assert_includes initialize_payload.dig("result", "identity", "supported_methods"), "on_conversation_created"
+    assert_includes initialize_payload.dig("result", "identity", "supported_methods"), "on_lane_first_user_message"
     assert_equal "Default", describe_payload.dig("result", "name")
     assert_equal true, health_payload.dig("result", "healthy")
     assert_equal "object", schemas_payload.dig("result", "global_config_schema", "type")
@@ -24,7 +26,7 @@ class RPCContractTest < Minitest::Test
     host&.shutdown
   end
 
-  def test_before_agent_step_returns_typed_planning_with_staged_mutations_and_approval_flow
+  def test_before_agent_step_returns_typed_planning_with_staged_mutations_and_cutover_fields
     callback = TestSupport::CallbackHarness.new.start
     host = build_host.start
     capability_snapshot = {
@@ -54,7 +56,7 @@ class RPCContractTest < Minitest::Test
           "conversation_id" => "conversation:test-default",
           "execution_target_id" => "target-primary",
           "capability_snapshot" => capability_snapshot,
-          "user_input" => "[fixture:stage-state] [fixture:replay-kv] [fixture:switch-target] [fixture:approval] Verify the workspace status",
+          "user_input" => "[fixture:stage-state] [fixture:replay-kv] [fixture:switch-target] Verify the workspace status",
           "callback_session" => {
             "endpoint" => callback.rpc_url,
             "bearer" => callback.required_bearer,
@@ -65,12 +67,9 @@ class RPCContractTest < Minitest::Test
     result = payload.fetch("result")
 
     assert_equal(
-      %w[stage-state replay-kv switch-target approval],
+      %w[stage-state replay-kv switch-target],
       result.dig("planning", "step_plan", "fixture_scenarios")
     )
-    assert_equal "pending_confirmation", result.dig("planning", "approval_request", "status")
-    assert_equal "target_switch", result.dig("planning", "approval_request", "reason")
-    assert_equal "target-alternate", result.dig("planning", "approval_request", "proposed_execution_target_id")
     assert_match("Verify the workspace status", result.dig("planning", "step_plan", "summary"))
     assert_equal "clear", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 0, "op")
     assert_equal "system", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 0, "buffer_name")
@@ -81,18 +80,73 @@ class RPCContractTest < Minitest::Test
     assert_equal 2, result.dig("planning", "staged_mutations", "kv_ops").size
     assert_equal "csnap_fixture", result.dig("planning", "tool_surface", "capability_registry_snapshot_id")
     assert_equal %w[etool_compact etool_subagent_spawn], result.dig("planning", "tool_surface", "selected_tool_ids")
-    assert_equal "bundled_default.before_agent_step", result.dig("planning", "tool_surface", "tool_surface_label")
+    assert_equal "surface_callback_harness", result.dig("planning", "tool_surface", "tool_surface_id")
+    assert_equal "target-alternate", result.dig("planning", "execution_target_proposal", "execution_target_id")
 
     assert_equal(
       [
+        "tool_surface.manifest",
         "execution_target.list",
-        "execution_target.propose",
       ],
       callback.calls.map { |call| call.fetch("method") }
     )
   ensure
     host&.shutdown
     callback&.shutdown
+  end
+
+  def test_bootstrap_hooks_return_append_only_authority_tasks
+    host = build_host.start
+
+    conversation_payload =
+      rpc_json(
+        host.rpc_url,
+        id: 11,
+        method: "on_conversation_created",
+        params: {
+          "conversation_id" => "conversation:test-default",
+          "conversation_kind" => "root",
+          "agent_key" => "main",
+          "lane_id" => "lane-main",
+        },
+      )
+    main_lane_first_user_payload =
+      rpc_json(
+        host.rpc_url,
+        id: 12,
+        method: "on_lane_first_user_message",
+        params: {
+          "conversation_id" => "conversation:test-default",
+          "lane_id" => "lane-main",
+          "lane_role" => "main",
+          "agent_key" => "main",
+          "user_node_id" => "message-1",
+        },
+      )
+    branch_lane_first_user_payload =
+      rpc_json(
+        host.rpc_url,
+        id: 13,
+        method: "on_lane_first_user_message",
+        params: {
+          "conversation_id" => "conversation:branch",
+          "conversation_kind" => "branch",
+          "lane_id" => "lane-branch",
+          "lane_role" => "branch",
+          "agent_key" => "main",
+          "user_node_id" => "message-branch-1",
+        },
+      )
+
+    assert_equal "create_task", conversation_payload.dig("result", "actions", 0, "type")
+    assert_equal "append", conversation_payload.dig("result", "actions", 0, "placement")
+    assert_match(/\Acybros_/i, conversation_payload.dig("result", "actions", 0, "logical_tool_name"))
+    assert_equal ["cybros_generate_title"], main_lane_first_user_payload.fetch("result").fetch("actions").map { |action| action["logical_tool_name"] }
+    assert_equal ["cybros_generate_title", "cybros_enqueue_lane_summary"],
+                 branch_lane_first_user_payload.fetch("result").fetch("actions").map { |action| action["logical_tool_name"] }
+    assert branch_lane_first_user_payload.fetch("result").fetch("actions").all? { |action| action["placement"] == "append" }
+  ensure
+    host&.shutdown
   end
 
   def test_before_agent_step_replaces_the_system_prompt_buffer_without_extra_callback_state

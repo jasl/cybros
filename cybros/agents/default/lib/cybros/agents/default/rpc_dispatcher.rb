@@ -62,6 +62,10 @@ module Cybros
               "agent_capabilities_version" => @application.agent_capabilities_version,
               "agent_tool_catalog" => @application.agent_tool_catalog,
             }
+          when "on_conversation_created"
+            Hooks::OnConversationCreated.new(application: @application).call(params: normalized_params)
+          when "on_lane_first_user_message"
+            Hooks::OnLaneFirstUserMessage.new(application: @application).call(params: normalized_params)
           when "before_agent_step"
             Hooks::BeforeAgentStep.new(application: @application).call(params: normalized_params)
           when "on_context_pressure"

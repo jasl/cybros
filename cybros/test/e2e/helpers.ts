@@ -22,10 +22,29 @@ export async function signIn(page: Page, email = "admin@example.com", password =
 }
 
 export async function createHighPriorityMockProvider(page: Page) {
-  await page.goto("/system/settings/llm_providers")
-  await page.locator('select[name="default_model_ref"]').selectOption("dev/mock-model")
-  await page.getByRole("button", { name: "Save default" }).click()
-  await expect(page.getByText("Site override: dev/mock-model")).toBeVisible()
+  const result = railsJson<{ defaultModelRef: string }>(`
+    require "json"
+
+    credential = LLMProviderCredential.find_or_initialize_by(provider_key: "openai", status: "active")
+    credential.assign_attributes(
+      credential_type: "api_key",
+      api_key: "sk-test",
+      max_concurrent_requests: 3,
+      requests_per_minute: 90,
+      tokens_per_minute: 180000,
+      burst_limit: 6,
+      backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10000 },
+    )
+    credential.save!
+
+    Account.instance.update_llm_default_model_ref!("dev/mock-model")
+
+    puts JSON.generate({ defaultModelRef: Account.instance.llm_default_model_ref })
+  `)
+  const target = ensureSingleBundledExecutionTarget()
+
+  expect(result.defaultModelRef).toBe("dev/mock-model")
+  expect(target.executionTargetName).toBeTruthy()
 }
 
 function railsRunner(script: string): string {
@@ -238,6 +257,8 @@ export function deactivateProgramDeployments(programId: string) {
 export function programmableConversationState(conversationId: string) {
   return railsJson<{
     conversationId: string
+    title: string
+    selectedModelRef: string | null
     agentProgramName: string | null
     permissionMode: string
     defaultExecutionTargetId: string | null
@@ -245,6 +266,7 @@ export function programmableConversationState(conversationId: string) {
     publicSettings: Record<string, unknown>
     selectedAgentConfig: Record<string, unknown>
     kv: Record<string, unknown>
+    kvEntryCounts: Record<string, number>
     latestDraft: {
       id: string | null
       status: string | null
@@ -285,9 +307,12 @@ export function programmableConversationState(conversationId: string) {
     kv = conversation.chat_lane.lane_kv_entries.order(:key).each_with_object({}) do |entry, out|
       out[entry.key] = entry.value
     end
+    kv_entry_counts = conversation.chat_lane.lane_kv_entries.group(:key).count
 
     puts JSON.generate({
       conversationId: conversation.id,
+      title: conversation.title,
+      selectedModelRef: conversation.metadata.dig("llm", "model_ref").to_s.presence,
       agentProgramName: conversation.agent_program&.name,
       permissionMode: conversation.permission_mode,
       defaultExecutionTargetId: conversation.default_execution_target_id,
@@ -295,6 +320,7 @@ export function programmableConversationState(conversationId: string) {
       publicSettings: conversation.public_settings,
       selectedAgentConfig: conversation.selected_agent_config,
       kv: kv,
+      kvEntryCounts: kv_entry_counts,
       latestDraft: {
         id: draft&.id,
         status: draft&.status,
@@ -333,7 +359,7 @@ export function bundledDefaultRuntimeState() {
   }>(`
     require "json"
 
-    program = AgentProgram.find_by!(bundled_agent_key: "default")
+    program = AgentPrograms::BootstrapBundledDefaultService.bootstrap!
     deployment = program.active_healthy_deployment
     target = ExecutionTarget.visible_for_runtime.order(:created_at).first
 
@@ -357,7 +383,10 @@ export function ensureSingleBundledExecutionTarget() {
   }>(`
     require "json"
 
-    bundled_target = ExecutionTarget.find_by(name: "Bundled Default Target")
+    AgentPrograms::BootstrapBundledDefaultService.bootstrap!
+    bundled_target =
+      ExecutionTarget.find_by(name: "Bundled Default Target") ||
+        ExecutionTarget.visible_for_runtime.order(:created_at).first
 
     if bundled_target.present?
       ExecutionTarget.where.not(id: bundled_target.id).update_all(status: "inactive", updated_at: Time.current)
@@ -375,6 +404,7 @@ export function agentProgramStateByName(name: string) {
   return railsJson<{
     programId: string
     programName: string
+    selectable: boolean
     sourceKind: string
     bundledAgentKey: string | null
     forkedFromProgramId: string | null
@@ -391,6 +421,7 @@ export function agentProgramStateByName(name: string) {
     puts JSON.generate({
       programId: program.id,
       programName: program.name,
+      selectable: program.selectable_for_conversation?,
       sourceKind: program.source_kind,
       bundledAgentKey: program.bundled_agent_key,
       forkedFromProgramId: program.forked_from_agent_program_id,
@@ -418,28 +449,93 @@ export async function openNewConversation(page: Page, title: string) {
   await expect(page).toHaveURL(/\/conversations\//)
 }
 
-const PERMISSION_MODE_LABELS: Record<string, string> = {
-  Conservative: "conservative",
-  Default: "default",
-  "Full access": "full_access",
+export async function openConversationWithMockRuntime(page: Page, title: string) {
+  await createHighPriorityMockProvider(page)
+  await openNewConversation(page, title)
+  await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", "Bundled Default Target")
+  // Execution target changes persist by reloading the page; select the ephemeral model override last.
+  await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
+}
+
+export function seedHotkeysFixtureConversation(title: string) {
+  const markdown = "# Mock Markdown\n\n**Prompt:** please respond with markdown\n\n- This response is deterministic (for E2E).\n- It includes markdown constructs (heading, bold, list, code).\n\n`mock_llm streaming: enabled`"
+
+  return railsJson<{ conversationId: string }>(`
+    require "json"
+
+    user = User.joins(:identity).find_by!(identities: { email: "admin@example.com" })
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    target = ExecutionTarget.find_by(name: "Bundled Default Target") || ExecutionTarget.visible_for_runtime.order(:created_at).first
+
+    Conversation.skip_callback(:commit, :after, :dispatch_bootstrap_hooks_after_commit)
+
+    conversation =
+      user.conversations.create!(
+        title: ${JSON.stringify(title)},
+        metadata: {
+          "agent" => { "key" => "main", "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "dev/mock-model" },
+        },
+        agent_program: program,
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        default_execution_target: target,
+      )
+
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+
+    graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          content: "!md please respond with markdown",
+          metadata: {},
+        )
+
+      agent_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          content: ${JSON.stringify(markdown)},
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    puts JSON.generate({ conversationId: conversation.id })
+  `)
+}
+
+export async function openHotkeysFixtureConversation(page: Page, title: string) {
+  await createHighPriorityMockProvider(page)
+  const state = seedHotkeysFixtureConversation(title)
+  await page.goto(`/conversations/${state.conversationId}`)
 }
 
 function conversationRuntimeOptionPersisted({
   conversationId,
   testId,
   label,
+  expectedValue,
 }: {
   conversationId: string
   testId: string
   label: string
+  expectedValue: string | null
 }) {
   const state = programmableConversationState(conversationId)
 
   switch (testId) {
+    case "conversation-composer-model-picker":
+      return state.selectedModelRef === expectedValue
     case "conversation-composer-agent-picker":
       return state.agentProgramName === label
     case "conversation-composer-permission-picker":
-      return state.permissionMode === PERMISSION_MODE_LABELS[label]
+      return state.permissionMode === expectedValue
     case "conversation-composer-execution-target-picker":
       return state.defaultExecutionTargetName === (label === "No target selected" ? null : label)
     default:
@@ -449,11 +545,30 @@ function conversationRuntimeOptionPersisted({
 
 export async function selectConversationRuntimeOption(page: Page, testId: string, label: string) {
   const conversationId = conversationIdFromUrl(page)
-  await page.getByTestId(testId).selectOption({ label })
+  const locator = page.getByTestId(testId)
+  const expectedValue = await locator.locator("option").evaluateAll((options, targetLabel) => {
+    const match = options.find((option) => {
+      const text = option.textContent?.trim() || ""
+      return option.label === targetLabel || text === targetLabel
+    })
+
+    return match ? match.value : null
+  }, label)
+
+  if (expectedValue === null) {
+    throw new Error(`runtime option ${testId} is missing label ${label}`)
+  }
+
+  await locator.selectOption({ label })
+
+  if (testId === "conversation-composer-model-picker") {
+    await expect(locator).toHaveValue(expectedValue)
+    return
+  }
 
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (conversationRuntimeOptionPersisted({ conversationId, testId, label })) {
+    if (conversationRuntimeOptionPersisted({ conversationId, testId, label, expectedValue })) {
       await page.reload({ waitUntil: "domcontentloaded" })
       return
     }

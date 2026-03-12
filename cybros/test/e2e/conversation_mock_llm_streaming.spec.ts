@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
 
 test.describe("Conversation with Mock LLM streaming + markdown", () => {
   test.beforeEach(async ({ page }) => {
@@ -7,13 +7,7 @@ test.describe("Conversation with Mock LLM streaming + markdown", () => {
   })
 
   test("send creates placeholder; final markdown is durable after reload", async ({ page }) => {
-    await createHighPriorityMockProvider(page)
-
-    // Create a new conversation and send a message that asks the mock to return markdown.
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Mock LLM ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Mock LLM ${Date.now()}`)
 
     await page.getByPlaceholder("Message…").fill("!md please respond with markdown")
     await page.getByRole("button", { name: "Send" }).click()

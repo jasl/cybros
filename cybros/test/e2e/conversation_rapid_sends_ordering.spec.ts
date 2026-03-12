@@ -1,51 +1,51 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
+
+async function addHiddenComposerInput(page, { name, value }) {
+  await page.locator('form[data-controller~="message-form"]').evaluate(
+    (form, { inputName, inputValue }) => {
+      let input = form.querySelector(`input[name="${inputName}"]`)
+      if (!(input instanceof HTMLInputElement)) {
+        input = document.createElement("input")
+        input.type = "hidden"
+        input.name = inputName
+        form.appendChild(input)
+      }
+
+      input.disabled = false
+      input.value = inputValue
+    },
+    { inputName: name, inputValue: String(value) },
+  )
+}
 
 test.describe("Conversation rapid sends ordering", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
-    await createHighPriorityMockProvider(page)
   })
 
-  test("rapid sends preserve DOM ordering of user messages", async ({ page }) => {
+  test("rapid sends preserve message ordering and do not lose drafts", async ({ page }) => {
     test.setTimeout(150_000)
 
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Rapid Sends ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Rapid Sends ${Date.now()}`)
+    await addHiddenComposerInput(page, {
+      name: "input_policy_override[input_coalescing][window_ms]",
+      value: 0,
+    })
 
     const messages = [`rapid-1-${Date.now()}`, `rapid-2-${Date.now()}`, `rapid-3-${Date.now()}`]
+    const anchorPrompt = "!mock slow=0.05 -- queue anchor " + "slow ".repeat(80)
+    const userTexts = page.locator('[data-role="user-text"]')
+
+    await page.getByPlaceholder("Message…").fill(anchorPrompt)
+    await page.getByRole("button", { name: "Send" }).click()
+    await expect(page.getByText(anchorPrompt)).toBeVisible({ timeout: 10_000 })
 
     for (const msg of messages) {
       await page.getByPlaceholder("Message…").fill(msg)
       await page.getByRole("button", { name: "Send" }).click()
-      await expect(page.getByText(msg)).toBeVisible({ timeout: 10_000 })
     }
 
-    const indices = await page.evaluate((msgs) => {
-      const list = document.querySelector("[id^='messages_list_conversation_']")
-      if (!list) throw new Error("missing messages_list")
-
-      const children = Array.from(list.children).filter((el) => el instanceof HTMLElement)
-      const childIds = children.map((el) => String((el).id || ""))
-
-      const wrapperIndexByUserText = (text) => {
-        const match = children.find((el) => {
-          const p = el.querySelector("p.whitespace-pre-wrap")
-          return p && p.textContent === text
-        })
-        if (!match) return -1
-        const id = String((match).id || "")
-        return childIds.indexOf(id)
-      }
-
-      return msgs.map((m) => wrapperIndexByUserText(m))
-    }, messages)
-
-    expect(indices.length).toBe(3)
-    expect(indices[0]).toBeGreaterThanOrEqual(0)
-    expect(indices[1]).toBeGreaterThan(indices[0])
-    expect(indices[2]).toBeGreaterThan(indices[1])
+    await expect(userTexts).toHaveText([anchorPrompt, ...messages], { timeout: 30_000 })
   })
 })

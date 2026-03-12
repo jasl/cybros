@@ -37,6 +37,7 @@ test.describe("Programmable agent target switching", () => {
     const suffix = `${Date.now()}-default`
     const { targets } = await openProgrammableConversation(page, suffix)
     await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Default")
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
     await page.getByPlaceholder("Message…").fill("[fixture:switch-target]")
     await page.getByRole("button", { name: "Send" }).click()
@@ -47,7 +48,7 @@ test.describe("Programmable agent target switching", () => {
     expect(state.latestDraft.proposedExecutionTargetName).toBe(targets.alternateTargetName)
 
     await page.getByRole("button", { name: "Approve" }).last().click()
-    await waitForTailAgentToFinish(page, "fixture compose response")
+    await waitForTailAgentToFinish(page)
 
     state = programmableConversationState(conversationIdFromUrl(page))
     expect(state.defaultExecutionTargetName).toBe(targets.alternateTargetName)
@@ -60,11 +61,12 @@ test.describe("Programmable agent target switching", () => {
     const suffix = `${Date.now()}-full`
     const { targets } = await openProgrammableConversation(page, suffix)
     await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Full access")
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
     await page.getByPlaceholder("Message…").fill("[fixture:switch-target]")
     await page.getByRole("button", { name: "Send" }).click()
 
-    await waitForTailAgentToFinish(page, "fixture compose response")
+    await waitForTailAgentToFinish(page)
     await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0)
 
     const state = programmableConversationState(conversationIdFromUrl(page))

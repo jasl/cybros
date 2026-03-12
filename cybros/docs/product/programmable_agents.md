@@ -10,11 +10,14 @@ The default interactive Cybros agent now follows this same model. The official b
 
 Current shipped runtime note:
 
+- the active bootstrap hooks are `on_conversation_created` and `on_lane_first_user_message`
 - the active planning hook is `before_agent_step`
 - the active live-step context-pressure hook is `on_context_pressure`
 - the active delegated-worker preflight hook is `before_subagent_spawn`
 - the active terminal task notice hooks are `after_task_notice` / `after_subagent_result`
 - the active programmable output hook is `before_finalize_output`
+- programmable tool execution now goes through `tool.execute`
+- `tool_surface.manifest` is the active callback helper for validating a durable tool surface selection
 - lane-scoped kernel state (`lane.kv.*`, `lane.prompt_buffer.*`) and `tokens.*` run under that cutover path
 - the runtime cutover is complete on the typed hook/capability surface; what remains separate is proving and tuning concrete agent behavior quality on top of it
 
@@ -141,6 +144,8 @@ The agent contract should provide:
 
 Today those turn handlers are:
 
+- `on_conversation_created`
+- `on_lane_first_user_message`
 - `before_agent_step`
 - `on_context_pressure`
 - `before_subagent_spawn`
@@ -181,13 +186,19 @@ This includes:
 - `lane.prompt_buffer.*`
 - `tokens.*`
 - execution-target discovery
-- requests to change execution target
+- durable execution-target proposals through `planning.execution_target_proposal`
 
 This control is declarative and policy-gated.
 
 During `before_agent_step`, those requested changes stay staged on the draft until Cybros finalizes the run plan.
 
 If approval is required, Cybros persists the prepared draft result, ends the planning session, and resumes finalization locally after approval instead of reopening planning.
+
+Bootstrap-family hooks are stricter:
+
+- they may only append reserved `cybros_*` authority tasks
+- they may not mutate conversation or lane state directly through callbacks
+- Cybros executes those authority tasks inside the DAG so bootstrap state changes stay auditable
 
 ## Permission Presets
 

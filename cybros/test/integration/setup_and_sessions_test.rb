@@ -4,14 +4,14 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
   def reset_install_state!
     # Some tests disable transactions and can leave rows behind; this suite needs a truly empty
     # "fresh install" state (no identities) without tripping foreign keys.
-    ConversationRun.delete_all
-    RunDraft.delete_all
-    Event.delete_all
-    Conversation.delete_all
     AgentRPCInvocation.update_all(last_session_id: nil)
     AgentRPCOperationReceipt.delete_all
     AgentRPCSession.delete_all
     AgentRPCInvocation.delete_all
+    ConversationRun.delete_all
+    RunDraft.delete_all
+    Event.delete_all
+    Conversation.delete_all
     AgentDeployment.delete_all
     AgentProgram.delete_all
     Session.delete_all

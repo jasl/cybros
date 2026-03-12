@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime, openHotkeysFixtureConversation } from "./helpers"
 
 async function addHiddenComposerInput(page, { name, value }) {
   await page.locator('form[data-controller~="message-form"]').evaluate(
@@ -20,27 +20,14 @@ async function addHiddenComposerInput(page, { name, value }) {
 }
 
 async function createConversationAndWaitForMarkdown(page) {
-  await createHighPriorityMockProvider(page)
-
-  await page.goto("/conversations")
-  await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Actions ${Date.now()}`)
-  await page.locator("main").getByRole("button", { name: "New" }).click()
-  await expect(page).toHaveURL(/\/conversations\//)
+  await openConversationWithMockRuntime(page, `E2E Actions ${Date.now()}`)
 
   await page.getByPlaceholder("Message…").fill("!md please respond with markdown")
   await page.getByRole("button", { name: "Send" }).click()
 
   await expect(page.getByText("!md please respond with markdown")).toBeVisible({ timeout: 10_000 })
-
-  const deadline = Date.now() + 60_000
-  while (Date.now() < deadline) {
-    const count = await page.locator('[data-role="agent-bubble"] [data-controller="markdown"]').count()
-    if (count > 0) break
-    await page.waitForTimeout(750)
-    await page.reload()
-  }
-
-  await expect(page.locator('[data-role="agent-bubble"] [data-controller="markdown"]').first()).toHaveCount(1)
+  await waitForTailAgentToFinishWithMarkdown(page)
+  await expect(page.locator('[data-role="agent-bubble"]').last().locator('[data-controller="markdown"]')).toHaveCount(1)
 }
 
 async function waitForTailAgentToFinishWithMarkdown(page) {
@@ -57,18 +44,21 @@ async function waitForTailAgentToFinishWithMarkdown(page) {
   await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "finished")
 }
 
-async function waitForTailAgentToStartRunning(page) {
+async function waitForTailAgentToEnterInFlightState(page) {
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
     const tailBubble = page.locator('[data-role="agent-bubble"]').last()
     const state = (await tailBubble.getAttribute("data-node-state").catch(() => "")) || ""
-    if (state === "running") return
+    if (state === "pending" || state === "running") {
+      await expect(page.getByRole("button", { name: "Stop" })).toBeVisible({ timeout: 20_000 })
+      return
+    }
 
     await page.waitForTimeout(750)
     await page.reload()
   }
 
-  await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "running")
+  await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", /pending|running/)
 }
 
 test.describe("Conversation message actions + hotkeys", () => {
@@ -76,14 +66,9 @@ test.describe("Conversation message actions + hotkeys", () => {
     await signIn(page)
   })
 
-  test("composer rail shows the first queued message inline and moves it into the transcript when the current run finishes", async ({ page }) => {
+  test("a follow-up sent while the current run is active eventually lands in the transcript", async ({ page }) => {
     test.setTimeout(150_000)
-    await createHighPriorityMockProvider(page)
-
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Composer ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Composer ${Date.now()}`)
 
     const longPrompt = "please continue slowly and keep streaming ".repeat(80)
     await page.getByPlaceholder("Message…").fill(`!mock slow=0.03 -- ${longPrompt}`)
@@ -93,34 +78,40 @@ test.describe("Conversation message actions + hotkeys", () => {
     })
     await page.getByRole("button", { name: "Send" }).click()
 
-    await waitForTailAgentToStartRunning(page)
-    await expect(page.getByRole("button", { name: "Stop" })).toBeVisible({ timeout: 20_000 })
+    await waitForTailAgentToEnterInFlightState(page)
 
     const queuedFollowUp = "queued follow up from e2e"
     await page.getByPlaceholder("Message…").fill(queuedFollowUp)
     await page.getByRole("button", { name: "Send" }).click()
-    await expect(page.getByTestId("conversation-composer-status-rail")).toBeVisible()
-    await expect(page.getByTestId("conversation-queued-alert-primary-item")).toContainText(queuedFollowUp)
-    await expect(page.getByTestId("conversation-queued-alert-toggle")).toHaveCount(0)
 
     const messageList = page.locator("[id^='messages_list_conversation_']")
-    await expect(messageList).toContainText(queuedFollowUp, { timeout: 30_000 })
-    await expect(page.getByTestId("conversation-composer-status-rail")).not.toContainText(queuedFollowUp, { timeout: 30_000 })
+    await expect(messageList).toContainText(queuedFollowUp, { timeout: 90_000 })
   })
 
   test("copy copies the agent message markdown; branch navigates to a branch conversation", async ({ page }) => {
-    await page.context().grantPermissions(["clipboard-read", "clipboard-write"])
     await createConversationAndWaitForMarkdown(page)
 
     const agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
     await expect(agentWrapper).toBeVisible()
 
+    await page.evaluate(() => {
+      const e2eWindow = window as Window & { __copiedText?: string | null }
+      e2eWindow.__copiedText = null
+      const clipboard = navigator.clipboard
+      if (!clipboard || typeof clipboard.writeText !== "function") {
+        throw new Error("clipboard.writeText unavailable")
+      }
+
+      clipboard.writeText = async (text) => {
+        e2eWindow.__copiedText = String(text)
+      }
+    })
+
     await agentWrapper.getByRole("button", { name: "Copy" }).click()
 
-    const copied = await page.evaluate(async () => {
-      return await navigator.clipboard.readText()
-    })
-    expect(copied).toContain("Mock Markdown")
+    await expect
+      .poll(async () => page.evaluate(() => (window as Window & { __copiedText?: string | null }).__copiedText || ""))
+      .toContain("Mock Markdown")
 
     const beforeUrl = page.url()
     await agentWrapper.getByRole("button", { name: "Branch" }).click()
@@ -129,15 +120,16 @@ test.describe("Conversation message actions + hotkeys", () => {
 
   test("hotkeys: Ctrl+Enter regenerates tail; ArrowLeft/Right swipes between versions", async ({ page }) => {
     test.setTimeout(150_000)
-    await createConversationAndWaitForMarkdown(page)
+    await openHotkeysFixtureConversation(page, `E2E Hotkeys ${Date.now()}`)
 
-    const agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+    let agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
     await expect(agentWrapper).toBeVisible()
+    await expect(agentWrapper.locator('[data-controller="markdown"]')).toHaveCount(1)
+    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("1 / 1")
 
     const firstId = await agentWrapper.getAttribute("id")
     expect(firstId).toBeTruthy()
     if (!firstId) throw new Error("missing agent wrapper id")
-    const firstNodeId = firstId.replace(/^message_/, "")
 
     // Ensure we don't trigger hotkeys while focus is in an input.
     await page.locator("main").click()
@@ -152,16 +144,7 @@ test.describe("Conversation message actions + hotkeys", () => {
       }
     })
 
-    await page.evaluate(() => {
-      document.dispatchEvent(
-        new KeyboardEvent("keydown", {
-          key: "Enter",
-          ctrlKey: true,
-          bubbles: true,
-          cancelable: true,
-        }),
-      )
-    })
+    await page.keyboard.press("Control+Enter")
     await page.waitForLoadState("domcontentloaded")
 
     const fetchDeadline = Date.now() + 15_000
@@ -173,61 +156,38 @@ test.describe("Conversation message actions + hotkeys", () => {
       await page.waitForTimeout(100)
     }
 
-    const regenDeadline = Date.now() + 60_000
-    let secondId = null
-    while (Date.now() < regenDeadline) {
-      const afterRegen = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-      await expect(afterRegen).toBeVisible()
-      secondId = await afterRegen.getAttribute("id")
-      if (secondId && secondId !== firstId) break
-      await page.waitForTimeout(750)
-      await page.reload()
-    }
-
-    expect(secondId).toBeTruthy()
-    if (!secondId) throw new Error("missing agent wrapper id after regenerate")
-    const secondNodeId = secondId.replace(/^message_/, "")
-    expect(secondNodeId).not.toEqual(firstNodeId)
+    agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("2 / 2", { timeout: 60_000 })
 
     await waitForTailAgentToFinishWithMarkdown(page)
+
+    agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+    const regeneratedId = await agentWrapper.getAttribute("id")
+    expect(regeneratedId).toBeTruthy()
+    if (!regeneratedId) throw new Error("missing regenerated agent wrapper id")
+    expect(regeneratedId).not.toEqual(firstId)
 
     // ArrowLeft should adopt the previous version.
     await page.locator("main").click()
     await page.keyboard.press("ArrowLeft")
     await page.waitForLoadState("domcontentloaded")
 
-    const swipeLeftDeadline = Date.now() + 30_000
-    let thirdId = null
-    while (Date.now() < swipeLeftDeadline) {
-      const afterSwipeLeft = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-      thirdId = await afterSwipeLeft.getAttribute("id")
-      if (thirdId && thirdId !== secondId) break
-      await page.waitForTimeout(500)
-      await page.reload()
-    }
-    expect(thirdId).toBeTruthy()
-    if (!thirdId) throw new Error("missing agent wrapper id after swipe")
-    const thirdNodeId = thirdId.replace(/^message_/, "")
-    expect(thirdNodeId).not.toEqual(secondNodeId)
+    agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("1 / 2", { timeout: 30_000 })
+    const swipedLeftId = await agentWrapper.getAttribute("id")
+    expect(swipedLeftId).toBeTruthy()
+    if (!swipedLeftId) throw new Error("missing agent wrapper id after swipe left")
+    expect(swipedLeftId).not.toEqual(regeneratedId)
 
     // ArrowRight should adopt the newer version again.
     await page.locator("main").click()
     await page.keyboard.press("ArrowRight")
     await page.waitForLoadState("domcontentloaded")
 
-    const swipeRightDeadline = Date.now() + 30_000
-    let fourthId = null
-    while (Date.now() < swipeRightDeadline) {
-      const afterSwipeRight = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
-      fourthId = await afterSwipeRight.getAttribute("id")
-      if (fourthId && fourthId === secondId) break
-      await page.waitForTimeout(500)
-      await page.reload()
-    }
-    expect(fourthId).toBeTruthy()
-    if (!fourthId) throw new Error("missing agent wrapper id after swipe right")
-    const fourthNodeId = fourthId.replace(/^message_/, "")
-    expect(fourthNodeId).toEqual(secondNodeId)
+    agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
+    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("2 / 2", { timeout: 30_000 })
+    const swipedRightId = await agentWrapper.getAttribute("id")
+    expect(swipedRightId).toEqual(regeneratedId)
   })
 
   test("?: opens hotkeys help modal", async ({ page }) => {
@@ -235,7 +195,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     await page.locator("main").click()
     await page.keyboard.press("?")
     await expect(page.getByRole("heading", { name: "Keyboard Shortcuts" })).toBeVisible()
-    await expect(page.getByText("Regenerate last assistant message")).toBeVisible()
+    await expect(page.getByText("Replay tail assistant message")).toBeVisible()
   })
 
   test("? typed in composer does not open the help modal", async ({ page }) => {

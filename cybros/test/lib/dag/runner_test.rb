@@ -237,6 +237,25 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     DAG.executor_registry = original_registry
   end
 
+  test "runner can skip follow-up graph enqueue for synchronous execution paths" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    node = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::RUNNING, metadata: {})
+
+    registry = DAG::ExecutorRegistry.new
+    registry.register(Messages::Task.node_type_key, UsageExecutor.new)
+
+    original_registry = DAG.executor_registry
+    DAG.executor_registry = registry
+
+    DAG::Runner.run_node!(node.id, enqueue_follow_up: false)
+
+    assert_equal DAG::Node::FINISHED, node.reload.state
+    assert_no_enqueued_jobs only: DAG::TickGraphJob
+  ensure
+    DAG.executor_registry = original_registry
+  end
+
   test "runner does not override a node that was stopped mid-stream, and stop materializes partial output" do
     conversation = create_conversation!
     graph = conversation.dag_graph

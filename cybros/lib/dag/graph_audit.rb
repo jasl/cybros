@@ -696,7 +696,7 @@
       def leaf_invariant_violations
         leaves =
           @graph.leaf_nodes
-            .select(:id, :node_type, :state)
+            .select(:id, :node_type, :state, :metadata)
             .to_a
 
         leaves.filter_map do |node|

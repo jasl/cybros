@@ -21,6 +21,9 @@ export default class extends Controller {
   connect() {
     this.defaultAction = this.element.action
     this.queueExpanded = false
+    this.submitInFlight = false
+    this.submittedDraft = null
+    this.pendingSubmissions = []
     this.handleMessageEdit = this.handleMessageEdit.bind(this)
     window.addEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.autoResize()
@@ -29,6 +32,7 @@ export default class extends Controller {
 
   disconnect() {
     window.removeEventListener("conversation:user-message-edit", this.handleMessageEdit)
+    this.pendingSubmissions = []
   }
 
   statusRailTargetConnected() {
@@ -49,6 +53,20 @@ export default class extends Controller {
     }
 
     this.#syncComposerState()
+
+    if (this.submitInFlight) {
+      event.preventDefault()
+
+      const submission = this.#captureSubmission(form)
+      if (!submission) return
+
+      this.pendingSubmissions.push(submission)
+      this.#clearComposerDraft()
+      return
+    }
+
+    this.submittedDraft = value
+    this.submitInFlight = true
   }
 
   keydown(event) {
@@ -59,14 +77,19 @@ export default class extends Controller {
     this.element.requestSubmit?.()
   }
 
-  submitEnd(event) {
-    if (event.detail?.success !== true) return
-    if (!this.hasTextareaTarget) return
+  async submitEnd(event) {
+    const success = event.detail?.success === true
+    const submittedDraft = this.submittedDraft
+    this.submittedDraft = null
+    this.submitInFlight = false
 
-    this.#clearEditState()
-    this.textareaTarget.value = ""
-    this.autoResize()
-    this.#syncComposerState()
+    if (success) {
+      this.#clearComposerDraftIfUnchanged(submittedDraft)
+      await this.#flushPendingSubmissions()
+      return
+    }
+
+    this.#restorePendingSubmissions()
   }
 
   autoResize() {
@@ -224,7 +247,7 @@ export default class extends Controller {
   }
 
   async #fetchJson(url, { method, body }) {
-    const token = document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
+    const token = this.#csrfToken()
     if (!token) return null
 
     return fetch(url, {
@@ -235,6 +258,22 @@ export default class extends Controller {
         Accept: "application/json",
       },
       body: JSON.stringify(body),
+      credentials: "same-origin",
+    })
+  }
+
+  async #fetchTurboStream(url, { method, body }) {
+    const token = this.#csrfToken()
+    if (!token) return null
+
+    return fetch(url, {
+      method,
+      headers: {
+        "X-CSRF-Token": token,
+        "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+        Accept: "text/vnd.turbo-stream.html, text/html, application/xhtml+xml",
+      },
+      body,
       credentials: "same-origin",
     })
   }
@@ -257,6 +296,112 @@ export default class extends Controller {
         cancelable: true,
       }),
     )
+  }
+
+  #csrfToken() {
+    return document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
+  }
+
+  #captureSubmission(form) {
+    const body = new FormData(form)
+    const entries = []
+    let content = ""
+
+    for (const [key, value] of body.entries()) {
+      if (typeof value !== "string") continue
+
+      entries.push([key, value])
+      if (key === "content") content = value
+    }
+
+    if (!content.trim()) return null
+
+    return {
+      action: form.action || this.defaultAction,
+      entries,
+      content,
+    }
+  }
+
+  #clearComposerDraft() {
+    this.#clearEditState()
+    if (!this.hasTextareaTarget) return
+
+    this.textareaTarget.value = ""
+    this.autoResize()
+    this.#syncComposerState()
+  }
+
+  #clearComposerDraftIfUnchanged(submittedDraft) {
+    this.#clearEditState()
+    if (!this.hasTextareaTarget) return
+
+    const currentDraft = this.textareaTarget.value
+    if (currentDraft.trim() && currentDraft !== String(submittedDraft || "")) {
+      this.autoResize()
+      this.#syncComposerState()
+      return
+    }
+
+    this.textareaTarget.value = ""
+    this.autoResize()
+    this.#syncComposerState()
+  }
+
+  async #flushPendingSubmissions() {
+    while (!this.submitInFlight && this.pendingSubmissions.length > 0) {
+      const nextSubmission = this.pendingSubmissions.shift()
+      const success = await this.#submitCapturedSubmission(nextSubmission)
+      if (!success) break
+    }
+  }
+
+  async #submitCapturedSubmission(submission) {
+    if (!submission) return false
+
+    this.submitInFlight = true
+
+    try {
+      const response = await this.#fetchTurboStream(submission.action, {
+        method: "POST",
+        body: new URLSearchParams(submission.entries),
+      })
+      if (!response?.ok) {
+        this.pendingSubmissions.unshift(submission)
+        this.#showToast("Queued send failed.")
+        return false
+      }
+
+      const stream = await response.text()
+      if (stream && window.Turbo?.renderStreamMessage) {
+        window.Turbo.renderStreamMessage(stream)
+      }
+
+      this.#clearComposerDraftIfUnchanged(submission.content)
+      return true
+    } catch (_error) {
+      this.pendingSubmissions.unshift(submission)
+      this.#showToast("Queued send failed.")
+      return false
+    } finally {
+      this.submitInFlight = false
+    }
+  }
+
+  #restorePendingSubmissions() {
+    if (!this.hasTextareaTarget) return
+    if (this.pendingSubmissions.length === 0) return
+
+    const currentDraft = this.textareaTarget.value
+    const restored = [...this.pendingSubmissions.map(({ content }) => String(content || "")), currentDraft]
+      .map((value) => value.trim())
+      .filter(Boolean)
+      .join("\n")
+
+    this.pendingSubmissions = []
+    this.textareaTarget.value = restored
+    this.autoResize()
+    this.textareaTarget.focus()
   }
 
   #clearEditState() {

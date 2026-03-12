@@ -58,10 +58,11 @@ test.describe("Programmable agent registration", () => {
     await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", program.programName)
     await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Full access")
     await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", targets.primaryTargetName)
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
     await page.getByPlaceholder("Message…").fill("registration smoke")
     await page.getByRole("button", { name: "Send" }).click()
-    await waitForTailAgentToFinish(page, "fixture compose response")
+    await waitForTailAgentToFinish(page)
 
     const conversationId = conversationIdFromUrl(page)
     const state = programmableConversationState(conversationId)

@@ -37,6 +37,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
   test "opening a callback session rejects initialize when deployment bearer auth fails" do
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://expected").start
     deployment = create_deployment!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://wrong")
+    conversation = create_conversation!
 
     error = nil
     assert_no_difference -> { AgentRPCSession.count } do
@@ -44,7 +45,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
         assert_raises(AgentCore::ValidationError) do
           AgentRPC::SessionAuthorizer.open!(
             deployment: deployment,
-            conversation: create_conversation!,
+            conversation: conversation,
             scope_type: "run_draft",
             scope_id: SecureRandom.uuid,
             allowed_methods: %w[conversation.settings.get],

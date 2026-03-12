@@ -1,6 +1,38 @@
 require "test_helper"
 
 class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
+  FakeManagedLocalProgram = Struct.new(:selectable_sequence, :reloads) do
+    def initialize(selectable_sequence)
+      super(selectable_sequence.dup, 0)
+    end
+
+    def reload
+      self.reloads += 1
+      self
+    end
+
+    def selectable_for_conversation?
+      selectable_sequence.length > 1 ? selectable_sequence.shift : selectable_sequence.first
+    end
+  end
+
+  FakeManagedLocalDeployment = Struct.new(:status_sequence, :health_sequence, :agent_program, :reloads, :status, :health_status) do
+    def initialize(status_sequence:, health_sequence:, agent_program:)
+      super(status_sequence.dup, health_sequence.dup, agent_program, 0, nil, nil)
+    end
+
+    def reload
+      self.reloads += 1
+      self.status = status_sequence.length > 1 ? status_sequence.shift : status_sequence.first
+      self.health_status = health_sequence.length > 1 ? health_sequence.shift : health_sequence.first
+      self
+    end
+
+    def id
+      "fake-managed-local-deployment"
+    end
+  end
+
   test "ensure_runtime_setting adopts the managed local workspace root when a seeded default points at app root" do
     RuntimeSetting.find_or_initialize_by(scope_key: "instance").tap do |setting|
       setting.assign_attributes(
@@ -110,6 +142,77 @@ class AgentPrograms::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCas
     assert_equal 0, AgentRPCSession.count
     assert_equal 0, AgentRPCInvocation.count
     assert_equal 0, AgentDeployment.count
+  end
+
+  test "wait_for_managed_local_activation waits until the program is selectable for conversations" do
+    program = FakeManagedLocalProgram.new([false, true])
+    deployment =
+      FakeManagedLocalDeployment.new(
+        status_sequence: ["active", "active"],
+        health_sequence: ["healthy", "healthy"],
+        agent_program: program,
+      )
+    service = AgentPrograms::BootstrapBundledDefaultService.new
+
+    result =
+      service.wait_for_managed_local_activation!(
+        deployment: deployment,
+        timeout: 1.second,
+        agent_program: program,
+      )
+
+    assert_same deployment, result
+    assert_operator deployment.reloads, :>=, 2
+    assert_operator program.reloads, :>=, 2
+  end
+
+  test "ensure_managed_local_deployment reconciles stale contract fingerprints on reused managed deployments" do
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    clear_agent_deployments!
+    runtime_config_path = Rails.root.join("tmp", "managed-local-runtime-config.json").to_s
+    deployment =
+      AgentDeployment.create!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: AgentDeployment.local_endpoint_url(host: "127.0.0.1", port: 4319, rpc_path: "/rpc"),
+        deployment_bearer_secret_ref: "secret://stale",
+        contract_fingerprint: "contract:sha256:stale",
+        deployment_fingerprint: AgentPrograms::BootstrapBundledDefaultService::DEFAULT_DEPLOYMENT_FINGERPRINT,
+        status: "active",
+        health_status: "healthy",
+        protocol_version: AgentDeployments::SUPPORTED_PROTOCOL_VERSION,
+        supported_methods: ["initialize"],
+        transport_config: {
+          "host" => "127.0.0.1",
+          "bind_host" => "127.0.0.1",
+          "port" => 4319,
+          "rpc_path" => "/rpc",
+          "runtime_config_path" => runtime_config_path,
+        },
+        manifest_snapshot: { "stale" => true },
+        schema_snapshot: { "stale" => true },
+        capability_snapshot: { "stale" => true },
+        inspection_details: { "supervisor" => { "error_message" => "stale" } },
+      )
+
+    reconciled =
+      AgentPrograms::BootstrapBundledDefaultService.new.ensure_managed_local_deployment!(
+        program: program,
+        default_fingerprint: AgentPrograms::BootstrapBundledDefaultService::DEFAULT_DEPLOYMENT_FINGERPRINT,
+        default_bearer_secret_ref: AgentPrograms::BootstrapBundledDefaultService::DEFAULT_DEPLOYMENT_BEARER,
+      )
+
+    assert_equal deployment.id, reconciled.id
+    assert_equal program.published_contract_fingerprint, reconciled.contract_fingerprint
+    assert_equal AgentPrograms::BootstrapBundledDefaultService::DEFAULT_DEPLOYMENT_BEARER, reconciled.deployment_bearer_secret_ref
+    assert_equal "inactive", reconciled.status
+    assert_equal "unknown", reconciled.health_status
+    assert_equal AgentDeployments::REQUIRED_METHODS, reconciled.supported_methods
+    assert_equal({}, reconciled.manifest_snapshot)
+    assert_equal({}, reconciled.schema_snapshot)
+    assert_equal({}, reconciled.capability_snapshot)
+    assert_equal({}, reconciled.inspection_details)
+    refute program.reload.selectable_for_conversation?
   end
 
   private

@@ -1,19 +1,15 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
 
 test.describe("Conversation mock LLM: stop flow", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
-    await createHighPriorityMockProvider(page)
   })
 
   test("slow streaming run can be stopped; conversation remains usable", async ({ page }) => {
     test.setTimeout(180_000)
 
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Stop ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Stop ${Date.now()}`)
 
     // Make the completion take long enough to reliably click Stop.
     // Keep the run long enough to stop reliably, but short enough that a failed stop doesn't

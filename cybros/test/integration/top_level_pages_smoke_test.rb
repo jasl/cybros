@@ -9,6 +9,9 @@ class TopLevelPagesSmokeTest < ActionDispatch::IntegrationTest
 
   test "root redirects to setup wizard when no identities exist" do
     # Some integration tests intentionally disable transactions; ensure a clean slate.
+    AgentRPCInvocation.update_all(last_session_id: nil)
+    AgentRPCSession.delete_all
+    AgentRPCInvocation.delete_all
     ConversationRun.delete_all
     Event.delete_all
     Conversation.delete_all

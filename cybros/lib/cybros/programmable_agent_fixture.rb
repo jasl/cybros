@@ -23,6 +23,8 @@ module Cybros
             agent.schemas.get
             capabilities.handshake
             capabilities.refresh
+            on_conversation_created
+            on_lane_first_user_message
             before_agent_step
             on_context_pressure
             before_subagent_spawn
@@ -105,18 +107,24 @@ module Cybros
             },
             "tool_surface" => default_tool_surface(params),
             "staged_mutations" => {},
-            "planned_tasks" => [],
           },
         }
         apply_before_agent_step_scenarios!(params, result)
+      when "on_conversation_created"
+        bootstrap_task_envelope("cybros_seed_message", params)
+      when "on_lane_first_user_message"
+        bootstrap_lane_first_user_envelope(params)
       when "before_finalize_output"
+        finalized_content = params.dig("draft_output", "content").to_s
+        finalized_content = "fixture finalized response" if finalized_content.strip.empty?
+
         {
           "actions" => [
             {
               "type" => "emit_message",
               "message" => {
                 "role" => "assistant",
-                "content" => params.dig("draft_output", "content").to_s.presence || "fixture finalized response",
+                "content" => finalized_content,
               },
             },
           ],
@@ -192,6 +200,46 @@ module Cybros
       }
     end
 
+    def bootstrap_lane_first_user_envelope(params)
+      user_node_id = params["user_node_id"]
+      actions = [
+        {
+          "type" => "create_task",
+          "logical_tool_name" => "cybros_generate_title",
+          "input" => {
+            "conversation_id" => params["conversation_id"],
+            "lane_id" => params["lane_id"],
+            "user_node_id" => user_node_id,
+          }.compact,
+          "placement" => "append",
+          "metadata" => {
+            "leaf_terminal" => true,
+          },
+        },
+      ]
+
+      if branch_lane_payload?(params)
+        actions << {
+          "type" => "create_task",
+          "logical_tool_name" => "cybros_enqueue_lane_summary",
+          "input" => {
+            "conversation_id" => params["conversation_id"],
+            "lane_id" => params["lane_id"],
+          }.compact,
+          "placement" => "append",
+          "metadata" => {
+            "leaf_terminal" => true,
+          },
+        }
+      end
+
+      { "actions" => actions }
+    end
+
+    def branch_lane_payload?(params)
+      params["lane_role"].to_s == "branch" || params["conversation_kind"].to_s == "branch"
+    end
+
     def apply_before_agent_step_scenarios!(params, result)
       tokens = scenario_tokens(params["user_input"])
       callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
@@ -213,18 +261,19 @@ module Cybros
 
       if tokens.include?("replay-kv")
         result["planning"]["staged_mutations"] ||= {}
-        result["planning"]["staged_mutations"]["kv_ops"] = [
-          {
-            "op" => "set",
-            "key" => "shared.fixture.replay",
-            "value" => { "status" => "deduped" },
-          },
-          {
-            "op" => "set",
-            "key" => "shared.fixture.replay",
-            "value" => { "status" => "deduped" },
-          },
-        ]
+        result["planning"]["staged_mutations"]["kv_ops"] =
+          Array(result.dig("planning", "staged_mutations", "kv_ops")) + [
+            {
+              "op" => "set",
+              "key" => "shared.fixture.replay",
+              "value" => { "status" => "deduped" },
+            },
+            {
+              "op" => "set",
+              "key" => "shared.fixture.replay",
+              "value" => { "status" => "deduped" },
+            },
+          ]
       end
 
       if tokens.include?("switch-target")
@@ -235,22 +284,9 @@ module Cybros
           targets.find { |target| target["id"].to_s != current_target_id }
 
         unless alternate_target.nil?
-          proposal =
-            callback_rpc(
-              callback_session,
-              "execution_target.propose",
-              {
-                "operation_id" => "fixture-target-switch",
-                "execution_target_id" => alternate_target.fetch("id"),
-              },
-            )
-          if proposal.dig("switch_decision", "decision").to_s == "confirm"
-            result["planning"]["approval_request"] = {
-              "status" => "pending_confirmation",
-              "reason" => "target_switch",
-              "proposed_execution_target_id" => alternate_target.fetch("id"),
-            }
-          end
+          result["planning"]["execution_target_proposal"] = {
+            "execution_target_id" => alternate_target.fetch("id"),
+          }
         end
       end
 
@@ -276,10 +312,41 @@ module Cybros
         end.uniq
       return nil if snapshot_id.empty? || selected_tool_ids.empty?
 
-      {
+      callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
+      payload = {
         "capability_registry_snapshot_id" => snapshot_id,
         "selected_tool_ids" => selected_tool_ids,
         "tool_surface_label" => "fixture.before_agent_step",
+      }
+      return payload if callback_session.empty?
+
+      callback_rpc(callback_session, "tool_surface.manifest", payload)
+    rescue StandardError
+      snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(snapshot)
+      manifest =
+        Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+          capability_registry_snapshot: snapshot,
+          selected_tool_ids: selected_tool_ids,
+          tool_surface_label: payload["tool_surface_label"],
+        )
+
+      payload.merge(
+        "tool_surface_id" => manifest.tool_surface_id,
+        "logical_tool_names" => manifest.selected_tools.map(&:logical_tool_name),
+      )
+    end
+
+    def bootstrap_task_envelope(logical_tool_name, params, leaf_terminal: false)
+      {
+        "actions" => [
+          {
+            "type" => "create_task",
+            "logical_tool_name" => logical_tool_name,
+            "input" => params.is_a?(Hash) ? deep_copy(params) : {},
+            "placement" => "append",
+            "metadata" => leaf_terminal ? { "leaf_terminal" => true } : nil,
+          },
+        ],
       }
     end
 

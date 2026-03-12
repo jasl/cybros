@@ -306,6 +306,9 @@ export default class extends Controller {
       if (raw.trim().length) return raw
     }
 
+    const renderedMarkdown = this.element.querySelector("[data-markdown-target='output']")?.textContent
+    if (renderedMarkdown && renderedMarkdown.trim().length) return renderedMarkdown
+
     // Fallback to visible text.
     const bubbleText = this.element.querySelector("[data-role='text']")?.textContent
     if (bubbleText && bubbleText.trim().length) return bubbleText

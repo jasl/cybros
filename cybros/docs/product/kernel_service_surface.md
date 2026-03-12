@@ -46,7 +46,6 @@ These are the canonical programmable surfaces for conversation-scoped and lane-s
 - `tokens.estimate_messages`
 - `execution_target.list`
 - `execution_target.get`
-- `execution_target.propose`
 
 These calls are:
 
@@ -59,6 +58,8 @@ Current shipped nuance:
 
 - `lane.prompt_buffer.render(max_tokens:)` is available to the agent as a token-aware selective read surface
 - the bundled/default prompt builder does not yet use that API as its own hot path; it currently reads lane prompt-buffer entries and injects grouped sections directly into prompt assembly
+- execution-target switching now cuts over through durable `planning.execution_target_proposal`, not an agent callback mutation
+- bootstrap conversation state changes stay kernel-owned through `cybros_*` authority tasks such as `cybros_seed_message`, `cybros_bootstrap_state`, and `cybros_generate_title`
 
 ### 2. Memory Surface
 

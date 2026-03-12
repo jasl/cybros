@@ -17,12 +17,16 @@ The shipped programmable-agent runtime now uses the hook/capability cutover surf
 
 - `capabilities.handshake`
 - `capabilities.refresh`
+- `on_conversation_created`
+- `on_lane_first_user_message`
 - `before_agent_step`
 - `on_context_pressure`
 - `before_subagent_spawn`
 - `after_task_notice`
 - `after_subagent_result`
 - `before_finalize_output`
+- `tool.execute`
+- `tool_surface.manifest`
 
 Current shipped notice coverage is still intentionally narrow:
 
@@ -65,9 +69,9 @@ V1 does not attempt to solve:
 
 ## Canonical Contract Rule
 
-The canonical protocol definition must be raw JSON Schema artifacts stored in the repository.
+The active shipped contract is the typed runtime surface implemented in Cybros plus the bundled agent/test fixtures that exercise it.
 
-Language-specific SDKs may generate helpers from those artifacts, but they do not replace them as the source of truth.
+Standalone raw JSON Schema export artifacts are still a follow-up task; they are not yet the canonical shipped source of truth in this repository.
 
 ## Transport
 
@@ -171,6 +175,8 @@ Agent-to-Cybros requests are subordinate data-access or policy-gated state reque
 
 ### Runtime Hooks
 
+- `on_conversation_created`
+- `on_lane_first_user_message`
 - `before_agent_step`
 - `on_context_pressure`
 - `before_subagent_spawn`
@@ -188,6 +194,18 @@ Agent-to-Cybros requests are subordinate data-access or policy-gated state reque
 
 `before_finalize_output` operates on immutable `ConversationRun` records plus typed runtime context and is the only programmable hook that may finalize the current assistant placeholder into final output.
 
+Bootstrap hooks operate on conversation lifecycle boundaries before or beside ordinary assistant-step execution:
+
+- `on_conversation_created` may only append reserved `cybros_*` authority tasks
+- `on_lane_first_user_message` may only append reserved `cybros_*` authority tasks
+
+`on_lane_first_user_message` is lane-sensitive:
+
+- main lanes typically append `cybros_generate_title`
+- branch lanes may append both `cybros_generate_title` and `cybros_enqueue_lane_summary`
+
+Those authority tasks are then executed by Cybros inside the DAG so bootstrap state changes remain auditable.
+
 Generic AgentCore runtime-surface lifecycle methods such as `finalize_output` and `handle_error` still exist as internal middleware stages, but they are not the canonical programmable `agent_rpc` hook names.
 
 ### Kernel Service Surface
@@ -199,7 +217,9 @@ The callable Cybros surface should remain explicit and small in V1:
 - `lane.kv.*`
 - `lane.prompt_buffer.*`
 - `tokens.*`
-- `execution_target.*`
+- `execution_target.list`
+- `execution_target.get`
+- `tool_surface.manifest`
 
 Memory, knowledge, and future stable kernel surfaces may be added incrementally, but they should follow the same bounded-session and schema-first rules.
 
@@ -213,12 +233,15 @@ Cybros-to-agent methods:
 - `agent.schemas.get`
 - `capabilities.handshake`
 - `capabilities.refresh`
+- `on_conversation_created`
+- `on_lane_first_user_message`
 - `before_agent_step`
 - `on_context_pressure`
 - `before_subagent_spawn`
 - `after_task_notice`
 - `after_subagent_result`
 - `before_finalize_output`
+- `tool.execute`
 
 Agent-to-Cybros methods:
 
@@ -242,7 +265,7 @@ Agent-to-Cybros methods:
 - `tokens.estimate_messages`
 - `execution_target.list`
 - `execution_target.get`
-- `execution_target.propose`
+- `tool_surface.manifest`
 
 ## Turn Control Boundary
 
@@ -254,7 +277,7 @@ The agent may:
 - read approved state through Cybros surfaces
 - request settings/config/lane-state mutations through Cybros surfaces
 - inspect visible execution targets through Cybros surfaces
-- request execution-target proposals through Cybros surfaces
+- propose execution-target changes through `planning.execution_target_proposal`
 
 The agent must not:
 
@@ -272,7 +295,7 @@ When the agent calls kernel surfaces during `before_agent_step`, Cybros handles 
 - read requests return current approved state
 - execution-target discovery reads return visible inventory summaries and policy previews
 - settings/config/lane-state mutations are staged on the `RunDraft`
-- execution-target proposals update the draft selection state
+- execution-target proposals come back as durable `planning.execution_target_proposal`
 
 Those staged operations commit only when draft finalization succeeds.
 

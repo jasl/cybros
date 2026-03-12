@@ -7,6 +7,8 @@ module AgentDeployments
     agent.schemas.get
     capabilities.handshake
     capabilities.refresh
+    on_conversation_created
+    on_lane_first_user_message
     before_agent_step
     on_context_pressure
     before_subagent_spawn

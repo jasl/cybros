@@ -49,6 +49,9 @@ class Conversation < ApplicationRecord
 
   validates :permission_mode, presence: true, inclusion: { in: PERMISSION_MODES }
   validates :agent_program, presence: true
+  attr_accessor :bootstrap_lane_first_user_message_node_id
+
+  after_create_commit :dispatch_bootstrap_hooks_after_commit
 
   def dag_node_body_namespace
     Messages
@@ -689,11 +692,14 @@ class Conversation < ApplicationRecord
       agent_node = nil
       product_node = nil
       created_new_turn = false
+      lane_first_user_message_node = nil
 
       graph.with_graph_lock! do
         running_agent = latest_executing_agent_for_lane(graph: graph, lane: lane)
         sequence_parent = nil
         dependency_parent = nil
+        had_prior_lane_user_messages =
+          graph.nodes.active.where(lane_id: lane.id, node_type: Messages::UserMessage.node_type_key).exists?
 
         if running_agent.present? && running_input_policy == "interrupt_new_turn"
           interrupted =
@@ -743,6 +749,7 @@ class Conversation < ApplicationRecord
           agent_node = created[:agent_node]
           product_node = created[:product_node]
           created_new_turn = agent_node.present?
+          lane_first_user_message_node = user_node if user_node.present? && !had_prior_lane_user_messages
         end
       end
 
@@ -756,8 +763,16 @@ class Conversation < ApplicationRecord
              debug: turn_execution_debug_payload(diagnostic_level),
              error: {},
            )
-          graph.kick!
+         graph.kick!
         end
+      end
+
+      if lane_first_user_message_node.present?
+        Conversations::BootstrapHookDispatcher.dispatch_lane_first_user_message!(
+          conversation: self,
+          user_node: lane_first_user_message_node,
+          anchor_node: agent_node || product_node || chat_head_leaf,
+        )
       end
 
       {
@@ -813,6 +828,9 @@ class Conversation < ApplicationRecord
         child_lane = root_node.lane
         child_lane.update!(attachable: child)
         snapshot_lane_state!(source_lane: source_lane, target_lane: child_lane)
+        if root_node.node_type.to_s == Messages::UserMessage.node_type_key && user_content.to_s.strip.present?
+          child.bootstrap_lane_first_user_message_node_id = root_node.id
+        end
       end
 
       child
@@ -1136,7 +1154,13 @@ class Conversation < ApplicationRecord
       end
       lane
     else
-      dag_lane || raise(Cybros::Error, "branch conversation is missing dag_lane")
+      lane = dag_lane
+      if lane.nil? && association(:dag_lane).loaded?
+        association(:dag_lane).reset
+        lane = dag_lane
+      end
+
+      lane || raise(Cybros::Error, "branch conversation is missing dag_lane")
     end
   end
 
@@ -1145,6 +1169,21 @@ class Conversation < ApplicationRecord
     def normalize_runtime_settings
       self.permission_mode = permission_mode.to_s.strip.presence || "default"
       self.agent_config = self[:agent_config].is_a?(Hash) ? self[:agent_config].deep_stringify_keys : {}
+    end
+
+    def dispatch_bootstrap_hooks_after_commit
+      Conversations::BootstrapHookDispatcher.dispatch_created!(conversation: self)
+
+      lane_first_user_message_node_id = bootstrap_lane_first_user_message_node_id.to_s.presence
+      return if lane_first_user_message_node_id.blank?
+
+      user_node = root_graph.nodes.active.find_by(id: lane_first_user_message_node_id)
+      return if user_node.nil?
+
+      Conversations::BootstrapHookDispatcher.dispatch_lane_first_user_message!(
+        conversation: self,
+        user_node: user_node,
+      )
     end
 
     def assign_default_agent_program
@@ -1459,7 +1498,7 @@ class Conversation < ApplicationRecord
       return false if node.compressed_at.present? || node.deleted?
       return false if node.claimed_at.present? || node.started_at.present?
       return false unless node.lane_id.to_s == chat_lane.id.to_s
-      return false unless head_leaf_for_lane(graph: root_graph, lane: chat_lane)&.id.to_s == node.id.to_s
+      return false unless pending_agent_leaf_position_valid?(graph: root_graph, lane: chat_lane, agent_node: node)
       return false if latest_executing_agent_for_lane(graph: root_graph, lane: chat_lane).present?
 
       true
@@ -1777,6 +1816,7 @@ class Conversation < ApplicationRecord
       stale_pending_agents_for_lane(graph: graph, lane: lane).each do |agent_node|
         sequence_children = active_sequence_children_for_node(graph: graph, node: agent_node)
         next if sequence_children.empty?
+        next if sequence_children.all? { |child| graph.leaf_terminal?(child) }
 
         stable_parent = stable_sequence_parent_for(node: agent_node)
         sequence_children.each do |child|
@@ -1829,6 +1869,19 @@ class Conversation < ApplicationRecord
       return [] if child_ids.empty?
 
       graph.nodes.active.where(id: child_ids).order(:id).to_a
+    end
+
+    def pending_agent_leaf_position_valid?(graph:, lane:, agent_node:)
+      lane_leaves = graph.leaf_nodes.where(lane_id: lane.id).to_a
+      return true if lane_leaves.empty?
+
+      sidecar_leaves = lane_leaves.reject { |leaf| leaf.id == agent_node.id }
+      return true if sidecar_leaves.empty?
+
+      descendant_ids = agent_node.causal_descendant_ids
+      sidecar_leaves.all? do |leaf|
+        descendant_ids.include?(leaf.id) && graph.leaf_terminal?(leaf)
+      end
     end
 
     def ensure_active_sequence_edge!(graph:, from_node:, to_node:, now:)

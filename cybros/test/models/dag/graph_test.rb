@@ -1,6 +1,13 @@
 require "test_helper"
 
 class DAG::GraphTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
   test "can be created without attachable but cannot create nodes" do
     graph = DAG::Graph.create!
 
@@ -74,5 +81,21 @@ class DAG::GraphTest < ActiveSupport::TestCase
     assert_equal 0, DAG::NodeBody.where(id: body_ids).count
     assert_not DAG::Edge.exists?(edge.id)
     assert_not DAG::Lane.exists?(lane_id)
+  end
+
+  test "mutate can skip kicking even when executable pending nodes are created" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    assert_no_enqueued_jobs only: DAG::TickGraphJob do
+      graph.mutate!(kick: false) do |m|
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: conversation.chat_lane.id,
+          metadata: {},
+        )
+      end
+    end
   end
 end

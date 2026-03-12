@@ -18,7 +18,6 @@ module AgentRPC
       lane.prompt_buffer.put
       lane.prompt_buffer.delete
       lane.prompt_buffer.clear
-      execution_target.propose
     ].freeze
 
     def self.call!(bearer:, method_name:, scope_type:, scope_id:, payload:)
@@ -129,8 +128,6 @@ module AgentRPC
           deployment: session.agent_deployment,
           payload: payload,
         )
-      when "execution_target.propose"
-        apply_mutation! { AgentRPC::KernelServices::ExecutionTargets.propose!(draft: draft, execution_target_id: payload.fetch("execution_target_id")) }
       else
         AgentCore::ValidationError.raise!(
           "Callback method is not implemented.",

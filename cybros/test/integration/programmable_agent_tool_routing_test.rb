@@ -56,7 +56,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
                 tool.is_a?(Hash) && tool["logical_tool_name"].to_s == "subagent_spawn"
               end
 
-            base_result.deep_merge(
+            result = base_result.deep_merge(
               "planning" => {
                 "staged_mutations" => {
                   "agent_config_patch" => {
@@ -65,13 +65,14 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
                     },
                   },
                 },
-                "tool_surface" => {
-                  "capability_registry_snapshot_id" => params.dig("capability_snapshot", "capability_registry_snapshot_id"),
-                  "selected_tool_ids" => [spawn_tool.fetch("effective_tool_id")],
-                  "tool_surface_label" => "fixture-agent-priority",
-                },
               },
             )
+            result["planning"]["tool_surface"] = {
+              "capability_registry_snapshot_id" => params.dig("capability_snapshot", "capability_registry_snapshot_id"),
+              "selected_tool_ids" => [spawn_tool.fetch("effective_tool_id")],
+              "tool_surface_label" => "fixture-agent-priority",
+            }
+            result
           end,
         },
       ).start

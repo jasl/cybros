@@ -16,7 +16,7 @@ module RunDrafts
       tokens.estimate_messages
       execution_target.list
       execution_target.get
-      execution_target.propose
+      tool_surface.manifest
     ].freeze
 
     def self.open_and_prepare!(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:)
@@ -175,6 +175,7 @@ module RunDrafts
       def apply_planning_to_draft!(draft, planning)
         planning = normalize_hash(planning)
         staged_mutations = normalize_hash(planning["staged_mutations"])
+        apply_execution_target_proposal!(draft: draft, payload: planning["execution_target_proposal"])
         tool_surface = normalize_tool_surface!(draft: draft, payload: planning["tool_surface"])
         planning["tool_surface"] = tool_surface if tool_surface
 
@@ -193,10 +194,9 @@ module RunDrafts
         snapshot_payload = normalize_hash(draft.agent_deployment&.capability_snapshot)
         snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(snapshot_payload)
         manifest =
-          Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+          Cybros::ProgrammableAgent::ToolSurfaceManifest.restore(
+            normalized,
             capability_registry_snapshot: snapshot,
-            selected_tool_ids: normalized.fetch("selected_tool_ids", []),
-            tool_surface_label: normalized["tool_surface_label"],
           )
 
         {
@@ -206,6 +206,17 @@ module RunDrafts
           "selected_tool_ids" => manifest.selected_tool_ids,
           "logical_tool_names" => manifest.selected_tools.map(&:logical_tool_name),
         }.compact
+      end
+
+      def apply_execution_target_proposal!(draft:, payload:)
+        proposal = normalize_hash(payload)
+        execution_target_id = proposal["execution_target_id"].to_s.strip
+        return if execution_target_id.empty?
+
+        AgentRPC::KernelServices::ExecutionTargets.propose!(
+          draft: draft,
+          execution_target_id: execution_target_id,
+        )
       end
 
       def normalize_approval_state(value)

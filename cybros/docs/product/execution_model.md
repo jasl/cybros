@@ -83,9 +83,9 @@ Execution-target discovery is read-only:
 - `execution_target.list`
 - `execution_target.get`
 
-Target switching is a separate mutation path:
+Target switching is a planning output, not a callback mutation:
 
-- `execution_target.propose`
+- `planning.execution_target_proposal`
 
 ### Decision Vocabulary
 
@@ -146,6 +146,7 @@ The programmable boundary should remain explicit and stable:
 - `lane.kv.*`
 - `lane.prompt_buffer.*`
 - `tokens.*`
-- `execution_target.*`
+- `execution_target.list`
+- `execution_target.get`
 
 Implementation details may vary, but the product boundary should not collapse back into metadata patches or storage-level writes.

@@ -1,19 +1,15 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, openConversationWithMockRuntime } from "./helpers"
 
 test.describe("Conversation reconnect/resume (no duplication)", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
-    await createHighPriorityMockProvider(page)
   })
 
   test("reload mid-stream resumes without duplicating already-received text", async ({ page }) => {
     test.setTimeout(180_000)
 
-    await page.goto("/conversations")
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Reconnect ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openConversationWithMockRuntime(page, `E2E Reconnect ${Date.now()}`)
 
     const token = `reconnect-token-${Date.now()}`
     const longPrompt = "x".repeat(1200)

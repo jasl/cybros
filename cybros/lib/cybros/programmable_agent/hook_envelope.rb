@@ -65,7 +65,6 @@ module Cybros
         execution_target_proposal
         approval_request
         tool_surface
-        planned_tasks
       ].freeze
       STAGED_MUTATION_KEYS = %w[
         public_settings_patch
@@ -76,6 +75,7 @@ module Cybros
       TERMINAL_ACTION_TYPES = %w[halt deny].freeze
       ACTION_POLICY = {
         "on_conversation_created" => %w[noop create_task],
+        "on_lane_first_user_message" => %w[noop create_task],
         "before_agent_step" => %w[noop set_step_status halt],
         "on_context_pressure" => %w[noop set_step_status create_task halt],
         "before_subagent_spawn" => %w[noop set_step_status create_task deny halt],
@@ -85,6 +85,7 @@ module Cybros
       }.freeze
       CREATE_TASK_PLACEMENT_POLICY = {
         "on_conversation_created" => %w[append],
+        "on_lane_first_user_message" => %w[append],
         "on_context_pressure" => %w[prepend append],
         "before_subagent_spawn" => %w[prepend],
         "after_task_notice" => %w[append],
@@ -98,7 +99,6 @@ module Cybros
         :execution_target_proposal,
         :approval_request,
         :tool_surface,
-        :planned_tasks,
       ) do
         def to_h
           {
@@ -107,7 +107,6 @@ module Cybros
             "execution_target_proposal" => execution_target_proposal,
             "approval_request" => approval_request,
             "tool_surface" => tool_surface,
-            "planned_tasks" => planned_tasks,
           }.compact
         end
       end
@@ -187,7 +186,6 @@ module Cybros
               execution_target_proposal: normalize_optional_hash(planning_payload["execution_target_proposal"]),
               approval_request: normalize_optional_hash(planning_payload["approval_request"]),
               tool_surface: normalize_optional_hash(planning_payload["tool_surface"]),
-              planned_tasks: normalize_array(planning_payload["planned_tasks"]),
             )
           end
 
@@ -288,6 +286,7 @@ module Cybros
                 when "create_task" then "cybros.programmable_agent.hook_policy.create_task_not_allowed"
                 when "emit_message" then "cybros.programmable_agent.hook_policy.emit_message_not_allowed"
                 when "deny" then "cybros.programmable_agent.hook_policy.deny_not_allowed"
+                when "set_step_status" then "cybros.programmable_agent.hook_policy.set_step_status_not_allowed"
                 else "cybros.programmable_agent.hook_policy.action_not_allowed"
                 end
 
@@ -328,6 +327,21 @@ module Cybros
                 },
               )
             end
+
+            actions.each do |action|
+              next unless action.type == "create_task"
+              next unless bootstrap_hook?(hook_name)
+              next if reserved_bootstrap_tool_name?(action.logical_tool_name)
+
+              AgentCore::ValidationError.raise!(
+                "bootstrap hook-created tasks must use the reserved cybros_* namespace",
+                code: "cybros.programmable_agent.hook_policy.bootstrap_task_must_use_reserved_namespace",
+                details: {
+                  hook_name: hook_name.to_s,
+                  logical_tool_name: action.logical_tool_name.to_s,
+                },
+              )
+            end
           end
 
           def validate_emit_message_actions!(actions)
@@ -350,6 +364,14 @@ module Cybros
 
           def planning_allowed?(hook_name:, request_payload:)
             hook_name.to_s == "before_agent_step" && request_payload.is_a?(Hash) && request_payload.dig("step", "phase").to_s == "planning"
+          end
+
+          def bootstrap_hook?(hook_name)
+            %w[on_conversation_created on_lane_first_user_message].include?(hook_name.to_s)
+          end
+
+          def reserved_bootstrap_tool_name?(logical_tool_name)
+            logical_tool_name.to_s.start_with?(Cybros::ProgrammableAgent::CapabilitySnapshot::RESERVED_LOGICAL_NAME_PREFIX)
           end
 
           def normalize_hash(value)

@@ -4,7 +4,8 @@ module Cybros
   module ProgrammableAgent
     class HookActionExecutor
       TerminalAction = Data.define(:type, :reason, :message)
-      Result = Data.define(:emitted_message, :terminal_action, :deferred_anchor)
+      Result = Data.define(:emitted_message, :terminal_action, :deferred_anchor, :created_tasks)
+      BOOTSTRAP_HOOKS = %w[on_conversation_created on_lane_first_user_message].freeze
 
       ACTIVE_PLACEHOLDER_STATES = [
         DAG::Node::PENDING,
@@ -12,20 +13,22 @@ module Cybros
         DAG::Node::AWAITING_APPROVAL,
       ].freeze
 
-      def self.execute!(actions:, placeholder_node:, hook_name:, conversation_run: nil, anchor_node: nil)
+      def self.execute!(actions:, placeholder_node:, hook_name:, conversation_run: nil, anchor_node: nil, lane: nil)
         new(
           actions: actions,
           placeholder_node: placeholder_node,
           hook_name: hook_name,
           conversation_run: conversation_run,
           anchor_node: anchor_node,
+          lane: lane,
         ).execute!
       end
 
-      def initialize(actions:, placeholder_node:, hook_name:, conversation_run: nil, anchor_node: nil)
+      def initialize(actions:, placeholder_node:, hook_name:, conversation_run: nil, anchor_node: nil, lane: nil)
         @actions = Array(actions)
         @placeholder_node = placeholder_node
         @anchor_node = anchor_node || placeholder_node
+        @lane = lane || @anchor_node&.lane || @placeholder_node&.lane
         @hook_name = hook_name.to_s
         @conversation_run = conversation_run
         @emitted_message = nil
@@ -37,7 +40,7 @@ module Cybros
         @deferred_anchor = false
       end
 
-      def execute!
+        def execute!
         actions.each_with_index do |action, index|
           case action.type
           when "noop"
@@ -63,12 +66,17 @@ module Cybros
         materialize_prepend_continuation!
         materialize_append_continuation!
 
-        Result.new(emitted_message: @emitted_message, terminal_action: @terminal_action, deferred_anchor: @deferred_anchor)
+        Result.new(
+          emitted_message: @emitted_message,
+          terminal_action: @terminal_action,
+          deferred_anchor: @deferred_anchor,
+          created_tasks: (prepended_tasks + appended_tasks).uniq,
+        )
       end
 
-      private
+        private
 
-        attr_reader :actions, :placeholder_node, :anchor_node, :hook_name
+        attr_reader :actions, :placeholder_node, :anchor_node, :hook_name, :lane
 
         def apply_set_step_status!(action)
           node = placeholder_node
@@ -135,6 +143,11 @@ module Cybros
         end
 
         def apply_append_task!(action, action_index:)
+          if bootstrap_hook?
+            apply_bootstrap_append_task!(action, action_index: action_index)
+            return
+          end
+
           ensure_active_placeholder!(placeholder_node)
           node = anchor_node
           manifest, tool_route = route_for_created_task!(action)
@@ -153,6 +166,28 @@ module Cybros
                 body_input: created_task_input(action, tool_route: tool_route, manifest: manifest, action_index: action_index),
               )
             m.create_edge(from_node: anchor, to_node: task, edge_type: DAG::Edge::SEQUENCE)
+          end
+
+          appended_tasks << task
+        end
+
+        def apply_bootstrap_append_task!(action, action_index:)
+          bootstrap_lane = bootstrap_lane_for_append!
+          bootstrap_graph = bootstrap_lane.graph
+          bootstrap_turn_id = ActiveRecord::Base.lease_connection.select_value("select uuidv7()")
+          task = nil
+
+          bootstrap_graph.mutate!(turn_id: bootstrap_turn_id, kick: false) do |m|
+            task =
+              m.create_node(
+                node_type: Messages::Task.node_type_key,
+                state: DAG::Node::PENDING,
+                idempotency_key: created_task_idempotency_key(action_index, placement: "append"),
+                lane_id: bootstrap_lane.id,
+                metadata: created_task_metadata(action, action_index: action_index),
+                body_input: created_task_input(action, tool_route: nil, manifest: nil, action_index: action_index),
+              )
+            m.create_edge(from_node: anchor_node, to_node: task, edge_type: DAG::Edge::SEQUENCE) if anchor_node.present?
           end
 
           appended_tasks << task
@@ -219,6 +254,7 @@ module Cybros
         def materialize_append_continuation!
           return if continuation_materialized
           return if appended_tasks.empty?
+          return if bootstrap_hook?
 
           return if append_continuation_already_materialized?
 
@@ -268,7 +304,7 @@ module Cybros
         def created_task_input(action, tool_route:, manifest:, action_index:)
           arguments = AgentCore::Utils.deep_stringify_keys(action.input.is_a?(Hash) ? action.input : {})
 
-          {
+          payload = {
             "tool_call_id" => created_task_tool_call_id(action_index, placement: action.placement.to_s),
             "requested_name" => action.logical_tool_name.to_s,
             "name" => action.logical_tool_name.to_s,
@@ -277,13 +313,20 @@ module Cybros
             "arguments" => arguments,
             "arguments_summary" => summarize_arguments(arguments),
             "source" => "hook_action",
-            "logical_tool_name" => tool_route.logical_tool_name,
-            "effective_tool_id" => tool_route.effective_tool_id,
-            "implementation_source" => tool_route.implementation_source,
-            "implementation_ref" => tool_route.implementation_ref,
-            "capability_registry_snapshot_id" => manifest.capability_registry_snapshot.snapshot_id,
-            "tool_surface_id" => manifest.tool_surface_id,
           }
+
+          if tool_route && manifest
+            payload["logical_tool_name"] = tool_route.logical_tool_name
+            payload["effective_tool_id"] = tool_route.effective_tool_id
+            payload["implementation_source"] = tool_route.implementation_source
+            payload["implementation_ref"] = tool_route.implementation_ref
+            payload["capability_registry_snapshot_id"] = manifest.capability_registry_snapshot.snapshot_id
+            payload["tool_surface_id"] = manifest.tool_surface_id
+          else
+            payload["logical_tool_name"] = action.logical_tool_name.to_s if bootstrap_hook?
+          end
+
+          payload
         end
 
         def created_task_metadata(action, action_index:)
@@ -293,30 +336,30 @@ module Cybros
             "action_type" => action.type,
             "placement" => action.placement,
             "action_index" => action_index,
-            "source_node_id" => anchor_node.id,
-            "placeholder_node_id" => placeholder_node.id,
+            "source_node_id" => anchor_node&.id,
+            "placeholder_node_id" => placeholder_node&.id,
             "authored_metadata" => AgentCore::Utils.deep_stringify_keys(action.metadata),
           }.compact
         end
 
         def created_task_idempotency_key(action_index, placement:)
-          "programmable_hook.#{placement}_task:#{hook_name}:#{anchor_node.id}:#{action_index}"
+          "programmable_hook.#{placement}_task:#{hook_name}:#{task_creation_anchor_identifier}:#{action_index}"
         end
 
         def created_task_tool_call_id(action_index, placement:)
-          "hook_action:#{hook_name}:#{placement}:#{anchor_node.id}:#{action_index}"
+          "hook_action:#{hook_name}:#{placement}:#{task_creation_anchor_identifier}:#{action_index}"
         end
 
         def append_continuation_idempotency_key
-          "programmable_hook.append_continuation:#{hook_name}:#{anchor_node.id}"
+          "programmable_hook.append_continuation:#{hook_name}:#{task_creation_anchor_identifier}"
         end
 
         def prepend_continuation_idempotency_key
-          "programmable_hook.prepend_continuation:#{hook_name}:#{anchor_node.id}"
+          "programmable_hook.prepend_continuation:#{hook_name}:#{task_creation_anchor_identifier}"
         end
 
         def prepend_continuation_tool_call_id
-          "hook_action:#{hook_name}:prepend_continuation:#{anchor_node.id}"
+          "hook_action:#{hook_name}:prepend_continuation:#{task_creation_anchor_identifier}"
         end
 
         def summarize_arguments(arguments)
@@ -356,6 +399,11 @@ module Cybros
         end
 
         def route_for_created_task!(action)
+          if bootstrap_hook?
+            ensure_bootstrap_tool_registered!(action.logical_tool_name)
+            return [nil, nil]
+          end
+
           manifest = tool_surface_manifest_for_create_task!
           tool_route = manifest.effective_tool_for(action.logical_tool_name)
           return [manifest, tool_route] if tool_route
@@ -370,6 +418,35 @@ module Cybros
               capability_registry_snapshot_id: manifest.capability_registry_snapshot.snapshot_id,
             },
           )
+        end
+
+        def bootstrap_hook?
+          BOOTSTRAP_HOOKS.include?(hook_name)
+        end
+
+        def bootstrap_lane_for_append!
+          return lane if lane.present?
+
+          AgentCore::ValidationError.raise!(
+            "bootstrap hook task creation requires a target lane",
+            code: "cybros.programmable_agent.runtime.bootstrap_lane_required",
+            details: { hook_name: hook_name },
+          )
+        end
+
+        def ensure_bootstrap_tool_registered!(logical_tool_name)
+          registry = Cybros::AgentRuntimeResolver.build_tools_registry
+          return if registry.tool_names.include?(logical_tool_name.to_s)
+
+          AgentCore::ValidationError.raise!(
+            "bootstrap hook task could not be routed through the kernel tools registry",
+            code: "cybros.programmable_agent.runtime.bootstrap_tool_not_registered",
+            details: { hook_name: hook_name, logical_tool_name: logical_tool_name.to_s },
+          )
+        end
+
+        def task_creation_anchor_identifier
+          anchor_node&.id&.to_s.presence || "lane:#{bootstrap_lane_for_append!.id}"
         end
 
         def conversation_run_for_create_task!

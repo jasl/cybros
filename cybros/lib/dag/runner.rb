@@ -1,12 +1,13 @@
 module DAG
   class Runner
-    def self.run_node!(node_id, execute_job_id: nil)
-      new(node_id: node_id, execute_job_id: execute_job_id).run_node!
+    def self.run_node!(node_id, execute_job_id: nil, enqueue_follow_up: true)
+      new(node_id: node_id, execute_job_id: execute_job_id, enqueue_follow_up: enqueue_follow_up).run_node!
     end
 
-    def initialize(node_id:, execute_job_id: nil)
+    def initialize(node_id:, execute_job_id: nil, enqueue_follow_up: true)
       @node_id = node_id
       @execute_job_id = execute_job_id
+      @enqueue_follow_up = enqueue_follow_up
     end
 
     def run_node!
@@ -75,7 +76,7 @@ module DAG
         )
       end
 
-      DAG::TickGraphJob.perform_later(node.graph_id) if node
+      DAG::TickGraphJob.perform_later(node.graph_id) if node && @enqueue_follow_up
     end
 
     private

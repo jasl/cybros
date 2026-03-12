@@ -31,6 +31,7 @@ test.describe("Programmable agent approval resume", () => {
     await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", program.programName)
     await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Default")
     await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", targets.primaryTargetName)
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
     await page.getByPlaceholder("Message…").fill("[fixture:stage-state] [fixture:replay-kv] [fixture:approval]")
     await page.getByRole("button", { name: "Send" }).click()
@@ -39,7 +40,7 @@ test.describe("Programmable agent approval resume", () => {
     await expect(page.getByRole("button", { name: "Approve" }).last()).toBeVisible()
 
     await page.getByRole("button", { name: "Approve" }).last().click()
-    await waitForTailAgentToFinish(page, "fixture compose response")
+    await waitForTailAgentToFinish(page)
 
     const state = programmableConversationState(conversationIdFromUrl(page))
 
@@ -49,6 +50,7 @@ test.describe("Programmable agent approval resume", () => {
     expect(state.selectedAgentConfig.mode).toBe("review")
     expect(state.kv["shared.fixture.plan"]).toEqual({ status: "planned" })
     expect(state.kv["shared.fixture.replay"]).toEqual({ status: "deduped" })
-    expect(state.latestDraft.operationReceiptCounts["fixture-kv-replay"]).toBe(1)
+    expect(state.kvEntryCounts["shared.fixture.plan"]).toBe(1)
+    expect(state.kvEntryCounts["shared.fixture.replay"]).toBe(1)
   })
 })

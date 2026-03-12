@@ -71,6 +71,42 @@ class AgentDeploymentsActivationGateTest < ActionDispatch::IntegrationTest
     server&.shutdown
   end
 
+  test "rejects activation when the deployment exposes agent-owned tools without tool.execute" do
+    sign_in_owner!
+    program = create_program!
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "capabilities.handshake" => lambda do |_params, _base_result, _identity|
+            {
+              "status" => "refreshed",
+              "agent_capabilities_version" => "fixture-agent-capabilities:v2",
+              "agent_tool_catalog" => [
+                {
+                  "logical_tool_name" => "subagent_spawn",
+                  "implementation_ref" => "agent://subagent_spawn",
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+    deployment = create_registered_deployment!(program:, endpoint_url: server.rpc_url)
+
+    post inspect_system_settings_agent_deployment_path(deployment)
+    assert_redirected_to system_settings_agent_deployment_path(deployment)
+
+    assert_equal 1, Array(deployment.reload.capability_snapshot["effective_tools"]).count { |tool| tool["logical_tool_name"] == "subagent_spawn" }
+
+    post activate_system_settings_agent_deployment_path(deployment)
+
+    assert_response :unprocessable_entity
+    deployment.reload
+    assert_equal "inactive", deployment.status
+  ensure
+    server&.shutdown
+  end
+
   test "activates when health inspection reports an alternate successful status label" do
     sign_in_owner!
     program = create_program!

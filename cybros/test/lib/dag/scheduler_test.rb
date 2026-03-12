@@ -5,6 +5,9 @@ class DAG::SchedulerTest < ActiveSupport::TestCase
   self.use_transactional_tests = false
 
   teardown do
+    AgentRPCInvocation.update_all(last_session_id: nil)
+    AgentRPCSession.delete_all
+    AgentRPCInvocation.delete_all
     Event.delete_all
     ConversationRun.delete_all
     DAG::Edge.delete_all

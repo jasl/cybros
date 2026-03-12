@@ -12,6 +12,8 @@ When a plan is fully landed or intentionally abandoned, move it to `docs/archive
 - runtime governance and execution-target selection
 - automation convergence
 - DAG hot-path / turn-first read-path cleanup
+- bootstrap hooks / authority tasks
+- turn-internal append-task orchestration
 
 ## Active Design Sources
 
@@ -20,12 +22,16 @@ When a plan is fully landed or intentionally abandoned, move it to `docs/archive
 - `2026-03-09-execution-target-discovery-design.md`
 - `2026-03-09-permission-presets-design.md`
 - `2026-03-11-turn-bundle-hot-path-design.md`
+- `2026-03-12-bootstrap-hooks-and-authority-tasks-design.md`
+- `2026-03-12-append-task-internal-queue-design.md`
 
 ## Active Executable Plans
 
 - `2026-03-08-runtime-governance.md`
 - `2026-03-10-automation-conversation-convergence.md`
 - `2026-03-11-turn-bundle-hot-path.md`
+- `2026-03-12-bootstrap-hooks-and-authority-tasks.md`
+- `2026-03-12-append-task-internal-queue.md`
 
 ## Recently Archived
 

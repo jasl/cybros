@@ -82,6 +82,88 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "planning applies execution_target_proposal through the kernel-owned target switch policy" do
+    alternate_target_id = nil
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "before_agent_step" => lambda do |_params, base_result, _identity|
+            base_result.deep_merge(
+              "planning" => {
+                "execution_target_proposal" => {
+                  "execution_target_id" => alternate_target_id,
+                },
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+    alternate_target = create_execution_target!(name: "Alternate target")
+    alternate_target_id = alternate_target.id
+
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Plan it",
+        },
+      )
+
+    assert_equal "awaiting_approval", draft.status
+    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
+    assert_equal "target_switch", draft.approval_state.fetch("reason")
+    assert_equal alternate_target.id, draft.proposed_execution_target_id
+  ensure
+    server&.shutdown
+  end
+
+  test "planning validates the returned tool_surface manifest instead of reconstructing it" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        rpc_overrides: {
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            selected_tool_id = params.dig("capability_snapshot", "effective_tools", 0, "effective_tool_id")
+            base_result.deep_merge(
+              "planning" => {
+                "tool_surface" => {
+                  "capability_registry_snapshot_id" => params.dig("capability_snapshot", "capability_registry_snapshot_id"),
+                  "selected_tool_ids" => [selected_tool_id],
+                  "tool_surface_id" => "surface_mismatched",
+                  "logical_tool_names" => ["compact_context"],
+                },
+              },
+            )
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+          conversation: conversation,
+          initiated_by_user: conversation.user,
+          selected_model_ref: "openai/gpt-5.4",
+          trigger_snapshot: {
+            "kind" => "user_turn",
+            "dag_node_id" => SecureRandom.uuid,
+            "user_input" => "Plan it",
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.tool_surface_manifest.tool_surface_id_mismatch", error.code
+  ensure
+    server&.shutdown
+  end
+
   test "planning rejects direct approval_state mutation from before_agent_step" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -359,5 +441,39 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
       )
 
       { conversation: conversation, deployment: deployment, program: program }
+    end
+
+    def create_execution_target!(name:)
+      location =
+        ExecutionLocation.create!(
+          name: "#{name} host",
+          kind: "host",
+          platform: "macos_arm64",
+          status: "active",
+          trust_group: "operator",
+          environment: "development",
+          tags: ["fixture"],
+          max_concurrent_tasks: 4,
+          max_queued_tasks: 16,
+          default_timeout_s: 900,
+        )
+      workspace =
+        Workspace.create!(
+          execution_location: location,
+          name: "#{name} workspace",
+          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
+          workspace_type: "git",
+          status: "active",
+          capability_tags: ["git"],
+          tags: ["fixture"],
+        )
+
+      ExecutionTarget.create!(
+        execution_location: location,
+        workspace: workspace,
+        name: name,
+        status: "active",
+        sandboxed: true,
+      )
     end
 end

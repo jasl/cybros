@@ -234,6 +234,47 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     assert_equal "gpt-5.4", runtime.model
   end
 
+  test "runtime_for allows kernel-owned bootstrap tasks without a materialized conversation run" do
+    LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
+
+    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => { "key" => "main" },
+        },
+        agent_program: program,
+      )
+
+    graph = conversation.dag_graph
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    task_node = nil
+
+    graph.mutate!(turn_id: turn_id, kick: false) do |m|
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: conversation.chat_lane.id,
+          metadata: {},
+          body_input: {
+            "logical_tool_name" => "cybros_seed_message",
+            "requested_name" => "cybros_seed_message",
+            "name" => "cybros_seed_message",
+            "tool_call_id" => "bootstrap-task-1",
+            "arguments" => { "content" => "hello from bootstrap" },
+            "arguments_summary" => "{\"content\":\"hello from bootstrap\"}",
+          },
+        )
+    end
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: task_node)
+
+    assert runtime.tools_registry.include?("cybros_seed_message")
+    assert_equal "gpt-5.4", runtime.model
+  end
+
   test "runtime_for reuses the same-turn programmable run for task nodes" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")

@@ -25,7 +25,11 @@ class ConversationBranchingTest < ActionDispatch::IntegrationTest
 
     # Create a finished assistant node we can branch from.
     post conversation_messages_path(conversation), params: { content: "Hello" }
-    agent = conversation.reload.dag_graph.leaf_nodes.order(:id).last
+    agent =
+      conversation.reload.root_graph.nodes.active
+        .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
+        .order(:id)
+        .last
     agent.mark_running!
     agent.mark_finished!(content: "Hi")
 

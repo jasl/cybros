@@ -41,8 +41,8 @@ module AgentPrograms
       )
     end
 
-    def self.wait_for_managed_local_activation!(deployment:, timeout: DEFAULT_ACTIVATION_TIMEOUT)
-      new.wait_for_managed_local_activation!(deployment: deployment, timeout: timeout)
+    def self.wait_for_managed_local_activation!(deployment:, timeout: DEFAULT_ACTIVATION_TIMEOUT, agent_program: deployment.agent_program)
+      new.wait_for_managed_local_activation!(deployment: deployment, timeout: timeout, agent_program: agent_program)
     end
 
     def bootstrap!
@@ -106,22 +106,31 @@ module AgentPrograms
 
     def ensure_managed_local_deployment!(program:, default_fingerprint:, default_bearer_secret_ref:)
       ensure_runtime_setting!
-      managed_deployment_for(program) ||
-        AgentDeployments::RegistrationService.new(
-          agent_program: program,
-          transport_kind: "http_jsonrpc",
-          endpoint_url: "",
-          deployment_bearer_secret_ref: default_bearer_secret_ref,
-          deployment_fingerprint: default_fingerprint,
-        ).register!
+      existing = managed_deployment_for(program)
+      return reconcile_managed_local_deployment!(
+        deployment: existing,
+        program: program,
+        default_bearer_secret_ref: default_bearer_secret_ref,
+      ) if existing.present?
+
+      AgentDeployments::RegistrationService.new(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: "",
+        deployment_bearer_secret_ref: default_bearer_secret_ref,
+        deployment_fingerprint: default_fingerprint,
+      ).register!
     end
 
-    def wait_for_managed_local_activation!(deployment:, timeout:)
+    def wait_for_managed_local_activation!(deployment:, timeout:, agent_program: deployment.agent_program)
       deadline = timeout.from_now
 
       loop do
         deployment.reload
-        return deployment if deployment.status == "active" && deployment.health_status == "healthy"
+        agent_program.reload
+        return deployment if deployment.status == "active" &&
+          deployment.health_status == "healthy" &&
+          agent_program.selectable_for_conversation?
 
         if deadline.past?
           raise "managed local deployment failed to activate: #{deployment.id}"
@@ -132,6 +141,34 @@ module AgentPrograms
     end
 
     private
+
+      def reconcile_managed_local_deployment!(deployment:, program:, default_bearer_secret_ref:)
+        contract_changed = deployment.contract_fingerprint.to_s != program.published_contract_fingerprint.to_s
+        protocol_changed = deployment.protocol_version.to_s != AgentDeployments::SUPPORTED_PROTOCOL_VERSION
+        methods_changed = deployment.supported_methods != AgentDeployments::REQUIRED_METHODS
+        bearer_changed = deployment.deployment_bearer_secret_ref.to_s != default_bearer_secret_ref.to_s
+
+        return deployment unless contract_changed || protocol_changed || methods_changed || bearer_changed
+
+        timestamp = Time.current.change(usec: 0)
+        deployment.close_open_rpc_sessions!(at: timestamp)
+        deployment.update!(
+          contract_fingerprint: program.published_contract_fingerprint,
+          deployment_bearer_secret_ref: default_bearer_secret_ref,
+          protocol_version: AgentDeployments::SUPPORTED_PROTOCOL_VERSION,
+          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          status: "inactive",
+          health_status: "unknown",
+          activated_at: nil,
+          deactivated_at: timestamp,
+          last_health_checked_at: nil,
+          manifest_snapshot: {},
+          schema_snapshot: {},
+          capability_snapshot: {},
+          inspection_details: {},
+        )
+        deployment
+      end
 
       def ensure_runtime_setting!
         runtime_setting = RuntimeSetting.find_or_initialize_by(scope_key: "instance")
