@@ -105,6 +105,41 @@ class ConversationActionPolicyUiTest < ActionDispatch::IntegrationTest
     assert_select '[data-message-actions-target="swipeRight"][disabled]', count: 1
   end
 
+  test "show keeps the latest assistant rerunnable when only a leaf-terminal authority task follows it" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    post conversation_messages_path(conversation), params: { content: "Hello" }
+    agent = conversation.reload.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi v1")
+
+    conversation.root_graph.mutate! do |m|
+      task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: conversation.chat_lane.id,
+          metadata: {
+            "authored_metadata" => {
+              "leaf_terminal" => true,
+            },
+          },
+          body_input: {
+            "name" => "cybros_generate_title",
+          },
+        )
+
+      m.create_edge(from_node: agent, to_node: task, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select '[data-message-actions-target="swipeCount"]', text: "1 / 1"
+    assert_select '[data-message-actions-target="regenerateButton"]', count: 1
+  end
+
   test "show renders swipe counter with directional availability for the active version" do
     user = sign_in_owner!
     conversation = create_conversation!(user: user, title: "Chat")

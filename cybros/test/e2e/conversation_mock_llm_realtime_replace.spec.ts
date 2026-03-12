@@ -31,42 +31,9 @@ test.describe("Conversation dual-channel (ActionCable ephemeral + Turbo truth)",
     if (!messageId) throw new Error("missing message wrapper id")
 
     const finalWrapper = page.locator(`#${messageId}`)
-    const nodeId = messageId.replace(/^message_/, "")
-
-    // Ensure the terminal content exists server-side, then converge in-place without reload by
-    // fetching a turbo-stream replace for this message wrapper.
-    const serverDeadline = Date.now() + 90_000
-    let serverHasMarkdown = false
-    while (Date.now() < serverDeadline) {
-      const res = await page.request.get(page.url())
-      const html = await res.text()
-      if (html.includes("Mock Markdown")) {
-        serverHasMarkdown = true
-        break
-      }
-      await page.waitForTimeout(1000)
-    }
-    expect(serverHasMarkdown).toBe(true)
-
-    const conversationId = new URL(page.url()).pathname.split("/").pop()
-    expect(conversationId).toBeTruthy()
-    if (!conversationId) throw new Error("missing conversation id")
-
-    await page.evaluate(async ({ conversationId, nodeId }) => {
-      const url = `/conversations/${encodeURIComponent(conversationId)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { Accept: "text/vnd.turbo-stream.html" },
-        credentials: "same-origin",
-      })
-      if (!res.ok) throw new Error(`refresh failed: ${res.status}`)
-      const html = await res.text()
-      if (!html.includes("turbo-stream")) throw new Error("expected turbo-stream response")
-
-      window.Turbo?.renderStreamMessage?.(html)
-    }, { conversationId, nodeId })
-
-    await expect(finalWrapper.locator('[data-controller="markdown"]')).toHaveCount(1, { timeout: 10_000 })
+    const finalBubble = finalWrapper.locator('[data-role="agent-bubble"]')
+    await expect(finalBubble).toHaveAttribute("data-node-state", "finished", { timeout: 90_000 })
+    await expect(finalBubble.locator('[data-controller="markdown"]')).toHaveCount(1, { timeout: 90_000 })
     await expect(finalWrapper.getByText("Mock Markdown", { exact: true })).toBeVisible()
 
     // Sanity: we did not need a refresh/navigation to reach markdown.

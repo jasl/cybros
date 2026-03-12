@@ -61,6 +61,43 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal false, policy.dig("actions", "swipe", "right_available")
   end
 
+  test "latest finished assistant remains rerunnable when followed only by a leaf-terminal authority task" do
+    conversation = create_conversation!
+
+    conversation.append_user_message!(content: "Hello")
+    agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi v1")
+
+    conversation.root_graph.mutate! do |m|
+      task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: conversation.chat_lane.id,
+          metadata: {
+            "authored_metadata" => {
+              "leaf_terminal" => true,
+            },
+          },
+          body_input: {
+            "name" => "cybros_generate_title",
+          },
+        )
+
+      m.create_edge(from_node: agent, to_node: task, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    policy = policy_for(conversation: conversation, node: agent.reload)
+
+    assert_equal true, policy.dig("actions", "regenerate", "supported")
+    assert_equal true, policy.dig("actions", "regenerate", "available")
+    assert_equal true, policy.dig("actions", "swipe", "supported")
+    assert_equal true, policy.dig("actions", "swipe", "available")
+    assert_equal 1, policy.dig("actions", "swipe", "current")
+    assert_equal 1, policy.dig("actions", "swipe", "total")
+  end
+
   test "finished non-tail assistant hides regenerate and leaves branching as the safe alternative" do
     conversation = create_conversation!
 

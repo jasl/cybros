@@ -67,7 +67,7 @@ class Conversation::NodeActionPolicy
       return unavailable_entry(reason: "not_finished") unless node.finished?
 
       return unavailable_entry(reason: "history_requires_branch") unless tail_agent?
-      return unavailable_entry(mode: "in_place", reason: "not_rerunnable_now") unless node.can_rerun?
+      return unavailable_entry(mode: "in_place", reason: "not_rerunnable_now") unless rerunnable_in_place?
 
       entry(supported: true, available: true, mode: "in_place")
     end
@@ -179,7 +179,8 @@ class Conversation::NodeActionPolicy
     def tail_agent?
       return false unless node.node_type.to_s == Messages::AgentMessage.node_type_key
 
-      conversation.chat_head_node_id(node_type: Messages::AgentMessage.node_type_key) == node.id.to_s
+      latest_agent = conversation.send(:latest_agent_message_for_lane, graph: conversation.root_graph, lane: conversation.chat_lane)
+      latest_agent&.id.to_s == node.id.to_s
     end
 
     def user_message?
@@ -266,6 +267,10 @@ class Conversation::NodeActionPolicy
       return nil if candidate.nil?
 
       candidate.retry_of_id || candidate.metadata&.dig("retry_of_node_id")
+    end
+
+    def rerunnable_in_place?
+      conversation.send(:latest_agent_rerunnable_in_place?, graph: conversation.root_graph, lane: conversation.chat_lane, node: node)
     end
 
     def swipe_metadata

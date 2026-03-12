@@ -460,6 +460,47 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert new_agent.reload.compressed_at.present?
   end
 
+  test "select_swipe! can adopt a previous version when both versions are followed only by leaf-terminal authority tasks" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+    lane = conversation.chat_lane
+
+    conversation.append_user_message!(content: "Hello")
+    agent = graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
+    agent.mark_running!
+    agent.mark_finished!(content: "v1")
+
+    graph.mutate! do |m|
+      task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          metadata: {
+            "authored_metadata" => {
+              "leaf_terminal" => true,
+            },
+          },
+          body_input: {
+            "name" => "cybros_generate_title",
+          },
+        )
+
+      m.create_edge(from_node: agent, to_node: task, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    regen = conversation.regenerate!(agent_node_id: agent.id)
+    new_agent = regen.fetch(:node)
+    new_agent.mark_running!
+    new_agent.mark_finished!(content: "v2")
+
+    selected = conversation.select_swipe!(agent_node_id: new_agent.id, direction: :left)
+
+    assert_equal agent.id, selected.id
+    assert_nil selected.reload.compressed_at
+    assert new_agent.reload.compressed_at.present?
+  end
+
   test "soft_delete_node! cancels queued run for that node" do
     conversation = create_conversation!(title: "Chat")
     result = conversation.append_user_message!(content: "Hello")

@@ -623,7 +623,7 @@ module DAG
           )
         end
 
-        if @graph.edges.where(from_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES).exists?
+        if active_outgoing_blocking_edges_from(target.id).any?
           OperationNotAllowedError.raise!(
             "can only adopt leaf nodes",
             code: "dag.mutations.can_only_adopt_leaf_nodes",
@@ -645,21 +645,21 @@ module DAG
           )
         end
 
-      nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
+        nodes_to_archive = active_versions.reject { |node| node.id == target.id }.map(&:id)
 
-      if nodes_to_archive.any?
-        archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: target.id, now: now)
-      end
+        if nodes_to_archive.any?
+          archive_nodes_and_incident_edges!(node_ids: nodes_to_archive, compressed_by_id: target.id, now: now)
+        end
 
-      if target.compressed_at.present?
-        @graph.nodes.where(id: target.id).update_all(
-          compressed_at: nil,
-          compressed_by_id: nil,
-          updated_at: now
-        )
-      end
+        if target.compressed_at.present?
+          @graph.nodes.where(id: target.id).update_all(
+            compressed_at: nil,
+            compressed_by_id: nil,
+            updated_at: now
+          )
+        end
 
-      active_node_ids = @graph.nodes.active.select(:id)
+        active_node_ids = @graph.nodes.active.select(:id)
 
         unless @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).exists?
           OperationNotAllowedError.raise!(
@@ -668,10 +668,10 @@ module DAG
           )
         end
 
-      @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).update_all(
-        compressed_at: nil,
-        updated_at: now
-      )
+        @graph.edges.where(to_node_id: target.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES, from_node_id: active_node_ids).update_all(
+          compressed_at: nil,
+          updated_at: now
+        )
 
         if active_outgoing_blocking_edges_from(target.id).any?
           OperationNotAllowedError.raise!(
@@ -680,15 +680,15 @@ module DAG
           )
         end
 
-      cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
+        cleanup_invalid_leaves_in_turn!(lane_id: target.lane_id, turn_id: target.turn_id, compressed_by_id: target.id, now: now)
 
-      DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
-        graph: @graph,
-        lane_id: target.lane_id,
-        turn_ids: [target.turn_id]
-      )
+        DAG::TurnHeadMaintenance.refresh_for_turn_ids!(
+          graph: @graph,
+          lane_id: target.lane_id,
+          turn_ids: [target.turn_id]
+        )
 
-      @graph.nodes.reload.find(target.id)
+        @graph.nodes.reload.find(target.id)
     end
 
       def edit_replace!(node:, new_input:)

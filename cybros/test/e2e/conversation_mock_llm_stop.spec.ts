@@ -1,6 +1,12 @@
 import { test, expect } from "@playwright/test"
 import { signIn, openConversationWithMockRuntime } from "./helpers"
 
+async function waitForVisibleStopButton(page) {
+  const stopButton = page.getByRole("button", { name: "Stop" })
+  await expect(stopButton).toBeVisible({ timeout: 60_000 })
+  return stopButton
+}
+
 test.describe("Conversation mock LLM: stop flow", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
@@ -29,47 +35,11 @@ test.describe("Conversation mock LLM: stop flow", () => {
     expect(messageId).toBeTruthy()
     if (!messageId) throw new Error("missing message wrapper id")
 
-    const nodeIdToStop = messageId.replace(/^message_/, "")
-    const conversationId = new URL(page.url()).pathname.split("/").pop()
-    expect(conversationId).toBeTruthy()
-    if (!conversationId) throw new Error("missing conversation id")
-
-    // Stop via endpoint once the node is actually running (the controller rejects pending).
-    // This avoids coupling to flaky realtime UI toggles while still exercising the real stop action.
-    const csrf = await page.locator('meta[name="csrf-token"]').getAttribute("content")
-    if (!csrf) throw new Error("missing csrf token")
-
-    const stopDeadline = Date.now() + 60_000
-    let stoppedOk = false
-    while (Date.now() < stopDeadline) {
-      const res = await page.request.post(`/conversations/${conversationId}/stop`, {
-        headers: { "X-CSRF-Token": csrf, "Content-Type": "application/json", Accept: "application/json" },
-        data: { node_id: nodeIdToStop },
-      })
-      const payload = await res.json().catch(() => ({}))
-      if (res.ok() && payload && payload.ok === true) {
-        stoppedOk = true
-        break
-      }
-      await page.waitForTimeout(500)
-    }
-    expect(stoppedOk).toBe(true)
-
-    // Converge the UI deterministically via refresh turbo-stream.
-    await page.evaluate(async ({ conversationId, nodeId }) => {
-      const url = `/conversations/${encodeURIComponent(conversationId)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { Accept: "text/vnd.turbo-stream.html" },
-        credentials: "same-origin",
-      })
-      if (!res.ok) throw new Error(`refresh failed: ${res.status}`)
-      const html = await res.text()
-      window.Turbo?.renderStreamMessage?.(html)
-    }, { conversationId, nodeId: nodeIdToStop })
-
-    // Terminal stopped should hide the spinner in the active bubble.
-    await expect(agentWrapper.locator('[data-role="spinner"]')).toBeHidden({ timeout: 60_000 })
+    const stopButton = await waitForVisibleStopButton(page)
+    await stopButton.click()
+    const stoppedBubble = agentWrapper.locator('[data-role="agent-bubble"]')
+    await expect(stoppedBubble).toHaveAttribute("data-node-state", "stopped", { timeout: 60_000 })
+    await expect(stoppedBubble.locator('[data-role="spinner"]')).toBeHidden({ timeout: 60_000 })
 
     // After stopping, user can send a new message and get markdown without reload.
     await page.getByPlaceholder("Message…").fill("!md after stop")
@@ -83,36 +53,10 @@ test.describe("Conversation mock LLM: stop flow", () => {
     expect(finalMessageId).toBeTruthy()
     if (!finalMessageId) throw new Error("missing message wrapper id")
 
-    const nodeId = finalMessageId.replace(/^message_/, "")
-
-    const serverDeadline = Date.now() + 90_000
-    let serverHasMarkdown = false
-    while (Date.now() < serverDeadline) {
-      const res = await page.request.get(page.url())
-      const html = await res.text()
-      if (html.includes("Mock Markdown")) {
-        serverHasMarkdown = true
-        break
-      }
-      await page.waitForTimeout(1000)
-    }
-    expect(serverHasMarkdown).toBe(true)
-
-    await page.evaluate(async ({ conversationId, nodeId }) => {
-      const url = `/conversations/${encodeURIComponent(conversationId)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { Accept: "text/vnd.turbo-stream.html" },
-        credentials: "same-origin",
-      })
-      if (!res.ok) throw new Error(`refresh failed: ${res.status}`)
-      const html = await res.text()
-      if (!html.includes("turbo-stream")) throw new Error("expected turbo-stream response")
-      window.Turbo?.renderStreamMessage?.(html)
-    }, { conversationId, nodeId })
-
     const finalWrapper = page.locator(`#${finalMessageId}`)
-    await expect(finalWrapper.locator('[data-controller="markdown"]')).toHaveCount(1, { timeout: 10_000 })
+    const finalBubble = finalWrapper.locator('[data-role="agent-bubble"]')
+    await expect(finalBubble).toHaveAttribute("data-node-state", "finished", { timeout: 90_000 })
+    await expect(finalBubble.locator('[data-controller="markdown"]')).toHaveCount(1, { timeout: 90_000 })
     await expect(finalWrapper.getByText("Mock Markdown", { exact: true })).toBeVisible()
   })
 })

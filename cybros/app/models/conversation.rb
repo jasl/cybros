@@ -850,7 +850,8 @@ class Conversation < ApplicationRecord
       raise Cybros::Error, "cannot regenerate non-terminal agent" if regenerate_action["reason"].to_s == "not_terminal"
       raise Cybros::Error, "cannot regenerate unfinished agent" if regenerate_action["reason"].to_s == "not_finished"
 
-      if target.id.to_s != chat_head_node_id(node_type: Messages::AgentMessage.node_type_key)
+      latest_agent = latest_agent_message_for_lane(graph: graph, lane: lane)
+      if target.id.to_s != latest_agent&.id&.to_s
         branch_action = action_entry_for(target, "branch")
         raise Cybros::Error, "agent is not rerunnable" unless branch_action.fetch("available", false)
 
@@ -860,6 +861,8 @@ class Conversation < ApplicationRecord
 
       raise Cybros::Error, "agent is not rerunnable" unless regenerate_action.fetch("available", false)
 
+      archive_leaf_terminal_sidecars!(graph: graph, node: target)
+      target.reload
       new_agent = target.rerun!(metadata_patch: { "generated_by" => "regenerate" })
 
       if enqueue_conversation_run!(
@@ -886,56 +889,58 @@ class Conversation < ApplicationRecord
       raise ArgumentError, "wrong lane" unless node.lane_id.to_s == lane.id.to_s
       raise Cybros::Error, "cannot swipe deleted node" if node.deleted?
 
-    version_set_id = node.version_set_id
-    raise Cybros::Error, "missing version_set_id" if version_set_id.blank?
+      version_set_id = node.version_set_id
+      raise Cybros::Error, "missing version_set_id" if version_set_id.blank?
 
-    in_flight =
-      graph.nodes.active
-        .where(version_set_id: version_set_id)
-        .where(state: [DAG::Node::PENDING, DAG::Node::RUNNING, DAG::Node::AWAITING_APPROVAL])
-        .exists?
-    raise Cybros::Error, "cannot swipe while a version is in-flight" if in_flight
+      in_flight =
+        graph.nodes.active
+          .where(version_set_id: version_set_id)
+          .where(state: [DAG::Node::PENDING, DAG::Node::RUNNING, DAG::Node::AWAITING_APPROVAL])
+          .exists?
+      raise Cybros::Error, "cannot swipe while a version is in-flight" if in_flight
 
-    versions = node.versions(include_inactive: true).to_a
-    raise ArgumentError, "no versions" if versions.empty?
+      versions = node.versions(include_inactive: true).to_a
+      raise ArgumentError, "no versions" if versions.empty?
 
-    active_idx = versions.index { |v| v.compressed_at.nil? }
-    raise Cybros::Error, "missing active version" if active_idx.nil?
+      active_idx = versions.index { |v| v.compressed_at.nil? }
+      raise Cybros::Error, "missing active version" if active_idx.nil?
 
-    target_idx =
-      if !position.nil?
-        raw = position.to_s
-        if AgentCore::Utils.uuid_like?(raw)
-          idx = versions.index { |v| v.id.to_s == raw }
-          raise ArgumentError, "unknown version_id" if idx.nil?
-          idx
+      target_idx =
+        if !position.nil?
+          raw = position.to_s
+          if AgentCore::Utils.uuid_like?(raw)
+            idx = versions.index { |v| v.id.to_s == raw }
+            raise ArgumentError, "unknown version_id" if idx.nil?
+            idx
+          else
+            n = Integer(raw, exception: false)
+            raise ArgumentError, "position must be an integer or uuid" if n.nil?
+            raise ArgumentError, "position must be >= 1" if n < 1
+            raise ArgumentError, "position out of range" if n > versions.length
+            n - 1
+          end
         else
-          n = Integer(raw, exception: false)
-          raise ArgumentError, "position must be an integer or uuid" if n.nil?
-          raise ArgumentError, "position must be >= 1" if n < 1
-          raise ArgumentError, "position out of range" if n > versions.length
-          n - 1
+          dir = direction.to_s
+          raise ArgumentError, "direction or position required" if dir.blank?
+
+          case dir
+          when "left"
+            [active_idx - 1, 0].max
+          when "right"
+            [active_idx + 1, versions.length - 1].min
+          else
+            raise ArgumentError, "invalid direction"
+          end
         end
-      else
-        dir = direction.to_s
-        raise ArgumentError, "direction or position required" if dir.blank?
 
-        case dir
-        when "left"
-          [active_idx - 1, 0].max
-        when "right"
-          [active_idx + 1, versions.length - 1].min
-        else
-          raise ArgumentError, "invalid direction"
-        end
-      end
+      target_idx = [[target_idx, 0].max, versions.length - 1].min
+      target = versions.fetch(target_idx)
+      raise Cybros::Error, "cannot swipe deleted version" if target.deleted?
 
-    target_idx = [[target_idx, 0].max, versions.length - 1].min
-    target = versions.fetch(target_idx)
-    raise Cybros::Error, "cannot swipe deleted version" if target.deleted?
+      raise Cybros::Error, "target version must be finished" unless target.state == DAG::Node::FINISHED
 
-    raise Cybros::Error, "target version must be finished" unless target.state == DAG::Node::FINISHED
-
+      archive_leaf_terminal_sidecars!(graph: graph, node: target)
+      archive_leaf_terminal_sidecars!(graph: graph, node: node)
       adopted = target.adopt_version!
       adopted.reload
     end
@@ -1708,6 +1713,55 @@ class Conversation < ApplicationRecord
       return visible if visible
 
       scope.order(:id).last
+    end
+
+    def latest_agent_message_for_lane(graph:, lane:)
+      graph.nodes.active
+        .where(lane_id: lane.id, node_type: Messages::AgentMessage.node_type_key, deleted_at: nil)
+        .order(:id)
+        .last
+    end
+
+    def leaf_terminal_sidecars_for(graph:, node:)
+      child_ids =
+        graph.edges.active
+          .where(from_node_id: node.id, edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+          .pluck(:to_node_id)
+      return [] if child_ids.empty?
+
+      children = graph.nodes.active.where(id: child_ids).order(:id).to_a
+      return nil unless children.size == child_ids.size
+      return nil unless children.all? { |child| graph.leaf_terminal?(child) }
+
+      children
+    end
+
+    def latest_agent_rerunnable_in_place?(graph:, lane:, node:)
+      latest_agent = latest_agent_message_for_lane(graph: graph, lane: lane)
+      return false unless latest_agent&.id.to_s == node.id.to_s
+
+      !leaf_terminal_sidecars_for(graph: graph, node: node).nil?
+    end
+
+    def archive_leaf_terminal_sidecars!(graph:, node:)
+      sidecars = leaf_terminal_sidecars_for(graph: graph, node: node)
+      return if sidecars.blank?
+
+      now = Time.current
+      sidecar_ids = sidecars.map(&:id)
+      edge_ids =
+        graph.edges.active
+          .where(from_node_id: node.id, to_node_id: sidecar_ids)
+          .pluck(:id)
+
+      graph.nodes.where(id: sidecar_ids).update_all(
+        context_excluded_at: now,
+        deleted_at: now,
+        compressed_at: now,
+        compressed_by_id: node.id,
+        updated_at: now,
+      )
+      graph.edges.where(id: edge_ids).update_all(compressed_at: now, updated_at: now) if edge_ids.any?
     end
 
     def queue_anchor_agent_for_lane(graph:, lane:)

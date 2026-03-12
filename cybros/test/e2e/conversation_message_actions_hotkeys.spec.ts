@@ -1,5 +1,11 @@
 import { test, expect } from "@playwright/test"
-import { signIn, openConversationWithMockRuntime, openHotkeysFixtureConversation } from "./helpers"
+import {
+  conversationIdFromUrl,
+  openConversationWithMockRuntime,
+  programmableConversationState,
+  signIn,
+  waitForTailAgentToFinish,
+} from "./helpers"
 
 async function addHiddenComposerInput(page, { name, value }) {
   await page.locator('form[data-controller~="message-form"]').evaluate(
@@ -17,6 +23,29 @@ async function addHiddenComposerInput(page, { name, value }) {
     },
     { inputName: name, inputValue: String(value) },
   )
+}
+
+async function startFetchRecording(page) {
+  await page.evaluate(() => {
+    window.__e2e_fetch_urls = []
+    if (window.__e2e_fetch_wrapper_installed) return
+
+    const orig = window.fetch.bind(window)
+    window.fetch = (...args) => {
+      window.__e2e_fetch_urls.push(String(args[0] || ""))
+      return orig(...args)
+    }
+    window.__e2e_fetch_wrapper_installed = true
+  })
+}
+
+async function waitForFetchUrl(page, pathFragment, timeoutMs = 15_000) {
+  await expect.poll(async () => {
+    return page.evaluate((fragment) => {
+      return Array.isArray(window.__e2e_fetch_urls) &&
+        window.__e2e_fetch_urls.some((u) => String(u).includes(fragment))
+    }, pathFragment)
+  }, { timeout: timeoutMs }).toBe(true)
 }
 
 async function createConversationAndWaitForMarkdown(page) {
@@ -88,7 +117,7 @@ test.describe("Conversation message actions + hotkeys", () => {
     await expect(messageList).toContainText(queuedFollowUp, { timeout: 90_000 })
   })
 
-  test("copy copies the agent message markdown; branch navigates to a branch conversation", async ({ page }) => {
+  test("copy copies the agent message markdown; branch conversation boots lane-first-user title and summary flow", async ({ page }) => {
     await createConversationAndWaitForMarkdown(page)
 
     const agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
@@ -116,16 +145,32 @@ test.describe("Conversation message actions + hotkeys", () => {
     const beforeUrl = page.url()
     await agentWrapper.getByRole("button", { name: "Branch" }).click()
     await page.waitForURL((u) => u.toString() !== beforeUrl, { timeout: 30_000 })
+
+    const branchConversationId = conversationIdFromUrl(page)
+    await expect(page.locator("[id^='messages_list_conversation_']")).toContainText("Mock Markdown")
+
+    const branchFirstMessage = "Summarize the branch lane plan"
+    await page.getByPlaceholder("Message…").fill(branchFirstMessage)
+    await page.getByRole("button", { name: "Send" }).click()
+    await waitForTailAgentToFinish(page)
+
+    await expect.poll(() => programmableConversationState(branchConversationId).title, {
+      timeout: 60_000,
+    }).toBe(branchFirstMessage)
+    await expect.poll(() => programmableConversationState(branchConversationId).laneTaskNames, {
+      timeout: 60_000,
+    }).toEqual(expect.arrayContaining(["cybros_generate_title", "cybros_enqueue_lane_summary"]))
   })
 
   test("hotkeys: Ctrl+Enter regenerates tail; ArrowLeft/Right swipes between versions", async ({ page }) => {
     test.setTimeout(150_000)
-    await openHotkeysFixtureConversation(page, `E2E Hotkeys ${Date.now()}`)
+    await createConversationAndWaitForMarkdown(page)
+    await page.reload()
 
     let agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
     await expect(agentWrapper).toBeVisible()
     await expect(agentWrapper.locator('[data-controller="markdown"]')).toHaveCount(1)
-    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("1 / 1")
+    await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("1 / 1", { timeout: 30_000 })
 
     const firstId = await agentWrapper.getAttribute("id")
     expect(firstId).toBeTruthy()
@@ -135,26 +180,11 @@ test.describe("Conversation message actions + hotkeys", () => {
     await page.locator("main").click()
 
     // Ctrl+Enter regenerate (tail-only).
-    await page.evaluate(() => {
-      window.__e2e_fetch_urls = []
-      const orig = window.fetch.bind(window)
-      window.fetch = (...args) => {
-        window.__e2e_fetch_urls.push(String(args[0] || ""))
-        return orig(...args)
-      }
-    })
+    await startFetchRecording(page)
 
     await page.keyboard.press("Control+Enter")
     await page.waitForLoadState("domcontentloaded")
-
-    const fetchDeadline = Date.now() + 15_000
-    while (Date.now() < fetchDeadline) {
-      const saw = await page.evaluate(() => {
-        return Array.isArray(window.__e2e_fetch_urls) && window.__e2e_fetch_urls.some((u) => String(u).includes("/regenerate"))
-      })
-      if (saw) break
-      await page.waitForTimeout(100)
-    }
+    await waitForFetchUrl(page, "/regenerate")
 
     agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
     await expect(agentWrapper.locator('[data-message-actions-target="swipeCount"]')).toHaveText("2 / 2", { timeout: 60_000 })
@@ -169,7 +199,9 @@ test.describe("Conversation message actions + hotkeys", () => {
 
     // ArrowLeft should adopt the previous version.
     await page.locator("main").click()
+    await startFetchRecording(page)
     await page.keyboard.press("ArrowLeft")
+    await waitForFetchUrl(page, "/swipe")
     await page.waitForLoadState("domcontentloaded")
 
     agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
@@ -181,7 +213,9 @@ test.describe("Conversation message actions + hotkeys", () => {
 
     // ArrowRight should adopt the newer version again.
     await page.locator("main").click()
+    await startFetchRecording(page)
     await page.keyboard.press("ArrowRight")
+    await waitForFetchUrl(page, "/swipe")
     await page.waitForLoadState("domcontentloaded")
 
     agentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()

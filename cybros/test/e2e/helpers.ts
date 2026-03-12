@@ -288,6 +288,7 @@ export function programmableConversationState(conversationId: string) {
       outputText: string | null
       outputPreviewText: string | null
     }
+    laneTaskNames: string[]
   }>(`
     require "json"
 
@@ -299,6 +300,11 @@ export function programmableConversationState(conversationId: string) {
         .where(lane_id: conversation.chat_lane.id, node_type: Messages::AgentMessage.node_type_key)
         .order(:id)
         .last
+    lane_task_names =
+      conversation.root_graph.nodes.active
+        .where(lane_id: conversation.chat_lane.id, node_type: Messages::Task.node_type_key)
+        .order(:id)
+        .map { |node| node.body_input["name"].to_s }
     invocation =
       if draft.present?
         AgentRPCInvocation.where(scope_type: "run_draft", scope_id: draft.id).order(created_at: :desc).first
@@ -342,6 +348,7 @@ export function programmableConversationState(conversationId: string) {
         outputText: latest_agent&.body&.output&.dig("content"),
         outputPreviewText: latest_agent&.body&.output_preview&.dig("content"),
       },
+      laneTaskNames: lane_task_names,
     })
   `)
 }
@@ -455,65 +462,6 @@ export async function openConversationWithMockRuntime(page: Page, title: string)
   await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", "Bundled Default Target")
   // Execution target changes persist by reloading the page; select the ephemeral model override last.
   await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
-}
-
-export function seedHotkeysFixtureConversation(title: string) {
-  const markdown = "# Mock Markdown\n\n**Prompt:** please respond with markdown\n\n- This response is deterministic (for E2E).\n- It includes markdown constructs (heading, bold, list, code).\n\n`mock_llm streaming: enabled`"
-
-  return railsJson<{ conversationId: string }>(`
-    require "json"
-
-    user = User.joins(:identity).find_by!(identities: { email: "admin@example.com" })
-    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
-    target = ExecutionTarget.find_by(name: "Bundled Default Target") || ExecutionTarget.visible_for_runtime.order(:created_at).first
-
-    Conversation.skip_callback(:commit, :after, :dispatch_bootstrap_hooks_after_commit)
-
-    conversation =
-      user.conversations.create!(
-        title: ${JSON.stringify(title)},
-        metadata: {
-          "agent" => { "key" => "main", "agent_profile" => "coding" },
-          "llm" => { "model_ref" => "dev/mock-model" },
-        },
-        agent_program: program,
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
-        default_execution_target: target,
-      )
-
-    graph = conversation.dag_graph
-    lane = conversation.chat_lane
-
-    graph.mutate! do |m|
-      user_node =
-        m.create_node(
-          node_type: Messages::UserMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          lane_id: lane.id,
-          content: "!md please respond with markdown",
-          metadata: {},
-        )
-
-      agent_node =
-        m.create_node(
-          node_type: Messages::AgentMessage.node_type_key,
-          state: DAG::Node::FINISHED,
-          lane_id: lane.id,
-          content: ${JSON.stringify(markdown)},
-          metadata: {},
-        )
-
-      m.create_edge(from_node: user_node, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
-    end
-
-    puts JSON.generate({ conversationId: conversation.id })
-  `)
-}
-
-export async function openHotkeysFixtureConversation(page: Page, title: string) {
-  await createHighPriorityMockProvider(page)
-  const state = seedHotkeysFixtureConversation(title)
-  await page.goto(`/conversations/${state.conversationId}`)
 }
 
 function conversationRuntimeOptionPersisted({
