@@ -38,6 +38,12 @@ Keep the runtime split explicit:
 
 The bundled `claw` agent will become an agent-owned tool provider through `agent_tool_catalog + tool.execute`. This is the single spine used for both `B` and `A`.
 
+The loop boundary is strict:
+
+- `claw` may not implement a shadow scheduler, shadow subagent runner, or shadow transcript/finalization system
+- agent loop progression, tool-task routing, delegated subagent execution, and final output application must continue to run through Cybros' DAG engine
+- if OpenClaw parity requires behavior that the current DAG/runtime surfaces cannot express, that gap must be closed in Cybros during this phase instead of being simulated inside `claw`
+
 Only `MEMORY` becomes conversation-owned state in V1. Other bootstrap inputs remain static or profile-driven:
 
 - `AGENTS.md`: repo/workspace or bundled context
@@ -57,6 +63,7 @@ This avoids freezing Cybros into a premature memory platform while still letting
 - Implement coding/workspace tools in `claw`
 - Add a narrow callback surface for conversation-owned memory documents
 - Rebuild `claw` prompt assembly around OpenClaw-style bootstrap sections
+- Improve Cybros DAG/runtime surfaces when they are the missing dependency for OpenClaw-style loop or subagent parity
 - Support user-scoped soft profiles on the agent side
 - Validate `B` first, then `A`
 
@@ -88,6 +95,8 @@ This design does not leave any targeted OpenClaw loop capability unmapped. Each 
 ### Already Owned By Cybros
 
 - serialized conversation execution and DAG scheduling
+- agent loop progression and tool-task routing
+- delegated subagent conversation/lane execution
 - approvals and mutation policy
 - tool audit and conversation transcript durability
 - context-pressure signaling into `on_context_pressure`
@@ -272,6 +281,19 @@ This is not a tenant boundary and must not be treated as one.
 
 No security or isolation guarantees are implied by user-scoped profile roots.
 
+## No Shadow Loop Rule
+
+The validation target is an OpenClaw-like default agent running on top of Cybros' native loop, not a second loop embedded inside `claw`.
+
+That means:
+
+- task creation must still flow through Cybros hook envelopes and DAG node creation
+- subagent execution must still use Cybros subagent conversations and execution scopes
+- silent/no-reply behavior must be represented by Cybros finalization/runtime surfaces, not by hidden transcript tricks in `claw`
+- prompt-mode and execution-scope distinctions should come from runtime/execution context already authored by Cybros
+
+If any of those surfaces are insufficient during implementation, the fix belongs in Cybros.
+
 ## Protocol Changes
 
 ### Agent Capabilities
@@ -450,6 +472,14 @@ Expanding `tool.execute` to support callbacks increases protocol complexity.
 
 Accepted in V1. Mitigation is a narrow whitelist and a post-implementation review.
 
+### Shadow Loop Drift
+
+It would be easy to make `claw` look feature-complete by re-implementing scheduling, silent replies, or subagent semantics inside the bundled host.
+
+That would invalidate the goal of proving the Cybros DAG engine can host this class of agent.
+
+Mitigation: every parity item must be classified as either `claw`-owned tooling/prompt logic or Cybros-owned DAG/runtime logic. If a DAG surface is missing, implementation adds it there instead of papering over it in `claw`.
+
 ### Hidden Lane Coupling
 
 If the backing implementation uses lane-backed storage carelessly, conversation memory could accidentally become lane memory.
@@ -473,6 +503,7 @@ This design now has explicit answers for the main implementation blockers:
 - user profile semantics: soft namespacing only
 - protocol expansion: allowed and intentionally narrow
 - prompt model: OpenClaw-style bootstrap sections with minimal subagent mode
+- loop ownership: no shadow loop; DAG/runtime gaps must be fixed in Cybros
 - acceptance bar: compare against OpenClaw docs plus OpenClaw implementation
 - final proof bar: real development-environment simulated conversation
 
