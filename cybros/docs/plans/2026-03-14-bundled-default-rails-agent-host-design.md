@@ -64,7 +64,19 @@ Reasoning:
 - `vendor/` implies imported or third-party code, which is the wrong ownership model for the default bundled agent
 - existing product/design docs already describe `agents/` as the bundled-agent source root
 
-`cybros/vendor/agents/claw` may exist as a temporary incubation directory during local exploration, but the long-lived bundled implementation should converge back into `cybros/agents/default`.
+`cybros/vendor/agents/claw` is an acceptable incubation source for the migration, but it should not survive as a second canonical bundled agent tree.
+
+Approved migration rule:
+
+- use `cybros/vendor/agents/claw` as the Rails skeleton source
+- promote that skeleton into `cybros/agents/default`
+- preserve the bundled default agent's runtime identity as `default`
+- delete the temporary `cybros/vendor/agents/claw` tree once cutover is complete
+
+Important distinction:
+
+- `claw` is the migration seed implementation
+- `default` remains the bundled agent identity unless there is a separate product decision to rename the agent key, deployment key conventions, and operator-facing copy
 
 ## Transport And Process Model
 
@@ -200,15 +212,17 @@ Only host/request integration tests should need the full Rails host.
 
 ## Cutover Strategy
 
-Cut over in two phases:
+Cut over in three phases:
 
-1. make the Rails host in `cybros/agents/default` pass the same contract expected from the current bundled default service
-2. switch the bundled default deployment/bootstrap path to that Rails host and delete the old WEBrick server implementation
+1. freeze the existing bundled default contract with tests
+2. promote the `cybros/vendor/agents/claw` Rails skeleton into `cybros/agents/default` and port the existing bundled default runtime logic into it
+3. switch the bundled default deployment/bootstrap path to that Rails host and delete the old WEBrick implementation artifacts plus the temporary `vendor/agents/claw` source tree
 
 During cutover:
 
 - keep `agent.yml`, prompts, identity fields, and deployment fingerprint rules stable unless there is a deliberate protocol reason to change them
 - prefer reusing existing dispatcher/manifest/identity/hook code over rewriting behavior into controllers
+- treat a rename from bundled identity `default` to bundled identity `claw` as out of scope for this cut
 
 ## Summary
 
@@ -220,3 +234,4 @@ The approved direction is:
 - keep `agent_rpc.v1` and `http_jsonrpc` unchanged
 - keep Rails conveniences optional and implementation-local
 - do not introduce ActionCable or WebSocket semantics into the main Cybros-to-agent path
+- use `cybros/vendor/agents/claw` only as a temporary scaffold source, not as the long-lived bundled agent location

@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the bundled default agent's WEBrick host with an API-only Rails/Puma host in `cybros/agents/default` while preserving the existing `agent_rpc.v1` HTTP JSON-RPC contract, identity semantics, and callback-session behavior.
+**Goal:** Replace the bundled default agent's WEBrick host by promoting the Rails skeleton in `cybros/vendor/agents/claw` into `cybros/agents/default`, while preserving the existing `agent_rpc.v1` HTTP JSON-RPC contract, identity semantics, and callback-session behavior.
 
-**Architecture:** Keep `cybros/agents/default` as the canonical bundled source root and implement a thin Rails request boundary around the existing pure-Ruby agent core. Reuse the current manifest, identity, dispatcher, hook, and prompt logic wherever possible, and keep `ActiveRecord` / `ActiveJob` available but off the request hot path.
+**Architecture:** Keep `cybros/agents/default` as the canonical bundled source root, but use `cybros/vendor/agents/claw` as the seed Rails scaffold instead of building a Rails app from scratch in place. Reuse the current manifest, identity, dispatcher, hook, and prompt logic wherever possible, keep `default` as the bundled agent identity, and keep `ActiveRecord` / `ActiveJob` available but off the request hot path.
 
 **Tech Stack:** Ruby, Rails API-only app, Puma, JSON-RPC over HTTP, current bundled-agent manifest/prompt assets, Minitest, Net::HTTP
 
@@ -15,7 +15,6 @@
 **Files:**
 - Modify: `cybros/agents/default/test/integration/rpc_contract_test.rb`
 - Modify: `cybros/agents/default/test/unit/manifest_test.rb`
-- Create: `cybros/agents/default/test/integration/http_boundary_test.rb`
 - Modify: `cybros/agents/default/test/test_helper.rb`
 
 **Step 1: Write the failing test**
@@ -43,7 +42,7 @@ end
 
 Run: `cd cybros/agents/default && bin/test`
 
-Expected: FAIL because the current WEBrick-only host does not yet expose the Rails request boundary and the new boundary assertions are not implemented.
+Expected: FAIL because the current contract coverage is incomplete and the new boundary assertions are not implemented yet.
 
 **Step 3: Write minimal implementation**
 
@@ -59,23 +58,32 @@ Expected: PASS with the old host still in place and the contract frozen by tests
 **Step 5: Commit**
 
 ```bash
-git add cybros/agents/default/test/integration/rpc_contract_test.rb cybros/agents/default/test/integration/http_boundary_test.rb cybros/agents/default/test/unit/manifest_test.rb cybros/agents/default/test/test_helper.rb
+git add cybros/agents/default/test/integration/rpc_contract_test.rb cybros/agents/default/test/unit/manifest_test.rb cybros/agents/default/test/test_helper.rb
 git commit -m "test: lock bundled agent http contract"
 ```
 
-### Task 2: Scaffold The Rails Host In `cybros/agents/default`
+### Task 2: Promote The `claw` Rails Skeleton Into `cybros/agents/default`
 
 **Files:**
-- Create: `cybros/agents/default/app/controllers/rpc_controller.rb`
-- Create: `cybros/agents/default/app/controllers/health_controller.rb`
+- Create: `cybros/agents/default/app/controllers/application_controller.rb`
 - Create: `cybros/agents/default/config/application.rb`
+- Create: `cybros/agents/default/config/boot.rb`
 - Create: `cybros/agents/default/config/environment.rb`
+- Create: `cybros/agents/default/config/environments/development.rb`
+- Create: `cybros/agents/default/config/environments/test.rb`
+- Create: `cybros/agents/default/config/environments/production.rb`
 - Create: `cybros/agents/default/config/routes.rb`
 - Create: `cybros/agents/default/config/puma.rb`
+- Create: `cybros/agents/default/config/initializers/filter_parameter_logging.rb`
 - Create: `cybros/agents/default/config.ru`
+- Create: `cybros/agents/default/bin/rails`
+- Create: `cybros/agents/default/test/integration/http_boundary_test.rb`
 - Modify: `cybros/agents/default/Gemfile`
+- Modify: `cybros/agents/default/Gemfile.lock`
+- Modify: `cybros/agents/default/Rakefile`
 - Modify: `cybros/agents/default/bin/server`
 - Modify: `cybros/agents/default/bin/test`
+- Delete: `cybros/vendor/agents/claw`
 
 **Step 1: Write the failing test**
 
@@ -93,17 +101,19 @@ assert_response :success
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd cybros/agents/default && bundle exec ruby -Itest test/integration/http_boundary_test.rb`
+Run: `cd cybros/agents/default && bundle exec rails test test/integration/http_boundary_test.rb`
 
-Expected: FAIL because the Rails app files and routes do not exist yet.
+Expected: FAIL because the canonical bundled source tree has not yet been promoted to a Rails app.
 
 **Step 3: Write minimal implementation**
 
-Build an API-only Rails skeleton around the current bundled agent:
+Promote the existing `cybros/vendor/agents/claw` skeleton into `cybros/agents/default`:
 
+- copy only the Rails host files that are actually needed
 - keep Puma as the app server
 - expose `/rpc` and `/health`
-- wire `bin/server` to boot the Rails app instead of manually spinning WEBrick
+- wire `bin/server` and `bin/test` to the promoted Rails app
+- remove the temporary `cybros/vendor/agents/claw` tree once the promoted files exist in `cybros/agents/default`
 
 Minimal route shape:
 
@@ -116,18 +126,19 @@ end
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd cybros/agents/default && bundle exec ruby -Itest test/integration/http_boundary_test.rb`
+Run: `cd cybros/agents/default && bundle exec rails test test/integration/http_boundary_test.rb`
 
 Expected: PASS with Rails booting and the two endpoints present.
 
 **Step 5: Commit**
 
 ```bash
-git add cybros/agents/default/app/controllers/rpc_controller.rb cybros/agents/default/app/controllers/health_controller.rb cybros/agents/default/config/application.rb cybros/agents/default/config/environment.rb cybros/agents/default/config/routes.rb cybros/agents/default/config/puma.rb cybros/agents/default/config.ru cybros/agents/default/Gemfile cybros/agents/default/bin/server cybros/agents/default/bin/test
-git commit -m "feat: scaffold rails host for bundled agent"
+git add cybros/agents/default/app/controllers/application_controller.rb cybros/agents/default/config/application.rb cybros/agents/default/config/boot.rb cybros/agents/default/config/environment.rb cybros/agents/default/config/environments/development.rb cybros/agents/default/config/environments/test.rb cybros/agents/default/config/environments/production.rb cybros/agents/default/config/routes.rb cybros/agents/default/config/puma.rb cybros/agents/default/config/initializers/filter_parameter_logging.rb cybros/agents/default/config.ru cybros/agents/default/bin/rails cybros/agents/default/test/integration/http_boundary_test.rb cybros/agents/default/Gemfile cybros/agents/default/Gemfile.lock cybros/agents/default/Rakefile cybros/agents/default/bin/server cybros/agents/default/bin/test
+git rm -r cybros/vendor/agents/claw
+git commit -m "feat: promote claw rails scaffold into bundled default"
 ```
 
-### Task 3: Preserve The Existing Pure-Ruby Agent Core
+### Task 3: Port The Existing Bundled Default Runtime Core Into The Promoted Rails Host
 
 **Files:**
 - Modify: `cybros/agents/default/lib/cybros/agents/default/application.rb`
@@ -159,7 +170,7 @@ assert_equal true, result.fetch("healthy")
 
 Run: `cd cybros/agents/default && bundle exec ruby -Itest test/unit/manifest_test.rb test/integration/rpc_contract_test.rb`
 
-Expected: FAIL because the Rails scaffolding work will have disturbed direct-loading assumptions and the core needs to be re-centered.
+Expected: FAIL because the promoted Rails host does not yet carry over the existing bundled default runtime behavior.
 
 **Step 3: Write minimal implementation**
 
@@ -193,8 +204,8 @@ git commit -m "refactor: keep bundled agent core host-agnostic"
 ### Task 4: Implement Thin Rails Controllers With Stable JSON-RPC Error Mapping
 
 **Files:**
-- Modify: `cybros/agents/default/app/controllers/rpc_controller.rb`
-- Modify: `cybros/agents/default/app/controllers/health_controller.rb`
+- Create: `cybros/agents/default/app/controllers/rpc_controller.rb`
+- Create: `cybros/agents/default/app/controllers/health_controller.rb`
 - Create: `cybros/agents/default/app/controllers/concerns/json_rpc_error_renderer.rb`
 - Create: `cybros/agents/default/test/controllers/rpc_controller_test.rb`
 - Create: `cybros/agents/default/test/controllers/health_controller_test.rb`
@@ -346,6 +357,7 @@ Update docs and any remaining test fixtures so the product describes the bundled
 - first-party code under `cybros/agents/default`
 - Rails/Puma hosted
 - still speaking `agent_rpc.v1` over HTTP JSON-RPC
+- seeded from the former `claw` scaffold while preserving bundled identity `default`
 
 **Step 4: Run test to verify it passes**
 
