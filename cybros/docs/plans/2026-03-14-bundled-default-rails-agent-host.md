@@ -83,6 +83,7 @@ git commit -m "test: lock bundled agent http contract"
 - Modify: `cybros/agents/default/Rakefile`
 - Modify: `cybros/agents/default/bin/server`
 - Modify: `cybros/agents/default/bin/test`
+- Modify: `cybros/agents/default/test/test_helper.rb`
 - Delete: `cybros/vendor/agents/claw`
 
 **Step 1: Write the failing test**
@@ -113,6 +114,7 @@ Promote the existing `cybros/vendor/agents/claw` skeleton into `cybros/agents/de
 - keep Puma as the app server
 - expose `/rpc` and `/health`
 - wire `bin/server` and `bin/test` to the promoted Rails app
+- switch `test/test_helper.rb` to boot the promoted Rails test environment
 - remove the temporary `cybros/vendor/agents/claw` tree once the promoted files exist in `cybros/agents/default`
 
 Minimal route shape:
@@ -133,7 +135,7 @@ Expected: PASS with Rails booting and the two endpoints present.
 **Step 5: Commit**
 
 ```bash
-git add cybros/agents/default/app/controllers/application_controller.rb cybros/agents/default/config/application.rb cybros/agents/default/config/boot.rb cybros/agents/default/config/environment.rb cybros/agents/default/config/environments/development.rb cybros/agents/default/config/environments/test.rb cybros/agents/default/config/environments/production.rb cybros/agents/default/config/routes.rb cybros/agents/default/config/puma.rb cybros/agents/default/config/initializers/filter_parameter_logging.rb cybros/agents/default/config.ru cybros/agents/default/bin/rails cybros/agents/default/test/integration/http_boundary_test.rb cybros/agents/default/Gemfile cybros/agents/default/Gemfile.lock cybros/agents/default/Rakefile cybros/agents/default/bin/server cybros/agents/default/bin/test
+git add cybros/agents/default/app/controllers/application_controller.rb cybros/agents/default/config/application.rb cybros/agents/default/config/boot.rb cybros/agents/default/config/environment.rb cybros/agents/default/config/environments/development.rb cybros/agents/default/config/environments/test.rb cybros/agents/default/config/environments/production.rb cybros/agents/default/config/routes.rb cybros/agents/default/config/puma.rb cybros/agents/default/config/initializers/filter_parameter_logging.rb cybros/agents/default/config.ru cybros/agents/default/bin/rails cybros/agents/default/test/integration/http_boundary_test.rb cybros/agents/default/test/test_helper.rb cybros/agents/default/Gemfile cybros/agents/default/Gemfile.lock cybros/agents/default/Rakefile cybros/agents/default/bin/server cybros/agents/default/bin/test
 git rm -r cybros/vendor/agents/claw
 git commit -m "feat: promote claw rails scaffold into bundled default"
 ```
