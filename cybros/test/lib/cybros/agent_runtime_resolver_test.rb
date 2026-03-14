@@ -511,7 +511,78 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     end
   end
 
+  test "runtime_for does not expose memory tools outside test when memory backend is not explicitly configured" do
+    node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
+
+    with_env("SIMPLE_INFERENCE_BASE_URL" => nil, "SIMPLE_INFERENCE_API_KEY" => nil) do
+      with_rails_env("development") do
+        runtime =
+          Cybros::AgentRuntimeResolver.runtime_for(
+            node: node,
+            provider: Struct.new(:name).new("stub"),
+            base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+            instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          )
+
+        refute runtime.tools_registry.include?("memory_search")
+        refute runtime.tools_registry.include?("memory_store")
+        refute runtime.tools_registry.include?("memory_forget")
+      end
+    end
+  end
+
+  test "runtime_for does not expose memory tools outside test even when memory backend is explicitly configured" do
+    node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
+
+    with_env("SIMPLE_INFERENCE_BASE_URL" => "http://memory.example", "SIMPLE_INFERENCE_API_KEY" => nil) do
+      with_rails_env("development") do
+        runtime =
+          Cybros::AgentRuntimeResolver.runtime_for(
+            node: node,
+            provider: Struct.new(:name).new("stub"),
+            base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+            instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          )
+
+        refute runtime.tools_registry.include?("memory_search")
+        refute runtime.tools_registry.include?("memory_store")
+        refute runtime.tools_registry.include?("memory_forget")
+      end
+    end
+  end
+
   private
+
+    def with_env(values)
+      prior = {}
+      values.each do |key, value|
+        prior[key] = ENV[key]
+        if value.nil?
+          ENV.delete(key)
+        else
+          ENV[key] = value
+        end
+      end
+
+      yield
+    ensure
+      prior.each do |key, value|
+        if value.nil?
+          ENV.delete(key)
+        else
+          ENV[key] = value
+        end
+      end
+    end
+
+    def with_rails_env(name)
+      singleton = Rails.singleton_class
+      original_method = singleton.instance_method(:env)
+      singleton.send(:define_method, :env) { ActiveSupport::StringInquirer.new(name) }
+      yield
+    ensure
+      singleton.send(:define_method, :env, original_method)
+    end
 
     def with_catalog_yaml(yaml)
       Dir.mktmpdir do |dir|

@@ -36,7 +36,7 @@ test.describe("Bootstrap hooks", () => {
 
     ensureOpenAiDefaultModel()
     const bundled = bundledDefaultRuntimeState()
-    expect(bundled.agentName).toBe("Default")
+    expect(bundled.agentName).toBe("Claw")
 
     await openNewConversation(page, "Conversation")
 

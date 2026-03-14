@@ -173,6 +173,22 @@ module Cybros
       end
 
       def placeholder_node_for_runtime_hook(node)
+        graph = conversation_run.conversation.root_graph
+        active_placeholder =
+          graph.nodes.active
+            .where(
+              lane_id: node.lane_id,
+              turn_id: node.turn_id,
+              node_type: [
+                Messages::AgentMessage.node_type_key,
+                Messages::CharacterMessage.node_type_key,
+              ],
+            )
+            .order(:id)
+            .last
+
+        active_placeholder || graph.nodes.find_by(id: conversation_run.dag_node_id) || node
+      rescue StandardError
         conversation_run.conversation.root_graph.nodes.find_by(id: conversation_run.dag_node_id) || node
       end
 

@@ -284,7 +284,7 @@ AgentCore 会在每次 LLM 调用写入：
   - 这里只记录 **自动** repair loop 的归因；手动 rerun/retry 不写进 `repair`，而是生成新的 `task` 节点并由统计层作为新的尝试处理
 - `source`：来源分类（用于可观测/安全策略）
   - `compact_context` 的 active path 约定为：
-    - `context_budget_policy`：bundled default policy 自动插入
+    - `context_budget_policy`：bundled claw policy 自动插入
     - `model_choice`：模型在 `advise_compact` guidance 下主动调用
     - `manual`：未来显式人工/API 触发的 durable compaction
 

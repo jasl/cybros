@@ -295,7 +295,7 @@ export async function openNewConversation(page: Page, _title: string, agentName?
 
   const agentRows = page.getByTestId("dashboard-agent-row")
   const row =
-    agentRows.filter({ has: page.getByText(agentName ?? "Default", { exact: true }) }).first()
+    agentRows.filter({ has: page.getByText(agentName ?? "Claw", { exact: true }) }).first()
 
   await expect(row).toBeVisible()
   await row.getByRole("button", { name: "New conversation" }).click()

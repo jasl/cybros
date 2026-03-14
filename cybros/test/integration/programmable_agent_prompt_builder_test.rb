@@ -10,7 +10,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "bundled default sends lane prompt buffer sections through the actual model request" do
+  test "bundled claw sends lane prompt buffer sections through the actual model request" do
     llm_payloads = []
     llm_server =
       MockLLMServer.new do |payload|
@@ -24,7 +24,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "working_notes", kind: "note", content: "Preserve the placeholder replacement semantics.")
       seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "handoff", kind: "handoff", content: "Next step is the runtime cutover verification pass.")
 
-      run_bundled_default_turn!(
+      run_bundled_claw_turn!(
         conversation: conversation,
         user_content: "Continue the runtime cutover",
         model_ref: "dev/mock-model",
@@ -45,7 +45,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     llm_server&.shutdown
   end
 
-  test "bundled default drops working_notes from the model request before history when prompt budget is tight" do
+  test "bundled claw drops working_notes from the model request before history when prompt budget is tight" do
     llm_payloads = []
     llm_server =
       MockLLMServer.new do |payload|
@@ -71,7 +71,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
           content: "Drop this working note first. " + ("x" * 12_000),
         )
 
-        run_bundled_default_turn!(
+        run_bundled_claw_turn!(
           conversation: conversation,
           user_content: "Continue the runtime cutover",
           model_ref: "dev/mock-model",
@@ -91,7 +91,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
 
   private
 
-    def run_bundled_default_turn!(conversation:, user_content:, model_ref:, llm_payloads:)
+    def run_bundled_claw_turn!(conversation:, user_content:, model_ref:, llm_payloads:)
       result = conversation.append_user_message!(content: user_content, model_ref: model_ref)
       agent_node = result.fetch(:agent_node)
 

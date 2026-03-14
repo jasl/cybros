@@ -344,7 +344,10 @@ export default class extends Controller {
     const url = `/conversations/${encodeURIComponent(this.conversationIdValue)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
     fetch(url, {
       method: "GET",
-      headers: { Accept: "text/vnd.turbo-stream.html" },
+      headers: {
+        Accept: "text/vnd.turbo-stream.html",
+        "X-Cybros-Best-Effort": "1",
+      },
       credentials: "same-origin",
     })
       .then((res) => (res.ok ? res.text() : ""))
@@ -453,7 +456,10 @@ export default class extends Controller {
       const url = `/conversations/${encodeURIComponent(this.conversationIdValue)}/messages/refresh?node_id=${encodeURIComponent(nodeId)}`
       fetch(url, {
         method: "GET",
-        headers: { Accept: "text/vnd.turbo-stream.html" },
+        headers: {
+          Accept: "text/vnd.turbo-stream.html",
+          "X-Cybros-Best-Effort": "1",
+        },
         credentials: "same-origin",
       })
         .then((res) => (res.ok ? res.text() : ""))

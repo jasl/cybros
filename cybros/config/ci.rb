@@ -12,6 +12,11 @@ CI.run do
 
   step "Tests: JS", "bun run test:js"
   step "Tests: Rails", "bin/rails test"
+  step "Tests: Bundled claw runtime",
+       "bin/rails", "test",
+       "test/integration/bundled_agent_parity_test.rb",
+       "test/integration/agent_runtime_binding_cutover_test.rb",
+       "test/services/agents/bootstrap_bundled_default_service_test.rb"
   step "Tests: Seeds", "env RAILS_ENV=test bin/rails db:seed:replant"
 
   if ENV["RUN_E2E"].to_s == "1"

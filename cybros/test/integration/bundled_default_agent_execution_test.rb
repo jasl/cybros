@@ -10,7 +10,7 @@ class BundledDefaultAgentExecutionTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "bundled default conversations complete one Cybros-owned loop through planning finalization and before_finalize_output" do
+  test "bundled claw conversations complete one Cybros-owned loop through planning finalization and before_finalize_output" do
     llm_server = MockLLMServer.new do |_payload|
       MockLLMServer.chat_response(content: "llm draft answer")
     end.start
@@ -23,11 +23,11 @@ class BundledDefaultAgentExecutionTest < ActiveSupport::TestCase
       draft = RunDraft.order(:created_at).last
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
 
-      assert_equal "default", conversation.agent.bundled_agent_key
+      assert_equal "claw", conversation.agent.bundled_agent_key
       assert_equal "finalized", draft.status
       assert_equal run.id, draft.materialized_conversation_run_id
       assert_equal run.id, draft.materialized_conversation_run_id
-      assert_equal "bundled_default.before_agent_step.v2", draft.planning.dig("step_plan", "kind")
+      assert_equal "bundled_claw.before_agent_step.v2", draft.planning.dig("step_plan", "kind")
       assert_equal "agent", run.runtime_governors.dig("execution_capacity", "scope_type")
       assert_equal conversation.agent_id, run.runtime_governors.dig("execution_capacity", "scope_id")
 

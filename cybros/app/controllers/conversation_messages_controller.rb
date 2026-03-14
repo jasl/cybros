@@ -84,6 +84,10 @@ class ConversationMessagesController < ApplicationController
 
       format.html { redirect_to conversation_path(@conversation) }
     end
+  rescue ActiveRecord::RecordNotFound
+    raise unless best_effort_refresh?
+
+    head :no_content
   end
 
   def create
@@ -165,5 +169,9 @@ class ConversationMessagesController < ApplicationController
 
       @conversation = Current.user.conversations.find_by(id: id)
       raise ActiveRecord::RecordNotFound if @conversation.nil?
+    end
+
+    def best_effort_refresh?
+      request.headers["X-Cybros-Best-Effort"].to_s == "1"
     end
 end

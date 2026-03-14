@@ -2,11 +2,13 @@ require "test_helper"
 require "tmpdir"
 
 class DefaultAgentAttachmentTransferTest < ActiveSupport::TestCase
-  test "transfer_attachments materializes conversation attachments into the logical workspace for the bundled default agent" do
+  test "transfer_attachments materializes conversation attachments into the logical workspace for the bundled claw agent" do
     workspace_root = Dir.mktmpdir("cybros-default-attachments-")
     agent = Agents::BootstrapBundledDefaultService.ensure_agent!
     conversation = nil
     append_result = nil
+
+    assert_equal "claw", agent.bundled_agent_key
 
     with_default_agent_workspace_root(workspace_root) do
       without_bootstrap_hooks do

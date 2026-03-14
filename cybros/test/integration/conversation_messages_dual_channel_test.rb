@@ -62,8 +62,10 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(data-role="agent-bubble")
   end
 
-  test "create returns 422 when preferred model is unavailable" do
+  test "create falls back to the site default when preferred model is unavailable" do
     LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
+    Account.instance.update_llm_default_model_ref!("dev/mock-model")
 
     user = create_user!
     sign_in!(user)
@@ -84,8 +86,9 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
          params: { content: "Hello" },
          headers: { "Accept" => "text/vnd.turbo-stream.html" }
 
-    assert_response :unprocessable_entity
-    assert_includes response.body, "Preferred model is unavailable"
+    assert_response :success
+    assert_equal "dev/mock-model", conversation.reload.metadata.dig("llm", "model_ref")
+    assert_includes response.body, %(data-role="agent-bubble")
   end
 
   test "create honors nested input policy override params from the composer form" do
@@ -270,6 +273,30 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
         headers: { "Accept" => "text/vnd.turbo-stream.html" }
 
     assert_response :not_found
+  end
+
+  test "refresh best-effort returns no content for a node outside the conversation lane" do
+    user = create_user!
+    sign_in!(user)
+
+    root = create_conversation!(user: user, title: "Root")
+    first_turn = root.append_user_message!(content: "Hello")
+    first_agent = first_turn.fetch(:agent_node)
+    first_agent.mark_running!
+    first_agent.mark_finished!(content: "Done")
+
+    branch = root.create_child!(from_node_id: first_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+    root_turn = root.append_user_message!(content: "Root followup")
+    root_agent = root_turn.fetch(:agent_node)
+
+    get refresh_conversation_messages_path(branch),
+        params: { node_id: root_agent.id },
+        headers: {
+          "Accept" => "text/vnd.turbo-stream.html",
+          "X-Cybros-Best-Effort" => "1",
+        }
+
+    assert_response :no_content
   end
 
   test "regenerate for the tail assistant returns turbo streams instead of redirecting the page" do

@@ -70,10 +70,10 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, 'data-layout="agent"'
 
-    agent = Agent.find_by!(bundled_agent_key: "default")
+    agent = Agent.find_by!(bundled_agent_key: "claw")
     deployment = agent.active_runtime_binding
     assert_equal "bundled", agent.source_kind
-    assert_equal "default", agent.bundled_agent_key
+    assert_equal "claw", agent.bundled_agent_key
     assert_equal "healthy", deployment&.health_status
     assert_equal "active", deployment&.status
   end

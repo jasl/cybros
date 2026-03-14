@@ -35,7 +35,7 @@ module Conversations
       workspace = Conversations::WorkspaceInitializer.initialize!(conversation: conversation).deep_stringify_keys
       attachments = selected_attachments
 
-      if bundled_default_agent?
+      if bundled_claw_agent?
         {
           "transfer_mode" => "workspace_copy",
           "workspace" => workspace,
@@ -97,8 +97,8 @@ module Conversations
         )
       end
 
-      def bundled_default_agent?
-        agent&.bundled_source? && agent&.bundled_agent_key.to_s == "default"
+      def bundled_claw_agent?
+        agent&.bundled_source? && agent&.bundled_agent_key.to_s == "claw"
       end
 
       def materialize_workspace_files!(attachments, workspace:)

@@ -51,30 +51,48 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     node
   end
 
-  test "model_resolution_for selects model_ref preference from the selected agent program manifest" do
+  test "model_resolution_for uses site default model and retains agent prefer as metadata" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
-    ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
-    program = Agents::BootstrapBundledDefaultService.ensure_agent!
+    ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", refresh_token: "rt")
+    Account.instance.update_llm_default_model_ref!("codex_subscription/gpt-5.4")
+    program =
+      create_agent_record!(
+        name: "Fixture Program",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:v1",
+        manifest_snapshot: {
+          "agent_program_key" => "fixture-program",
+          "name" => "Fixture Program",
+          "model" => { "prefer" => ["openai/gpt-5.4"] },
+        },
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:v1",
+      )
 
     conversation =
       create_conversation!(
         metadata: {
           "agent" => { "key" => "main" },
         },
-        agent_program: program,
+        agent: program,
       )
     resolution = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation)
 
-    assert_equal "openai", resolution.fetch(:provider_key)
+    assert_equal "codex_subscription", resolution.fetch(:provider_key)
     assert_equal "gpt-5.4", resolution.fetch(:model_key)
-    assert_equal "openai/gpt-5.4", resolution.fetch(:model_ref)
+    assert_equal "codex_subscription/gpt-5.4", resolution.fetch(:model_ref)
     assert_equal "gpt-5.4", resolution.fetch(:model)
+    assert_equal ["openai/gpt-5.4"], resolution.fetch(:preferred_models)
+    assert_equal true, resolution.fetch(:matched_preference)
   end
 
-  test "model_resolution_for hard-errors when the selected agent program manifest prefers an unavailable provider" do
+  test "model_resolution_for does not hard-error when agent prefer is unavailable and a site default exists" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
+    Account.instance.update_llm_default_model_ref!("dev/mock-model")
     program =
       create_agent_record!(
         name: "Fixture Program",
@@ -96,11 +114,15 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         metadata: {
           "agent" => { "key" => "main" },
         },
-        agent_program: program,
+        agent: program,
       )
 
-    error = assert_raises(AgentCore::ValidationError) { Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation) }
-    assert_equal "cybros.llm.model_preference_unavailable", error.code
+    resolution = Cybros::AgentRuntimeResolver.model_resolution_for(conversation: conversation)
+
+    assert_equal "dev", resolution.fetch(:provider_key)
+    assert_equal "mock-model", resolution.fetch(:model_key)
+    assert_equal "dev/mock-model", resolution.fetch(:model_ref)
+    assert_equal ["codex_subscription/gpt-5.3-codex"], resolution.fetch(:preferred_models)
   end
 
   test "runtime_for uses site default when agent prefer is absent" do
@@ -231,9 +253,85 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     assert_equal "gpt-5.4", runtime.model
   end
 
+  test "runtime_for uses materialized conversation run permission mode for delegated tools" do
+    LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
+
+    program =
+      create_agent_record!(
+        name: "Fixture Program",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:v1",
+        manifest_snapshot: { "agent_program_key" => "fixture-program", "name" => "Fixture Program" },
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:v1",
+      )
+    deployment =
+      create_runtime_binding_record!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: "http://127.0.0.1:4319/rpc",
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: "contract:v1",
+        deployment_fingerprint: "fixture-deployment-v1",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
+
+    conversation = create_conversation!
+    node = build_pending_agent_node(conversation: conversation)
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
+    create_conversation_run!(
+      conversation: conversation,
+      dag_node_id: node.id,
+      agent: agent,
+      recognized_deployment: recognized_deployment,
+      selected_model_ref: "openai/gpt-5.4",
+      effective_permission_mode: "full_access",
+      effective_public_settings: {},
+      effective_agent_config: {},
+      agent_config_schema_fingerprint: program.config_schema_fingerprint,
+      effective_policy: {},
+      runtime_governors: {
+        "provider_limiter" => {
+          "provider_key" => "openai",
+        },
+      },
+      snapshot: {
+        "draft" => {
+          "id" => SecureRandom.uuid,
+          "planning" => { "step_plan" => { "fixture" => true } },
+        },
+      },
+    )
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+    decision =
+      runtime.tool_policy.authorize(
+        name: "subagent_run",
+        arguments: { "name" => "worker", "prompt" => "inspect" },
+        context: AgentCore::ExecutionContext.new(instrumenter: AgentCore::Observability::NullInstrumenter.new),
+      )
+
+    assert_equal :allow, decision.outcome
+  end
+
   test "runtime_for allows kernel-owned bootstrap tasks without a materialized conversation run" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
+    Account.instance.update_llm_default_model_ref!("openai/gpt-5.4")
 
     program = Agents::BootstrapBundledDefaultService.ensure_agent!
     conversation =

@@ -36,18 +36,18 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "bundled default inspection also materializes the capability snapshot through handshake" do
-    program = Agents::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
+  test "bundled claw inspection also materializes the capability snapshot through handshake" do
+    program = Agents::Creator.create_from_bundled_source!(name: "Claw assistant", bundled_agent_key: "claw")
     host =
       Cybros::BundledAgentHost::Application.new(
-        source_root: Rails.root.join("agents/default"),
-        deployment_fingerprint: "bundled-default-test",
+        source_root: Rails.root.join("agents/claw"),
+        deployment_fingerprint: "bundled-claw-test",
         required_bearer: "secret://bundled",
       ).start
     deployment = create_registered_deployment!(
       program: program,
       endpoint_url: host.rpc_url,
-      deployment_fingerprint: "bundled-default-test",
+      deployment_fingerprint: "bundled-claw-test",
       deployment_bearer_secret_ref: "secret://bundled",
     )
 
@@ -57,7 +57,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     assert_includes deployment.supported_methods, "capabilities.handshake"
     assert_includes deployment.supported_methods, "capabilities.refresh"
     assert_equal "refreshed", deployment.capability_snapshot.fetch("status")
-    assert_equal "default-agent-capabilities:v1", deployment.capability_snapshot.fetch("agent_capabilities_version")
+    assert_equal "claw-agent-capabilities:v1", deployment.capability_snapshot.fetch("agent_capabilities_version")
     assert_match(/\Acsnap_/, deployment.capability_snapshot.fetch("capability_registry_snapshot_id"))
   ensure
     host&.shutdown

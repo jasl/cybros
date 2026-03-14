@@ -132,10 +132,6 @@ module Cybros
     end
 
     def default_model_ref_for(agent_metadata:, agent: nil, catalog: Cybros::LLM::Catalog.effective)
-      subject = agent
-      preferred_model_ref = preferred_model_ref_for(agent_metadata: agent_metadata, agent: subject, catalog: catalog)
-      return preferred_model_ref if preferred_model_ref.present?
-
       site_default_model_ref = Account.instance.llm_default_model_ref.to_s.strip
       if site_default_model_ref.present?
         normalized_site_default = normalize_model_ref(model_ref: site_default_model_ref)
@@ -182,77 +178,6 @@ module Cybros
         option.merge(label: "#{option.fetch(:label)} (#{option.fetch(:provider_display_name)})")
       end
     end
-
-    def preferred_model_ref_for(agent_metadata:, agent:, catalog:)
-      preferences = preferred_models_for(agent_metadata: agent_metadata, agent: agent)
-      return nil if preferences.empty?
-
-      preferences.each do |preference|
-        resolved_model_ref = resolve_preference_to_model_ref(catalog: catalog, preference: preference)
-        next if resolved_model_ref.blank?
-
-        begin
-          validate_model_ref!(model_ref: resolved_model_ref)
-          return resolved_model_ref
-        rescue AgentCore::ValidationError
-          next
-        end
-      end
-
-      AgentCore::ValidationError.raise!(
-        "Preferred model is unavailable. Please update the agent configuration or model settings.",
-        code: "cybros.llm.model_preference_unavailable",
-        details: { preferred_models: preferences },
-      )
-    end
-    private_class_method :preferred_model_ref_for
-
-    def resolve_preference_to_model_ref(catalog:, preference:)
-      raw = preference.to_s.strip
-      return nil if raw.empty?
-
-      if raw.include?("/")
-        normalized = normalize_model_ref(model_ref: raw)
-        return normalized if model_ref_in_catalog?(catalog: catalog, model_ref: normalized)
-        return nil
-      end
-
-      matches =
-        usable_or_enabled_model_refs(catalog: catalog).select do |row|
-          row.fetch(:model_key) == raw || row.fetch(:api_model) == raw
-        end
-
-      if matches.length > 1
-        AgentCore::ValidationError.raise!(
-          "Preferred model is ambiguous. Use a fully-qualified model_ref.",
-          code: "cybros.llm.model_preference_ambiguous",
-          details: { preference: raw, matches: matches.map { |row| row.fetch(:model_ref) } },
-        )
-      end
-
-      matches.first&.fetch(:model_ref)
-    end
-    private_class_method :resolve_preference_to_model_ref
-
-    def usable_or_enabled_model_refs(catalog:)
-      catalog.enabled_provider_keys_for_env(Rails.env.to_s).flat_map do |provider_key|
-        provider_spec = catalog.provider(provider_key)
-        models = provider_spec.fetch("models", {})
-        next [] unless models.is_a?(Hash)
-
-        models.map do |model_key, model_spec|
-          next nil unless model_spec.is_a?(Hash)
-          next nil if model_spec.fetch("enabled", true) == false
-
-          {
-            model_ref: "#{provider_key}/#{model_key}",
-            model_key: model_key.to_s,
-            api_model: model_spec.fetch("api_model").to_s,
-          }
-        end.compact
-      end
-    end
-    private_class_method :usable_or_enabled_model_refs
 
     def model_ref_in_catalog?(catalog:, model_ref:)
       provider_key, model_key = normalize_model_ref(model_ref: model_ref).split("/", 2).map(&:to_s)
@@ -329,6 +254,23 @@ module Cybros
       )
     end
 
+    def resolved_base_tool_policy(conversation_run:, base_tool_policy:, tools_registry:)
+      return base_tool_policy if base_tool_policy.present?
+
+      permission_mode = conversation_run&.effective_permission_mode.to_s.strip
+      return AgentCore::Resources::Tools::Policy::ConfirmAll.new if permission_mode.blank?
+
+      Cybros::Permissions::BundleCompiler.compile(
+        permission_mode: permission_mode,
+        tools_registry: tools_registry,
+      ).fetch(:tool_policy)
+    rescue AgentCore::ValidationError
+      raise
+    rescue StandardError
+      AgentCore::Resources::Tools::Policy::ConfirmAll.new
+    end
+    private_class_method :resolved_base_tool_policy
+
     def channel_for(node:)
       from_node = routing_channel_from_metadata(node&.metadata)
       return from_node if from_node
@@ -379,7 +321,12 @@ module Cybros
           parse_context_turns(agent_metadata&.fetch("context_turns", nil))
         end
 
-      base_tool_policy ||= AgentCore::Resources::Tools::Policy::ConfirmAll.new
+      base_tool_policy =
+        resolved_base_tool_policy(
+          conversation_run: conversation_run,
+          base_tool_policy: base_tool_policy,
+          tools_registry: tools_registry,
+        )
 
       delegate =
         if profile_config&.tools_allowed
@@ -873,7 +820,9 @@ module Cybros
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
 
-      # Phase 0: always register native memory + skills tools.
+      # Phase 0: always register native skills tools.
+      # Memory tools stay disabled until the embedding backend is promoted to a
+      # productized Cybros runtime capability.
       begin
         skills_dir = Rails.root.join("skills")
         if skills_dir.directory?
@@ -881,12 +830,6 @@ module Cybros
             AgentCore::Resources::Skills::FileSystemStore.new(dirs: [skills_dir.to_s], strict: false)
           )
         end
-      rescue StandardError
-        # ignore
-      end
-
-      begin
-        registry.register_memory_store(build_memory_store)
       rescue StandardError
         # ignore
       end
@@ -950,35 +893,6 @@ module Cybros
       end
     end
     private_class_method :preferred_models_for
-
-    def build_memory_store
-      if Rails.env.test?
-        embedder =
-          Class.new do
-            def embed(text:)
-              _ = text
-              Array.new(1536, 0.0)
-            end
-          end.new
-
-        return AgentCore::Resources::Memory::PgvectorStore.new(embedder: embedder, conversation_id: nil, include_global: true)
-      end
-
-      embed_model = ENV.fetch("AGENT_CORE_EMBEDDING_MODEL", "text-embedding-3-small").to_s.strip
-      embed_model = "text-embedding-3-small" if embed_model.empty?
-
-      embedder =
-        AgentCore::Resources::Memory::Embedder::SimpleInference.new(
-          model: embed_model,
-          base_url: ENV["SIMPLE_INFERENCE_BASE_URL"],
-          api_key: ENV["SIMPLE_INFERENCE_API_KEY"],
-        )
-
-      AgentCore::Resources::Memory::PgvectorStore.new(embedder: embedder, conversation_id: nil, include_global: true)
-    rescue StandardError
-      AgentCore::Resources::Memory::InMemory.new
-    end
-    private_class_method :build_memory_store
 
     def build_instrumenter
       AgentCore::Observability::Adapters::ActiveSupportNotificationsInstrumenter.new

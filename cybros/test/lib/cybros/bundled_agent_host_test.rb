@@ -4,8 +4,8 @@ require "net/http"
 require "uri"
 
 class Cybros::BundledAgentHostTest < ActiveSupport::TestCase
-  test "default bundled agent host responds to required methods" do
-    host = Cybros::BundledAgentHost::Application.new(source_root: Rails.root.join("agents/default"))
+  test "claw bundled agent host responds to required methods" do
+    host = Cybros::BundledAgentHost::Application.new(source_root: Rails.root.join("agents/claw"))
 
     assert_equal Agents::Protocol::DEFAULT_SUPPORTED_METHODS, host.supported_methods
   end
@@ -13,7 +13,7 @@ class Cybros::BundledAgentHostTest < ActiveSupport::TestCase
   test "bundled host serves initialize and health over http json-rpc" do
     host =
       Cybros::BundledAgentHost::Application.new(
-        source_root: Rails.root.join("agents/default"),
+        source_root: Rails.root.join("agents/claw"),
         deployment_fingerprint: "bundled-host-http-test",
         required_bearer: "secret://bundled",
       ).start
@@ -36,7 +36,7 @@ class Cybros::BundledAgentHostTest < ActiveSupport::TestCase
         bearer: "secret://bundled",
       )
 
-    assert_equal "default", initialize_result.dig("result", "identity", "agent_program_key")
+    assert_equal "claw", initialize_result.dig("result", "identity", "agent_program_key")
     assert_equal "bundled-host-http-test", initialize_result.dig("result", "identity", "deployment_fingerprint")
     assert_equal true, health_result.dig("result", "healthy")
   ensure

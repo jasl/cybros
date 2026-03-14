@@ -403,7 +403,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.4"
   end
 
-  test "show groups model picker options by provider with plain model labels inside each group" do
+  test "show disambiguates duplicate model picker labels with provider suffixes" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "codex_subscription", credential_type: "oauth_codex", refresh_token: "rt")
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
@@ -422,11 +422,10 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     get conversation_path(conversation)
     assert_response :success
 
-    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="Codex (ChatGPT Pro/Plus)"] option', text: "GPT‑5.3 Codex"
-    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4"
-    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4"
-    refute_includes response.body, "GPT‑5.4 (OpenAI)"
-    refute_includes response.body, "GPT‑5.4 (OpenRouter)"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="Codex (ChatGPT Pro/Plus)"] option', text: "GPT‑5.3 Codex (Codex (ChatGPT Pro/Plus))"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4 (OpenAI)"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4 (OpenRouter)"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.4 (OpenAI)"
   end
 
   test "show requires reselection when default model is unusable and conversation has no stored model_ref" do
@@ -467,11 +466,11 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
     get conversation_path(conversation)
     assert_response :success
-    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4"
-    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenAI"] option', text: "GPT‑5.4 (OpenAI)"
+    assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] optgroup[label="OpenRouter"] option', text: "GPT‑5.4 (OpenRouter)"
   end
 
-  test "create prefers the selected program manifest over the site default model" do
+  test "create uses the site default model instead of the selected program manifest preference" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
@@ -484,7 +483,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
 
     conversation = Conversation.order(:created_at).last
     assert_equal user.id, conversation.user_id
-    assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
+    assert_equal "openrouter/openai-gpt-5.4-pro", conversation.metadata.dig("llm", "model_ref")
     assert_nil conversation[:agent_program_id]
     assert_nil conversation[:default_execution_target_id]
   end

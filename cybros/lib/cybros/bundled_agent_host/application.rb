@@ -23,8 +23,8 @@ module Cybros
         source_root:,
         host: "127.0.0.1",
         port: 0,
-        deployment_key: "default",
-        deployment_fingerprint: "bundled-default-v1",
+        deployment_key: "claw",
+        deployment_fingerprint: "bundled-claw-v1",
         required_bearer: nil
       )
         @source_root = Pathname.new(source_root.to_s)
@@ -124,8 +124,8 @@ module Cybros
             begin
               lib_root = source_root.join("lib")
               $LOAD_PATH.unshift(lib_root.to_s) unless $LOAD_PATH.include?(lib_root.to_s)
-              require "cybros/agents/default"
-              Cybros::Agents::Default::Application.new(
+              require "cybros/agents/claw"
+              Cybros::Agents::Claw::Application.new(
                 source_root: source_root,
                 deployment_key: deployment_key,
                 deployment_fingerprint: deployment_fingerprint,
@@ -173,9 +173,9 @@ module Cybros
         options = {
           host: "127.0.0.1",
           port: 4321,
-          source_root: Rails.root.join("agents", "default").to_s,
-          deployment_key: "default",
-          deployment_fingerprint: "bundled-default-v1",
+          source_root: Rails.root.join("agents", "claw").to_s,
+          deployment_key: "claw",
+          deployment_fingerprint: "bundled-claw-v1",
           required_bearer: nil,
         }
 
@@ -198,7 +198,7 @@ module Cybros
             required_bearer: options[:required_bearer],
           ).start
 
-        puts "bundled default agent host listening on #{application.rpc_url}"
+        puts "bundled claw agent host listening on #{application.rpc_url}"
 
         Signal.trap("INT") { application.shutdown; exit 0 }
         Signal.trap("TERM") { application.shutdown; exit 0 }

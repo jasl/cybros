@@ -1,7 +1,7 @@
 module Agents
   module BundledSources
     SOURCES = {
-      "default" => Rails.root.join("agents", "default"),
+      "claw" => Rails.root.join("agents", "claw"),
     }.freeze
 
     module_function

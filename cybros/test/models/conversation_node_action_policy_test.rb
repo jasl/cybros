@@ -185,6 +185,40 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal true, policy.dig("actions", "start", "available")
   end
 
+  test "tail pending assistant with unresolved dependency does not expose start" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "input_policy" => {
+            "input_coalescing" => { "enabled" => false },
+          },
+        },
+      )
+
+    agent = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+
+    conversation.root_graph.mutate! do |m|
+      approval_task =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::AWAITING_APPROVAL,
+          lane_id: conversation.chat_lane.id,
+          metadata: {},
+          body_input: {
+            "name" => "subagent_run",
+          },
+        )
+
+      m.create_edge(from_node: approval_task, to_node: agent, edge_type: DAG::Edge::DEPENDENCY)
+    end
+
+    policy = policy_for(conversation: conversation, node: agent.reload)
+
+    assert_equal true, policy.dig("actions", "start", "supported")
+    assert_equal false, policy.dig("actions", "start", "available")
+  end
+
   test "non-tail pending assistant does not expose start" do
     conversation = create_conversation!
     graph = conversation.dag_graph

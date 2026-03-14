@@ -41,7 +41,7 @@ test.describe("Conversation agent switching", () => {
     expect(state.latestRun.deploymentFingerprint).toBe(deployment.deploymentFingerprint)
   })
 
-  test("switching back to the bundled default agent applies to later turns", async ({ page }) => {
+  test("switching back to the bundled claw agent applies to later turns", async ({ page }) => {
     test.setTimeout(180_000)
 
     await createHighPriorityMockProvider(page)
@@ -59,7 +59,7 @@ test.describe("Conversation agent switching", () => {
     await waitForTailAgentToFinish(page)
 
     await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", bundled.agentName)
-    await page.getByPlaceholder("Message…").fill("Return to the bundled default runtime")
+    await page.getByPlaceholder("Message…").fill("Return to the bundled claw runtime")
     await page.getByRole("button", { name: "Send" }).click()
     await waitForTailAgentToFinish(page)
 
@@ -69,6 +69,6 @@ test.describe("Conversation agent switching", () => {
     expect(state.latestDraft.status).toBe("finalized")
     expect(state.latestRun.state).toBe("succeeded")
     expect(state.latestRun.deploymentFingerprint).toBe(bundled.deploymentFingerprint)
-    expect(state.latestAgentNode.outputText || "").toContain("Return to the bundled default runtime")
+    expect(state.latestAgentNode.outputText || "").toContain("Return to the bundled claw runtime")
   })
 })

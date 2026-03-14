@@ -1,7 +1,7 @@
 require "test_helper"
 
 class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
-  test "conversation creation binds the bundled default agent and removes execution target selection from the UI" do
+  test "conversation creation binds the bundled claw agent and removes execution target selection from the UI" do
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("")
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
@@ -48,10 +48,10 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
     assert_equal({ "mode" => "review" }, conversation.agent_config.fetch(previous.fetch(:agent).config_namespace))
   end
 
-  test "bundled bootstrap provisions a default agent row" do
+  test "bundled bootstrap provisions a claw agent row" do
     agent = Agents::BootstrapBundledDefaultService.bootstrap!
 
-    assert_equal "default", agent.bundled_agent_key
+    assert_equal "claw", agent.bundled_agent_key
     assert_equal "bundled", agent.source_kind
     assert_predicate agent, :persisted?
   end

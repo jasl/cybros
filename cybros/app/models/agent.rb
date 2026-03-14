@@ -136,7 +136,7 @@ class Agent < ApplicationRecord
   def conversation_metadata_fragment
     {}.tap do |metadata|
       key =
-        if bundled_agent_key.to_s == "default"
+        if bundled_agent_key.to_s == "claw"
           "main"
         else
           bundled_agent_key.to_s.presence

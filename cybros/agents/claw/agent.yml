@@ -1,0 +1,53 @@
+agent_program_key: claw
+name: Claw
+description: Bundled claw Cybros programmable agent.
+config_namespace: bundled.claw
+protocol_version: agent_rpc.v1
+agent_sdk_version: cybros-bundled-claw/1.0
+supported_methods:
+  - initialize
+  - agent.describe
+  - agent.health
+  - agent.schemas.get
+  - capabilities.handshake
+  - capabilities.refresh
+  - attachments.import
+  - on_conversation_created
+  - on_lane_first_user_message
+  - before_agent_step
+  - on_context_pressure
+  - before_subagent_spawn
+  - before_finalize_output
+  - after_task_notice
+  - after_subagent_result
+prompts:
+  agent: prompts/AGENT.md
+  soul: prompts/SOUL.md
+  user: prompts/USER.md
+  system: prompts/system.md.liquid
+model:
+  prefer:
+    - openai/gpt-5.4
+global_config_schema:
+  type: object
+  properties: {}
+conversation_config_schema:
+  type: object
+  properties: {}
+input_policy:
+  input_coalescing:
+    enabled: true
+    window_ms: 1500
+  running_input_policy: queue
+  interrupted_output_policy: keep_context
+  steer_capability: true
+  steer_cleanup_policy: none
+  steer_after_side_effects: false
+  oversize:
+    single_message:
+      soft_threshold_ratio: 0.25
+      hard_threshold_ratio: 0.5
+      soft_strategy: compress_input
+      hard_strategy: product_guard
+    multi_message:
+      strategy: compact_context

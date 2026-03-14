@@ -82,6 +82,7 @@ class Conversation::NodeActionPolicy
       return unavailable_entry(reason: "already_claimed") if node.claimed_at.present? || node.started_at.present?
       return unavailable_entry(reason: "not_tail") unless tail_message?
       return unavailable_entry(reason: "already_executing") if executing_agent_present?
+      return unavailable_entry(reason: "dependencies_pending") unless start_dependencies_satisfied?
 
       entry(supported: true, available: true)
     end
@@ -211,6 +212,12 @@ class Conversation::NodeActionPolicy
 
     def tail_message?
       conversation.chat_head_node_id == node.id.to_s
+    end
+
+    def start_dependencies_satisfied?
+      conversation.send(:pending_agent_dependencies_satisfied?, graph: conversation.root_graph, agent_node: node)
+    rescue StandardError
+      false
     end
 
     def retry_depth

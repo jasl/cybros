@@ -188,7 +188,7 @@
                   <optgroup label="<%= group.fetch(:provider_display_name) %>">
                     <% group.fetch(:options).each do |opt| %>
                       <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
-                        <%= opt.fetch(:model_display_name, opt.fetch(:label)) %>
+                        <%= opt.fetch(:label, opt.fetch(:model_display_name)) %>
                       </option>
                     <% end %>
                   </optgroup>

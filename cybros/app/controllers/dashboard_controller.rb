@@ -4,7 +4,7 @@ class DashboardController < AgentController
     @agents =
       Agent.all.select(&:selectable_for_conversation?).sort_by do |agent|
         [
-          agent.bundled_agent_key.to_s == "default" ? 0 : 1,
+          agent.bundled_agent_key.to_s == "claw" ? 0 : 1,
           agent.name.to_s.downcase,
           agent.id.to_s,
         ]

@@ -1,11 +1,11 @@
 module Agents
   class BootstrapBundledDefaultService
-    DEFAULT_BUNDLED_AGENT_KEY = "default".freeze
-    DEFAULT_AGENT_NAME = "Default".freeze
-    DEFAULT_DEPLOYMENT_FINGERPRINT = "deployment:bundled-default:managed-local".freeze
-    DEFAULT_DEPLOYMENT_BEARER = "secret://bundled-default:managed-local".freeze
-    TEST_DEPLOYMENT_FINGERPRINT = "deployment:bundled-default:test".freeze
-    TEST_DEPLOYMENT_BEARER = "secret://bundled-default:test".freeze
+    DEFAULT_BUNDLED_AGENT_KEY = "claw".freeze
+    DEFAULT_AGENT_NAME = "Claw".freeze
+    DEFAULT_DEPLOYMENT_FINGERPRINT = "deployment:bundled-claw:managed-local".freeze
+    DEFAULT_DEPLOYMENT_BEARER = "secret://bundled-claw:managed-local".freeze
+    TEST_DEPLOYMENT_FINGERPRINT = "deployment:bundled-claw:test".freeze
+    TEST_DEPLOYMENT_BEARER = "secret://bundled-claw:test".freeze
     PROTOCOL_VERSION = "agent_rpc.v1".freeze
     HOST_MUTEX = Mutex.new
 

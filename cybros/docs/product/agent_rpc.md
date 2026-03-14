@@ -4,6 +4,8 @@
 
 `agent_rpc` is the wire contract between Cybros and an `Agent` runtime endpoint.
 
+Current bundled implementation: `claw` at `cybros/agents/claw`.
+
 The configured `Agent` is the user-visible selector. At runtime Cybros performs initialization/handshake, observes a runtime identity, and resolves or creates a `RecognizedDeployment` for turn-level pinning.
 
 ## Core Rules

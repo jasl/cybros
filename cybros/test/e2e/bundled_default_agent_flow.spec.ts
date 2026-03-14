@@ -10,22 +10,22 @@ import {
   waitForTailAgentToFinish,
 } from "./helpers"
 
-test.describe("Bundled default agent flow", () => {
+test.describe("Bundled claw agent flow", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
   })
 
-  test("fresh setup bootstraps the bundled default agent and completes the first conversation loop", async ({ page }) => {
+  test("fresh setup bootstraps the bundled claw agent and completes the first conversation loop", async ({ page }) => {
     test.setTimeout(180_000)
 
     await createHighPriorityMockProvider(page)
     const bundled = bundledDefaultRuntimeState()
 
-    expect(bundled.agentName).toBe("Default")
+    expect(bundled.agentName).toBe("Claw")
     expect(bundled.deploymentStatus).toBe("active")
     expect(bundled.deploymentHealthStatus).toBe("healthy")
 
-    await openNewConversation(page, `Bundled Default ${Date.now()}`)
+    await openNewConversation(page, `Bundled Claw ${Date.now()}`)
 
     const conversationId = conversationIdFromUrl(page)
     let state = programmableConversationState(conversationId)

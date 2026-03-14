@@ -775,6 +775,189 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "before_subagent_spawn updates the active continuation placeholder when the original agent node has already finished" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
+        },
+        rpc_overrides: {
+          "before_subagent_spawn" => lambda do |_params, _base_result, _identity|
+            {
+              "actions" => [
+                {
+                  "type" => "set_step_status",
+                  "text" => "Preparing active continuation placeholder",
+                  "state" => "running",
+                },
+                {
+                  "type" => "deny",
+                  "reason" => "subagent_policy_denied",
+                  "message" => "Spawn request is out of policy",
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+
+    conversation = create_conversation!
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    agent_node = nil
+    task_node = nil
+    continuation_node = nil
+
+    conversation.root_graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      agent_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+          body_output: {
+            "content" => "",
+            "tool_calls" => [
+              {
+                "id" => "tc_run",
+                "name" => "subagent_run",
+              },
+            ],
+          },
+        )
+
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+          body_input: {
+            "name" => "subagent_run",
+            "requested_name" => "subagent_run",
+            "tool_call_id" => "tc_run",
+            "arguments" => {
+              "name" => "researcher",
+              "prompt" => "Investigate the repo",
+            },
+            "arguments_summary" => "{\"name\":\"researcher\",\"prompt\":\"Investigate the repo\"}",
+          },
+        )
+
+      continuation_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: { "generated_by" => "agent_core.tool_loop" },
+        )
+
+      m.create_edge(from_node: user, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: agent_node, to_node: task_node, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: task_node, to_node: continuation_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    program = create_program!
+    snapshot = build_capability_snapshot(program_id: program.id)
+    deployment =
+      create_runtime_binding_record!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: server.rpc_url,
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: "contract:v1",
+        deployment_fingerprint: "fixture-deployment-v1",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: capability_snapshot_payload(snapshot),
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
+    run =
+      create_conversation_run!(
+        conversation: conversation,
+        dag_node_id: agent_node.id,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        effective_public_settings: {},
+        effective_agent_config: {},
+        effective_policy: {},
+        runtime_governors: {},
+        snapshot: {
+          "capability_snapshot" => capability_snapshot_payload(snapshot),
+          "draft" => {
+            "planning" => {
+              "tool_surface" => {
+                "capability_registry_snapshot_id" => snapshot.snapshot_id,
+                "selected_tool_ids" => [],
+                "tool_surface_label" => "fixture-before-subagent-spawn-finished-origin",
+                "tool_surface_id" => "surface-empty",
+                "logical_tool_names" => [],
+              },
+            },
+          },
+        },
+      )
+
+    registry = AgentCore::Resources::Tools::Registry.new
+    registry.register(
+      AgentCore::Resources::Tools::Tool.new(
+        name: "subagent_run",
+        description: "subagent_run",
+        parameters: {},
+      ) do |_args, context:|
+        _ = context
+        flunk("subagent_run should have been rejected by the hook")
+      end
+    )
+
+    provider =
+      Cybros::ProgrammableAgentProvider.new(
+        conversation_run: run,
+        delegate: Struct.new(:name).new("delegate"),
+      )
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "dev/mock-model",
+        tools_registry: registry,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: {},
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+
+    execution_result =
+      with_runtime(runtime) do
+        AgentCore::DAG::Executors::TaskExecutor.new.execute(
+          node: task_node,
+          context: [],
+          stream: nil,
+        )
+      end
+
+    invocation = AgentRPCInvocation.find_by(scope_type: "conversation_run", scope_id: run.id, method: "before_subagent_spawn")
+
+    assert_equal DAG::Node::REJECTED, execution_result.state, execution_result.error
+    assert invocation.present?, "expected before_subagent_spawn invocation"
+    assert_equal "Preparing active continuation placeholder", continuation_node.reload.body_output_preview.fetch("content")
+    refute_equal "Preparing active continuation placeholder", agent_node.reload.body_output_preview.fetch("content", nil)
+  ensure
+    server&.shutdown
+  end
+
   private
 
     def execute_task(runtime:, tool_name:)
