@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace the bundled default agent's WEBrick host by promoting the Rails skeleton in `cybros/vendor/agents/claw` into `cybros/agents/default`, while preserving the existing `agent_rpc.v1` HTTP JSON-RPC contract, identity semantics, and callback-session behavior.
+**Goal:** Replace the bundled default agent's WEBrick host by promoting the Rails skeleton in `cybros/vendor/agents/claw` into the canonical bundled source tree, then complete a second cutover that renames the bundled agent identity and source root from `default` to `claw`, while preserving the existing `agent_rpc.v1` HTTP JSON-RPC contract and callback-session behavior.
 
-**Architecture:** Keep `cybros/agents/default` as the canonical bundled source root, but use `cybros/vendor/agents/claw` as the seed Rails scaffold instead of building a Rails app from scratch in place. Reuse the current manifest, identity, dispatcher, hook, and prompt logic wherever possible, keep `default` as the bundled agent identity, and keep `ActiveRecord` / `ActiveJob` available but off the request hot path.
+**Architecture:** Use `cybros/vendor/agents/claw` as the seed Rails scaffold instead of building a Rails app from scratch in place. First cut over the host by promoting that scaffold into `cybros/agents/default` while preserving runtime identity `default`; then run a separate rename phase that moves the canonical source root to `cybros/agents/claw` and changes the bundled identity to `claw`. Keep `ActiveRecord` / `ActiveJob` available but off the request hot path.
 
 **Tech Stack:** Ruby, Rails API-only app, Puma, JSON-RPC over HTTP, current bundled-agent manifest/prompt assets, Minitest, Net::HTTP
 
@@ -374,10 +374,96 @@ git add cybros/docs/product/agent_rpc.md cybros/docs/plans/2026-03-14-bundled-de
 git commit -m "docs: align bundled agent host cutover"
 ```
 
-### Task 7: Run Final Verification Before Merge
+### Task 7: Rename Bundled Identity And Source Root From `default` To `claw`
 
 **Files:**
-- Modify: `cybros/agents/default/bin/test`
+- Move: `cybros/agents/default` -> `cybros/agents/claw`
+- Move: `cybros/agents/claw/lib/cybros/agents/default.rb` -> `cybros/agents/claw/lib/cybros/agents/claw.rb`
+- Move: `cybros/agents/claw/lib/cybros/agents/default` -> `cybros/agents/claw/lib/cybros/agents/claw`
+- Modify: `cybros/agents/claw/agent.yml`
+- Modify: `cybros/agents/claw/bin/server`
+- Modify: `cybros/agents/claw/bin/test`
+- Modify: `cybros/agents/claw/bin/console`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/application.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/identity.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/manifest.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/rpc_dispatcher.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/hooks/before_finalize_output.rb`
+- Modify: `cybros/agents/claw/lib/cybros/agents/claw/hooks/after_task_notice.rb`
+- Modify: `cybros/agents/claw/prompts/AGENT.md`
+- Modify: `cybros/agents/claw/README.md`
+- Modify: `cybros/agents/claw/test/test_helper.rb`
+- Modify: `cybros/agents/claw/test/unit/manifest_test.rb`
+- Modify: `cybros/agents/claw/test/integration/rpc_contract_test.rb`
+- Modify: `cybros/app/services/agents/bundled_sources.rb`
+- Modify: `cybros/app/services/agents/bootstrap_bundled_default_service.rb`
+- Modify: `cybros/app/services/conversations/attachment_transfer_service.rb`
+- Modify: `cybros/app/models/agent.rb`
+- Modify: `cybros/app/controllers/dashboard_controller.rb`
+- Modify: `cybros/test/services/agents/bootstrap_bundled_default_service_test.rb`
+- Modify: `cybros/test/integration/agent_runtime_binding_cutover_test.rb`
+- Modify: `cybros/test/integration/setup_and_sessions_test.rb`
+- Modify: `cybros/test/integration/default_agent_attachment_transfer_test.rb`
+- Modify: `cybros/test/integration/bundled_default_agent_execution_test.rb`
+- Modify: `cybros/test/integration/programmable_agent_capabilities_handshake_test.rb`
+- Modify: `cybros/docs/plans/2026-03-14-bundled-default-rails-agent-host-design.md`
+
+**Step 1: Write the failing test**
+
+Cover:
+
+- bundled source resolution now resolves `claw`
+- bootstrap provisions a bundled agent with `bundled_agent_key == "claw"`
+- the canonical bundled source path is `cybros/agents/claw`
+- the bundled-implementation special cases no longer check hard-coded `"default"`
+- the promoted Rails host still boots and handshakes after the rename
+
+Example assertion:
+
+```ruby
+agent = Agents::BootstrapBundledDefaultService.bootstrap!
+assert_equal "claw", agent.bundled_agent_key
+assert_equal Rails.root.join("agents", "claw").to_s, agent.absolute_local_path.to_s
+```
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/integration/agent_runtime_binding_cutover_test.rb test/integration/setup_and_sessions_test.rb test/integration/default_agent_attachment_transfer_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb`
+
+Expected: FAIL because the product and bundled source registry still hard-code `default`.
+
+**Step 3: Write minimal implementation**
+
+Implement the explicit rename phase:
+
+- move the canonical bundled source tree to `cybros/agents/claw`
+- rename the bundled Ruby entrypoint and module path from `Cybros::Agents::Default` to `Cybros::Agents::Claw`
+- update bundled source resolution from `default` to `claw`
+- update manifest identity fields, config namespace, capability labels, deployment fingerprints, and user-facing name
+- update prompt text and runtime-generated copy that still says "Bundled default"
+- replace hard-coded `bundled_agent_key == "default"` checks with either `claw` or a less identity-specific predicate where appropriate
+- keep the protocol shape unchanged even though runtime identity strings change
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/integration/agent_runtime_binding_cutover_test.rb test/integration/setup_and_sessions_test.rb test/integration/default_agent_attachment_transfer_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb`
+
+Expected: PASS with the bundled agent now identified as `claw`.
+
+**Step 5: Commit**
+
+```bash
+git add cybros/agents/claw cybros/app/services/agents/bundled_sources.rb cybros/app/services/agents/bootstrap_bundled_default_service.rb cybros/app/services/conversations/attachment_transfer_service.rb cybros/app/models/agent.rb cybros/app/controllers/dashboard_controller.rb cybros/test/services/agents/bootstrap_bundled_default_service_test.rb cybros/test/integration/agent_runtime_binding_cutover_test.rb cybros/test/integration/setup_and_sessions_test.rb cybros/test/integration/default_agent_attachment_transfer_test.rb cybros/test/integration/bundled_default_agent_execution_test.rb cybros/test/integration/programmable_agent_capabilities_handshake_test.rb cybros/docs/plans/2026-03-14-bundled-default-rails-agent-host-design.md
+git rm -r cybros/agents/default
+git commit -m "refactor: rename bundled default agent to claw"
+```
+
+### Task 8: Run Final Verification Before Merge
+
+**Files:**
+- Modify: `cybros/agents/claw/bin/test`
 - Modify: `cybros/bin/ci` 
 
 **Step 1: Write the failing test**
@@ -387,13 +473,13 @@ Add/adjust the verification entrypoints so the bundled-agent contract suite is p
 Example shell expectation:
 
 ```bash
-cd cybros/agents/default && bin/test
+cd cybros/agents/claw && bin/test
 cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/integration/agent_runtime_binding_cutover_test.rb
 ```
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd cybros/agents/default && bin/test`
+Run: `cd cybros/agents/claw && bin/test`
 
 Expected: FAIL if any host-replacement contract drift remains.
 
@@ -403,6 +489,7 @@ Make the verification commands the canonical way to prove:
 
 - bundled-agent contract parity
 - Cybros-side runtime compatibility
+- post-rename bundled identity consistency
 
 Do not add speculative checks unrelated to this host replacement.
 
@@ -410,7 +497,7 @@ Do not add speculative checks unrelated to this host replacement.
 
 Run:
 
-- `cd cybros/agents/default && bin/test`
+- `cd cybros/agents/claw && bin/test`
 - `cd cybros && bin/rails test test/integration/agent_runtime_binding_cutover_test.rb test/integration/bundled_default_agent_host_cutover_test.rb`
 
 Expected: PASS for both command groups.
@@ -418,6 +505,6 @@ Expected: PASS for both command groups.
 **Step 5: Commit**
 
 ```bash
-git add cybros/agents/default/bin/test cybros/bin/ci
+git add cybros/agents/claw/bin/test cybros/bin/ci
 git commit -m "test: wire bundled agent host verification"
 ```
