@@ -99,12 +99,19 @@ This design does not leave any targeted OpenClaw loop capability unmapped. Each 
 - OpenClaw `IDENTITY.md` as a first-class editable workspace identity contract
 - OpenClaw `HEARTBEAT.md` / `HEARTBEAT_OK` behavior
 - OpenClaw reply tags, messaging sections, and self-update instructions
+- narrow profile self-mutation as a required follow-up phase
+- full agent-program self-upgrade / platform self-update as a later, more complex follow-up
 - `promptMode=none`
 - OpenClaw-style assistant/tool/lifecycle streaming parity beyond Cybros’ current DAG/runtime surfaces
 - file-backed `MEMORY.md + memory/*.md` storage layout
 - embedding-backed semantic memory as the default implementation
 
 The most important intentional divergence is memory storage shape: OpenClaw reads `MEMORY.md` plus daily `memory/*.md` files, while Cybros V1 uses one conversation-owned logical memory document behind the same recall-style tool surface.
+
+Self-update is also intentionally split:
+
+- required follow-up: profile self-mutation for agent-owned/profile-owned state such as `SOUL`, `USER`, and future profile bootstrap material
+- later follow-up: true agent self-upgrade or platform self-update, which would require a separate control-plane design
 
 ## Capability Model
 
