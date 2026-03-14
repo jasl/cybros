@@ -1,31 +1,46 @@
-# Bundled Default Rails Agent Host Design
+# Bundled Agent Rails Host Design
 
 ## Status
 
-Approved design notes for replacing the bundled default agent's WEBrick host with a Rails/Puma host while keeping `agent_rpc.v1` language-neutral and transport-neutral.
+Approved design notes for replacing the current bundled default agent implementation with a Rails/Puma-hosted `claw` implementation while keeping `agent_rpc.v1` language-neutral and transport-neutral.
 
 ## Problem
 
-The current bundled default agent already behaves like a small web service, but its host is a minimal WEBrick server inside `cybros/agents/default/lib/.../rpc_server.rb`.
+The current bundled agent under `cybros/agents/default` already behaves like a small web service, but it is hosted by a minimal WEBrick server and mixes "current production baseline" with "future implementation target".
 
-That creates two issues:
+At the same time, a new API-only Rails skeleton already exists under `cybros/vendor/agents/claw`.
 
-- the host implementation is intentionally lightweight, but it is not the operational shape we want to carry forward for throughput, concurrency, and maintenance
-- the current host shape makes the bundled agent feel "special" in implementation even though product/runtime docs already describe agents as normal bounded runtime endpoints
+The cleaner migration is not:
 
-At the same time, Cybros should not accidentally turn "Rails" into the protocol.
+- move `claw` into `agents/default`
+- finish the host migration
+- then rename everything again
 
-The replacement must improve the host implementation without changing the public runtime contract.
+That path creates unnecessary churn and makes it harder to prove whether behavior drift came from:
+
+- host migration
+- source-tree moves
+- runtime-identity rename
+
+The better path is:
+
+- keep `cybros/agents/default` intact as the known-good baseline
+- merge its effective logic into `cybros/vendor/agents/claw`
+- prove `claw` and `default` are behaviorally aligned
+- then switch the bundled implementation to `claw`
+- finally remove the old `default` tree
 
 ## Goals
 
-- replace the bundled default agent's WEBrick host with a Rails/Puma host
-- after host cutover, rename the bundled agent runtime identity and source root from `default` to `claw`
 - keep `agent_rpc.v1` as the canonical Cybros-to-agent protocol
-- preserve the existing JSON-RPC over HTTP transport shape
-- preserve current callback-session semantics, recognized-deployment binding, and runtime drift behavior
-- keep the bundled implementation Ruby-first and Rails-friendly without making Rails a protocol requirement
-- keep agent application logic portable enough to run and test outside a fully booted Rails request stack
+- preserve HTTP JSON-RPC transport shape and callback-session semantics
+- preserve recognized-deployment binding and runtime drift behavior
+- use Rails/Puma for the new bundled implementation host
+- keep the current `default` implementation intact until `claw` reaches parity
+- validate `claw` against `default` side-by-side before product cutover
+- cut over the bundled runtime identity and canonical source root to `claw`
+- delete the old `default` implementation after cutover succeeds
+- take advantage of Rails on the agent side to add stronger unit, request, and integration tests
 
 ## Non-Goals
 
@@ -33,53 +48,35 @@ The replacement must improve the host implementation without changing the public
 - no ActionCable requirement on the Cybros-to-agent hot path
 - no change to Cybros product/runtime boundaries
 - no requirement that external agents use Ruby or Rails
-- no requirement that the bundled default agent use Active Record or Active Job on the request hot path
+- no requirement that Active Record or Active Job participate in the request hot path
 - no protocol expansion justified only by the new host framework
 
 ## Core Decision
 
-Adopt a Rails-first host for the bundled default agent, but keep HTTP JSON-RPC as the canonical transport.
+Adopt a side-by-side migration:
 
-The bundled default agent should become an API-only Rails application hosted by Puma and exposed as a normal bounded runtime endpoint:
-
-- `POST /rpc` remains the canonical `agent_rpc.v1` JSON-RPC entrypoint
-- `GET /health` remains the health and identity inspection endpoint
-- Cybros continues to treat the deployment as `transport_kind = http_jsonrpc`
+1. freeze and retain `cybros/agents/default` as the baseline bundled implementation
+2. merge its effective runtime logic into `cybros/vendor/agents/claw`
+3. prove parity between the two implementations
+4. promote `claw` into the canonical bundled source root
+5. switch bundled identity from `default` to `claw`
+6. remove the legacy `default` tree
 
 Rails is the host implementation.
 It is not the protocol.
 
-## Directory Decision
+## Source Layout
 
-The bundled source should live under:
+### Temporary Migration Layout
 
-- `cybros/agents/...`
+- baseline bundled implementation: `cybros/agents/default`
+- migration workspace: `cybros/vendor/agents/claw`
 
-It should not live under:
+### Final Layout
 
-- `cybros/vendor/agents/...`
+- canonical bundled implementation: `cybros/agents/claw`
 
-Reasoning:
-
-- `agents/` correctly communicates that the bundled default agent is first-party Cybros product code
-- `vendor/` implies imported or third-party code, which is the wrong ownership model for the default bundled agent
-- existing product/design docs already describe `agents/` as the bundled-agent source root
-
-`cybros/vendor/agents/claw` is an acceptable incubation source for the migration, but it should not survive as a second canonical bundled agent tree.
-
-Approved migration rule:
-
-- use `cybros/vendor/agents/claw` as the Rails skeleton source
-- first promote that skeleton into `cybros/agents/default` for the host cutover
-- then rename the bundled source root to `cybros/agents/claw`
-- change the bundled runtime identity from `default` to `claw`
-- delete the temporary `cybros/vendor/agents/claw` tree once cutover is complete
-
-Important distinction:
-
-- `claw` starts as the migration seed implementation
-- `claw` becomes the final bundled agent identity after the explicit rename phase
-- the host cutover and the identity rename are separate cuts, even if they are executed back-to-back
+The `vendor/agents/claw` tree should not survive the cutover.
 
 ## Transport And Process Model
 
@@ -90,30 +87,28 @@ The Cybros-to-agent transport remains synchronous HTTP JSON-RPC.
 Why:
 
 - Cybros already models invocation lifecycle, callback-session authorization, replay, and drift detection around request/response RPC
-- current hook calls are discrete lifecycle invocations, not a natural duplex event stream
-- switching to WebSocket would force new protocol semantics for reconnect, ordering, acknowledgements, replay, and backpressure without solving the main current bottleneck
+- current hook calls are discrete lifecycle invocations, not a natural duplex stream
+- switching transport while changing host implementation would enlarge the migration without solving the main operational issue
 
-The main gain comes from:
+The intended runtime shape remains:
 
-- `WEBrick -> Puma`
-
-not from:
-
-- `HTTP -> WebSocket`
+- `POST /rpc` as canonical JSON-RPC entrypoint
+- `GET /health` as health and identity inspection endpoint
+- `transport_kind = http_jsonrpc`
 
 ### Process Model
 
-The bundled default agent should behave as a stateless concurrent HTTP service from Cybros's perspective.
+The new `claw` implementation should behave as a stateless concurrent HTTP service from Cybros's perspective.
 
-Each hook call is handled as an independent HTTP request.
-Puma provides concurrency and request lifecycle management.
-Any Cybros callback usage still happens through explicit callback session payloads and explicit outbound HTTP requests back into Cybros.
+Each hook call is handled as an independent request.
+Puma provides concurrency.
+Any Cybros callback usage still happens through explicit outbound HTTP requests using the provided callback session.
 
 There is no connection affinity requirement in V1.
 
 ## Component Boundaries
 
-The implementation should follow a "Rails shell + pure Ruby agent core" split.
+The new implementation should follow a "Rails shell + pure Ruby agent core" split.
 
 ### Rails Shell Responsibilities
 
@@ -121,7 +116,7 @@ The implementation should follow a "Rails shell + pure Ruby agent core" split.
 - bearer authentication at the HTTP boundary
 - JSON parsing and response rendering
 - error-to-status / error-to-JSON-RPC mapping
-- environment/configuration loading
+- configuration loading
 - structured logging
 - Puma process management
 
@@ -129,7 +124,7 @@ The implementation should follow a "Rails shell + pure Ruby agent core" split.
 
 - manifest loading
 - identity construction
-- prompt loading/assembly
+- prompt loading and assembly
 - RPC method dispatch
 - hook implementations
 - attachment import translation
@@ -138,124 +133,106 @@ The implementation should follow a "Rails shell + pure Ruby agent core" split.
 ### Boundary Rule
 
 Controllers stay thin.
-They should not embed protocol semantics or hook logic.
+They should not contain bundled-agent business logic.
 
 Instead:
 
-- controller -> dispatcher -> pure Ruby hook/service object
+- controller -> runtime -> dispatcher -> pure Ruby hook/service object
 
-This keeps the agent logic testable without depending on a live Puma process, a Rails request object, or a database connection.
-
-## Request Lifecycle And Error Handling
-
-Each `POST /rpc` request should follow a stable synchronous lifecycle:
-
-1. authenticate bearer
-2. validate request shape and parse JSON-RPC payload
-3. dispatch by `method`
-4. execute hook/service logic
-5. optionally call Cybros callback endpoints using the supplied callback session
-6. return JSON-RPC `result`
-
-Error handling should be explicit and stable.
-
-### Error Classes
-
-- authentication errors: invalid or missing deployment bearer
-- protocol errors: malformed JSON, missing `method`, unsupported `method`, invalid params shape
-- domain errors: invalid business payloads, callback-session misuse, attachment import validation failures
-- unknown errors: any unexpected internal failure
-
-### Error Boundary Rules
-
-- do not leak raw Ruby exceptions as the public contract
-- keep JSON-RPC error shapes stable and testable
-- keep `/health` and `/rpc` behavior compatible with the current bundled default service
-- do not move invocation replay/recovery responsibility into the bundled agent host; Cybros keeps that responsibility
+This keeps the agent logic testable without requiring a live Rails request object or local database state.
 
 ## Optional Rails Subsystems
 
-`ActiveRecord` and `ActiveJob` may remain available in the bundled Rails application, but they are optional implementation capabilities, not protocol requirements.
+`ActiveRecord` and `ActiveJob` may remain available in `claw`, but they are optional implementation capabilities, not protocol requirements.
 
-Approved constraint:
+Hard rule:
 
-- the hot path for `initialize`, `agent.health`, lifecycle hooks, and callback usage must not require local database state or background job completion in order to be correct
+- `initialize`, `agent.health`, lifecycle hooks, and callback usage must not require local database state or background-job completion to be correct
 
-Acceptable future uses:
+Because `claw` is Rails-based, we should use that framework advantage to strengthen testing:
 
-- local caching
-- auxiliary audit trails
-- offline cleanup
-- asynchronous non-critical prep work
+- unit tests for runtime objects
+- request tests for `/rpc` and `/health`
+- integration tests for full host behavior
 
-Unacceptable V1 use:
+## Parity Strategy
 
-- "return success now, finish the hook later in a background job"
-- "the hook only works if a local Active Record row already exists"
+Behavioral parity is a first-class migration requirement.
 
-## Testing Strategy
+Before product cutover, we should be able to run both implementations side-by-side and verify that they agree on the externally observable contract for:
 
-Testing should prove host replacement without protocol drift.
+- `initialize`
+- `agent.describe`
+- `agent.health`
+- `agent.schemas.get`
+- `capabilities.handshake`
+- `capabilities.refresh`
+- `attachments.import`
+- `on_conversation_created`
+- `on_lane_first_user_message`
+- `before_agent_step`
+- `on_context_pressure`
+- `before_subagent_spawn`
+- `before_finalize_output`
+- `after_task_notice`
+- `after_subagent_result`
 
-### Required Coverage
+Parity means:
 
-- existing bundled-agent RPC contract tests still pass
-- manifest and identity tests still pass
-- request/integration tests cover `/rpc` and `/health`
-- Cybros-side programmable-agent integration tests still pass against the new host
+- same method surface
+- same identity and manifest semantics, except for the deliberate final rename to `claw`
+- same hook/result structure
+- same attachment import shape
+- same error semantics at the protocol boundary
 
-### Important Test Boundary
+## Identity Cutover
 
-Most agent-core tests should run without:
+Only after parity is proven should the bundled identity switch from `default` to `claw`.
 
-- booting Puma
-- connecting to a local DB
+That cut includes:
 
-Only host/request integration tests should need the full Rails host.
+- canonical bundled source root changes from `cybros/agents/default` to `cybros/agents/claw`
+- `bundled_agent_key` changes from `default` to `claw`
+- manifest identity fields become `claw`-based
+- bootstrap constants, deployment fingerprints, bearer references, and user-facing naming change accordingly
+- product/runtime special-casing that hard-codes `"default"` must be updated
+
+This identity cut is intentionally separate from the parity phase because it will cause deliberate churn in:
+
+- bundled source resolution
+- bootstrap fixtures
+- recognized deployment identity strings
+- tests that hard-code `default`
 
 ## Cutover Strategy
 
-Cut over in four phases:
+Cut over in five phases:
 
-1. freeze the existing bundled default contract with tests
-2. promote the `cybros/vendor/agents/claw` Rails skeleton into `cybros/agents/default` and port the existing bundled default runtime logic into it
-3. switch the bundled default deployment/bootstrap path to that Rails host and delete the old WEBrick implementation artifacts plus the temporary `vendor/agents/claw` source tree
-4. rename the bundled agent identity, source root, and operator-facing name from `default` to `claw`
+1. freeze the current `default` contract with tests
+2. complete the `claw` Rails host in `cybros/vendor/agents/claw`
+3. merge `default` runtime logic into `claw` and prove side-by-side parity
+4. move `claw` to `cybros/agents/claw` and switch bundled identity/bootstrap to `claw`
+5. delete `cybros/agents/default` and any temporary `vendor/agents/claw` residue
 
-During cutover:
+During phases 1-3:
 
-- keep `agent.yml`, prompts, identity fields, and deployment fingerprint rules stable during phases 1-3 unless there is a deliberate protocol reason to change them
-- prefer reusing existing dispatcher/manifest/identity/hook code over rewriting behavior into controllers
-- treat phase 4 as an explicit identity cutover, not an incidental side effect of the host migration
-- accept that phase 4 will intentionally churn bundled bootstrap fixtures, recognized deployment fingerprints, and tests that hard-code `default`
+- `cybros/agents/default` remains the shipped baseline
+- no product bootstrap should point at `claw` yet
+- identity strings should remain stable unless a parity test explicitly needs dual expectations
 
-## Identity Rename Phase
+During phases 4-5:
 
-After the Rails host cutover is stable, the bundled default agent should be renamed from identity `default` to identity `claw`.
-
-That phase includes:
-
-- rename bundled source root from `cybros/agents/default` to `cybros/agents/claw`
-- change `bundled_agent_key`, `agent_program_key`, and `config_namespace` from `default`-based values to `claw`-based values
-- update bootstrap constants, deployment fingerprints, bearer references, and user-facing names accordingly
-- update any product/runtime special-casing that currently checks `bundled_agent_key == "default"`
-
-This rename is intentionally separate from the host migration because it changes:
-
-- bundled source resolution
-- runtime identity
-- bootstrap records and test fixtures
-- recognized deployment fingerprints and capability labels
+- `claw` becomes the bundled implementation
+- `default` becomes legacy code scheduled for deletion
 
 ## Summary
 
 The approved direction is:
 
-- host the bundled default agent as an API-only Rails app under `cybros/agents/default` during host cutover, then rename the final bundled source root to `cybros/agents/claw`
-- serve it with Puma
-- keep `POST /rpc` and `GET /health` as the public surface
+- build the new implementation in `cybros/vendor/agents/claw`
+- merge in the effective logic from `cybros/agents/default`
+- prove parity while both implementations coexist
+- then cut over directly to `cybros/agents/claw`
 - keep `agent_rpc.v1` and `http_jsonrpc` unchanged
-- keep Rails conveniences optional and implementation-local
-- do not introduce ActionCable or WebSocket semantics into the main Cybros-to-agent path
-- use `cybros/vendor/agents/claw` only as a temporary scaffold source, not as the long-lived bundled agent location
-- finish with bundled identity and bundled source root both named `claw`
+- use Rails as an implementation advantage, especially for testing
+- delete the old `default` implementation once `claw` is the new bundled runtime
