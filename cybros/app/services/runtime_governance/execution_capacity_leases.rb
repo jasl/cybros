@@ -111,10 +111,8 @@ module RuntimeGovernance
 
     def with_subject_lock(subject_type:, subject_id:)
       case subject_type.to_s
-      when "execution_location"
-        ExecutionLocation.find(subject_id).with_lock { yield }
-      when "execution_target"
-        ExecutionTarget.find(subject_id).with_lock { yield }
+      when "agent"
+        Agent.find(subject_id).with_lock { yield }
       else
         raise ArgumentError, "unsupported execution subject: #{subject_type}"
       end

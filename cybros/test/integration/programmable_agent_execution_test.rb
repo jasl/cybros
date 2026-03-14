@@ -151,7 +151,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
     def create_programmable_runtime!(server:)
       user = create_user!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -164,65 +164,52 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
+      agent = materialize_agent_runtime!(program: program)
+      fixture_identity = Cybros::ProgrammableAgentFixture.identity
+      supported_methods = fixture_identity.fetch("supported_methods")
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
           contract_fingerprint: program.published_contract_fingerprint,
-          deployment_fingerprint: "fixture-deployment-v1",
+          deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
           status: "active",
           health_status: "healthy",
-          protocol_version: "agent_rpc.v1",
-          agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_finalize_output after_task_notice],
+          protocol_version: fixture_identity.fetch("protocol_version"),
+          agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+          supported_methods: supported_methods,
           manifest_snapshot: {},
           schema_snapshot: {},
-          capability_snapshot: {},
+          capability_snapshot: {
+            "observed_runtime_identity" => {
+              "supported_methods" => supported_methods,
+            },
+          },
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      location =
-        ExecutionLocation.create!(
-          name: "Primary host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        Workspace.create!(
-          execution_location: location,
-          name: "Primary workspace",
-          root_path: "/tmp/programmable-exec-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-      target =
-        ExecutionTarget.create!(
-          execution_location: location,
-          workspace: workspace,
-          name: "Primary target",
-          status: "active",
-          sandboxed: true,
-        )
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
 
-      conversation = create_conversation!(user: user, title: "Chat")
+      conversation =
+        create_conversation!(
+          user: user,
+          title: "Chat",
+          agent: agent,
+        )
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
         permission_mode: "default",
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        agent_config_schema_fingerprint: agent.config_schema_fingerprint,
       )
 
-      { conversation: conversation, deployment: deployment, program: program }
+      {
+        agent: agent,
+        conversation: conversation,
+        deployment: deployment,
+        program: program,
+        recognized_deployment: recognized_deployment,
+      }
     end
 end

@@ -31,8 +31,10 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
       ).start
 
     program = create_program!
+    agent = create_agent!(program: program)
     deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
-    conversation = create_conversation!(title: "Programmable context", agent_program: program)
+    sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+    conversation = create_conversation!(title: "Programmable context", agent: agent)
 
     with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
       result = conversation.append_user_message!(content: "Inspect runtime context", model_ref: "dev/mock-model")
@@ -45,24 +47,34 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
 
       DAG::Runner.run_node!(agent_node.id)
 
-      expected_session_context = {
+      expected_workspace = {
+        "conversation_id" => conversation.id,
+        "logical_workspace_key" => conversation.logical_workspace_key,
+        "logical_workspace_root_path" => conversation.logical_workspace_root_path,
+        "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at.iso8601,
+      }
+      expected_prepare_session_context = {
         "account_id" => Account.instance.id,
         "user_id" => conversation.user_id,
         "conversation_id" => conversation.id,
       }
-      expected_execution_context =
-        expected_session_context.merge(
+      expected_prepare_execution_context =
+        expected_prepare_session_context.merge(
           "graph_id" => conversation.dag_graph.id,
           "lane_id" => agent_node.lane_id,
           "turn_id" => agent_node.turn_id,
           "dag_node_id" => agent_node.id,
           "execution_scope" => "primary",
         )
+      expected_prepare_session_context = expected_prepare_session_context.merge("workspace" => expected_workspace)
+      expected_prepare_execution_context = expected_prepare_execution_context.merge("workspace" => expected_workspace)
+      expected_runtime_session_context = expected_prepare_session_context.merge("workspace" => expected_workspace)
+      expected_runtime_execution_context = expected_prepare_execution_context.merge("workspace" => expected_workspace)
 
-      assert_equal expected_session_context, captured_params.dig(:prepare, "session_context")
-      assert_equal expected_session_context, captured_params.dig(:finalize, "session_context")
-      assert_equal expected_execution_context, captured_params.dig(:prepare, "execution_context")
-      assert_equal expected_execution_context, captured_params.dig(:finalize, "execution_context")
+      assert_equal expected_prepare_session_context, captured_params.dig(:prepare, "session_context")
+      assert_equal expected_runtime_session_context, captured_params.dig(:finalize, "session_context")
+      assert_equal expected_prepare_execution_context, captured_params.dig(:prepare, "execution_context")
+      assert_equal expected_runtime_execution_context, captured_params.dig(:finalize, "execution_context")
 
       runtime =
         Cybros::AgentRuntimeResolver.runtime_for(
@@ -74,9 +86,9 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         )
       built_context = AgentCore::DAG::ExecutionContextBuilder.build(node: conversation.root_graph.nodes.find(agent_node.id), runtime: runtime)
 
-      assert_equal expected_session_context, built_context.attributes.dig(:cybros, :session_context)
-      assert_equal expected_execution_context, built_context.attributes.dig(:cybros, :execution_context)
-      assert_equal deployment.id, run.agent_deployment_id
+      assert_equal expected_runtime_session_context, built_context.attributes.dig(:cybros, :session_context)
+      assert_equal expected_runtime_execution_context, built_context.attributes.dig(:cybros, :execution_context)
+      assert_equal deployment.deployment_fingerprint, run.recognized_deployment.deployment_fingerprint
       assert_equal "finalized", draft.status
     end
   ensure
@@ -114,9 +126,8 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         user: parent.user,
         parent_conversation: parent,
         title: "Delegated",
-        agent_program: parent.agent_program,
+        agent: parent.agent,
         agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
-        default_execution_target: parent.default_execution_target,
         metadata: {
           "agent" => { "agent_profile" => "coding" },
           "subagent" => {
@@ -183,7 +194,7 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
   private
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -199,25 +210,32 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
     end
 
     def create_active_deployment!(program:, endpoint_url:)
-      AgentDeployment.create!(
+      fixture_identity = Cybros::ProgrammableAgentFixture.identity
+      supported_methods = fixture_identity.fetch("supported_methods")
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
         contract_fingerprint: program.published_contract_fingerprint,
-        deployment_fingerprint: "fixture-deployment-v1",
+        deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
         status: "active",
         health_status: "healthy",
-        protocol_version: "agent_rpc.v1",
-        agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        protocol_version: fixture_identity.fetch("protocol_version"),
+        agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+        supported_methods: supported_methods,
         transport_config: {},
         manifest_snapshot: {},
         schema_snapshot: {},
-        capability_snapshot: {},
+        capability_snapshot: {
+          "agent_capabilities_version" => "fixture-agent-capabilities:v1",
+          "observed_runtime_identity" => {
+            "supported_methods" => supported_methods,
+          },
+        },
         inspection_details: {
           "identity" => {
-            "deployment_fingerprint" => "fixture-deployment-v1",
+            "deployment_fingerprint" => fixture_identity.fetch("deployment_fingerprint"),
           },
           "initialize" => {},
           "describe" => {},
@@ -225,6 +243,13 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
           "schemas" => {},
         },
         activated_at: Time.current.change(usec: 0),
+      )
+    end
+
+    def create_agent!(program:)
+      materialize_agent_runtime!(
+        program: program,
+        execution_target: build_default_execution_profile!,
       )
     end
 end

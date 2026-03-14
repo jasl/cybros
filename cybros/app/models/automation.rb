@@ -3,8 +3,7 @@ class Automation < ApplicationRecord
   SCHEDULE_KINDS = %w[rrule].freeze
 
   belongs_to :user
-  belongs_to :agent_program
-  belongs_to :execution_target
+  belongs_to :agent, optional: true
 
   has_many :conversations, inverse_of: :automation
 
@@ -12,6 +11,7 @@ class Automation < ApplicationRecord
 
   validates :permission_mode, presence: true, inclusion: { in: Conversation::PERMISSION_MODES }
   validates :status, presence: true, inclusion: { in: STATUSES }
+  validates :agent, presence: true
   validate :task_payload_must_be_object
   validate :schedule_or_trigger_definition_present
   validate :schedule_rrule_is_valid

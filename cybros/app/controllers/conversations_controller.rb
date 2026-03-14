@@ -42,29 +42,32 @@ class ConversationsController < AgentController
   def create
     title = params.dig(:conversation, :title).to_s.strip
     title = "Conversation" if title.blank?
-    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
-    agent_metadata = { "key" => "main" }
+    agent = resolve_selected_agent!(params.dig(:conversation, :agent_id))
+    agent_metadata = agent.conversation_metadata_fragment
     default_model_ref =
-      Cybros::AgentRuntimeResolver.default_model_ref_for(
-        agent_metadata: agent_metadata,
-        agent_program: default_program,
-      )
+      begin
+        Cybros::AgentRuntimeResolver.default_model_ref_for(
+          agent_metadata: agent_metadata,
+          agent: agent,
+        )
+      rescue AgentCore::ValidationError
+        if Current.user&.owner? || Current.user&.admin?
+          redirect_to system_settings_llm_providers_path, alert: "No usable default model is configured."
+          return
+        end
+
+        raise
+      end
 
     conversation =
       Current.user.conversations.create!(
         title: title,
         metadata: { "agent" => agent_metadata, "llm" => { "model_ref" => default_model_ref } },
-        agent_program: default_program,
-        agent_config_schema_fingerprint: default_program.config_schema_fingerprint,
+        agent: agent,
+        agent_config_schema_fingerprint: agent.config_schema_fingerprint,
       )
 
     redirect_to conversation_path(conversation)
-  rescue AgentCore::ValidationError
-    if Current.user&.owner? || Current.user&.admin?
-      redirect_to system_settings_llm_providers_path, alert: "No usable default model is configured."
-    else
-      raise
-    end
   end
 
   def show
@@ -75,13 +78,9 @@ class ConversationsController < AgentController
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
     @composer_state = @conversation.composer_state
     @permission_mode_options = Conversation::PERMISSION_MODE_LABELS
-    @selected_agent_program = @conversation.agent_program
-    @agent_program_options = selectable_agent_programs_for(@conversation)
-    @selected_agent_program_stale = @selected_agent_program.present? && !@selected_agent_program.selectable_for_conversation?
-    @selected_execution_target = @conversation.default_execution_target
-    @execution_target_options = selectable_execution_targets_for(@conversation)
-    @selected_execution_target_stale =
-      @selected_execution_target.present? && !RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(@selected_execution_target)
+    @selected_agent = @conversation.agent
+    @agent_options = selectable_agents_for(@conversation)
+    @selected_agent_stale = @selected_agent.present? && !@selected_agent.selectable_for_conversation?
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
@@ -95,7 +94,7 @@ class ConversationsController < AgentController
           resolved_default_model_ref =
             Cybros::AgentRuntimeResolver.default_model_ref_for(
               agent_metadata: @conversation.metadata.fetch("agent", {}),
-              agent_program: @conversation.agent_program,
+              agent: @conversation.agent,
             )
         rescue AgentCore::ValidationError
           resolved_default_model_ref = nil
@@ -329,36 +328,43 @@ class ConversationsController < AgentController
         end
     end
 
-    def selectable_agent_programs_for(conversation)
-      programs = AgentProgram.selectable_for_conversations.to_a
-      selected = conversation.agent_program
-      if selected.present? && programs.none? { |program| program.id == selected.id }
-        programs << selected
+    def selectable_agents_for(conversation)
+      agents = Agent.all.select(&:selectable_for_conversation?)
+      selected = conversation.agent
+      if selected.present? && agents.none? { |agent| agent.id == selected.id }
+        agents << selected
       end
-      programs.sort_by { |program| program.name.to_s.downcase }
+      agents.sort_by { |agent| agent.name.to_s.downcase }
     end
 
-    def selectable_execution_targets_for(conversation)
-      targets =
-        RuntimeGovernance::ExecutionTargetInventory.list(
-          current_target: conversation.default_execution_target,
-          permission_mode: conversation.permission_mode,
+    def resolve_selected_agent!(raw_id)
+      id = raw_id.to_s.strip
+      if id.empty?
+        AgentCore::ValidationError.raise!(
+          "Agent selection is required.",
+          code: "cybros.conversations.agent_required",
         )
-      selected = conversation.default_execution_target
-      if selected.present? && targets.none? { |target| target.fetch("id") == selected.id }
-        targets <<
-          RuntimeGovernance::ExecutionTargetInventory.get(
-            current_target: selected,
-            permission_mode: conversation.permission_mode,
-            execution_target_id: selected.id,
-            visible_only: false,
-          )
       end
 
-      targets.sort_by { |target| target.fetch("name").to_s.downcase }
+      agent = Agent.find_by(id: id)
+      unless agent
+        AgentCore::ValidationError.raise!(
+          "Selected agent could not be found.",
+          code: "cybros.conversations.agent_not_found",
+          details: { agent_id: id },
+        )
+      end
+
+      return agent if agent.selectable_for_conversation?
+
+      AgentCore::ValidationError.raise!(
+        "Selected agent is not currently active and healthy.",
+        code: "cybros.conversations.agent_not_selectable",
+        details: { agent_id: agent.id },
+      )
     end
 
     def conversation_update_params
-      params.fetch(:conversation, {}).permit(:agent_program_id, :default_execution_target_id, :permission_mode)
+      params.fetch(:conversation, {}).permit(:agent_id, :permission_mode)
     end
 end

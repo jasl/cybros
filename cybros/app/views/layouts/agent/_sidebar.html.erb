@@ -1,29 +1,9 @@
 <nav class="h-full flex flex-col w-full">
   <div class="h-14 px-2 border-b border-base-300 flex items-center shrink-0 is-drawer-close:justify-center is-drawer-open:gap-2">
-    <div class="is-drawer-close:hidden">
-      <%= form_with url: conversations_path, method: :post do %>
-        <button type="submit" class="btn btn-ghost btn-square" aria-label="New chat">
-          <span class="icon-[lucide--square-pen] size-5"></span>
-        </button>
-      <% end %>
-    </div>
-
-    <div class="flex-1 is-drawer-close:hidden"></div>
-
     <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="Toggle sidebar">
       <label for="left_drawer" class="btn btn-ghost btn-square" aria-label="Toggle sidebar">
         <span class="icon-[lucide--panel-left] size-5"></span>
       </label>
-    </div>
-  </div>
-
-  <div class="px-2 is-drawer-open:hidden is-drawer-close:flex is-drawer-close:justify-center">
-    <div class="is-drawer-close:tooltip is-drawer-close:tooltip-right" data-tip="New chat">
-      <%= form_with url: conversations_path, method: :post do %>
-        <button type="submit" class="btn btn-ghost btn-square" aria-label="New chat">
-          <span class="icon-[lucide--square-pen] size-5"></span>
-        </button>
-      <% end %>
     </div>
   </div>
 

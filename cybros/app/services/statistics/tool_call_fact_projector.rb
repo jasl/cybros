@@ -56,8 +56,9 @@ module Statistics
           tool_surface_label: tool_surface_label,
           implementation_source: implementation_source,
           implementation_ref: implementation_ref,
-          agent_program_id: agent_program_id,
-          agent_program_version: agent_program_version,
+          recognized_deployment_id: recognized_deployment_id,
+          recognized_deployment_key: recognized_deployment_key,
+          agent_capabilities_version: agent_capabilities_version,
           execution_readiness: execution_readiness,
           entered_execution: entered_execution?,
           tool_outcome: tool_outcome,
@@ -221,13 +222,16 @@ module Statistics
           logical_tool_name&.then { |name| "kernel://#{name}" }
       end
 
-      def agent_program_id
-        upstream_conversation_run&.agent_program_id || conversation&.agent_program_id
+      def recognized_deployment_id
+        upstream_conversation_run&.recognized_deployment_id
       end
 
-      def agent_program_version
-        capability_snapshot["agent_program_version"].to_s.presence ||
-          capability_snapshot["agent_capabilities_version"].to_s.presence
+      def recognized_deployment_key
+        upstream_conversation_run&.recognized_deployment_key.to_s.presence
+      end
+
+      def agent_capabilities_version
+        capability_snapshot["agent_capabilities_version"].to_s.presence
       end
 
       def upstream_agent_output

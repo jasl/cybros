@@ -5,6 +5,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
     runtime = create_runtime!
     first =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -21,6 +23,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
 
     replay =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -34,10 +38,12 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
     assert_equal first.fetch(:invocation).id, replay.fetch(:invocation).id
   end
 
-  test "does not replay across a different deployment row with copied binding fields" do
+  test "replays across a different deployment row when the recognized deployment binding is unchanged" do
     runtime = create_runtime!
     first =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -56,6 +62,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
 
     second =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: replacement,
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -65,15 +73,16 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         request_payload: { "user_input" => "Hello" },
       )
 
-    assert_equal false, second.fetch(:replayed)
-    refute_equal first.fetch(:invocation).id, second.fetch(:invocation).id
-    assert_equal replacement.id, second.fetch(:invocation).agent_deployment_id
+    assert_equal true, second.fetch(:replayed)
+    assert_equal first.fetch(:invocation).id, second.fetch(:invocation).id
   end
 
   test "does not replay across a reactivation of the same deployment row" do
     runtime = create_runtime!
     first =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -92,6 +101,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
 
     replay =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment).reload,
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -110,6 +121,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
     runtime = create_runtime!
     invocation =
       AgentRPC::InvocationStore.start_or_replay!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
         deployment: runtime.fetch(:deployment),
         conversation: runtime.fetch(:conversation),
         scope_type: "run_draft",
@@ -119,8 +132,22 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         request_payload: { "user_input" => "Hello" },
       ).fetch(:invocation)
 
-    first_session = create_session!(deployment: runtime.fetch(:deployment), conversation: runtime.fetch(:conversation), invocation: invocation)
-    replay_session = create_session!(deployment: runtime.fetch(:deployment), conversation: runtime.fetch(:conversation), invocation: invocation)
+    first_session =
+      create_session!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
+        deployment: runtime.fetch(:deployment),
+        conversation: runtime.fetch(:conversation),
+        invocation: invocation,
+      )
+    replay_session =
+      create_session!(
+        agent: runtime.fetch(:agent),
+        recognized_deployment: runtime.fetch(:recognized_deployment),
+        deployment: runtime.fetch(:deployment),
+        conversation: runtime.fetch(:conversation),
+        invocation: invocation,
+      )
 
     first =
       AgentRPC::OperationReceiptStore.record_or_replay!(
@@ -173,7 +200,12 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
       end,
     )
 
-    invocation = AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123")
+    invocation =
+      AgentRPCInvocation.find_by!(
+        agent_id: runtime.fetch(:agent).id,
+        invocation_id: "invoke-123",
+        scope_id: "draft-123",
+      )
 
     assert_equal [invocation.id], observed_session_invocation_ids
     assert_equal "closed", invocation.last_session.reload.status
@@ -184,9 +216,8 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
   private
 
     def create_runtime!(endpoint_url: "http://127.0.0.1:4319/rpc", deployment_fingerprint: "fixture-deployment-v1")
-      conversation = create_conversation!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -196,8 +227,10 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
+      target = build_default_execution_profile!
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
@@ -208,19 +241,26 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      conversation =
+        create_conversation!(
+          agent: agent,
+          agent_program: program,
+          default_execution_target: target,
+        )
 
-      { conversation: conversation, program: program, deployment: deployment }
+      { agent: agent, conversation: conversation, program: program, deployment: deployment, recognized_deployment: recognized_deployment, target: target }
     end
 
     def replacement_deployment!(program:, deployment_fingerprint:, activated_at: Time.current.change(usec: 0))
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -231,7 +271,7 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -240,10 +280,11 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
       )
     end
 
-    def create_session!(deployment:, conversation:, invocation:)
+    def create_session!(agent:, recognized_deployment:, deployment:, conversation:, invocation:)
       AgentRPCSession.create!(
-        agent_deployment: deployment,
-        agent_program: deployment.agent_program,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        recognized_deployment_key: recognized_deployment.recognized_deployment_key,
         agent_rpc_invocation: invocation,
         conversation: conversation,
         scope_type: invocation.scope_type,

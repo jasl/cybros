@@ -30,6 +30,14 @@ class RuntimeSetting < ApplicationRecord
     validate_agent_workspace_root_path!(normalize_agent_workspace_root_path(configured_root))
   end
 
+  def self.conversation_workspace_root_path_for(logical_workspace_key:)
+    key = logical_workspace_key.to_s.strip
+    raise ArgumentError, "logical workspace key is required" if key.blank?
+
+    normalized_key = key.tr(File::SEPARATOR, "-")
+    instance_agent_workspace_root_path.join("conversations", normalized_key).cleanpath
+  end
+
   def self.normalize_agent_workspace_root_path(value)
     root = value.to_s.strip
     raise InvalidAgentWorkspaceRoot, "Agent workspace root must be configured before creating custom agents" if root.empty?

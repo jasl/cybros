@@ -68,6 +68,25 @@ class Cybros::ProgrammableAgent::HookEnvelopeTest < ActiveSupport::TestCase
     assert_equal "cybros.programmable_agent.hook_contract.approval_state_forbidden", error.code
   end
 
+  test "planning rejects legacy execution_target proposals" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "before_agent_step",
+          request_payload: { "step" => { "phase" => "planning" } },
+          payload: {
+            "planning" => {
+              "execution_target_proposal" => {
+                "execution_target_id" => SecureRandom.uuid,
+              },
+            },
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_contract.invalid_planning_field", error.code
+  end
+
   test "before_agent_step planning rejects deny actions" do
     error =
       assert_raises(AgentCore::ValidationError) do

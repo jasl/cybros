@@ -11,7 +11,7 @@ module Cybros
             user_input = params.fetch("user_input", "").to_s.strip
             tokens = scenario_tokens(user_input)
             callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
-            system_entry = build_system_entry
+            system_entry = build_system_entry(params: params)
 
             result = {
               "planning" => {
@@ -45,17 +45,46 @@ module Cybros
 
           private
 
-          def build_system_entry
+          def build_system_entry(params:)
+            conversation_context = conversation_context_text(params)
+            content = [@application.full_system_prompt, present_string(conversation_context)].compact.join("\n\n")
+
             {
               "id" => SecureRandom.uuid,
               "buffer_name" => "system",
               "seq" => 10,
               "kind" => "instruction",
-              "content" => @application.full_system_prompt,
+              "content" => content,
               "priority" => 100,
               "estimated_tokens" => 0,
               "metadata" => { "source" => "before_agent_step" },
             }
+          end
+
+          def conversation_context_text(params)
+            workspace = params.dig("session_context", "workspace")
+            attachments = Array(params["attachment_manifest"]).select { |entry| entry.is_a?(Hash) }
+            user_input = params.fetch("user_input", "").to_s.strip
+
+            lines = []
+            lines << "Latest request: #{user_input}" unless user_input.empty?
+
+            if workspace.is_a?(Hash)
+              root_path = workspace["logical_workspace_root_path"].to_s.strip
+              workspace_key = workspace["logical_workspace_key"].to_s.strip
+              lines << "Conversation workspace: #{root_path}" unless root_path.empty?
+              lines << "Workspace key: #{workspace_key}" unless workspace_key.empty?
+            end
+
+            attachments.each_with_index do |attachment, index|
+              filename = attachment["filename"].to_s.strip
+              content_type = present_string(attachment["content_type"].to_s.strip) || "application/octet-stream"
+              label = filename.empty? ? "(unnamed attachment)" : filename
+              lines << "Attachment #{index + 1}: #{label} (#{content_type})"
+            end
+            return nil if lines.empty?
+
+            "<conversation_runtime_context>\n#{lines.join("\n")}\n</conversation_runtime_context>"
           end
 
           def build_summary(user_input)
@@ -180,6 +209,11 @@ module Cybros
             else
               { "status" => "staged" }
             end
+          end
+
+          def present_string(value)
+            string = value.to_s
+            string.empty? ? nil : string
           end
         end
       end

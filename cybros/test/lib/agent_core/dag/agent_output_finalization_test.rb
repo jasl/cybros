@@ -1,6 +1,8 @@
 require "test_helper"
 
 class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
+  PROGRAMMABLE_SUPPORTED_METHODS = Agents::Protocol::REQUIRED_METHODS + %w[before_finalize_output after_task_notice]
+
   class StubProvider < AgentCore::Resources::Provider::Base
     def initialize(message:)
       @message = message
@@ -46,6 +48,9 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => PROGRAMMABLE_SUPPORTED_METHODS,
+        },
         rpc_overrides: {
           "before_finalize_output" => lambda do |params, _base_result, _identity|
             {
@@ -89,6 +94,9 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => PROGRAMMABLE_SUPPORTED_METHODS,
+        },
         rpc_overrides: {
           "before_finalize_output" => lambda do |_params, _base_result, _identity|
             {
@@ -122,6 +130,9 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => PROGRAMMABLE_SUPPORTED_METHODS,
+        },
         rpc_overrides: {
           "before_finalize_output" => lambda do |_params, _base_result, _identity|
             {
@@ -156,6 +167,9 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => PROGRAMMABLE_SUPPORTED_METHODS,
+        },
         rpc_overrides: {
           "before_finalize_output" => lambda do |_params, _base_result, _identity|
             {
@@ -263,7 +277,7 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
       agent = turn.fetch(:agent_node)
 
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -274,7 +288,7 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
@@ -285,27 +299,22 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_finalize_output after_task_notice],
+          supported_methods: PROGRAMMABLE_SUPPORTED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent_runtime = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      conversation.update!(agent: agent_runtime, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+      recognized_deployment = recognize_agent_runtime!(agent: agent_runtime, deployment: deployment)
       run =
-        ConversationRun.create!(
+        create_conversation_run!(
           conversation: conversation,
           dag_node_id: agent.id,
-          state: "queued",
-          queued_at: Time.current.change(usec: 0),
-          snapshot_version: 1,
-          initiated_by_user: conversation.user,
-          effective_permission_mode: "default",
-          agent_program: program,
-          contract_fingerprint: "contract:v1",
-          agent_deployment: deployment,
-          deployment_fingerprint: "fixture-deployment-v1",
-          deployment_activated_at: deployment.activated_at,
+          agent: agent_runtime,
+          recognized_deployment: recognized_deployment,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},

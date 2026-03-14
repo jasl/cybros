@@ -9,10 +9,10 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     clear_performed_jobs
   end
 
-  test "scheduler parks blocked runs at claim time and exposes waiting_for_capacity as a derived runtime state" do
-    target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-    first = create_queued_execution!(execution_target: target)
-    second = create_queued_execution!(execution_target: target)
+  test "scheduler parks blocked runs at claim time for agent-scoped capacity and exposes waiting_for_capacity as a derived runtime state" do
+    runtime = create_runtime!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    first = create_queued_execution!(runtime: runtime)
+    second = create_queued_execution!(runtime: runtime)
 
     claimed_first = DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
     claimed_second = DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
@@ -29,14 +29,16 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     assert_equal parked_wait.retry_at.to_i, parked_node.claim_after_at.to_i
     assert_equal "execution_capacity", parked_node.metadata.dig("runtime_wait", "reason_type")
     assert_equal parked_wait.id, parked_node.metadata.dig("runtime_wait", "runtime_wait_id")
+    assert_equal "agent", parked_wait.subject_type
+    assert_equal runtime.fetch(:agent).id, parked_wait.subject_id
     assert_equal "waiting_for_capacity", parked_run.runtime_state
   end
 
-  test "scheduler terminally fails runs when execution backlog is already full" do
-    target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 1)
-    first = create_queued_execution!(execution_target: target)
-    second = create_queued_execution!(execution_target: target)
-    third = create_queued_execution!(execution_target: target)
+  test "scheduler terminally fails runs when agent execution backlog is already full" do
+    runtime = create_runtime!(max_concurrent_tasks: 1, max_queued_tasks: 1)
+    first = create_queued_execution!(runtime: runtime)
+    second = create_queued_execution!(runtime: runtime)
+    third = create_queued_execution!(runtime: runtime)
 
     claimed_first = DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
     claimed_second = DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
@@ -56,11 +58,11 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     assert_nil RuntimeWait.find_by(owner_type: "ConversationRun", owner_id: failed_run.id, reason_type: "execution_capacity")
   end
 
-  test "releasing capacity resumes the oldest ready parked waiter and retries it promptly" do
+  test "releasing capacity resumes the oldest ready parked waiter and retries it promptly for agent-scoped capacity" do
     travel_to(Time.zone.parse("2026-03-09 09:00:00 UTC")) do
-      target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-      first = create_queued_execution!(execution_target: target)
-      second = create_queued_execution!(execution_target: target)
+      runtime = create_runtime!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+      first = create_queued_execution!(runtime: runtime)
+      second = create_queued_execution!(runtime: runtime)
 
       DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
       DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
@@ -90,8 +92,8 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
   end
 
   test "canceling a running governed node releases its active execution-capacity lease" do
-    target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-    execution = create_queued_execution!(execution_target: target)
+    runtime = create_runtime!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    execution = create_queued_execution!(runtime: runtime)
 
     DAG::Scheduler.claim_executable_nodes(graph: execution.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
     execution.fetch(:node).reload.stop!(reason: "user_cancelled")
@@ -104,10 +106,10 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
   end
 
   test "canceling a parked capacity waiter removes it from the next wakeup selection" do
-    target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-    first = create_queued_execution!(execution_target: target)
-    second = create_queued_execution!(execution_target: target)
-    third = create_queued_execution!(execution_target: target)
+    runtime = create_runtime!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    first = create_queued_execution!(runtime: runtime)
+    second = create_queued_execution!(runtime: runtime)
+    third = create_queued_execution!(runtime: runtime)
 
     DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
     DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
@@ -141,22 +143,17 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
 
   private
 
-    def create_queued_execution!(execution_target:)
-      conversation = create_conversation!
+    def create_queued_execution!(runtime:)
+      conversation =
+        create_conversation!(
+          agent: runtime.fetch(:agent),
+          agent_program: runtime.fetch(:program),
+          default_execution_target: nil,
+        )
       graph = conversation.dag_graph
       user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
       node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
       graph.edges.create!(from_node_id: user.id, to_node_id: node.id, edge_type: DAG::Edge::SEQUENCE)
-
-      program = create_program!
-      deployment = create_deployment!(program)
-      credential =
-        LLMProviderCredential.create!(
-          provider_key: "openai-#{SecureRandom.hex(4)}",
-          credential_type: "api_key",
-          status: "active",
-          api_key: "sk-test",
-        )
 
       run =
         ConversationRun.create!(
@@ -167,34 +164,60 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
           snapshot_version: 1,
           initiated_by_user: conversation.user,
           effective_permission_mode: "default",
-          agent_program: program,
-          contract_fingerprint: program.published_contract_fingerprint,
-          agent_deployment: deployment,
-          deployment_fingerprint: deployment.deployment_fingerprint,
-          deployment_activated_at: deployment.activated_at || Time.current.change(usec: 0),
-          provider_credential: credential,
-          execution_target: execution_target,
+          agent: runtime.fetch(:agent),
+          recognized_deployment: runtime.fetch(:recognized_deployment),
+          recognized_deployment_key: runtime.fetch(:recognized_deployment).recognized_deployment_key,
+          contract_fingerprint: runtime.fetch(:program).published_contract_fingerprint,
+          deployment_fingerprint: runtime.fetch(:deployment).deployment_fingerprint,
+          deployment_activated_at: runtime.fetch(:deployment).activated_at || Time.current.change(usec: 0),
+          provider_credential: runtime.fetch(:credential),
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: runtime.fetch(:agent).config_schema_fingerprint,
           effective_policy: {},
-          runtime_governors: {
-            "provider_limiter" => provider_limiter_snapshot(
-              provider_credential: credential,
-              selected_model_ref: "openai/gpt-5.4",
-            ),
-            "execution_capacity" => RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: execution_target),
-          },
-          snapshot: { "execution_target_id" => execution_target.id },
+          runtime_governors: runtime_governors_snapshot(
+            provider_credential: runtime.fetch(:credential),
+            selected_model_ref: "openai/gpt-5.4",
+            agent: runtime.fetch(:agent),
+          ),
+          snapshot: { "agent" => { "id" => runtime.fetch(:agent).id } },
         )
+
+      assert_nil run[:agent_program_id]
+      assert_nil run[:agent_deployment_id]
+      assert_nil run[:execution_target_id]
 
       { conversation: conversation, node: node, run: run }
     end
 
+    def create_runtime!(max_concurrent_tasks:, max_queued_tasks:)
+      program = create_program!
+      target = create_execution_target!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      deployment = create_deployment!(program)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      credential =
+        LLMProviderCredential.create!(
+          provider_key: "openai-#{SecureRandom.hex(4)}",
+          credential_type: "api_key",
+          status: "active",
+          api_key: "sk-test",
+        )
+
+      {
+        agent: agent,
+        credential: credential,
+        deployment: deployment,
+        program: program,
+        recognized_deployment: recognized_deployment,
+        target: target,
+      }
+    end
+
     def create_execution_target!(max_concurrent_tasks:, max_queued_tasks:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Fixture host #{SecureRandom.hex(4)}",
           kind: "host",
           platform: "macos_arm64",
@@ -207,7 +230,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Fixture workspace #{SecureRandom.hex(4)}",
           root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
@@ -217,7 +240,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: "Fixture target",
@@ -227,7 +250,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program #{SecureRandom.hex(4)}",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
@@ -240,7 +263,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     end
 
     def create_deployment!(program)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -252,7 +275,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
         activated_at: Time.current.change(usec: 0),
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

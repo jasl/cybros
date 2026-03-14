@@ -6,7 +6,7 @@ module Cybros
       module_function
 
       def handshake!(deployment:, rpc_client: nil)
-        rpc_client ||= AgentDeployments::RPCClient.new(deployment: deployment)
+        rpc_client ||= ::Agents::RPCClient.new(deployment: deployment)
         catalog = KernelCapabilityCatalog.current
         cached = normalize_hash(deployment.capability_snapshot)
 
@@ -56,7 +56,7 @@ module Cybros
           )
         end
 
-        rpc_client ||= AgentDeployments::RPCClient.new(deployment: deployment)
+        rpc_client ||= ::Agents::RPCClient.new(deployment: deployment)
         catalog = KernelCapabilityCatalog.current
         cached = normalize_hash(deployment.capability_snapshot)
         response =
@@ -125,11 +125,21 @@ module Cybros
             normalize_tool_catalog(cached["agent_tool_catalog"])
           end
 
+        observed_runtime_identity =
+          normalize_hash(response["identity"]).presence ||
+            normalize_hash(cached["observed_runtime_identity"]).presence ||
+            {
+              "deployment_fingerprint" => deployment.deployment_fingerprint,
+              "protocol_version" => deployment.protocol_version,
+              "agent_sdk_version" => deployment.agent_sdk_version,
+              "supported_methods" => Array(deployment.supported_methods),
+            }
+
         snapshot =
           CapabilitySnapshot.build(
             kernel_registry_version: catalog.kernel_capability_registry_version,
-            agent_program_id: deployment.agent_program_id,
-            agent_program_version: agent_capabilities_version,
+            agent_key: resolved_agent_key(deployment),
+            agent_capabilities_version: agent_capabilities_version,
             kernel_tools: catalog.tools,
             agent_tools: agent_tool_catalog,
           )
@@ -141,6 +151,7 @@ module Cybros
           "kernel_capability_registry_version" => catalog.kernel_capability_registry_version,
           "agent_capabilities_version" => agent_capabilities_version,
           "agent_tool_catalog" => agent_tool_catalog.map(&:deep_stringify_keys),
+          "observed_runtime_identity" => observed_runtime_identity,
           "effective_tools" =>
             snapshot.effective_tools.map do |tool|
               {
@@ -157,6 +168,14 @@ module Cybros
         payload
       end
       private_class_method :persist_snapshot!
+
+      def resolved_agent_key(deployment)
+        return deployment.agent_key if deployment.respond_to?(:agent_key)
+        return deployment.agent.agent_key if deployment.respond_to?(:agent) && deployment.agent.respond_to?(:agent_key)
+
+        nil
+      end
+      private_class_method :resolved_agent_key
     end
   end
 end

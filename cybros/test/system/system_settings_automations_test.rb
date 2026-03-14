@@ -25,8 +25,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
 
     assert_text "Automations"
     assert_text runtime.fetch(:automation).task_payload.fetch("prompt")
-    assert_text runtime.fetch(:program).name
-    assert_text runtime.fetch(:target).name
+    assert_text runtime.fetch(:agent).name
 
     within("tr", text: runtime.fetch(:automation).task_payload.fetch("prompt")) do
       click_link "View"
@@ -48,9 +47,11 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
             base_result.merge(
-              "approval_state" => {
-                "status" => "pending_confirmation",
-                "reason" => "fixture_approval",
+              "planning" => {
+                "approval_request" => {
+                  "status" => "pending_confirmation",
+                  "reason" => "fixture_approval",
+                },
               },
             )
           end,
@@ -90,13 +91,12 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     def create_automation_runtime!(user:, endpoint_url:, permission_mode:)
       program = create_program!
       active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
-      target = create_execution_target!(name: "Operator automation target")
+      agent = materialize_agent_runtime!(program: program)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: permission_mode,
           status: "active",
           schedule_kind: "rrule",
@@ -109,7 +109,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
           },
         )
 
-      { automation: automation, program: program, target: target }
+      { agent: agent, automation: automation, program: program }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -131,7 +131,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Operator Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -147,7 +147,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -158,46 +158,12 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
         inspection_details: {},
         activated_at: Time.current.change(usec: 0),
-      )
-    end
-
-    def create_execution_target!(name:)
-      location =
-        ExecutionLocation.create!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        Workspace.create!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      ExecutionTarget.create!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
       )
     end
 

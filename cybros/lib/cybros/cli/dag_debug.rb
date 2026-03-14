@@ -160,9 +160,8 @@ module Cybros
               Conversation.create!(
                 user: source_conversation.user,
                 title: "Debug smoke #{Time.current.to_i}",
-                agent_program: source_conversation.agent_program,
+                agent: source_conversation.agent,
                 agent_config_schema_fingerprint: source_conversation.agent_config_schema_fingerprint,
-                default_execution_target: source_conversation.default_execution_target,
                 metadata:
                   source_conversation.metadata.deep_dup.deep_merge(
                     "statistics" => {

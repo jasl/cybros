@@ -230,20 +230,20 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
   end
 
   test "groups reliability slices by programmable runtime routing dimensions" do
-    program_id = uuidv7
+    recognized_deployment_key = "recognized_deployment:agent:fixture:sha256:test"
 
     create_fact!(
       task_node_id: uuidv7,
       logical_tool_name: "compact_context",
       resolved_name: "compact_context",
-      implementation_source: "agent_program",
+      implementation_source: "agent",
       implementation_ref: "agent://compact_context",
       capability_registry_snapshot_id: "cap_snapshot_123",
       kernel_capability_registry_version: "kernel:v1",
       tool_surface_id: "tool_surface_123",
       tool_surface_label: "bundled_default.before_agent_step",
-      agent_program_id: program_id,
-      agent_program_version: "default-agent-capabilities:v1",
+      recognized_deployment_key: recognized_deployment_key,
+      agent_capabilities_version: "default-agent-capabilities:v1",
       execution_scope: "parent",
       execution_readiness: "executable",
       entered_execution: true,
@@ -263,8 +263,8 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
       kernel_capability_registry_version: "kernel:v1",
       tool_surface_id: "tool_surface_123",
       tool_surface_label: "bundled_default.before_agent_step",
-      agent_program_id: program_id,
-      agent_program_version: "default-agent-capabilities:v1",
+      recognized_deployment_key: recognized_deployment_key,
+      agent_capabilities_version: "default-agent-capabilities:v1",
       execution_scope: "parent",
       execution_readiness: "executable",
       entered_execution: true,
@@ -280,16 +280,17 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
     by_logical_tool = stats.fetch("by_logical_tool_name")
     by_implementation_source = stats.fetch("by_implementation_source")
     by_tool_surface = stats.fetch("by_tool_surface_id")
-    by_agent_program_id = stats.fetch("by_agent_program_id")
-    by_agent_program_version = stats.fetch("by_agent_program_version")
+    by_recognized_deployment_key = stats.fetch("by_recognized_deployment_key")
+    by_agent_capabilities_version = stats.fetch("by_agent_capabilities_version")
 
     summary = stats.fetch("summary")
     compact_context = by_logical_tool.find { |row| row.fetch("logical_tool_name") == "compact_context" }
-    agent_program = by_implementation_source.find { |row| row.fetch("implementation_source") == "agent_program" }
+    agent_row = by_implementation_source.find { |row| row.fetch("implementation_source") == "agent" }
     kernel = by_implementation_source.find { |row| row.fetch("implementation_source") == "kernel" }
     tool_surface = by_tool_surface.find { |row| row.fetch("tool_surface_id") == "tool_surface_123" }
-    agent_program_id_row = by_agent_program_id.find { |row| row.fetch("agent_program_id") == program_id }
-    agent_version = by_agent_program_version.find { |row| row.fetch("agent_program_version") == "default-agent-capabilities:v1" }
+    recognized_deployment_row =
+      by_recognized_deployment_key.find { |row| row.fetch("recognized_deployment_key") == recognized_deployment_key }
+    agent_version = by_agent_capabilities_version.find { |row| row.fetch("agent_capabilities_version") == "default-agent-capabilities:v1" }
 
     assert_equal 2, summary.dig("result_status", "total")
     assert_equal 1, summary.dig("result_status", "success")
@@ -299,10 +300,10 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
     assert_equal 63, summary.dig("latency_ms", "avg")
     assert_equal 84, summary.dig("latency_ms", "max")
     assert_equal 2, compact_context.fetch("total_calls")
-    assert_equal 1, agent_program.fetch("total_calls")
+    assert_equal 1, agent_row.fetch("total_calls")
     assert_equal 1, kernel.fetch("total_calls")
     assert_equal 2, tool_surface.fetch("total_calls")
-    assert_equal 2, agent_program_id_row.fetch("total_calls")
+    assert_equal 2, recognized_deployment_row.fetch("total_calls")
     assert_equal 2, agent_version.fetch("total_calls")
   end
 
@@ -329,6 +330,8 @@ class Cybros::Statistics::ToolReliabilityStatsTest < ActiveSupport::TestCase
           source: "shell",
           provider_key: "openai",
           model_ref: "openai/gpt-5.4",
+          recognized_deployment_id: nil,
+          recognized_deployment_key: nil,
           execution_readiness: "executable",
           entered_execution: false,
           tool_outcome: "not_executed",

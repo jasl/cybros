@@ -209,4 +209,31 @@ class ConversationActionPolicyUiTest < ActionDispatch::IntegrationTest
     assert_includes user_wrapper.to_html, 'data-action="message-actions#edit"'
     refute_includes user_wrapper.to_html, 'data-message-actions-target="branchButton"'
   end
+
+  test "show hides edit for the latest user message when the turn has attachments" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+    append_result =
+      conversation.append_user_message!(
+        content: "",
+        attachments: [
+          Rack::Test::UploadedFile.new(
+            Rails.root.join("test/fixtures/files/attachment-note.txt"),
+            "text/plain",
+          ),
+        ],
+      )
+    user_node = append_result.fetch(:user_node)
+    agent = append_result.fetch(:agent_node)
+    agent.mark_running!
+    agent.mark_finished!(content: "Hi")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    user_wrapper = Nokogiri::HTML5.fragment(response.body).at_css(%([id="message_#{user_node.id}"]))
+    refute_nil user_wrapper
+
+    refute_includes user_wrapper.to_html, 'data-action="message-actions#edit"'
+  end
 end

@@ -66,7 +66,7 @@ class AgentCore::DAG::PromptAssemblyTest < ActiveSupport::TestCase
 
     assert_equal "compact_context", tool_value(compact_context, "logical_tool_name")
     assert_match(/\Aetool_/, tool_value(compact_context, "effective_tool_id"))
-    assert_equal "agent_program", tool_value(compact_context, "implementation_source")
+    assert_equal "agent", tool_value(compact_context, "implementation_source")
     assert_equal "agent://compact_context", tool_value(compact_context, "implementation_ref")
 
     assert_equal "cybros_shell_exec", tool_value(shell_exec, "logical_tool_name")
@@ -105,8 +105,8 @@ class AgentCore::DAG::PromptAssemblyTest < ActiveSupport::TestCase
     snapshot =
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: "agent-program-123",
-        agent_program_version: "2026-03-11",
+        agent_key: "fixture-agent",
+        agent_capabilities_version: "2026-03-11",
         kernel_tools: [
           {
             logical_tool_name: "cybros_shell_exec",
@@ -355,8 +355,8 @@ class AgentCore::DAG::PromptAssemblyTest < ActiveSupport::TestCase
       snapshot =
         Cybros::ProgrammableAgent::CapabilitySnapshot.build(
           kernel_registry_version: "kernel:v1",
-          agent_program_id: "agent-program-123",
-          agent_program_version: "2026-03-11",
+          agent_key: "fixture-agent",
+          agent_capabilities_version: "2026-03-11",
           kernel_tools: kernel_tools,
           agent_tools: agent_tools,
         )
@@ -364,7 +364,7 @@ class AgentCore::DAG::PromptAssemblyTest < ActiveSupport::TestCase
       {
         "capability_registry_snapshot_id" => snapshot.snapshot_id,
         "kernel_capability_registry_version" => snapshot.kernel_registry_version,
-        "agent_capabilities_version" => snapshot.agent_program_version,
+        "agent_capabilities_version" => snapshot.agent_capabilities_version,
         "effective_tools" =>
           snapshot.effective_tools.map do |tool|
             {

@@ -1,3 +1,5 @@
+require "digest"
+
 class Conversation < ApplicationRecord
   KINDS = %w[root branch thread checkpoint].freeze
   TERMINAL_NODE_STATES = %w[finished errored stopped rejected skipped].freeze
@@ -9,8 +11,7 @@ class Conversation < ApplicationRecord
 
   belongs_to :user
   belongs_to :automation, optional: true
-  belongs_to :agent_program
-  belongs_to :default_execution_target, class_name: "ExecutionTarget", optional: true
+  belongs_to :agent, optional: true
 
   has_one :dag_graph,
           class_name: "DAG::Graph",
@@ -31,6 +32,7 @@ class Conversation < ApplicationRecord
            inverse_of: :parent_conversation
 
   has_many :events, dependent: :destroy
+  has_many :conversation_attachments, dependent: :destroy
   has_many :conversation_runs, dependent: :destroy
   has_many :run_drafts, dependent: :destroy
   has_many :turn_internal_tasks, dependent: :destroy
@@ -43,13 +45,12 @@ class Conversation < ApplicationRecord
 
   before_validation :assign_root_conversation, on: :create
   before_validation :ensure_statistics_sample_origin, on: :create
-  before_validation :assign_default_agent_program, on: :create
-  before_validation :assign_default_execution_target, on: :create
+  before_validation :assign_default_agent, on: :create
   before_validation :normalize_runtime_settings
   after_create :set_root_conversation_to_self, if: :root?
 
   validates :permission_mode, presence: true, inclusion: { in: PERMISSION_MODES }
-  validates :agent_program, presence: true
+  validates :agent, presence: true
   attr_accessor :bootstrap_lane_first_user_message_node_id
 
   after_create_commit :dispatch_bootstrap_hooks_after_commit
@@ -196,17 +197,32 @@ class Conversation < ApplicationRecord
   end
 
   def selected_agent_config
-    selected_agent_config_for(agent_program)
+    selected_agent_config_for(agent)
   end
 
-  def selected_agent_config_for(program)
-    namespace = program&.config_namespace.to_s.strip
+  def selected_agent_config_for(agent_like)
+    namespace = agent_like&.config_namespace.to_s.strip
     return {} if namespace.empty?
 
     value = agent_config.fetch(namespace, nil)
     value.is_a?(Hash) ? value.deep_stringify_keys : {}
   rescue StandardError
     {}
+  end
+
+  def logical_workspace_initialized?
+    logical_workspace_key.to_s.present? &&
+      logical_workspace_root_path.to_s.present? &&
+      logical_workspace_initialized_at.present?
+  end
+
+  def logical_workspace_root
+    path = logical_workspace_root_path.to_s.strip
+    return nil if path.blank?
+
+    Pathname.new(path).cleanpath
+  rescue StandardError
+    nil
   end
 
   def statistics_sample_origin
@@ -221,10 +237,11 @@ class Conversation < ApplicationRecord
     DEFAULT_STATISTICS_SAMPLE_ORIGIN
   end
 
-  def append_user_message_and_project!(content:, mode: :preview, model_ref: nil, input_policy_override: nil, diagnostic_level: nil)
+  def append_user_message_and_project!(content:, attachments: nil, mode: :preview, model_ref: nil, input_policy_override: nil, diagnostic_level: nil)
     result =
       append_user_message!(
         content: content,
+        attachments: attachments,
         model_ref: model_ref,
         input_policy_override: input_policy_override,
         diagnostic_level: diagnostic_level,
@@ -269,7 +286,12 @@ class Conversation < ApplicationRecord
         raise ArgumentError, "wrong lane" unless target.lane_id.to_s == lane.id.to_s
 
         edit_action = action_entry_for(target, "edit")
-        raise Cybros::Error, edit_action.fetch("reason", "not_editable_now") unless edit_action.fetch("available", false)
+        if !edit_action.fetch("available", false)
+          reason = edit_action.fetch("reason", "not_editable_now")
+          raise Cybros::Error, "Editing attachments is not supported yet." if reason == "attachments_not_editable"
+          raise Cybros::Error, reason
+        end
+        raise Cybros::Error, "Editing attachments is not supported yet." if Array(target.body_input["attachments"]).any?
 
         mutations = DAG::Mutations.new(graph: graph)
         user_node = mutations.edit_replace!(node: target, new_input: { "content" => content })
@@ -686,9 +708,11 @@ class Conversation < ApplicationRecord
       end
   end
 
-  def append_user_message!(content:, model_ref: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
+  def append_user_message!(content:, attachments: nil, model_ref: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
+    uploaded_attachments = normalize_uploaded_attachments(attachments)
     content = content.to_s.strip
-    return nil if content.blank?
+    return nil if content.blank? && uploaded_attachments.empty?
+    validate_attachment_upload_support!(uploaded_attachments) if uploaded_attachments.any?
 
     with_dag_errors_wrapped do
       graph = root_graph
@@ -697,7 +721,7 @@ class Conversation < ApplicationRecord
       model_ref = resolve_model_ref!(requested_model_ref: model_ref)
       policy = resolved_input_policy(app_override: input_policy_override)
       now = Time.current
-      claim_after_at = coalescing_claim_after_at(policy: policy, now: now)
+      claim_after_at = uploaded_attachments.any? ? nil : coalescing_claim_after_at(policy: policy, now: now)
       running_input_policy = policy["running_input_policy"].to_s.presence || "queue"
 
       user_node = nil
@@ -762,6 +786,10 @@ class Conversation < ApplicationRecord
           compact_task = created[:compact_task]
           agent_node = created[:agent_node]
           product_node = created[:product_node]
+          if user_node.present? && uploaded_attachments.any?
+            manifest = persist_message_attachments!(user_node: user_node, uploaded_attachments: uploaded_attachments)
+            annotate_user_message_attachments!(user_node: user_node, attachments_manifest: manifest)
+          end
           created_new_turn = agent_node.present?
           lane_first_user_message_node = user_node if user_node.present? && !had_prior_lane_user_messages
         end
@@ -825,8 +853,7 @@ class Conversation < ApplicationRecord
             user: user,
             title: title,
             metadata: metadata,
-            agent_program: agent_program,
-            default_execution_target: default_execution_target,
+            agent: agent,
             permission_mode: permission_mode,
             agent_config: agent_config,
             agent_config_schema_fingerprint: agent_config_schema_fingerprint,
@@ -1213,19 +1240,12 @@ class Conversation < ApplicationRecord
       )
     end
 
-    def assign_default_agent_program
-      return if agent_program.present?
+    def assign_default_agent
+      return if agent.present?
 
-      program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
-      self.agent_program = program
-      self.agent_config_schema_fingerprint ||= program.config_schema_fingerprint
-    end
-
-    def assign_default_execution_target
-      return if default_execution_target.present?
-
-      visible_targets = ExecutionTarget.visible_for_runtime.order(:created_at).limit(2).to_a
-      self.default_execution_target = visible_targets.first if visible_targets.one?
+      selected_agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+      self.agent = selected_agent
+      self.agent_config_schema_fingerprint ||= selected_agent.config_schema_fingerprint
     end
 
     def enqueue_conversation_run!(agent_node:, selected_model_ref:, user_input:, debug:, error:)
@@ -1453,6 +1473,73 @@ class Conversation < ApplicationRecord
       out["action_policy"] = action_policy_for(node)
       out["run_state"] = turn_execution_projector.run_state_for_node_id(node.id)
       out
+    end
+
+    def normalize_uploaded_attachments(value)
+      Array(value).flatten.compact.select { |upload| upload.respond_to?(:original_filename) }
+    end
+
+    def validate_attachment_upload_support!(uploaded_attachments)
+      return if uploaded_attachments.empty?
+      return if agent&.supports_upload?
+
+      raise ArgumentError, "Selected agent does not support file attachments."
+    end
+
+    def persist_message_attachments!(user_node:, uploaded_attachments:)
+      uploaded_attachments.each_with_index do |uploaded_attachment, index|
+        attachment =
+          conversation_attachments.build(
+            source_message_node_id: user_node.id,
+            position: index + 1,
+            sha256_digest: uploaded_attachment_digest(uploaded_attachment),
+          )
+        attachment.file.attach(
+          io: uploaded_attachment_io(uploaded_attachment),
+          filename: uploaded_attachment_filename(uploaded_attachment),
+          content_type: uploaded_attachment_content_type(uploaded_attachment),
+        )
+        attachment.save!
+      end
+
+      Conversations::AttachmentManifestBuilder.build(
+        conversation: self,
+        source_message_node_id: user_node.id,
+      )
+    end
+
+    def annotate_user_message_attachments!(user_node:, attachments_manifest:)
+      body = user_node.body
+      body_input = body.input.is_a?(Hash) ? body.input.deep_dup : {}
+      body_input["attachments"] = Array(attachments_manifest)
+      body.update!(input: body_input)
+    end
+
+    def uploaded_attachment_io(uploaded_attachment)
+      io =
+        if uploaded_attachment.respond_to?(:tempfile) && uploaded_attachment.tempfile.present?
+          uploaded_attachment.tempfile
+        else
+          uploaded_attachment
+        end
+      io.rewind if io.respond_to?(:rewind)
+      io
+    end
+
+    def uploaded_attachment_filename(uploaded_attachment)
+      uploaded_attachment.original_filename.to_s.presence || "attachment"
+    end
+
+    def uploaded_attachment_content_type(uploaded_attachment)
+      uploaded_attachment.content_type.to_s.presence || "application/octet-stream"
+    end
+
+    def uploaded_attachment_digest(uploaded_attachment)
+      io = uploaded_attachment_io(uploaded_attachment)
+      digest = Digest::SHA256.new
+      digest << io.read
+      io.rewind if io.respond_to?(:rewind)
+      digest.hexdigest
     end
 
     def normalize_turn_execution_diagnostic_level(value)
@@ -1866,7 +1953,7 @@ class Conversation < ApplicationRecord
       resolved_model_ref =
         Cybros::AgentRuntimeResolver.default_model_ref_for(
           agent_metadata: (metadata || {}).fetch("agent", {}),
-          agent_program: agent_program,
+          agent: agent,
         )
 
       self.metadata = (metadata || {}).deep_merge({ "llm" => { "model_ref" => resolved_model_ref } })

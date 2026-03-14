@@ -1,10 +1,8 @@
 module RuntimeGovernance
   class ExecutionCapacityEnforcer
-    REQUIRED_CAPACITY_FIELDS = %w[
+    BASE_REQUIRED_CAPACITY_FIELDS = %w[
       scope_type
       scope_id
-      execution_location_id
-      execution_target_id
       max_concurrent_tasks
       max_queued_tasks
     ].freeze
@@ -85,7 +83,7 @@ module RuntimeGovernance
         end
 
         snapshot = snapshot.deep_stringify_keys
-        missing_fields = REQUIRED_CAPACITY_FIELDS.select { |field| snapshot[field].blank? }
+        missing_fields = required_capacity_fields(snapshot).select { |field| snapshot[field].blank? }
         return snapshot if missing_fields.empty?
 
         AgentCore::ValidationError.raise!(
@@ -100,6 +98,10 @@ module RuntimeGovernance
 
       def execution_request_id_for
         "conversation_run:#{conversation_run.id}"
+      end
+
+      def required_capacity_fields(snapshot)
+        BASE_REQUIRED_CAPACITY_FIELDS
       end
   end
 end

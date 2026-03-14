@@ -33,6 +33,7 @@
 <% preview = payload.dig("output_preview", "content").to_s %>
 <% output = payload.dig("output", "content").to_s %>
 <% input = payload.dig("input", "content").to_s %>
+<% input_attachments = Array(payload.dig("input", "attachments")).select { |entry| entry.is_a?(Hash) } %>
 <% terminal = Conversation::TERMINAL_NODE_STATES.include?(state) %>
 <% markdown_source = output.presence || preview %>
 <% markdown_source = markdown_source.to_s.truncate(20_000, omission: "\n\n… (truncated)") %>
@@ -49,7 +50,19 @@
       data-message-actions-action-policy-value="<%= action_policy_json %>">
       <div class="max-w-[70%]">
         <div class="bg-base-200 rounded-3xl px-5 py-3" data-node-id="<%= node_id %>">
-          <p class="whitespace-pre-wrap text-sm" data-role="user-text"><%= input %></p>
+          <% if input.present? %>
+            <p class="whitespace-pre-wrap text-sm" data-role="user-text"><%= input %></p>
+          <% end %>
+          <% if input_attachments.any? %>
+            <div class="<%= input.present? ? "mt-3" : "" %> space-y-2" data-role="user-attachments">
+              <% input_attachments.each do |attachment| %>
+                <div class="rounded-2xl border border-base-300 bg-base-100/70 px-3 py-2 text-xs">
+                  <div class="font-medium"><%= attachment.fetch("filename", "attachment") %></div>
+                  <div class="opacity-60"><%= attachment.fetch("content_type", "application/octet-stream") %></div>
+                </div>
+              <% end %>
+            </div>
+          <% end %>
         </div>
         <div class="mt-1 flex justify-end gap-1 opacity-60 group-hover:opacity-100">
           <button type="button"

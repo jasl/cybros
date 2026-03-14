@@ -5,7 +5,8 @@ module Cybros
     class Router
       def initialize(agent_application:, required_bearer: nil)
         @agent_application = agent_application
-        @required_bearer = required_bearer.to_s.strip.presence
+        bearer = required_bearer.to_s.strip
+        @required_bearer = bearer.empty? ? nil : bearer
       end
 
       def health_payload

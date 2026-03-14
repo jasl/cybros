@@ -5,8 +5,8 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
     snapshot =
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: "agent-program-123",
-        agent_program_version: "2026-03-11",
+        agent_key: "fixture-agent",
+        agent_capabilities_version: "2026-03-11",
         kernel_tools: [
           tool(logical_tool_name: "compact_context", implementation_ref: "kernel://compact_context"),
           tool(logical_tool_name: "cybros_shell_exec", implementation_ref: "kernel://cybros_shell_exec"),
@@ -21,10 +21,10 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
     memory_search = snapshot.route_for!("memory_search")
     cybros_shell_exec = snapshot.route_for!("cybros_shell_exec")
 
-    assert_equal "agent_program", compact_context.implementation_source
+    assert_equal "agent", compact_context.implementation_source
     assert_equal "agent://compact_context", compact_context.implementation_ref
 
-    assert_equal "agent_program", memory_search.implementation_source
+    assert_equal "agent", memory_search.implementation_source
     assert_equal "agent://memory_search", memory_search.implementation_ref
 
     assert_equal "kernel", cybros_shell_exec.implementation_source
@@ -39,8 +39,8 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
       assert_raises(AgentCore::ValidationError) do
         Cybros::ProgrammableAgent::CapabilitySnapshot.build(
           kernel_registry_version: "kernel:v1",
-          agent_program_id: "agent-program-123",
-          agent_program_version: "2026-03-11",
+          agent_key: "fixture-agent",
+          agent_capabilities_version: "2026-03-11",
           kernel_tools: [],
           agent_tools: [
             tool(logical_tool_name: "cybros_shell_exec", implementation_ref: "agent://cybros_shell_exec"),
@@ -55,8 +55,8 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
     built =
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: "agent-program-123",
-        agent_program_version: "2026-03-12",
+        agent_key: "fixture-agent",
+        agent_capabilities_version: "2026-03-12",
         kernel_tools: [
           tool(logical_tool_name: "subagent_run", implementation_ref: "kernel://subagent_run", execution_mode: "parallel_safe"),
           tool(logical_tool_name: "cybros_generate_title", implementation_ref: "kernel://cybros_generate_title"),
@@ -68,8 +68,8 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
       Cybros::ProgrammableAgent::CapabilitySnapshot.restore(
         "capability_registry_snapshot_id" => built.snapshot_id,
         "kernel_capability_registry_version" => built.kernel_registry_version,
-        "agent_program_id" => built.agent_program_id,
-        "agent_capabilities_version" => built.agent_program_version,
+        "agent_key" => built.agent_key,
+        "agent_capabilities_version" => built.agent_capabilities_version,
         "effective_tools" =>
           built.effective_tools.map do |tool|
             {

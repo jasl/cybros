@@ -53,7 +53,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
 
     def create_automation!(status:, hour:, minute:, endpoint_url:)
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Automation Program #{SecureRandom.hex(4)}",
           config_namespace: "automation.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -64,7 +64,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Automation host #{SecureRandom.hex(4)}",
           kind: "host",
           platform: "macos_arm64",
@@ -77,7 +77,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Automation workspace #{SecureRandom.hex(4)}",
           root_path: "/tmp/automation-#{SecureRandom.hex(4)}",
@@ -87,7 +87,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
           tags: ["automation"],
         )
       target =
-        ExecutionTarget.create!(
+        create_execution_profile!(
           execution_location: location,
           workspace: workspace,
           name: "Automation target #{SecureRandom.hex(4)}",
@@ -95,12 +95,12 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
           sandboxed: true,
         )
       ensure_active_openai_credential!
-      active_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1")
+      deployment = active_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1")
+      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
 
       Automation.create!(
         user: create_user!,
-        agent_program: program,
-        execution_target: target,
+        agent: agent,
         permission_mode: "full_access",
         status: status,
         schedule_kind: "rrule",
@@ -111,7 +111,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -122,7 +122,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

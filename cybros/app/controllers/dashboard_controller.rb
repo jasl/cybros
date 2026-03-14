@@ -1,7 +1,16 @@
 class DashboardController < AgentController
   def show
+    Agents::BootstrapBundledDefaultService.ensure_agent!
+    @agents =
+      Agent.all.select(&:selectable_for_conversation?).sort_by do |agent|
+        [
+          agent.bundled_agent_key.to_s == "default" ? 0 : 1,
+          agent.name.to_s.downcase,
+          agent.id.to_s,
+        ]
+      end
+    @agent_count = @agents.length
     @recent_conversations = Current.user.conversations.order(created_at: :desc).limit(10)
-    @agent_program_count = AgentProgram.count
     catalog = Cybros::LLM::Catalog.effective
     provider_keys = catalog.enabled_provider_keys_for_env(Rails.env)
     providers =

@@ -31,14 +31,16 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
 
     def create_invocation!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           manifest_snapshot: { "name" => "Fixture Program" },
           global_config_schema: { "type" => "object", "properties" => {} },
           conversation_config_schema: { "type" => "object", "properties" => {} },
         )
+      target = build_default_execution_profile!
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "websocket",
           endpoint_url: "ws://127.0.0.1:4319/rpc",
@@ -49,16 +51,26 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: { "name" => "Fixture Program" },
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      conversation =
+        create_conversation!(
+          agent: agent,
+          agent_program: program,
+          default_execution_target: target,
         )
 
       AgentRPCInvocation.create!(
-        agent_deployment: deployment,
-        conversation: create_conversation!,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+        conversation: conversation,
         scope_type: "run_draft",
         scope_id: SecureRandom.uuid,
         method: "before_agent_step",

@@ -55,7 +55,7 @@ AgentCore 内建的 policy 组合（可选）：
 
 Cybros 注册了 `subagent_spawn` / `subagent_poll` 两个 native tools（用于跨图子会话模式），但仍遵循 **deny-by-default**：
 
-- 顶层 interactive conversation 的默认 model / input policy / runtime surface 已由 `Conversation.agent_program` / manifest 拥有；这里的 `agent_profile` 只描述 subagent worker boundary。
+- 顶层 interactive conversation 的默认 model / input policy / runtime surface 已由 `Conversation.agent` / manifest 拥有；这里的 `agent_profile` 只描述 subagent worker boundary。
 - runtime 默认 base policy 仍可保持 `Policy::DenyAll`，因此即便 `agent_profile` 为 `coding`（允许 `*`），tools 也不会自动暴露给模型。
 - 当 app 注入的 base policy 允许时，`agent_profile` 会通过 `Policy::Profiled` 作为额外收敛层生效：
   - 未命中 profile 的工具会被拒绝（reason=`tool_not_in_profile`），并产出可审计的 tool_result。

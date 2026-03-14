@@ -5,7 +5,7 @@ module System
       helper_method :execution_status_label, :execution_approval_status, :execution_approval_reason
 
       def index
-        @automations = Automation.includes(:agent_program, :execution_target).order(created_at: :desc, id: :desc).to_a
+        @automations = Automation.includes(:agent).order(created_at: :desc, id: :desc).to_a
         executions =
           Conversation.where(automation_id: @automations.map(&:id))
             .includes(:run_drafts, :conversation_runs)
@@ -28,7 +28,7 @@ module System
       private
 
         def set_automation
-          @automation = Automation.includes(:agent_program, :execution_target).find(params[:id])
+          @automation = Automation.includes(:agent).find(params[:id])
         end
 
         def execution_status_label(conversation)

@@ -14,11 +14,7 @@ x-app: &default-app
     ACTIVE_RECORD_ENCRYPTION__KEY_DERIVATION_SALT: ${ACTIVE_RECORD_ENCRYPTION__KEY_DERIVATION_SALT:-compose-local-key-derivation-salt}
     RAILS_ASSUME_SSL: "false"
     RAILS_FORCE_SSL: "false"
-    CYBROS_MANAGED_AGENT_AUTOLAUNCH: "1"
-    CYBROS_MANAGED_AGENT_PUBLIC_HOST: agent_deployments
-    CYBROS_MANAGED_AGENT_BIND_HOST: 0.0.0.0
     CYBROS_AGENT_WORKSPACE_ROOT: /rails/agent-workspace
-    CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT: /rails
     # Migrator specified
     SKIP_DEMO_DATA: 1
   entrypoint: []
@@ -130,29 +126,6 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
-
-  agent_deployments:
-    <<: *default-app
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-    command:
-      - "./bin/managed_agent_deployments"
-    deploy:
-      resources:
-        limits:
-          cpus: '1'
-          memory: 1G
-        reservations:
-          cpus: '0.25'
-          memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
 volumes:
   postgres-data:
   app-storage:

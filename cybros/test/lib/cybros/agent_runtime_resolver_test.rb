@@ -345,10 +345,10 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     end
   end
 
-  test "selected agent program runtime_surface config drives interactive runtime when no legacy agent_profile is stored" do
+  test "selected agent runtime_surface config drives interactive runtime when no legacy agent_profile is stored" do
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
-    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
-    program.update!(
+    agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+    agent.update!(
       args: {
         "runtime_surface" => {
           "type" => "noop",
@@ -367,7 +367,8 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
           "routing" => { "channel" => "web" },
           "agent" => { "key" => "main" },
         },
-        agent_program: program,
+        agent: agent,
+        default_execution_target: nil,
       )
 
     runtime = build_runtime_for(node)
@@ -532,8 +533,14 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
       end
     end
 
-    def build_pending_agent_node(metadata:, agent_program: :__default__)
-      conversation = create_conversation!(metadata: metadata, agent_program: agent_program)
+    def build_pending_agent_node(metadata:, agent: :__default__, agent_program: :__default__, default_execution_target: :__default__)
+      conversation =
+        create_conversation!(
+          metadata: metadata,
+          agent: agent,
+          agent_program: agent_program,
+          default_execution_target: default_execution_target,
+        )
       graph = conversation.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
       node = nil

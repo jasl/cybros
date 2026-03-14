@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn } from "./helpers"
+import { bundledDefaultRuntimeState, createHighPriorityMockProvider, signIn } from "./helpers"
 
 test.describe("Dashboard", () => {
   test.beforeEach(async ({ page }) => {
@@ -11,9 +11,9 @@ test.describe("Dashboard", () => {
   })
 
   test("shows stats cards", async ({ page }) => {
-    await expect(page.getByText("LLM providers")).toBeVisible()
-    await expect(page.getByText("Agent programs")).toBeVisible()
-    await expect(page.getByText("Runs")).toBeVisible()
+    await expect(page.locator(".stat-title").filter({ hasText: "LLM providers" })).toBeVisible()
+    await expect(page.locator(".stat-title").filter({ hasText: "Available agents" })).toBeVisible()
+    await expect(page.locator(".stat-title").filter({ hasText: "Runs" })).toBeVisible()
   })
 
   test("shows recent conversations section", async ({ page }) => {
@@ -24,15 +24,16 @@ test.describe("Dashboard", () => {
     await expect(page.getByRole("heading", { name: "Last run" })).toBeVisible()
   })
 
-  test("'New chat' button creates a conversation", async ({ page }) => {
-    await page.getByTestId("dashboard-page").getByRole("button", { name: "New chat" }).click()
+  test("agent launcher creates a conversation and generic new chat is absent", async ({ page }) => {
+    await createHighPriorityMockProvider(page)
+    const bundled = bundledDefaultRuntimeState()
+    await page.goto("/dashboard")
+    const defaultAgent = page.getByTestId("dashboard-agent-row").filter({ has: page.getByText(bundled.agentName, { exact: true }) }).first()
+
+    await expect(defaultAgent).toBeVisible()
+    await expect(page.getByRole("button", { name: "New chat" })).toHaveCount(0)
+    await defaultAgent.getByRole("button", { name: "New conversation" }).click()
 
     await expect(page).toHaveURL(/\/conversations\//)
-  })
-
-  test("'Agents' link navigates to agent programs", async ({ page }) => {
-    await page.getByTestId("dashboard-page").getByRole("link", { name: "Agents" }).click()
-
-    await expect(page).toHaveURL(/\/system\/settings\/agent_programs/)
   })
 })

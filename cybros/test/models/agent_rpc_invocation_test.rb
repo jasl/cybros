@@ -6,7 +6,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
   test "defaults deployment_activated_at to the agent deployment activation time" do
     activated_at = FIXED_DEPLOYMENT_ACTIVATED_AT
     deployment =
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: create_program!,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -17,7 +17,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -25,7 +25,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
         activated_at: activated_at,
       )
 
-    invocation = build_invocation(agent_deployment: deployment)
+    invocation = build_invocation(deployment: deployment)
 
     assert_equal activated_at, invocation.deployment_activated_at
   end
@@ -36,7 +36,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
 
     duplicate =
       build_invocation(
-        agent_deployment: invocation.agent_deployment,
+        deployment: invocation.recognized_deployment.agent,
         conversation: invocation.conversation,
         result_snapshot: { "ok" => false },
       )
@@ -45,25 +45,26 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
     assert_includes duplicate.errors[:invocation_id], "has already been taken"
   end
 
-  test "allows the same invocation id for a copied binding on a different agent deployment row" do
+  test "treats copied deployment rows with the same recognized runtime identity as the same binding" do
     invocation = build_invocation
     invocation.save!
     copied_binding_deployment =
       build_deployment!(
-        program: invocation.agent_deployment.agent_program,
-        deployment_fingerprint: invocation.agent_deployment.deployment_fingerprint,
+        program: invocation.recognized_deployment.agent,
+        deployment_fingerprint: invocation.recognized_deployment.deployment_fingerprint,
         status: "inactive",
       )
 
     duplicate =
       build_invocation(
-        agent_deployment: copied_binding_deployment,
+        deployment: copied_binding_deployment,
         conversation: invocation.conversation,
         binding_fingerprint: invocation.binding_fingerprint,
         deployment_activated_at: invocation.deployment_activated_at,
       )
 
-    assert_predicate duplicate, :valid?
+    refute_predicate duplicate, :valid?
+    assert_includes duplicate.errors[:invocation_id], "has already been taken"
   end
 
   test "persists result and error snapshots" do
@@ -80,15 +81,15 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
 
   def build_invocation(attributes = {})
     conversation = attributes[:conversation] || create_conversation!
-    deployment =
-      attributes[:agent_deployment] ||
-        build_deployment!(
-          program: attributes[:agent_program] || create_program!,
-        )
+    deployment = attributes[:deployment] || build_deployment!(program: attributes[:agent_program] || create_program!)
+    agent = attributes[:agent] || create_agent_runtime!(program: deployment, execution_target: build_default_execution_profile!, deployment: deployment)
+    recognized_deployment = attributes[:recognized_deployment] || recognize_agent_runtime!(agent: agent, deployment: deployment)
 
     AgentRPCInvocation.new(
       {
-        agent_deployment: deployment,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        recognized_deployment_key: recognized_deployment.recognized_deployment_key,
         conversation: conversation,
         scope_type: "run_draft",
         scope_id: "scope-123",
@@ -100,12 +101,12 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
         status: "succeeded",
         result_snapshot: { "ok" => true },
         error_snapshot: { "message" => "none" },
-      }.merge(attributes.except(:agent_program)),
+      }.merge(attributes.except(:agent_program, :deployment)),
     )
   end
 
   def create_program!
-    AgentProgram.create!(
+    create_agent_record!(
       name: "Fixture Program",
       config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
       published_contract_fingerprint: "contract:v1",
@@ -118,7 +119,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
   end
 
   def build_deployment!(program:, deployment_fingerprint: "deployment:v1", status: "active", activated_at: nil)
-    AgentDeployment.create!(
+    create_runtime_binding_record!(
       agent_program: program,
       transport_kind: "websocket",
       endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -129,7 +130,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: AgentDeployments::REQUIRED_METHODS,
+      supported_methods: Agents::Protocol::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},

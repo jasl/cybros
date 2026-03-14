@@ -23,6 +23,7 @@ module Cybros
             agent.schemas.get
             capabilities.handshake
             capabilities.refresh
+            attachments.import
             on_conversation_created
             on_lane_first_user_message
             before_agent_step
@@ -93,6 +94,8 @@ module Cybros
         capabilities_handshake_result(params)
       when "capabilities.refresh"
         capabilities_refresh_result(params)
+      when "attachments.import"
+        attachments_import_result(params)
       when "before_agent_step"
         conversation_id = params["conversation_id"]
         user_input = params["user_input"].to_s.strip
@@ -200,6 +203,30 @@ module Cybros
       }
     end
 
+    def attachments_import_result(params)
+      attachments = Array(params["attachments"]).select { |attachment| attachment.is_a?(Hash) }
+
+      {
+        "imports" =>
+          attachments.map do |attachment|
+            attachment_id = attachment["id"].to_s
+            filename = attachment["filename"].to_s
+
+            {
+              "id" => attachment_id,
+              "remote_ref" => {
+                "kind" => "attachment_import",
+                "locator" => "fixture-attachment://#{attachment_id}/#{sanitize_attachment_filename(filename)}",
+                "filename" => filename,
+                "content_type" => attachment["content_type"].to_s,
+                "byte_size" => attachment["byte_size"],
+                "digest" => attachment["digest"].to_s,
+              },
+            }
+          end,
+      }
+    end
+
     def bootstrap_lane_first_user_envelope(params)
       user_node_id = params["user_node_id"]
       actions = [
@@ -276,20 +303,6 @@ module Cybros
           ]
       end
 
-      if tokens.include?("switch-target")
-        targets = callback_rpc(callback_session, "execution_target.list", {}).fetch("targets", [])
-        current_target_id = params["execution_target_id"].to_s
-        alternate_target =
-          paired_target_for(targets: targets, current_target_id: current_target_id) ||
-          targets.find { |target| target["id"].to_s != current_target_id }
-
-        unless alternate_target.nil?
-          result["planning"]["execution_target_proposal"] = {
-            "execution_target_id" => alternate_target.fetch("id"),
-          }
-        end
-      end
-
       if tokens.include?("approval")
         result["planning"]["approval_request"] ||= {
           "status" => "pending_confirmation",
@@ -354,25 +367,6 @@ module Cybros
       user_input.to_s.scan(/\[fixture:([a-z0-9_-]+)\]/i).flatten.map(&:downcase)
     end
 
-    def paired_target_for(targets:, current_target_id:)
-      current_target = targets.find { |target| target["id"].to_s == current_target_id.to_s }
-      return nil if current_target.nil?
-
-      current_name = current_target["name"].to_s
-      paired_name =
-        if current_name.end_with?(" Primary")
-          "#{current_name.delete_suffix(" Primary")} Alternate"
-        elsif current_name.end_with?(" Alternate")
-          "#{current_name.delete_suffix(" Alternate")} Primary"
-        end
-
-      return nil if paired_name.nil? || paired_name.empty?
-
-      targets.find do |target|
-        target["id"].to_s != current_target_id.to_s && target["name"].to_s == paired_name
-      end
-    end
-
     def callback_rpc(callback_session, method_name, params)
       endpoint = callback_session.fetch("endpoint")
       bearer = callback_session.fetch("bearer")
@@ -391,6 +385,10 @@ module Cybros
       end
 
       payload.fetch("result")
+    end
+
+    def sanitize_attachment_filename(filename)
+      filename.to_s.gsub(/[^a-zA-Z0-9.\-_]+/, "_")
     end
 
     class Server

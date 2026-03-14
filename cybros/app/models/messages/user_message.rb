@@ -1,5 +1,7 @@
 module Messages
   class UserMessage < ::DAG::NodeBody
+    ATTACHMENTS_INPUT_KEY = "attachments".freeze
+
     class << self
       def turn_head?
         true
@@ -34,6 +36,15 @@ module Messages
 
     def editable?
       true
+    end
+
+    def attachments
+      raw = input.is_a?(Hash) ? input[ATTACHMENTS_INPUT_KEY] : nil
+      Array(raw).select { |entry| entry.is_a?(Hash) }
+    end
+
+    def has_attachments?
+      attachments.any?
     end
   end
 end

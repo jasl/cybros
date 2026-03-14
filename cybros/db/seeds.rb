@@ -38,6 +38,6 @@ if default_model_ref.present?
   account.update_llm_default_model_ref!(normalized_model_ref)
 end
 
-if AgentPrograms::BundledSources.path_for("default")
-  AgentPrograms::BootstrapBundledDefaultService.bootstrap!
+if Agents::BundledSources.path_for("default")
+  Agents::BootstrapBundledDefaultService.bootstrap!
 end

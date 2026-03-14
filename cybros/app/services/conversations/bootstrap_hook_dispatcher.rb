@@ -35,6 +35,7 @@ module Conversations
       return if user_node.nil?
 
       lane = user_node.lane
+      initialize_workspace_for!(lane: lane)
       resolved_anchor = anchor_node || default_first_user_anchor_for(user_node: user_node)
 
       dispatch_hook!(
@@ -89,7 +90,7 @@ module Conversations
       end
 
       def deployment_for(hook_name)
-        deployment = conversation.agent_program&.active_healthy_deployment_for_published_contract
+        deployment = conversation.agent&.active_runtime_binding
         return nil if deployment.nil?
         return nil unless Array(deployment.supported_methods).include?(hook_name)
         return nil unless bootstrap_ready_deployment?(deployment)
@@ -131,9 +132,22 @@ module Conversations
       end
 
       def capability_registry_snapshot_id
-        snapshot = conversation.agent_program&.active_healthy_deployment_for_published_contract&.capability_snapshot
+        snapshot = conversation.agent&.active_runtime_binding&.capability_snapshot
         snapshot = {} unless snapshot.is_a?(Hash)
         snapshot["capability_registry_snapshot_id"].to_s.presence || snapshot["snapshot_id"].to_s.presence
+      end
+
+      def initialize_workspace_for!(lane:)
+        return if lane.nil?
+        return unless main_lane?(lane)
+
+        Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+      end
+
+      def main_lane?(lane)
+        conversation.chat_lane.id.to_s == lane.id.to_s
+      rescue StandardError
+        false
       end
 
       def default_first_user_anchor_for(user_node:)

@@ -26,6 +26,42 @@ class RPCContractTest < Minitest::Test
     host&.shutdown
   end
 
+  def test_http_json_rpc_serves_descriptor_based_attachment_imports
+    host = build_host.start
+
+    payload =
+      rpc_json(
+        host.rpc_url,
+        id: 7,
+        method: "attachments.import",
+        params: {
+          "attachments" => [
+            {
+              "id" => "attachment-1",
+              "filename" => "error.png",
+              "content_type" => "image/png",
+              "byte_size" => 128,
+              "digest" => "sha256:abc123",
+              "signed_download_url" => "https://example.test/rails/active_storage/blobs/redirect/signed/error.png",
+              "workspace" => {
+                "conversation_id" => "conversation:test-default",
+                "logical_workspace_id" => "workspace:test-default",
+              },
+            },
+          ],
+        },
+      )
+
+    import = payload.fetch("result").fetch("imports").first
+
+    assert_equal "attachment-1", import.fetch("id")
+    assert_equal "attachment_import", import.dig("remote_ref", "kind")
+    assert_match %r{\Aattachment-import://attachment-1/}, import.dig("remote_ref", "locator")
+    assert_equal "error.png", import.dig("remote_ref", "filename")
+  ensure
+    host&.shutdown
+  end
+
   def test_before_agent_step_returns_typed_planning_with_staged_mutations_and_cutover_fields
     callback = TestSupport::CallbackHarness.new.start
     host = build_host.start
@@ -180,6 +216,49 @@ class RPCContractTest < Minitest::Test
   ensure
     host&.shutdown
     callback&.shutdown
+  end
+
+  def test_before_agent_step_injects_workspace_and_attachment_descriptors_without_execution_target_callbacks
+    host = build_host.start
+
+    payload =
+      rpc_json(
+        host.rpc_url,
+        id: 8,
+        method: "before_agent_step",
+        params: {
+          "user_input" => "Review the uploaded files",
+          "session_context" => {
+            "workspace" => {
+              "conversation_id" => "conversation:test-default",
+              "logical_workspace_key" => "conversation-conversation:test-default",
+              "logical_workspace_root_path" => "/tmp/cybros/conversations/conversation:test-default",
+              "logical_workspace_initialized_at" => "2026-03-13T09:00:00Z",
+            },
+          },
+          "attachment_manifest" => [
+            {
+              "id" => "attachment-1",
+              "filename" => "screenshot-error.png",
+              "content_type" => "image/png",
+            },
+            {
+              "id" => "attachment-2",
+              "filename" => "logs.txt",
+              "content_type" => "text/plain",
+            },
+          ],
+        },
+      )
+
+    system_entry = payload.dig("result", "planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "content")
+
+    assert_includes system_entry, "Review the uploaded files"
+    assert_includes system_entry, "Conversation workspace: /tmp/cybros/conversations/conversation:test-default"
+    assert_includes system_entry, "Attachment 1: screenshot-error.png (image/png)"
+    assert_includes system_entry, "Attachment 2: logs.txt (text/plain)"
+  ensure
+    host&.shutdown
   end
 
   def test_on_context_pressure_before_subagent_spawn_before_finalize_output_after_task_notice_and_after_subagent_result_return_typed_action_envelopes

@@ -6,9 +6,7 @@ RAILS_ARGS = ARGV - %w[--verbose -v]
 PROCFILE = "Procfile.dev"
 MANAGED_AGENT_ENV = {
   "RUBY_DEBUG_OPEN" => "true",
-  "CYBROS_MANAGED_AGENT_AUTOLAUNCH" => "1",
   "CYBROS_AGENT_WORKSPACE_ROOT" => File.expand_path("tmp/agent-workspace", Dir.pwd),
-  "CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT" => Dir.pwd,
 }.freeze
 Process.exec(*%w[bin/rails server], *RAILS_ARGS) unless File.exist?(PROCFILE)
 

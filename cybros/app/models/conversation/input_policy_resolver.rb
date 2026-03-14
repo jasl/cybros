@@ -38,15 +38,9 @@ class Conversation::InputPolicyResolver
   end
 
   def base_policy
-    manifest_authoritative_program&.input_policy_config || Cybros::AgentProfiles.input_policy(profile_name)
-  end
+    return Cybros::AgentProfiles.input_policy(profile_name) if explicit_agent_profile_metadata?
 
-  def manifest_authoritative_program
-    return nil if explicit_agent_profile_metadata?
-
-    conversation.agent_program
-  rescue StandardError
-    nil
+    conversation.agent&.input_policy_config || Cybros::AgentProfiles.input_policy(profile_name)
   end
 
   def explicit_agent_profile_metadata?

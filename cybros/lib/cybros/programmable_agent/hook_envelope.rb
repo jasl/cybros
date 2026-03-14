@@ -62,7 +62,6 @@ module Cybros
       PLANNING_KEYS = %w[
         step_plan
         staged_mutations
-        execution_target_proposal
         approval_request
         tool_surface
       ].freeze
@@ -96,7 +95,6 @@ module Cybros
       Planning = Data.define(
         :step_plan,
         :staged_mutations,
-        :execution_target_proposal,
         :approval_request,
         :tool_surface,
       ) do
@@ -104,7 +102,6 @@ module Cybros
           {
             "step_plan" => step_plan,
             "staged_mutations" => staged_mutations,
-            "execution_target_proposal" => execution_target_proposal,
             "approval_request" => approval_request,
             "tool_surface" => tool_surface,
           }.compact
@@ -183,7 +180,6 @@ module Cybros
                 "kv_ops" => normalize_array(staged_mutations["kv_ops"]),
                 "prompt_buffer_ops" => normalize_array(staged_mutations["prompt_buffer_ops"]),
               }.compact,
-              execution_target_proposal: normalize_optional_hash(planning_payload["execution_target_proposal"]),
               approval_request: normalize_optional_hash(planning_payload["approval_request"]),
               tool_surface: normalize_optional_hash(planning_payload["tool_surface"]),
             )

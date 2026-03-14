@@ -69,7 +69,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
     def create_programmable_runtime!(server:)
       user = create_user!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -82,7 +82,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -93,7 +93,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -102,7 +102,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
       )
       ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Primary host",
           kind: "host",
           platform: "macos_arm64",
@@ -115,7 +115,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Primary workspace",
           root_path: "/tmp/programmable-step-status-#{SecureRandom.hex(4)}",
@@ -125,7 +125,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
       target =
-        ExecutionTarget.create!(
+        create_execution_profile!(
           execution_location: location,
           workspace: workspace,
           name: "Primary target",
@@ -134,13 +134,13 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
         )
 
       conversation = create_conversation!(user: user, title: "Chat")
+      agent = create_agent_runtime!(program: program, execution_target: target)
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
+        agent: agent,
         permission_mode: "default",
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 
-      { conversation: conversation, program: program }
+      { agent: agent, conversation: conversation, program: program }
     end
 end

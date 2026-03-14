@@ -16,8 +16,9 @@ module AgentRPC
       runtime.fetch(:deployment).update!(
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
-        supported_methods: AgentDeployments::REQUIRED_METHODS + %w[after_task_notice],
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[after_task_notice],
       )
+      sync_agent_runtime_from_binding!(agent: runtime.fetch(:agent), deployment: runtime.fetch(:deployment))
 
       error =
         assert_raises(AgentCore::ValidationError) do
@@ -54,6 +55,8 @@ module AgentRPC
       runtime = create_runtime!
       invocation =
         InvocationStore.start_or_replay!(
+          agent: runtime.fetch(:agent),
+          recognized_deployment: runtime.fetch(:recognized_deployment),
           deployment: runtime.fetch(:deployment),
           conversation: runtime.fetch(:conversation),
           scope_type: "run_draft",
@@ -72,6 +75,7 @@ module AgentRPC
         health_status: "unhealthy",
         deactivated_at: Time.current.change(usec: 0),
       )
+      sync_agent_runtime_from_binding!(agent: runtime.fetch(:agent), deployment: runtime.fetch(:deployment))
 
       remote_call_count = 0
       error =
@@ -101,9 +105,8 @@ module AgentRPC
     private
 
       def create_runtime!
-        conversation = create_conversation!
         program =
-          AgentProgram.create!(
+          create_agent_record!(
             name: "Fixture Program",
             config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
             published_contract_fingerprint: "contract:v1",
@@ -113,8 +116,10 @@ module AgentRPC
             conversation_config_schema: { "type" => "object" },
             config_schema_fingerprint: "config:v1",
           )
+        target = build_default_execution_profile!
+        agent = materialize_agent_runtime!(program: program, execution_target: target)
         deployment =
-          AgentDeployment.create!(
+          create_runtime_binding_record!(
             agent_program: program,
             transport_kind: "http_jsonrpc",
             endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -125,7 +130,7 @@ module AgentRPC
             health_status: "healthy",
             protocol_version: "agent_rpc.v1",
             agent_sdk_version: "fixture-ruby-sdk/1.0",
-            supported_methods: AgentDeployments::REQUIRED_METHODS,
+            supported_methods: Agents::Protocol::REQUIRED_METHODS,
             transport_config: {},
             manifest_snapshot: {},
             schema_snapshot: {},
@@ -133,8 +138,16 @@ module AgentRPC
             inspection_details: {},
             activated_at: Time.current.change(usec: 0),
           )
+        sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+        recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+        conversation =
+          create_conversation!(
+            agent: agent,
+            agent_program: program,
+            default_execution_target: target,
+          )
 
-        { conversation: conversation, program: program, deployment: deployment }
+        { agent: agent, conversation: conversation, deployment: deployment, program: program, recognized_deployment: recognized_deployment }
       end
   end
 end

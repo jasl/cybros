@@ -90,12 +90,13 @@ class Cybros::ProgrammableAgentProviderTest < ActiveSupport::TestCase
       m.create_edge(from_node: first_agent, to_node: second_agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    run = create_conversation_run!(conversation: conversation, node: first_agent)
-    deployment = run.agent_deployment
-    deployment.update!(
-      endpoint_url: server.rpc_url,
-      deployment_bearer_secret_ref: "secret://fixture",
-      supported_methods: AgentDeployments::REQUIRED_METHODS + %w[on_context_pressure],
+    run =
+      create_conversation_run!(
+        conversation: conversation,
+        node: first_agent,
+        endpoint_url: server.rpc_url,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[on_context_pressure],
+        deployment_bearer_secret_ref: "secret://fixture",
     )
 
     provider = Cybros::ProgrammableAgentProvider.new(conversation_run: run, delegate: DelegateProvider.new)
@@ -175,12 +176,13 @@ class Cybros::ProgrammableAgentProviderTest < ActiveSupport::TestCase
       m.create_edge(from_node: first_agent, to_node: second_agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    run = create_conversation_run!(conversation: conversation, node: first_agent)
-    deployment = run.agent_deployment
-    deployment.update!(
-      endpoint_url: server.rpc_url,
-      deployment_bearer_secret_ref: "secret://fixture",
-      supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_finalize_output],
+    run =
+      create_conversation_run!(
+        conversation: conversation,
+        node: first_agent,
+        endpoint_url: server.rpc_url,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[before_finalize_output],
+        deployment_bearer_secret_ref: "secret://fixture",
     )
 
     provider = Cybros::ProgrammableAgentProvider.new(conversation_run: run, delegate: DelegateProvider.new)
@@ -221,10 +223,16 @@ class Cybros::ProgrammableAgentProviderTest < ActiveSupport::TestCase
 
   private
 
-    def create_conversation_run!(conversation:, node:)
+    def create_conversation_run!(
+      conversation:,
+      node:,
+      endpoint_url: "http://127.0.0.1:4319/rpc",
+      deployment_bearer_secret_ref: "secret://fixture",
+      supported_methods: nil
+    )
       program =
-        AgentProgram.create!(
-          name: "Fixture Program",
+        create_agent_record!(
+          name: "Fixture Program #{SecureRandom.hex(4)}",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
           manifest_snapshot: { "agent_program_key" => "fixture-program", "name" => "Fixture Program" },
@@ -233,62 +241,70 @@ class Cybros::ProgrammableAgentProviderTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
+      target = build_default_execution_profile!
+      agent = create_agent_runtime!(program: program, execution_target: target)
+      fixture_identity = Cybros::ProgrammableAgentFixture.identity
+      supported_methods ||= fixture_identity.fetch("supported_methods")
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
-          endpoint_url: "http://127.0.0.1:4319/rpc",
-          deployment_bearer_secret_ref: "secret://fixture",
-          contract_fingerprint: "contract:v1",
-          deployment_fingerprint: "fixture-deployment-v1",
+          endpoint_url: endpoint_url,
+          deployment_bearer_secret_ref: deployment_bearer_secret_ref,
+          contract_fingerprint: program.published_contract_fingerprint,
+          deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
           status: "active",
           health_status: "healthy",
-          protocol_version: "agent_rpc.v1",
-          agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          protocol_version: fixture_identity.fetch("protocol_version"),
+          agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+          supported_methods: supported_methods,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {
             "capability_registry_snapshot_id" => "cap:test",
+            "observed_runtime_identity" => {
+              "supported_methods" => supported_methods,
+            },
           },
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+      recognized_deployment =
+        if endpoint_url == "http://127.0.0.1:4319/rpc"
+          recognize_agent_runtime!(agent: agent, deployment: deployment)
+        else
+          Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+          AgentRPC::SessionAuthorizer.resolve_initialized_runtime!(
+            deployment: deployment,
+            agent: agent,
+          ).fetch(:recognized_deployment)
+        end
 
       ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: node.id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: "contract:v1",
-        agent_deployment: deployment,
-        deployment_fingerprint: "fixture-deployment-v1",
-        deployment_activated_at: deployment.activated_at,
-        selected_model_ref: "openai/gpt-5.4",
-        effective_public_settings: {},
-        effective_agent_config: {},
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
-        effective_policy: {},
-        runtime_governors: {
-          "provider_limiter" => {
-            "provider_key" => "openai",
-          },
-        },
-        snapshot: {
-          "draft" => {
-            "id" => SecureRandom.uuid,
-            "planning" => {
-              "tool_surface" => {
-                "capability_registry_snapshot_id" => "cap:test",
-                "selected_tool_ids" => [],
+        build_conversation_run_attributes(
+          conversation: conversation,
+          dag_node_id: node.id,
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          selected_model_ref: "openai/gpt-5.4",
+          effective_public_settings: {},
+          effective_agent_config: {},
+          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          effective_policy: {},
+          runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4", agent: agent),
+          snapshot: {
+            "draft" => {
+              "id" => SecureRandom.uuid,
+              "planning" => {
+                "tool_surface" => {
+                  "capability_registry_snapshot_id" => "cap:test",
+                  "selected_tool_ids" => [],
+                },
               },
             },
           },
-        },
+        ),
       )
     end
 end

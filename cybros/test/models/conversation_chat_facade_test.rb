@@ -434,6 +434,35 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert_equal ["Hello again"], visible_inputs
   end
 
+  test "edit_user_message! rejects editing a user turn that already has attachments" do
+    conversation = create_conversation!(title: "Chat")
+    attachment =
+      Rack::Test::UploadedFile.new(
+        Rails.root.join("test/fixtures/files/attachment-note.txt"),
+        "text/plain",
+      )
+
+    result =
+      conversation.append_user_message!(
+        content: "",
+        attachments: [attachment],
+      )
+    original_user = result.fetch(:user_node)
+    original_agent = result.fetch(:agent_node)
+    original_agent.mark_running!
+    original_agent.mark_finished!(content: "Attachment received")
+
+    error =
+      assert_raises(Cybros::Error) do
+        conversation.edit_user_message!(node_id: original_user.id, content: "Edited")
+      end
+
+    assert_equal "Editing attachments is not supported yet.", error.message
+    assert_equal [original_user.id], conversation.root_graph.nodes.active.where(turn_id: original_user.turn_id, node_type: Messages::UserMessage.node_type_key).pluck(:id)
+    assert_equal ["attachment-note.txt"], original_user.reload.body_input.fetch("attachments").map { |entry| entry.fetch("filename") }
+    assert_equal 1, conversation.conversation_attachments.where(source_message_node_id: original_user.id).count
+  end
+
   test "select_swipe! adopts a previous version in the same version_set" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph

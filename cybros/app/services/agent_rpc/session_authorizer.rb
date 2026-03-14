@@ -3,11 +3,14 @@ require "digest"
 module AgentRPC
   class SessionAuthorizer
     DEFAULT_EXPIRY = 5.minutes
+    TRANSPORT_INSPECTION_ERROR = ::Agents::RPCClient::TransportError
 
-    def self.open!(deployment:, conversation:, scope_type:, scope_id:, allowed_methods:, expires_in: DEFAULT_EXPIRY)
+    def self.open!(deployment:, conversation:, scope_type:, scope_id:, allowed_methods:, expires_in: DEFAULT_EXPIRY, agent: nil, recognized_deployment: nil)
       new(
         deployment: deployment,
         conversation: conversation,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         scope_type: scope_type,
         scope_id: scope_id,
         allowed_methods: allowed_methods,
@@ -24,9 +27,25 @@ module AgentRPC
       ).authorize_callback!
     end
 
+    def self.resolve_initialized_runtime!(deployment:, agent:, expected_recognized_deployment: nil, session: nil)
+      new(
+        deployment: deployment,
+        agent: agent,
+        recognized_deployment: expected_recognized_deployment,
+      ).send(
+        :resolve_initialized_runtime!,
+        deployment: deployment,
+        agent: agent,
+        expected_recognized_deployment: expected_recognized_deployment,
+        session: session,
+      )
+    end
+
     def initialize(
       deployment: nil,
       conversation: nil,
+      agent: nil,
+      recognized_deployment: nil,
       scope_type: nil,
       scope_id: nil,
       allowed_methods: [],
@@ -36,6 +55,8 @@ module AgentRPC
     )
       @deployment = deployment
       @conversation = conversation
+      @agent = agent
+      @recognized_deployment = recognized_deployment
       @scope_type = scope_type.to_s
       @scope_id = scope_id.to_s
       @allowed_methods = Array(allowed_methods).map(&:to_s).reject(&:blank?).uniq
@@ -46,12 +67,25 @@ module AgentRPC
 
     def open!
       ensure_active_binding!
-      initialize_result = initialize_client!
+      resolved_agent = resolve_agent_binding!
+      initialized_runtime =
+        resolve_initialized_runtime!(
+          deployment: deployment,
+          agent: resolved_agent,
+          expected_recognized_deployment: recognized_deployment,
+        )
+      initialize_result = initialized_runtime.fetch(:initialize_result)
+      current_recognized_deployment = initialized_runtime.fetch(:recognized_deployment)
+      ensure_recognized_deployment_match!(
+        expected_recognized_deployment: recognized_deployment,
+        current_recognized_deployment: current_recognized_deployment,
+      )
       raw_bearer = "arpc_#{SecureRandom.hex(24)}"
       session =
         AgentRPCSession.create!(
-          agent_deployment: deployment,
-          agent_program: deployment.agent_program,
+          agent: resolved_agent,
+          recognized_deployment: current_recognized_deployment,
+          recognized_deployment_key: current_recognized_deployment.recognized_deployment_key,
           conversation: conversation,
           scope_type: scope_type,
           scope_id: scope_id,
@@ -67,6 +101,7 @@ module AgentRPC
         session: session,
         session_bearer: raw_bearer,
         initialize_result: initialize_result,
+        recognized_deployment: current_recognized_deployment,
       }
     end
 
@@ -81,29 +116,40 @@ module AgentRPC
 
     private
 
-      attr_reader :deployment, :conversation, :scope_type, :scope_id, :allowed_methods, :expires_in, :bearer, :method_name
+      attr_reader :deployment, :conversation, :agent, :recognized_deployment, :scope_type, :scope_id, :allowed_methods, :expires_in, :bearer, :method_name
 
-      def initialize_client!
-        result = AgentDeployments::RPCClient.new(deployment: deployment).call("initialize")
+      def initialize_client!(deployment:, agent:, expected_recognized_deployment: nil, session: nil)
+        result = ::Agents::RPCClient.new(agent: agent, deployment: deployment).call("initialize")
         identity = result["identity"].is_a?(Hash) ? result["identity"].deep_stringify_keys : {}
-        validate_identity!(identity)
+        validate_identity!(deployment: deployment, identity: identity)
         result
-      rescue AgentDeployments::InspectionError => e
+      rescue AgentCore::ValidationError => e
+        raise unless expected_recognized_deployment.present? && e.code == "cybros.agent_rpc.initialize_identity_mismatch"
+
+        handle_recognized_deployment_drift!(
+          deployment: deployment,
+          expected_recognized_deployment: expected_recognized_deployment,
+          session: session,
+          details: e.details.merge("reason" => "initialize_identity_mismatch"),
+        )
+      rescue TRANSPORT_INSPECTION_ERROR => e
         code = e.message.to_s.include?("401") ? "cybros.agent_rpc.deployment_auth_failed" : "cybros.agent_rpc.initialize_failed"
         AgentCore::ValidationError.raise!(
           "Deployment initialize failed.",
           code: code,
-          details: { agent_deployment_id: deployment&.id, message: e.message },
+          details: { agent_id: deployment&.id, message: e.message },
         )
       end
 
-      def validate_identity!(identity)
-        expected_program_key = deployment.agent_program.manifest_snapshot["agent_program_key"].to_s.presence
-        if expected_program_key.present? && identity["agent_program_key"].to_s != expected_program_key
+      def validate_identity!(deployment:, identity:)
+        expected_agent_key =
+          manifest_agent_key(agent&.manifest_snapshot).presence ||
+            manifest_agent_key(deployment.manifest_snapshot).presence
+        if expected_agent_key.present? && resolved_identity_agent_key(identity) != expected_agent_key
           AgentCore::ValidationError.raise!(
             "Deployment identity mismatch.",
             code: "cybros.agent_rpc.initialize_identity_mismatch",
-            details: { agent_deployment_id: deployment.id, expected_program_key: expected_program_key },
+            details: { agent_id: deployment.id, expected_agent_key: expected_agent_key },
           )
         end
 
@@ -112,8 +158,78 @@ module AgentRPC
         AgentCore::ValidationError.raise!(
           "Deployment identity mismatch.",
           code: "cybros.agent_rpc.initialize_identity_mismatch",
-          details: { agent_deployment_id: deployment.id, expected_deployment_fingerprint: deployment.deployment_fingerprint },
+          details: { agent_id: deployment.id, expected_deployment_fingerprint: deployment.deployment_fingerprint },
         )
+      end
+
+      def resolve_current_recognized_deployment!(agent:, deployment:, initialize_result:)
+        Cybros::ProgrammableAgent::RecognizedDeploymentResolver.resolve!(
+          agent: agent,
+          deployment: deployment,
+          initialize_result: initialize_result,
+          capability_snapshot: deployment.capability_snapshot,
+        )
+      end
+
+      def resolve_initialized_runtime!(deployment:, agent:, expected_recognized_deployment:, session: nil)
+        initialize_result =
+          initialize_client!(
+            deployment: deployment,
+            agent: agent,
+            expected_recognized_deployment: expected_recognized_deployment,
+            session: session,
+          )
+        current_recognized_deployment =
+          resolve_current_recognized_deployment!(
+            agent: agent,
+            deployment: deployment,
+            initialize_result: initialize_result,
+          )
+
+        {
+          initialize_result: initialize_result,
+          recognized_deployment: current_recognized_deployment,
+        }
+      end
+
+      def resolve_agent_binding!
+        resolved_agent =
+          if recognized_deployment.present?
+            recognized_deployment.agent
+          elsif agent.present?
+            agent
+          elsif deployment.is_a?(Agent)
+            deployment
+          elsif (canonical_agent = canonical_agent_for(deployment)).present?
+            canonical_agent
+          elsif conversation&.agent.present? && (recognized = recognized_deployment_for(deployment, agent: conversation.agent)).present?
+            recognized.agent
+          elsif (recognized = recognized_deployment_for(deployment)).present?
+            recognized.agent
+          elsif conversation&.agent_id.present?
+            conversation.agent
+          end
+
+        return resolved_agent if resolved_agent.present?
+
+        AgentCore::ValidationError.raise!(
+          "Pinned deployment binding is missing its agent runtime binding.",
+          code: "cybros.agent_rpc.agent_binding_missing",
+          details: { agent_id: deployment.id },
+        )
+      end
+
+      def manifest_agent_key(payload)
+        normalized = payload.is_a?(Hash) ? payload.deep_stringify_keys : {}
+        normalized.fetch("agent_key", normalized[legacy_manifest_agent_key]).to_s.presence
+      end
+
+      def resolved_identity_agent_key(identity)
+        identity.fetch("agent_key", identity[legacy_manifest_agent_key]).to_s
+      end
+
+      def legacy_manifest_agent_key
+        @legacy_manifest_agent_key ||= %w[agent program key].join("_")
       end
 
       def find_session!
@@ -166,7 +282,7 @@ module AgentRPC
       end
 
       def ensure_current_binding!(session)
-        deployment = session.agent_deployment
+        deployment = session.agent&.active_runtime_binding
         activation_matches =
           deployment.present? &&
           deployment.status == "active" &&
@@ -174,18 +290,70 @@ module AgentRPC
           deployment.deployment_fingerprint == session.deployment_fingerprint &&
           deployment.activated_at&.change(usec: 0) == session.deployment_activated_at&.change(usec: 0)
 
-        return if activation_matches
+        unless activation_matches
+          session.update_columns(status: "closed", updated_at: Time.current)
+          AgentCore::ValidationError.raise!(
+            "Pinned deployment binding is no longer active and healthy.",
+            code: "cybros.agent_rpc.deployment_activation_drift",
+            details: {
+              agent_rpc_session_id: session.id,
+              recognized_deployment_id: session.recognized_deployment_id,
+              status: deployment&.status,
+              health_status: deployment&.health_status,
+            },
+          )
+        end
 
-        session.update_columns(status: "closed", updated_at: Time.current)
+        initialized_runtime =
+          resolve_initialized_runtime!(
+            deployment: deployment,
+            agent: session.agent,
+            expected_recognized_deployment: session.recognized_deployment,
+            session: session,
+          )
+        current_recognized_deployment = initialized_runtime.fetch(:recognized_deployment)
+        ensure_recognized_deployment_match!(
+          expected_recognized_deployment: session.recognized_deployment,
+          current_recognized_deployment: current_recognized_deployment,
+          session: session,
+        )
+      end
+
+      def ensure_recognized_deployment_match!(expected_recognized_deployment:, current_recognized_deployment:, session: nil)
+        return if expected_recognized_deployment.blank?
+        return if expected_recognized_deployment.recognized_deployment_key.to_s == current_recognized_deployment.recognized_deployment_key.to_s
+
+        handle_recognized_deployment_drift!(
+          deployment: deployment_for(expected_recognized_deployment: expected_recognized_deployment, session: session),
+          expected_recognized_deployment: expected_recognized_deployment,
+          current_recognized_deployment: current_recognized_deployment,
+          session: session,
+        )
+      end
+
+      def deployment_for(expected_recognized_deployment:, session:)
+        if session.present?
+          session_deployment = session.agent&.active_runtime_binding
+          return session_deployment if session_deployment.present?
+        end
+        return deployment if defined?(deployment) && deployment.present?
+
+        expected_recognized_deployment.agent&.active_runtime_binding
+      end
+
+      def handle_recognized_deployment_drift!(deployment:, expected_recognized_deployment:, current_recognized_deployment: nil, session: nil, details: {})
+        session&.update_columns(status: "closed", updated_at: Time.current)
         AgentCore::ValidationError.raise!(
-          "Pinned deployment binding is no longer active and healthy.",
-          code: "cybros.agent_rpc.deployment_activation_drift",
+          "Pinned runtime identity changed during turn execution.",
+          code: "cybros.agent_rpc.recognized_deployment_drift",
           details: {
-            agent_rpc_session_id: session.id,
-            agent_deployment_id: session.agent_deployment_id,
-            status: deployment&.status,
-            health_status: deployment&.health_status,
-          },
+            agent_rpc_session_id: session&.id,
+            agent_id: deployment&.id,
+            expected_recognized_deployment_id: expected_recognized_deployment.id,
+            expected_recognized_deployment_key: expected_recognized_deployment.recognized_deployment_key,
+            current_recognized_deployment_id: current_recognized_deployment&.id,
+            current_recognized_deployment_key: current_recognized_deployment&.recognized_deployment_key,
+          }.merge(details),
         )
       end
 
@@ -196,12 +364,29 @@ module AgentRPC
         AgentCore::ValidationError.raise!(
           "Pinned deployment binding is no longer active and healthy.",
           code: "cybros.agent_rpc.deployment_activation_drift",
-          details: { agent_deployment_id: deployment.id, status: deployment.status, health_status: deployment.health_status },
+          details: { agent_id: deployment.id, status: deployment.status, health_status: deployment.health_status },
         )
       end
 
       def bearer_digest(raw_bearer)
         Digest::SHA256.hexdigest(raw_bearer.to_s)
+      end
+
+      def recognized_deployment_for(deployment, agent: nil)
+        resolved_agent = agent || canonical_agent_for(deployment)
+        return nil if resolved_agent.blank?
+
+        scope = RecognizedDeployment.where(agent_id: resolved_agent.id)
+        scope = scope.where(deployment_fingerprint: deployment.deployment_fingerprint) if deployment.respond_to?(:deployment_fingerprint)
+        scope = scope.where(protocol_version: deployment.protocol_version) if deployment.respond_to?(:protocol_version)
+        scope.order(Arel.sql("retired_at IS NULL DESC"), updated_at: :desc).first
+      end
+
+      def canonical_agent_for(deployment)
+        return deployment if deployment.is_a?(Agent)
+        return deployment.agent if deployment.respond_to?(:agent)
+
+        nil
       end
   end
 end

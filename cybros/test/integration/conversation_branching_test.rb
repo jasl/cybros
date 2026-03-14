@@ -43,6 +43,8 @@ class ConversationBranchingTest < ActionDispatch::IntegrationTest
     assert_equal conversation.id, child.parent_conversation_id
     assert_equal agent.id, child.forked_from_node_id
     assert_equal "branch", child.kind
+    assert_equal conversation.agent_id, child.agent_id
+    assert_equal conversation.agent_config_schema_fingerprint, child.agent_config_schema_fingerprint
 
     page = child.message_page(limit: 20, mode: :full)
 

@@ -45,10 +45,11 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("")
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
-    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    default_agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+    default_program = Agents::BootstrapBundledDefaultService.ensure_agent!
 
     assert_difference -> { Conversation.count }, +1 do
-      post conversations_path, params: { conversation: { title: "New convo" } }
+      post conversations_path, params: { conversation: { title: "New convo", agent_id: default_agent.id } }
     end
 
     conversation = Conversation.order(:created_at).last
@@ -57,16 +58,18 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_equal "main", conversation.metadata.dig("agent", "key")
     assert_nil conversation.metadata.dig("agent", "agent_profile")
     assert_equal "keep_context", conversation.resolved_input_policy.fetch("interrupted_output_policy")
-    assert_equal default_program.id, conversation.agent_program_id
+    assert_nil conversation[:agent_program_id]
+    assert_nil conversation[:default_execution_target_id]
   end
 
   test "create redirects to llm settings when no usable default model exists" do
     sign_in_owner!
     Account.instance.update_llm_default_model_ref!("")
     LLMProviderCredential.delete_all
+    default_agent = Agents::BootstrapBundledDefaultService.ensure_agent!
 
     assert_no_difference -> { Conversation.count } do
-      post conversations_path, params: { conversation: { title: "New convo" } }
+      post conversations_path, params: { conversation: { title: "New convo", agent_id: default_agent.id } }
     end
 
     assert_redirected_to system_settings_llm_providers_path
@@ -188,6 +191,55 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     refute_includes response.body, "Codex (ChatGPT Pro/Plus) · GPT‑5.3 Codex"
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"][aria-label="Model"]'
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.3 Codex"
+  end
+
+  test "index no longer renders a generic new conversation form" do
+    user = sign_in_owner!
+    create_conversation!(user: user, title: "Existing")
+
+    get conversations_path
+    assert_response :success
+
+    refute_includes response.body, "New conversation title"
+    refute_includes response.body, ">New<"
+  end
+
+  test "creating a conversation requires an explicit agent_id" do
+    user = sign_in_owner!
+
+    assert_no_difference -> { Conversation.count } do
+      post conversations_path, params: { conversation: { title: "Missing agent" } }
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body.downcase, "agent"
+    assert_equal 0, user.conversations.count
+  end
+
+  test "creating a conversation binds the requested agent" do
+    user = sign_in_owner!
+    agent = create_selectable_agent!(name: "Review agent")
+
+    assert_difference -> { Conversation.count }, +1 do
+      post conversations_path, params: { conversation: { title: "Agent launch", agent_id: agent.id } }
+    end
+
+    conversation = Conversation.order(:id).last
+    assert_redirected_to conversation_path(conversation)
+    assert_equal agent.id, conversation.agent_id
+    assert_nil conversation[:agent_program_id]
+    assert_nil conversation[:default_execution_target_id]
+  end
+
+  test "show renders the composer form as multipart so file attachments reach Rails" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select "form##{ActionView::RecordIdentifier.dom_id(conversation, :message_form)}[enctype='multipart/form-data']"
+    assert_select "form##{ActionView::RecordIdentifier.dom_id(conversation, :message_form)} input[type='file'][name='attachments[]'][multiple]"
   end
 
   test "show includes a hidden coalescing override so rapid follow-ups become queued turns" do
@@ -423,17 +475,18 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-openai")
     ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-test")
-    default_program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    default_agent = Agents::BootstrapBundledDefaultService.ensure_agent!
     Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-pro")
 
     assert_difference -> { Conversation.count }, +1 do
-      post conversations_path, params: { conversation: { title: "Chat" } }
+      post conversations_path, params: { conversation: { title: "Chat", agent_id: default_agent.id } }
     end
 
     conversation = Conversation.order(:created_at).last
     assert_equal user.id, conversation.user_id
     assert_equal "openai/gpt-5.4", conversation.metadata.dig("llm", "model_ref")
-    assert_equal default_program.id, conversation.agent_program_id
+    assert_nil conversation[:agent_program_id]
+    assert_nil conversation[:default_execution_target_id]
   end
 
   test "create_message appends a finished user_message and leaves a pending agent_message leaf" do
@@ -470,4 +523,42 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_equal "queued", run.state
     assert run.queued_at
   end
+
+  private
+
+    def create_selectable_agent!(name:)
+      program =
+        create_agent_record!(
+          name: name,
+          config_namespace: "fixture.conversations.#{SecureRandom.hex(4)}",
+          published_contract_fingerprint: "contract:v1",
+          manifest_snapshot: { "agent_program_key" => SecureRandom.hex(4), "name" => name },
+          global_config: {},
+          global_config_schema: { "type" => "object" },
+          conversation_config_schema: { "type" => "object" },
+          config_schema_fingerprint: "config:v1",
+        )
+      target = build_default_execution_profile!
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      deployment = create_runtime_binding_record!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: "http://127.0.0.1:4319/rpc",
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: "fixture-deployment-#{SecureRandom.hex(4)}",
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
+      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+      agent
+    end
 end

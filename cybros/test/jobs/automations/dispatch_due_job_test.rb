@@ -25,7 +25,7 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
 
     def create_automation!(status:, hour:, minute:)
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Automation Program #{SecureRandom.hex(4)}",
           config_namespace: "automation.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -36,7 +36,7 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
           config_schema_fingerprint: "config:v1",
         )
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Automation host #{SecureRandom.hex(4)}",
           kind: "host",
           platform: "macos_arm64",
@@ -49,7 +49,7 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Automation workspace #{SecureRandom.hex(4)}",
           root_path: "/tmp/automation-#{SecureRandom.hex(4)}",
@@ -59,18 +59,18 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
           tags: ["automation"],
         )
       target =
-        ExecutionTarget.create!(
+        create_execution_profile!(
           execution_location: location,
           workspace: workspace,
           name: "Automation target #{SecureRandom.hex(4)}",
           status: "active",
           sandboxed: true,
         )
+      agent = create_agent_runtime!(program: program, execution_target: target)
 
       Automation.create!(
         user: create_user!,
-        agent_program: program,
-        execution_target: target,
+        agent: agent,
         permission_mode: "full_access",
         status: status,
         schedule_kind: "rrule",

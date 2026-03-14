@@ -21,7 +21,7 @@
 补充（Cybros app 侧约定）：
 
 - 默认 resolver 委托到 `Cybros::AgentRuntimeResolver.runtime_for(node:)`
-- 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自选中的 `Conversation.agent_program`
+- 顶层 interactive conversation 的默认 model / input policy / runtime surface 来自选中的 `Conversation.agent`
 - `conversations.metadata["agent"]` 不再是顶层 interactive runtime 的主 authority；它只保留给：
   - 显式 legacy `agent_profile` 兼容行
   - subagent worker-boundary payload
@@ -200,7 +200,7 @@ Tool result / output surface：
 
 Programmable-agent 现状：
 
-- 当前仅支持让 `AgentProgram` 通过安全配置快照 opt into runtime-surface config
+- 当前仅支持让 `Agent` 通过安全配置快照 opt into runtime-surface config
 - 不在这一版里定义 script engine、编辑器 UX、版本化或调试模型
 
 主 LLM 调用稳定性（executor 级自愈）：

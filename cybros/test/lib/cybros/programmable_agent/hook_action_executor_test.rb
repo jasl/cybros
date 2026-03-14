@@ -917,7 +917,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
   private
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -933,7 +933,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
     end
 
     def create_active_deployment!(program:, capability_snapshot:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:9999/rpc",
@@ -944,7 +944,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         transport_config: {},
         manifest_snapshot: {},
         schema_snapshot: {},
@@ -959,49 +959,47 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
     end
 
     def create_conversation_run!(conversation:, dag_node_id:, program:, snapshot:, tool_surface:)
+      target = build_default_execution_profile!
+      agent = create_agent_runtime!(program: program, execution_target: target)
+      conversation.update!(
+        agent: agent,
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+      )
       deployment = create_active_deployment!(program: program, capability_snapshot: snapshot)
+      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+      recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment, capability_snapshot: deployment.capability_snapshot)
 
       ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: dag_node_id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: program.published_contract_fingerprint,
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
-        selected_model_ref: "openai/gpt-5.4",
-        effective_public_settings: {},
-        effective_agent_config: {},
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
-        effective_policy: {},
-        runtime_governors: {
-          "provider_limiter" => {
-            "provider_key" => "openai",
-          },
-        },
-        snapshot: {
-          "capability_snapshot" => capability_snapshot_payload(snapshot),
-          "draft" => {
-            "id" => SecureRandom.uuid,
-            "planning" => {
-              "step_plan" => { "summary" => "fixture summary" },
-              "tool_surface" => tool_surface_payload(tool_surface, snapshot: snapshot),
+        build_conversation_run_attributes(
+          conversation: conversation,
+          dag_node_id: dag_node_id,
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          selected_model_ref: "openai/gpt-5.4",
+          effective_public_settings: {},
+          effective_agent_config: {},
+          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          effective_policy: {},
+          runtime_governors: runtime_governors_snapshot(agent: agent, selected_model_ref: "openai/gpt-5.4"),
+          snapshot: {
+            "capability_snapshot" => capability_snapshot_payload(snapshot),
+            "draft" => {
+              "id" => SecureRandom.uuid,
+              "planning" => {
+                "step_plan" => { "summary" => "fixture summary" },
+                "tool_surface" => tool_surface_payload(tool_surface, snapshot: snapshot),
+              },
             },
           },
-        },
+        ),
       )
     end
 
     def build_capability_snapshot(program_id:)
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: program_id,
-        agent_program_version: "agent:v1",
+        agent_key: program_id,
+        agent_capabilities_version: "agent:v1",
         kernel_tools: [
           {
             logical_tool_name: "compact_context",
@@ -1026,8 +1024,8 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
       {
         "capability_registry_snapshot_id" => snapshot.snapshot_id,
         "kernel_capability_registry_version" => snapshot.kernel_registry_version,
-        "agent_program_id" => snapshot.agent_program_id,
-        "agent_capabilities_version" => snapshot.agent_program_version,
+        "agent_key" => snapshot.agent_key,
+        "agent_capabilities_version" => snapshot.agent_capabilities_version,
         "effective_tools" => snapshot.effective_tools.map { |tool| effective_tool_payload(tool) },
       }
     end

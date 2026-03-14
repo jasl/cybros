@@ -26,16 +26,14 @@ class Automations::DispatchTest < ActiveSupport::TestCase
 
     assert_equal automation.id, conversation.automation_id
     assert_equal automation.user_id, conversation.user_id
-    assert_equal automation.agent_program_id, conversation.agent_program_id
-    assert_equal automation.execution_target_id, conversation.default_execution_target_id
+    assert_equal automation.agent_id, conversation.agent_id
     assert_equal "full_access", conversation.permission_mode
     assert_equal dispatch_key, conversation.automation_dispatch_key
     assert_equal scheduled_for, conversation.automation_triggered_at
     assert_equal "queued", conversation.metadata.dig("automation_execution", "status")
     assert_equal dispatch_key, conversation.metadata.dig("automation_execution", "dispatch_key")
     assert_equal automation.id, conversation.metadata.dig("automation", "id")
-    assert_equal automation.agent_program_id, conversation.metadata.dig("automation", "agent_program_id")
-    assert_equal automation.execution_target_id, conversation.metadata.dig("automation", "execution_target_id")
+    assert_equal automation.agent_id, conversation.metadata.dig("automation", "agent_id")
     assert_equal "rrule", conversation.metadata.dig("schedule", "kind")
     assert_equal automation.schedule_rrule, conversation.metadata.dig("schedule", "rrule")
     assert_equal automation.schedule_timezone, conversation.metadata.dig("schedule", "timezone")
@@ -124,19 +122,42 @@ class Automations::DispatchTest < ActiveSupport::TestCase
   private
 
     def create_automation!(status: "active", hour: 9, minute: 0, timezone: "UTC")
-      program =
-        AgentProgram.create!(
-          name: "Automation Program #{SecureRandom.hex(4)}",
-          config_namespace: "automation.program.#{SecureRandom.hex(4)}",
-          published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "name" => "Automation Program" },
-          global_config: {},
-          global_config_schema: { "type" => "object" },
-          conversation_config_schema: { "type" => "object" },
-          config_schema_fingerprint: "config:v1",
-        )
+      program = create_program!
+      target = create_execution_target!
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+
+      Automation.create!(
+        user: create_user!,
+        agent: agent,
+        permission_mode: "full_access",
+        status: status,
+        schedule_kind: "rrule",
+        schedule_rrule: "FREQ=DAILY;BYHOUR=#{hour};BYMINUTE=#{minute}",
+        schedule_timezone: timezone,
+        task_payload: {
+          "kind" => "scheduled_prompt",
+          "prompt" => "Ship it",
+          "selected_model_ref" => "openai/gpt-5.4",
+        },
+      )
+    end
+
+    def create_program!
+      create_agent_record!(
+        name: "Automation Program #{SecureRandom.hex(4)}",
+        config_namespace: "automation.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:v1",
+        manifest_snapshot: { "name" => "Automation Program" },
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:v1",
+      )
+    end
+
+    def create_execution_target!
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Automation host #{SecureRandom.hex(4)}",
           kind: "host",
           platform: "macos_arm64",
@@ -149,7 +170,7 @@ class Automations::DispatchTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Automation workspace #{SecureRandom.hex(4)}",
           root_path: "/tmp/automation-#{SecureRandom.hex(4)}",
@@ -158,29 +179,13 @@ class Automations::DispatchTest < ActiveSupport::TestCase
           capability_tags: ["git"],
           tags: ["automation"],
         )
-      target =
-        ExecutionTarget.create!(
-          execution_location: location,
-          workspace: workspace,
-          name: "Automation target #{SecureRandom.hex(4)}",
-          status: "active",
-          sandboxed: true,
-        )
 
-      Automation.create!(
-        user: create_user!,
-        agent_program: program,
-        execution_target: target,
-        permission_mode: "full_access",
-        status: status,
-        schedule_kind: "rrule",
-        schedule_rrule: "FREQ=DAILY;BYHOUR=#{hour};BYMINUTE=#{minute}",
-        schedule_timezone: timezone,
-        task_payload: {
-          "kind" => "scheduled_prompt",
-          "prompt" => "Ship it",
-          "selected_model_ref" => "openai/gpt-5.4",
-        },
+      create_execution_profile!(
+        execution_location: location,
+        workspace: workspace,
+        name: "Automation target #{SecureRandom.hex(4)}",
+        status: "active",
+        sandboxed: true,
       )
     end
 end

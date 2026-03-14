@@ -23,12 +23,13 @@ class BundledDefaultAgentExecutionTest < ActiveSupport::TestCase
       draft = RunDraft.order(:created_at).last
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
 
-      assert_equal "default", conversation.agent_program.bundled_agent_key
+      assert_equal "default", conversation.agent.bundled_agent_key
       assert_equal "finalized", draft.status
       assert_equal run.id, draft.materialized_conversation_run_id
       assert_equal run.id, draft.materialized_conversation_run_id
       assert_equal "bundled_default.before_agent_step.v2", draft.planning.dig("step_plan", "kind")
-      assert_equal conversation.default_execution_target_id, run.execution_target_id
+      assert_equal "agent", run.runtime_governors.dig("execution_capacity", "scope_type")
+      assert_equal conversation.agent_id, run.runtime_governors.dig("execution_capacity", "scope_id")
 
       conversation.root_graph.nodes.find(agent_node.id).update!(claim_after_at: nil)
       claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)

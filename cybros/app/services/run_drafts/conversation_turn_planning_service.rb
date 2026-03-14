@@ -14,8 +14,6 @@ module RunDrafts
       lane.prompt_buffer.render
       tokens.estimate_text
       tokens.estimate_messages
-      execution_target.list
-      execution_target.get
       tool_surface.manifest
     ].freeze
 
@@ -37,9 +35,11 @@ module RunDrafts
 
     def open_and_prepare!
       draft = create_draft!
+      deployment = runtime_deployment_for!(draft)
+      Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
       response =
         Cybros::ProgrammableAgent::HookCaller.call!(
-          deployment: draft.agent_deployment,
+          deployment: deployment,
           conversation: conversation,
           scope_type: "run_draft",
           scope_id: draft.id,
@@ -83,9 +83,15 @@ module RunDrafts
       attr_reader :conversation, :initiated_by_user, :selected_model_ref, :trigger_snapshot
 
       def create_draft!
-        deployment = resolve_deployment!
-        Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
-        deployment.reload
+        agent = conversation.agent
+        runtime_binding = resolve_runtime_binding!
+        Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: runtime_binding)
+        runtime_binding.reload
+        recognized_deployment =
+          AgentRPC::SessionAuthorizer.resolve_initialized_runtime!(
+            deployment: runtime_binding,
+            agent: agent,
+          ).fetch(:recognized_deployment)
         resolved = RuntimeGovernance::DraftGovernorResolver.resolve!(entrypoint: conversation, selected_model_ref: selected_model_ref)
 
         RunDraft.create!(
@@ -94,16 +100,16 @@ module RunDrafts
           status: "open",
           permission_mode: resolved.fetch(:permission_mode),
           trigger_snapshot: trigger_snapshot,
-          agent_program: conversation.agent_program,
-          contract_fingerprint: conversation.agent_program.published_contract_fingerprint,
-          agent_deployment: deployment,
-          deployment_fingerprint: deployment.deployment_fingerprint,
-          deployment_activated_at: deployment.activated_at&.change(usec: 0),
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+          contract_fingerprint: agent.published_contract_fingerprint,
+          deployment_fingerprint: runtime_binding.deployment_fingerprint,
+          deployment_activated_at: runtime_binding.activated_at&.change(usec: 0),
           provider_credential: resolved.fetch(:provider_credential),
-          proposed_execution_target: resolved.fetch(:proposed_execution_target),
           selected_model_ref: resolved.fetch(:selected_model_ref),
           runtime_governors: resolved.fetch(:runtime_governors),
-          agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint.presence || conversation.agent_program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint.presence || agent.config_schema_fingerprint,
           prepare_invocation_id: SecureRandom.uuid,
           planning: {},
           staged_public_settings_patch: {},
@@ -116,37 +122,41 @@ module RunDrafts
       rescue ActiveRecord::RecordInvalid => e
         raise unless stale_deployment_binding_error?(e)
 
-        missing_agent_deployment_validation_error!(program: conversation.agent_program)
+        missing_agent_runtime_validation_error!(agent: agent)
       end
 
-      def resolve_deployment!
-        program = conversation.agent_program
-        unless program
+      def resolve_runtime_binding!
+        agent = conversation.agent
+        unless agent
           AgentCore::ValidationError.raise!(
             "Conversation agent selection is required before planning a programmable run.",
-            code: "cybros.run_drafts.agent_program_missing",
+            code: "cybros.run_drafts.agent_missing",
           )
         end
 
-        deployment = program.active_healthy_deployment_for_published_contract
-        missing_agent_deployment_validation_error!(program:) unless deployment&.activated_at.present?
+        runtime_binding = agent.active_runtime_binding
+        missing_agent_runtime_validation_error!(agent: agent) unless runtime_binding&.activated_at.present?
 
-        deployment
+        runtime_binding
       end
 
       def prepare_params(draft)
         node = draft.bound_agent_node
+        session_context = Cybros::ProgrammableAgent::SessionContext.from_conversation(conversation).to_h
+        execution_context =
+          Cybros::ProgrammableAgent::ExecutionContext.from_conversation_step(
+            conversation: conversation,
+            dag_node_id: draft.trigger_snapshot["dag_node_id"],
+            node: node,
+          ).to_h
 
         {
           "invocation_id" => draft.plan_invocation_id,
           "run_draft_id" => draft.id,
           "conversation_id" => conversation.id,
-          "session_context" => Cybros::ProgrammableAgent::SessionContext.from_conversation(conversation).to_h,
-          "execution_context" => Cybros::ProgrammableAgent::ExecutionContext.from_conversation_step(
-            conversation: conversation,
-            dag_node_id: draft.trigger_snapshot["dag_node_id"],
-            node: node,
-          ).to_h,
+          "session_context" => session_context,
+          "execution_context" => execution_context,
+          "attachment_manifest" => attachment_manifest_for_step(node: node),
           "step" => {
             "phase" => "planning",
             "run_draft_id" => draft.id,
@@ -156,16 +166,41 @@ module RunDrafts
           "user_input" => trigger_snapshot["user_input"].to_s,
           "trigger_snapshot" => draft.trigger_snapshot,
           "selected_model_ref" => draft.selected_model_ref,
-          "capability_snapshot" => normalize_hash(draft.agent_deployment&.capability_snapshot),
+          "capability_snapshot" => normalize_hash(draft.recognized_deployment&.capability_snapshot),
           "permission_mode" => draft.permission_mode,
-          "execution_target_id" => draft.proposed_execution_target_id,
           "public_settings" => conversation.public_settings,
-          "agent_config" => conversation.selected_agent_config_for(draft.agent_program),
-        }
+          "agent_config" => conversation.selected_agent_config_for(draft.agent),
+        }.compact
       end
 
       def normalize_hash(value)
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
+      end
+
+      def attachment_manifest_for_step(node:)
+        user_node = source_user_node_for_step(node: node)
+        return [] if user_node.nil?
+
+        Conversations::AttachmentManifestBuilder.build(
+          conversation: conversation,
+          source_message_node_id: user_node.id,
+        )
+      rescue StandardError
+        []
+      end
+
+      def source_user_node_for_step(node:)
+        turn_id = node&.turn_id || conversation.turn_id_for_node_id(draft_node_id)
+        return nil if turn_id.blank?
+
+        conversation.root_graph.nodes.active
+          .where(turn_id: turn_id, node_type: Messages::UserMessage.node_type_key)
+          .order(:id)
+          .first
+      end
+
+      def draft_node_id
+        trigger_snapshot["dag_node_id"].to_s.presence
       end
 
       def normalize_array(value)
@@ -175,7 +210,6 @@ module RunDrafts
       def apply_planning_to_draft!(draft, planning)
         planning = normalize_hash(planning)
         staged_mutations = normalize_hash(planning["staged_mutations"])
-        apply_execution_target_proposal!(draft: draft, payload: planning["execution_target_proposal"])
         tool_surface = normalize_tool_surface!(draft: draft, payload: planning["tool_surface"])
         planning["tool_surface"] = tool_surface if tool_surface
 
@@ -191,7 +225,7 @@ module RunDrafts
         normalized = normalize_hash(payload)
         return nil if normalized.empty?
 
-        snapshot_payload = normalize_hash(draft.agent_deployment&.capability_snapshot)
+        snapshot_payload = normalize_hash(draft.recognized_deployment&.capability_snapshot)
         snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(snapshot_payload)
         manifest =
           Cybros::ProgrammableAgent::ToolSurfaceManifest.restore(
@@ -206,17 +240,6 @@ module RunDrafts
           "selected_tool_ids" => manifest.selected_tool_ids,
           "logical_tool_names" => manifest.selected_tools.map(&:logical_tool_name),
         }.compact
-      end
-
-      def apply_execution_target_proposal!(draft:, payload:)
-        proposal = normalize_hash(payload)
-        execution_target_id = proposal["execution_target_id"].to_s.strip
-        return if execution_target_id.empty?
-
-        AgentRPC::KernelServices::ExecutionTargets.propose!(
-          draft: draft,
-          execution_target_id: execution_target_id,
-        )
       end
 
       def normalize_approval_state(value)
@@ -308,14 +331,43 @@ module RunDrafts
         record = error.record
         return false unless record.is_a?(RunDraft)
 
-        record.errors[:agent_deployment].present? || record.errors[:contract_fingerprint].present?
+        record.errors[:recognized_deployment].present? ||
+          record.errors[:recognized_deployment_key].present? ||
+          record.errors[:contract_fingerprint].present? ||
+          record.errors[:deployment_fingerprint].present?
       end
 
-      def missing_agent_deployment_validation_error!(program:)
+      def missing_agent_runtime_validation_error!(agent:)
+        agent_id = agent&.id
+        contract_fingerprint = agent&.published_contract_fingerprint
+
         AgentCore::ValidationError.raise!(
-          "Selected agent has no active healthy deployment.",
-          code: "cybros.run_drafts.agent_deployment_missing",
-          details: { agent_program_id: program.id, published_contract_fingerprint: program.published_contract_fingerprint },
+          "Selected agent has no active healthy runtime binding.",
+          code: "cybros.run_drafts.agent_runtime_missing",
+          details: {
+            agent_id: agent_id,
+            published_contract_fingerprint: contract_fingerprint,
+          },
+        )
+      end
+
+      def runtime_deployment_for!(draft)
+        runtime_binding = draft.agent&.active_runtime_binding
+
+        if runtime_binding.present? &&
+            runtime_binding.deployment_fingerprint.to_s == draft.deployment_fingerprint.to_s &&
+            runtime_binding.activated_at&.change(usec: 0) == draft.deployment_activated_at&.change(usec: 0)
+          return runtime_binding
+        end
+
+        AgentCore::ValidationError.raise!(
+          "Run draft is missing its pinned runtime deployment.",
+          code: "cybros.run_drafts.agent_runtime_missing",
+          details: {
+            run_draft_id: draft.id,
+            agent_id: draft.agent_id,
+            recognized_deployment_id: draft.recognized_deployment_id,
+          },
         )
       end
 

@@ -53,18 +53,4 @@ test.describe("System Settings", () => {
 
     await expect(page.getByRole("table")).toBeVisible()
   })
-
-  test("agent programs page renders", async ({ page }) => {
-    await page.goto("/system/settings/agent_programs")
-
-    await expect(page.getByRole("heading", { name: "Agent Programs" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "New agent" })).toBeVisible()
-  })
-
-  test("agent programs page shows table and search", async ({ page }) => {
-    await page.goto("/system/settings/agent_programs")
-
-    await expect(page.getByRole("table")).toBeVisible()
-    await expect(page.getByPlaceholder("Search name or source")).toBeVisible()
-  })
 })

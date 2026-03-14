@@ -2,43 +2,30 @@
 
 ## Positioning
 
-Cybros is an agent runtime kernel and control plane.
+Cybros is the control plane for agent conversations.
 
-It should provide the core services agents need:
+The product model is intentionally small:
 
-- human interfaces
-- conversation orchestration
-- LLM orchestration
-- tool execution routing
-- execution environment management
-- memory and knowledge services
-- scheduling and automation
-- agent registration and lifecycle
-- observability and audit
+- `Conversation`
+- `Agent`
+- `RecognizedDeployment`
 
-Cybros itself is not the app-specific intelligence. It is the operating system layer. Programmable agents are the apps.
+`Conversation` is the user-facing durable thread. `Agent` is the configured runtime endpoint and policy anchor. `RecognizedDeployment` is the observed runtime identity that pins a specific turn.
 
 ## Product Principles
 
-- `Architecture first`: destructive refactors are allowed early to keep the system clean.
-- `Public API over storage access`: product features talk to `Conversation` and other public facades, not raw DAG internals or ad hoc metadata writes.
-- `Trusted self-hosted agents first`: v1 assumes the operator is responsible for the safety of agent code they deploy.
-- `Dangerous execution is separate`: shell, file mutation, browser, desktop, and deployment actions run through managed execution targets, not inside the agent deployment environment itself.
-- `Execution target is explicit`: every run must know which `location + workspace` it used.
-- `No cross-location sync in v1`: the same repo on two machines is treated as two workspaces.
-- `Agent has high conversation control`: the agent may request public conversation setting and KV changes through policy-gated APIs, but draft-time changes stay staged until Cybros finalizes the run plan.
+- `Conversation -> Agent -> RecognizedDeployment` is the canonical runtime path.
+- The dashboard launches new conversations from explicit agent rows; generic agent-less "new chat" entry points are retired.
+- Agent upgrades affect future turns only. Historical drafts and runs stay pinned to the recognized runtime identity captured when they were created.
+- Runtime policy belongs to `Agent`, especially execution capacity.
+- Conversation-owned logical workspaces are persistent and lazy-initialized instead of being exposed as standalone product inventory.
+- Uploaded files are first-class conversation artifacts and move into agents through explicit import/transfer steps, not raw RPC byte payloads.
+- Product flows should hide obsolete runtime topology such as deployment activation inventories or execution-target switching.
 
 ## Non-Goals For V1
 
-- third-party marketplace
-- plugin system design
-- cross-location workspace replication
-- per-agent strong isolation by default
-- treating Nexus as the programmable-agent runtime
-
-## V1 Trust Model
-
-- agent programs are trusted and self-hosted
-- agent deployments are out-of-process
-- dangerous execution stays in Nexus-managed targets
-- policy, session scoping, and audit remain the system boundary for user-visible control
+- user-facing multi-agent switching inside one conversation
+- user-facing deployment inventory management
+- user-facing execution-target/location/workspace topology
+- strong attestation that agent-reported runtime metadata is truthful
+- compatibility layers that preserve the abandoned pre-cutover runtime mental model

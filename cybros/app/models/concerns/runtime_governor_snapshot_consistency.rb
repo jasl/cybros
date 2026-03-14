@@ -27,39 +27,21 @@ module RuntimeGovernorSnapshotConsistency
         end
       end
 
-      return unless runtime_governor_execution_target_id.present?
-
-      unless execution_snapshot.is_a?(Hash)
-        errors.add(:runtime_governors, "must include an execution_capacity snapshot")
-        return
-      end
-
-      if execution_snapshot["execution_target_id"].to_s != runtime_governor_execution_target_id.to_s
-        errors.add(:runtime_governors, "must snapshot the selected execution target")
-      end
-
-      expected_location_id = runtime_governor_execution_location_id
-      if expected_location_id.present? && execution_snapshot["execution_location_id"].to_s != expected_location_id.to_s
-        errors.add(:runtime_governors, "must snapshot the target execution location")
-      end
-    end
-
-    def runtime_governor_execution_target_id
-      if respond_to?(:proposed_execution_target_id)
-        proposed_execution_target_id
-      else
-        execution_target_id
-      end
-    end
-
-    def runtime_governor_execution_location_id
-      target =
-        if respond_to?(:proposed_execution_target)
-          proposed_execution_target
-        else
-          execution_target
+      if runtime_governor_agent_id.present?
+        unless execution_snapshot.is_a?(Hash)
+          errors.add(:runtime_governors, "must include an execution_capacity snapshot")
+          return
         end
 
-      target&.execution_location_id
+        if execution_snapshot["scope_type"].to_s != "agent" || execution_snapshot["scope_id"].to_s != runtime_governor_agent_id.to_s
+          errors.add(:runtime_governors, "must snapshot the selected agent execution capacity policy")
+        end
+      end
+    end
+
+    def runtime_governor_agent_id
+      return unless respond_to?(:agent_id)
+
+      agent_id
     end
 end

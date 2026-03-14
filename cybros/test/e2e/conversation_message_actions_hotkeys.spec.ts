@@ -48,29 +48,46 @@ async function waitForFetchUrl(page, pathFragment, timeoutMs = 15_000) {
   }, { timeout: timeoutMs }).toBe(true)
 }
 
+function conversationTranscript(page) {
+  return page.locator("[id^='messages_list_conversation_']")
+}
+
 async function createConversationAndWaitForMarkdown(page) {
   await openConversationWithMockRuntime(page, `E2E Actions ${Date.now()}`)
+  const transcript = conversationTranscript(page)
+  const agentBubbleCountBeforeSend = await transcript.locator('[data-role="agent-bubble"]').count()
 
   await page.getByPlaceholder("Message…").fill("!md please respond with markdown")
   await page.getByRole("button", { name: "Send" }).click()
 
-  await expect(page.getByText("!md please respond with markdown")).toBeVisible({ timeout: 10_000 })
-  await waitForTailAgentToFinishWithMarkdown(page)
-  await expect(page.locator('[data-role="agent-bubble"]').last().locator('[data-controller="markdown"]')).toHaveCount(1)
+  await expect(transcript.getByText("!md please respond with markdown", { exact: true })).toBeVisible({ timeout: 10_000 })
+  await waitForTailAgentToFinishWithMarkdown(page, { agentBubbleCountBeforeSend })
+  await expect(transcript.locator('[data-role="agent-bubble"]').last().locator('[data-controller="markdown"]')).toHaveCount(1)
+  await expect(transcript.locator('[data-role="agent-bubble"]').last().getByText("Mock Markdown", { exact: true })).toBeVisible()
 }
 
-async function waitForTailAgentToFinishWithMarkdown(page) {
+async function waitForTailAgentToFinishWithMarkdown(page, { agentBubbleCountBeforeSend = 0 } = {}) {
+  const transcript = conversationTranscript(page)
   const deadline = Date.now() + 90_000
   while (Date.now() < deadline) {
-    const tailBubble = page.locator('[data-role="agent-bubble"]').last()
+    const bubbleCount = await transcript.locator('[data-role="agent-bubble"]').count().catch(() => 0)
+    if (bubbleCount <= agentBubbleCountBeforeSend) {
+      await page.waitForTimeout(750)
+      await page.reload()
+      continue
+    }
+
+    const tailBubble = transcript.locator('[data-role="agent-bubble"]').last()
     const state = (await tailBubble.getAttribute("data-node-state").catch(() => "")) || ""
     const hasMarkdown = (await tailBubble.locator('[data-controller="markdown"]').count().catch(() => 0)) > 0
-    if (state === "finished" && hasMarkdown) return
+    const hasExpectedReply = (await tailBubble.getByText("Mock Markdown", { exact: true }).count().catch(() => 0)) > 0
+    if (state === "finished" && hasMarkdown && hasExpectedReply) return
     await page.waitForTimeout(750)
     await page.reload()
   }
 
-  await expect(page.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "finished")
+  await expect(transcript.locator('[data-role="agent-bubble"]').last()).toHaveAttribute("data-node-state", "finished")
+  await expect(transcript.locator('[data-role="agent-bubble"]').last().getByText("Mock Markdown", { exact: true })).toBeVisible()
 }
 
 async function waitForTailAgentToEnterInFlightState(page) {

@@ -69,11 +69,11 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
         )
       end
 
-    assert_equal "cybros.agent_rpc.invocation_binding_mismatch", drift_error.code
+    assert_equal "cybros.agent_rpc.recognized_deployment_drift", drift_error.code
     assert_equal [], replacement_prepare_calls
     assert_equal invocation.id, AgentRPCInvocation.find_by!(invocation_id: "invoke-123", scope_id: "draft-123").id
     assert_equal "reply_unknown", invocation.reload.status
-    assert_equal 0, AgentRPCSession.where(agent_deployment: replacement, status: "open").count
+    assert_equal 0, AgentRPCSession.where(scope_type: "run_draft", scope_id: "draft-123", status: "open").count
   ensure
     primary_server&.shutdown
     replacement_server&.shutdown
@@ -82,9 +82,8 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
   private
 
     def create_runtime!(endpoint_url:, deployment_bearer_secret_ref:, deployment_fingerprint:)
-      conversation = create_conversation!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -94,8 +93,10 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
+      target = build_default_execution_profile!
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
@@ -106,19 +107,25 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      conversation =
+        create_conversation!(
+          agent: agent,
+          agent_program: program,
+          default_execution_target: target,
+        )
 
-      { conversation: conversation, program: program, deployment: deployment }
+      { agent: agent, conversation: conversation, program: program, deployment: deployment, target: target }
     end
 
     def replacement_deployment!(program:, endpoint_url:, deployment_bearer_secret_ref:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -129,7 +136,7 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

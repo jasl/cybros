@@ -2,6 +2,8 @@ module Statistics
   class ToolCallFact < ApplicationRecord
     self.table_name = "statistics_tool_call_facts"
 
+    belongs_to :recognized_deployment, optional: true
+
     SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
     EXECUTION_SCOPES = %w[parent subagent].freeze
     MODEL_ATTEMPT_CLASSES = %w[first_pass repaired_name repaired_args repaired_both].freeze
@@ -21,9 +23,11 @@ module Statistics
     validates :tool_outcome, presence: true, inclusion: { in: TOOL_OUTCOMES }
     validates :failure_class, allow_nil: true, inclusion: { in: FAILURE_CLASSES }
     validates :duration_ms, allow_nil: true, numericality: { greater_than_or_equal_to: 0, only_integer: true }
+    validates :recognized_deployment_key, presence: true, if: :recognized_deployment_id?
 
     before_validation :derive_effective_on
     before_validation :derive_duration_ms
+    before_validation :derive_recognized_deployment_key
 
     private
 
@@ -39,6 +43,12 @@ module Statistics
         return if started_at.blank? || finished_at.blank?
 
         self.duration_ms = ((finished_at - started_at) * 1000).round
+      end
+
+      def derive_recognized_deployment_key
+        return if recognized_deployment_key.present?
+
+        self.recognized_deployment_key = recognized_deployment&.recognized_deployment_key
       end
   end
 end

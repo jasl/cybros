@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn } from "./helpers"
+import { openNewConversation, signIn } from "./helpers"
 
 test.describe("Conversation dual-channel skeleton", () => {
   test.beforeEach(async ({ page }) => {
@@ -7,11 +7,7 @@ test.describe("Conversation dual-channel skeleton", () => {
   })
 
   test("show page has Turbo stream subscription and renders agent placeholder on send", async ({ page }) => {
-    await page.goto("/conversations")
-
-    await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Dual Channel ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openNewConversation(page, `E2E Dual Channel ${Date.now()}`)
 
     await expect(page.locator('turbo-cable-stream-source[channel="Turbo::StreamsChannel"]')).toHaveCount(1)
 

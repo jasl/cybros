@@ -8,6 +8,7 @@ import {
 export default class extends Controller {
   static targets = [
     "textarea",
+    "attachmentInput",
     "statusRail",
     "editMode",
     "editModeLabel",
@@ -23,6 +24,9 @@ export default class extends Controller {
     this.queueExpanded = false
     this.submitInFlight = false
     this.submittedDraft = null
+    this.attachmentSelectionToken = 0
+    this.submittedAttachmentSelectionToken = null
+    this.pendingAttachmentRestoreFiles = null
     this.pendingSubmissions = []
     this.handleMessageEdit = this.handleMessageEdit.bind(this)
     window.addEventListener("conversation:user-message-edit", this.handleMessageEdit)
@@ -32,6 +36,8 @@ export default class extends Controller {
 
   disconnect() {
     window.removeEventListener("conversation:user-message-edit", this.handleMessageEdit)
+    this.submittedAttachmentSelectionToken = null
+    this.pendingAttachmentRestoreFiles = null
     this.pendingSubmissions = []
   }
 
@@ -46,13 +52,20 @@ export default class extends Controller {
     if (!textarea) return
 
     const value = textarea.value.trim()
-    if (!value) {
+    const hasAttachments = this.#hasPendingAttachmentsForNewSubmission()
+    if (!value && !hasAttachments) {
       event.preventDefault()
       textarea.focus()
       return
     }
 
     this.#syncComposerState()
+
+    if (this.submitInFlight && hasAttachments) {
+      event.preventDefault()
+      this.#showToast("Wait for the current send to finish before sending attachments.")
+      return
+    }
 
     if (this.submitInFlight) {
       event.preventDefault()
@@ -61,12 +74,29 @@ export default class extends Controller {
       if (!submission) return
 
       this.pendingSubmissions.push(submission)
-      this.#clearComposerDraft()
+      this.#clearComposerDraft({ clearAttachments: false })
       return
     }
 
     this.submittedDraft = value
+    this.submittedAttachmentSelectionToken = this.#currentAttachmentSelectionToken()
     this.submitInFlight = true
+  }
+
+  attachmentInputChanged() {
+    this.attachmentSelectionToken += 1
+    this.pendingAttachmentRestoreFiles = null
+  }
+
+  prepareAttachmentSelection(event) {
+    if (!this.submitInFlight) return
+
+    const input = event?.currentTarget
+    if (!input) return
+    if (typeof DataTransfer !== "function") return
+
+    this.pendingAttachmentRestoreFiles = Array.from(input.files || [])
+    input.value = ""
   }
 
   keydown(event) {
@@ -80,16 +110,20 @@ export default class extends Controller {
   async submitEnd(event) {
     const success = event.detail?.success === true
     const submittedDraft = this.submittedDraft
+    const submittedAttachmentSelectionToken = this.submittedAttachmentSelectionToken
     this.submittedDraft = null
+    this.submittedAttachmentSelectionToken = null
     this.submitInFlight = false
 
     if (success) {
-      this.#clearComposerDraftIfUnchanged(submittedDraft)
+      this.pendingAttachmentRestoreFiles = null
+      this.#clearComposerDraftIfUnchanged(submittedDraft, submittedAttachmentSelectionToken)
       await this.#flushPendingSubmissions()
       return
     }
 
     this.#restorePendingSubmissions()
+    this.#restorePendingAttachments()
   }
 
   autoResize() {
@@ -323,8 +357,9 @@ export default class extends Controller {
     }
   }
 
-  #clearComposerDraft() {
+  #clearComposerDraft({ clearAttachments = true } = {}) {
     this.#clearEditState()
+    if (clearAttachments) this.#clearPendingAttachments()
     if (!this.hasTextareaTarget) return
 
     this.textareaTarget.value = ""
@@ -332,8 +367,9 @@ export default class extends Controller {
     this.#syncComposerState()
   }
 
-  #clearComposerDraftIfUnchanged(submittedDraft) {
+  #clearComposerDraftIfUnchanged(submittedDraft, submittedAttachmentSelectionToken = null) {
     this.#clearEditState()
+    this.#clearPendingAttachmentsIfUnchanged(submittedAttachmentSelectionToken)
     if (!this.hasTextareaTarget) return
 
     const currentDraft = this.textareaTarget.value
@@ -402,6 +438,62 @@ export default class extends Controller {
     this.textareaTarget.value = restored
     this.autoResize()
     this.textareaTarget.focus()
+  }
+
+  #restorePendingAttachments() {
+    if (!this.hasAttachmentInputTarget) {
+      this.pendingAttachmentRestoreFiles = null
+      return
+    }
+
+    const files = Array.from(this.pendingAttachmentRestoreFiles || [])
+    if (files.length === 0) return
+    if (this.attachmentInputTarget.files.length > 0) {
+      this.pendingAttachmentRestoreFiles = null
+      return
+    }
+    if (typeof DataTransfer !== "function") {
+      this.pendingAttachmentRestoreFiles = null
+      return
+    }
+
+    try {
+      const transfer = new DataTransfer()
+      files.forEach((file) => transfer.items.add(file))
+      this.attachmentInputTarget.files = transfer.files
+    } finally {
+      this.pendingAttachmentRestoreFiles = null
+    }
+  }
+
+  #clearPendingAttachments() {
+    if (!this.hasAttachmentInputTarget) return
+
+    this.attachmentInputTarget.value = ""
+  }
+
+  #clearPendingAttachmentsIfUnchanged(submittedAttachmentSelectionToken) {
+    const currentSelectionToken = this.#currentAttachmentSelectionToken()
+    if (submittedAttachmentSelectionToken !== currentSelectionToken) return
+
+    this.#clearPendingAttachments()
+  }
+
+  #hasPendingAttachments() {
+    return this.hasAttachmentInputTarget && this.attachmentInputTarget.files.length > 0
+  }
+
+  #hasPendingAttachmentsForNewSubmission() {
+    if (!this.#hasPendingAttachments()) return false
+    if (!this.submitInFlight) return true
+
+    return this.#currentAttachmentSelectionToken() !== this.submittedAttachmentSelectionToken
+  }
+
+  #currentAttachmentSelectionToken() {
+    if (!this.#hasPendingAttachments()) return null
+
+    return this.attachmentSelectionToken
   }
 
   #clearEditState() {

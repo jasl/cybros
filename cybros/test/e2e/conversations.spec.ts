@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn } from "./helpers"
+import { openNewConversation, signIn } from "./helpers"
 
 test.describe("Conversations", () => {
   test.beforeEach(async ({ page }) => {
@@ -24,32 +24,22 @@ test.describe("Conversations", () => {
     }
   })
 
-  test("creating a new conversation from index", async ({ page }) => {
+  test("index no longer exposes a generic creation form", async ({ page }) => {
     await page.goto("/conversations")
 
-    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Test Conversation")
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-
-    await expect(page).toHaveURL(/\/conversations\//)
+    await expect(page.locator("main").getByPlaceholder("New conversation title")).toHaveCount(0)
+    await expect(page.locator("main").getByRole("button", { name: "New" })).toHaveCount(0)
   })
 
   test("conversation show page renders chat interface", async ({ page }) => {
-    await page.goto("/conversations")
-
-    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Chat Test")
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openNewConversation(page, "E2E Chat Test")
 
     await expect(page.getByPlaceholder("Message…")).toBeVisible()
     await expect(page.getByRole("button", { name: "Send" })).toBeVisible()
   })
 
   test("send a message and verify it appears", async ({ page }) => {
-    await page.goto("/conversations")
-
-    await page.locator("main").getByPlaceholder("New conversation title").fill("E2E Message Test")
-    await page.locator("main").getByRole("button", { name: "New" }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openNewConversation(page, "E2E Message Test")
 
     await page.getByPlaceholder("Message…").fill("Hello from Playwright E2E test")
     await page.getByRole("button", { name: "Send" }).click()

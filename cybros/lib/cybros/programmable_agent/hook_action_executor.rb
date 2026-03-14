@@ -318,6 +318,7 @@ module Cybros
             "generated_by" => "programmable_agent_hook",
             "hook_name" => hook_name,
             "action_type" => action.type,
+            "logical_tool_name" => action.logical_tool_name.to_s,
             "placement" => action.placement,
             "action_index" => action_index,
             "source_node_id" => anchor_node&.id,

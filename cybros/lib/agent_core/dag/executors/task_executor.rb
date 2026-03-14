@@ -181,7 +181,7 @@ module AgentCore
           end
 
           def execute_tool_call(runtime:, node:, execution_context:, tool_name:, arguments:, tool_route:)
-            if tool_route&.implementation_source == "agent_program"
+            if tool_route&.implementation_source == "agent"
               payload =
                 programmable_tool_executor_for(runtime).execute_programmable_tool!(
                   tool_call_id: node.body_input.fetch("tool_call_id", ""),
@@ -230,7 +230,7 @@ module AgentCore
             return provider if provider.respond_to?(:execute_programmable_tool!)
 
             ValidationError.raise!(
-              "runtime provider does not support agent_program tool execution",
+              "runtime provider does not support agent tool execution",
               code: "agent_core.dag.task_executor.programmable_tool_executor_missing",
               details: {
                 provider_class: provider.class.name,
@@ -384,7 +384,7 @@ module AgentCore
               )
             end
 
-            unless %w[kernel agent_program].include?(route.implementation_source)
+            unless %w[kernel agent].include?(route.implementation_source)
               return nil unless strict
 
               ValidationError.raise!(

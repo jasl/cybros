@@ -408,12 +408,12 @@ module Cybros
       def apply_agent_config_patch!(conversation:, patch:)
         return if patch.blank?
 
-        namespace = conversation.agent_program.config_namespace.to_s
+        namespace = conversation.agent.config_namespace.to_s
         agent_config = conversation.agent_config.deep_dup
         current_namespace = agent_config[namespace].is_a?(Hash) ? agent_config[namespace] : {}
         agent_config[namespace] = current_namespace.deep_merge(patch)
         conversation.agent_config = agent_config
-        conversation.agent_config_schema_fingerprint = conversation.agent_program.config_schema_fingerprint
+        conversation.agent_config_schema_fingerprint = conversation.agent.config_schema_fingerprint
         conversation.save!
       end
       private_class_method :apply_agent_config_patch!

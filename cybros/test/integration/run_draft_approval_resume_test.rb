@@ -50,71 +50,6 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning preserves kernel-owned target switch approval when before_agent_step omits approval_request" do
-    server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_programmable_runtime!(server:)
-    conversation = runtime.fetch(:conversation)
-    alternate_target = create_execution_target!(name: "Alternate target")
-    service =
-      RunDrafts::ConversationTurnPlanningService.new(
-        conversation: conversation,
-        initiated_by_user: conversation.user,
-        selected_model_ref: "openai/gpt-5.4",
-        trigger_snapshot: {
-          "kind" => "user_turn",
-          "dag_node_id" => SecureRandom.uuid,
-          "user_input" => "Ship it",
-        },
-      )
-    captured_draft = nil
-    service_singleton = class << service; self; end
-    hook_caller_singleton = class << Cybros::ProgrammableAgent::HookCaller; self; end
-
-    service_singleton.alias_method :__test_original_create_draft!, :create_draft!
-    service_singleton.define_method(:create_draft!) do
-      captured_draft = __test_original_create_draft!
-    end
-
-    hook_caller_singleton.alias_method :__test_original_call!, :call!
-    hook_caller_singleton.define_method(:call!) do |**kwargs|
-      AgentRPC::KernelServices::ExecutionTargets.propose!(
-        draft: captured_draft,
-        execution_target_id: alternate_target.id,
-      )
-      Cybros::ProgrammableAgent::HookEnvelope.parse!(
-        hook_name: kwargs.fetch(:hook_name),
-        request_payload: kwargs.fetch(:request_payload),
-        payload: {
-          "planning" => {
-            "step_plan" => {
-              "fixture" => true,
-              "kind" => "fixture_plan_v2",
-            },
-          },
-        },
-      )
-    end
-
-    service.open_and_prepare!
-
-    draft = captured_draft.reload
-    assert_equal "awaiting_approval", draft.status
-    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
-    assert_equal "target_switch", draft.approval_state.fetch("reason")
-    assert_equal alternate_target.id, draft.proposed_execution_target_id
-    assert_nil draft.materialized_conversation_run_id
-  ensure
-    if defined?(service_singleton) && service_singleton.method_defined?(:__test_original_create_draft!)
-      service_singleton.alias_method :create_draft!, :__test_original_create_draft!
-      service_singleton.remove_method :__test_original_create_draft!
-    end
-    if defined?(hook_caller_singleton) && hook_caller_singleton.method_defined?(:__test_original_call!)
-      hook_caller_singleton.alias_method :call!, :__test_original_call!
-      hook_caller_singleton.remove_method :__test_original_call!
-    end
-    server&.shutdown
-  end
-
   test "approval resume keeps the draft permission mode pinned when the live conversation preset changes after parking" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -177,10 +112,15 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4").fetch(:agent_node)
     draft = RunDraft.order(:created_at).last
     alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
+    alternate_agent =
+      create_agent_runtime!(
+        program: alternate_program,
+        execution_target: build_default_execution_profile!,
+      )
 
     Conversations::RuntimeSettingsUpdater.update!(
       conversation: conversation,
-      attributes: { agent_program_id: alternate_program.id },
+      attributes: { agent_id: alternate_agent.id },
     )
 
     assert_enqueued_with(job: DAG::ExecuteNodeJob) do
@@ -189,7 +129,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
 
     run = draft.reload.materialized_conversation_run
     assert_equal "finalized", draft.status
-    assert_equal original_program.id, run.agent_program_id
+    assert_equal runtime.fetch(:agent).id, run.agent_id
     assert_equal original_program.config_schema_fingerprint, run.agent_config_schema_fingerprint
     assert_equal original_program.config_schema_fingerprint, draft.agent_config_schema_fingerprint
     assert_equal alternate_program.config_schema_fingerprint, conversation.reload.agent_config_schema_fingerprint
@@ -220,11 +160,16 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       conversation.append_user_message!(content: "Ship it", model_ref: "openai/gpt-5.4").fetch(:agent_node)
     draft = RunDraft.order(:created_at).last
     alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
+    alternate_agent =
+      create_agent_runtime!(
+        program: alternate_program,
+        execution_target: build_default_execution_profile!,
+      )
 
     draft.update!(staged_agent_config_patch: { "mode" => "review" })
     Conversations::RuntimeSettingsUpdater.update!(
       conversation: conversation,
-      attributes: { agent_program_id: alternate_program.id },
+      attributes: { agent_id: alternate_agent.id },
     )
 
     assert_enqueued_with(job: DAG::ExecuteNodeJob) do
@@ -285,7 +230,6 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
-    alternate_target = create_execution_target!
     draft =
       RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
         conversation: conversation,
@@ -300,26 +244,19 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     draft.update!(
       status: "awaiting_approval",
       approval_state: { "status" => "denied", "reason" => "operator_denied" },
-      proposed_execution_target: alternate_target,
-      runtime_governors:
-        draft.runtime_governors.deep_merge(
-          "execution_capacity" => {
-            "scope_type" => "execution_target",
-            "execution_target_id" => alternate_target.id,
-            "execution_location_id" => alternate_target.execution_location_id,
-          },
-        ),
       staged_public_settings_patch: { "tone" => "concise" },
       staged_agent_config_patch: { "mode" => "review" },
       staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
     )
+    expected_recognized_deployment_key = draft.recognized_deployment_key
 
     error = assert_raises(AgentCore::ValidationError) { RunDrafts::ApprovalResumeService.resume!(draft: draft) }
 
     assert_equal "cybros.run_drafts.approval_not_granted", error.code
     assert_equal "discarded", draft.reload.status
-    assert_equal alternate_target.id, draft.proposed_execution_target_id
-    assert_equal alternate_target.id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+    assert_equal expected_recognized_deployment_key, draft.recognized_deployment_key
+    assert_equal "agent", draft.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal conversation.agent_id, draft.runtime_governors.dig("execution_capacity", "scope_id")
     assert_equal({}, draft.staged_public_settings_patch)
     assert_equal({}, draft.staged_agent_config_patch)
     assert_equal([], draft.staged_kv_ops)
@@ -503,7 +440,8 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     agent_node = result.fetch(:agent_node)
     draft = RunDraft.order(:created_at).last
 
-    deployment.update!(status: "inactive", health_status: "inactive", deactivated_at: Time.current)
+    deployment.update!(status: "inactive", health_status: "unhealthy", deactivated_at: Time.current)
+    runtime.fetch(:agent).update!(status: "inactive", health_status: "unhealthy", deactivated_at: Time.current)
 
     error =
       assert_raises(AgentCore::ValidationError) do
@@ -524,7 +462,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
 
     def create_programmable_runtime!(server:)
       user = create_user!
-      program = AgentProgram.create!(
+      program = create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -538,7 +476,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         config_schema_fingerprint: "config:v1",
       )
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -549,7 +487,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -559,19 +497,19 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       target = create_execution_target!
       ensure_active_openai_credential!
       conversation = create_conversation!(user: user, title: "Chat")
+      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
+        agent: agent,
         permission_mode: "default",
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 
-      { conversation: conversation, deployment: deployment, program: program }
+      { agent: agent, conversation: conversation, deployment: deployment, program: program }
     end
 
     def create_program!(name:, config_namespace:, server:)
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: name,
           config_namespace: config_namespace,
           published_contract_fingerprint: "contract:#{config_namespace}",
@@ -584,7 +522,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:#{config_namespace}",
         )
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -595,7 +533,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -607,7 +545,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
 
     def create_execution_target!(name: "Primary target")
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -620,7 +558,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/approval-#{SecureRandom.hex(4)}",
@@ -630,7 +568,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

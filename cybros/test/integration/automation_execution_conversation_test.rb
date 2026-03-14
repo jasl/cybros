@@ -11,22 +11,29 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
   test "each automation trigger creates a fresh execution conversation" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_automation_runtime!(server:)
+    automation = runtime.fetch(:automation)
+
+    assert_equal runtime.fetch(:agent).id, automation.agent_id
 
     first =
       perform_dispatch!(
-        automation: runtime.fetch(:automation),
+        automation: automation,
         scheduled_for: Time.utc(2026, 3, 9, 9, 0, 0),
       )
     second =
       perform_dispatch!(
-        automation: runtime.fetch(:automation),
+        automation: automation,
         scheduled_for: Time.utc(2026, 3, 10, 9, 0, 0),
       )
 
     assert_not_equal first.id, second.id
-    assert_equal runtime.fetch(:automation).id, first.automation_id
-    assert_equal runtime.fetch(:automation).id, second.automation_id
-    assert_equal 2, runtime.fetch(:automation).conversations.count
+    assert_equal automation.id, first.automation_id
+    assert_equal automation.id, second.automation_id
+    assert_equal 2, automation.conversations.count
+    assert_equal runtime.fetch(:agent).id, first.agent_id
+    assert_equal runtime.fetch(:agent).id, second.agent_id
+    assert_equal runtime.fetch(:agent).config_schema_fingerprint, first.agent_config_schema_fingerprint
+    assert_equal runtime.fetch(:agent).config_schema_fingerprint, second.agent_config_schema_fingerprint
   ensure
     server&.shutdown
   end
@@ -61,6 +68,8 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
     assert_equal "finalized", draft.status
     assert_equal run.id, draft.materialized_conversation_run_id
     assert_equal conversation.id, run.conversation_id
+    assert_equal runtime.fetch(:agent).id, run.agent_id
+    assert_equal draft.recognized_deployment_id, run.recognized_deployment_id
     assert_equal run.id, conversation.metadata.dig("automation_execution", "conversation_run_id")
     assert_equal conversation.id, run.snapshot.dig("draft", "trigger_snapshot", "conversation_id")
     assert_equal conversation.automation_id, run.snapshot.dig("draft", "trigger_snapshot", "automation_id")
@@ -133,15 +142,16 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
 
     draft = conversation.run_drafts.order(:created_at, :id).last
     agent_node = conversation.root_graph.nodes.find(draft.trigger_snapshot.fetch("dag_node_id"))
-    expected_target_id = draft.proposed_execution_target_id
-    expected_capacity_target_id = draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+    expected_recognized_deployment_key = draft.recognized_deployment_key
+    expected_capacity_scope_id = draft.runtime_governors.dig("execution_capacity", "scope_id")
     draft.update!(expires_at: 1.minute.ago)
 
     RunDrafts::ApprovalExpiryService.expire!(draft: draft)
 
     assert_equal "expired", draft.reload.status
-    assert_equal expected_target_id, draft.proposed_execution_target_id
-    assert_equal expected_capacity_target_id, draft.runtime_governors.dig("execution_capacity", "execution_target_id")
+    assert_equal expected_recognized_deployment_key, draft.recognized_deployment_key
+    assert_equal "agent", draft.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal expected_capacity_scope_id, draft.runtime_governors.dig("execution_capacity", "scope_id")
     assert_equal "canceled", conversation.reload.metadata.dig("automation_execution", "status")
     assert_equal DAG::Node::REJECTED, agent_node.reload.state
     assert_equal "approval_expired", agent_node.metadata.fetch("reason")
@@ -166,12 +176,12 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
       program = create_program!
       deployment = active_deployment!(program: program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Automation target")
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: permission_mode,
           status: "active",
           schedule_kind: "rrule",
@@ -184,7 +194,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
           },
         )
 
-      { automation: automation, program: program, deployment: deployment, target: target }
+      { agent: agent, automation: automation, program: program, deployment: deployment, target: target }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -197,7 +207,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -213,7 +223,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -224,7 +234,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -235,7 +245,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -248,7 +258,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -258,7 +268,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

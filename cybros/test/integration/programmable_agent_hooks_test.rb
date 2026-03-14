@@ -82,7 +82,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning applies execution_target_proposal through the kernel-owned target switch policy" do
+  test "planning rejects legacy execution_target proposals at the hook contract boundary" do
     alternate_target_id = nil
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
@@ -100,25 +100,24 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
       ).start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
-    alternate_target = create_execution_target!(name: "Alternate target")
-    alternate_target_id = alternate_target.id
+    alternate_target_id = SecureRandom.uuid
 
-    draft =
-      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
-        conversation: conversation,
-        initiated_by_user: conversation.user,
-        selected_model_ref: "openai/gpt-5.4",
-        trigger_snapshot: {
-          "kind" => "user_turn",
-          "dag_node_id" => SecureRandom.uuid,
-          "user_input" => "Plan it",
-        },
-      )
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+          conversation: conversation,
+          initiated_by_user: conversation.user,
+          selected_model_ref: "openai/gpt-5.4",
+          trigger_snapshot: {
+            "kind" => "user_turn",
+            "dag_node_id" => SecureRandom.uuid,
+            "user_input" => "Plan it",
+          },
+        )
+      end
 
-    assert_equal "awaiting_approval", draft.status
-    assert_equal "pending_confirmation", draft.approval_state.fetch("status")
-    assert_equal "target_switch", draft.approval_state.fetch("reason")
-    assert_equal alternate_target.id, draft.proposed_execution_target_id
+    assert_equal "cybros.programmable_agent.hook_contract.invalid_planning_field", error.code
+    assert_nil RunDraft.order(:created_at).last&.planning&.dig("execution_target_proposal")
   ensure
     server&.shutdown
   end
@@ -151,9 +150,9 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
           conversation: conversation,
           initiated_by_user: conversation.user,
           selected_model_ref: "openai/gpt-5.4",
-          trigger_snapshot: {
-            "kind" => "user_turn",
-            "dag_node_id" => SecureRandom.uuid,
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
             "user_input" => "Plan it",
           },
         )
@@ -357,7 +356,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
     def create_programmable_runtime!(server:)
       user = create_user!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -371,7 +370,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
@@ -382,7 +381,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
@@ -400,80 +399,14 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
         backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
       )
       credential.save!
-      location =
-        ExecutionLocation.create!(
-          name: "Primary host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        Workspace.create!(
-          execution_location: location,
-          name: "Primary workspace",
-          root_path: "/tmp/programmable-hooks-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-      target =
-        ExecutionTarget.create!(
-          execution_location: location,
-          workspace: workspace,
-          name: "Primary target",
-          status: "active",
-          sandboxed: true,
-        )
+      agent = materialize_agent_runtime!(program: program)
 
-      conversation = create_conversation!(user: user, title: "Chat")
+      conversation = create_conversation!(user: user, title: "Chat", agent: agent)
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
         permission_mode: "default",
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        agent_config_schema_fingerprint: agent.config_schema_fingerprint,
       )
 
-      { conversation: conversation, deployment: deployment, program: program }
-    end
-
-    def create_execution_target!(name:)
-      location =
-        ExecutionLocation.create!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        Workspace.create!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      ExecutionTarget.create!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
-      )
+      { agent: agent, conversation: conversation, deployment: deployment, program: program }
     end
 end

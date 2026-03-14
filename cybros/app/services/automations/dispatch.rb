@@ -41,8 +41,8 @@ module Automations
               automation_dispatch_key: dispatch_key,
               automation_triggered_at: scheduled_for,
               title: conversation_title,
-              agent_program: automation.agent_program,
-              default_execution_target: automation.execution_target,
+              agent: automation.agent,
+              agent_config_schema_fingerprint: automation.agent&.config_schema_fingerprint,
               permission_mode: automation.permission_mode,
               metadata: conversation_metadata,
             )
@@ -78,8 +78,7 @@ module Automations
         {
           "id" => automation.id,
           "user_id" => automation.user_id,
-          "agent_program_id" => automation.agent_program_id,
-          "execution_target_id" => automation.execution_target_id,
+          "agent_id" => automation.agent_id,
           "permission_mode" => automation.permission_mode,
           "task_payload" => automation.task_payload.deep_dup,
         }.compact

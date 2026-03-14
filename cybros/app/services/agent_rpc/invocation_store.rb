@@ -2,11 +2,11 @@ require "digest"
 
 module AgentRPC
   class InvocationStore
-    def self.replay_candidate_for(deployment:, scope_type:, scope_id:, method_name:, invocation_id:)
+    def self.replay_candidate_for(agent:, recognized_deployment:, deployment:, scope_type:, scope_id:, method_name:, invocation_id:)
       scope =
         AgentRPCInvocation.where(
-          agent_deployment_id: deployment.id,
-          binding_fingerprint: deployment.deployment_fingerprint,
+          agent_id: agent.id,
+          recognized_deployment_key: recognized_deployment.recognized_deployment_key,
           scope_type: scope_type.to_s,
           scope_id: scope_id.to_s,
           method: method_name.to_s,
@@ -20,8 +20,9 @@ module AgentRPC
       end
     end
 
-    def self.reply_unknown_candidate_for(scope_type:, scope_id:, method_name:, invocation_id:)
+    def self.reply_unknown_candidate_for(agent:, scope_type:, scope_id:, method_name:, invocation_id:)
       AgentRPCInvocation.where(
+        agent_id: agent.id,
         scope_type: scope_type.to_s,
         scope_id: scope_id.to_s,
         method: method_name.to_s,
@@ -30,9 +31,11 @@ module AgentRPC
       ).order(created_at: :desc).first
     end
 
-    def self.ensure_replayable!(invocation:, deployment:, request_payload:)
+    def self.ensure_replayable!(invocation:, agent:, recognized_deployment:, deployment:, request_payload:)
       store =
         new(
+          agent: agent,
+          recognized_deployment: recognized_deployment,
           deployment: deployment,
           conversation: invocation.conversation,
           scope_type: invocation.scope_type,
@@ -46,8 +49,10 @@ module AgentRPC
       invocation
     end
 
-    def self.start_or_replay!(deployment:, conversation:, scope_type:, scope_id:, method_name:, invocation_id:, request_payload:)
+    def self.start_or_replay!(agent:, recognized_deployment:, deployment:, conversation:, scope_type:, scope_id:, method_name:, invocation_id:, request_payload:)
       new(
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         deployment: deployment,
         conversation: conversation,
         scope_type: scope_type,
@@ -91,7 +96,9 @@ module AgentRPC
       value.is_a?(Hash) ? value.deep_stringify_keys : {}
     end
 
-    def initialize(deployment:, conversation:, scope_type:, scope_id:, method_name:, invocation_id:, request_payload:)
+    def initialize(agent:, recognized_deployment:, deployment:, conversation:, scope_type:, scope_id:, method_name:, invocation_id:, request_payload:)
+      @agent = agent
+      @recognized_deployment = recognized_deployment
       @deployment = deployment
       @conversation = conversation
       @scope_type = scope_type.to_s
@@ -114,7 +121,9 @@ module AgentRPC
       {
         invocation:
           AgentRPCInvocation.create!(
-            agent_deployment: deployment,
+            agent: agent,
+            recognized_deployment: recognized_deployment,
+            recognized_deployment_key: recognized_deployment.recognized_deployment_key,
             conversation: conversation,
             scope_type: scope_type,
             scope_id: scope_id,
@@ -133,10 +142,12 @@ module AgentRPC
 
     private
 
-      attr_reader :deployment, :conversation, :scope_type, :scope_id, :method_name, :invocation_id, :request_payload
+      attr_reader :agent, :recognized_deployment, :deployment, :conversation, :scope_type, :scope_id, :method_name, :invocation_id, :request_payload
 
       def replay_candidate
         self.class.replay_candidate_for(
+          agent: agent,
+          recognized_deployment: recognized_deployment,
           deployment: deployment,
           scope_type: scope_type,
           scope_id: scope_id,
@@ -148,6 +159,7 @@ module AgentRPC
       def ensure_no_reply_unknown_binding_drift!
         candidate =
           self.class.reply_unknown_candidate_for(
+            agent: agent,
             scope_type: scope_type,
             scope_id: scope_id,
             method_name: method_name,
@@ -160,8 +172,22 @@ module AgentRPC
       end
 
       def ensure_same_binding!(invocation)
+        if invocation.recognized_deployment_key != recognized_deployment.recognized_deployment_key
+          AgentCore::ValidationError.raise!(
+            "Recognized deployment drifted for this invocation.",
+            code: "cybros.agent_rpc.recognized_deployment_drift",
+            details: {
+              invocation_id: invocation.invocation_id,
+              expected_agent_id: invocation.agent_id,
+              actual_agent_id: agent.id,
+              expected_recognized_deployment_key: invocation.recognized_deployment_key,
+              actual_recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+            },
+          )
+        end
+
         same_binding =
-          invocation.agent_deployment_id == deployment.id &&
+          invocation.agent_id == agent.id &&
           invocation.binding_fingerprint == deployment.deployment_fingerprint &&
             invocation.deployment_activated_at == (deployment.activated_at || invocation.deployment_activated_at)
 
@@ -172,10 +198,10 @@ module AgentRPC
           code: "cybros.agent_rpc.invocation_binding_mismatch",
           details: {
             invocation_id: invocation.invocation_id,
-            expected_agent_deployment_id: invocation.agent_deployment_id,
-            actual_agent_deployment_id: deployment.id,
-            expected_binding_fingerprint: invocation.binding_fingerprint,
-            actual_binding_fingerprint: deployment.deployment_fingerprint,
+            expected_agent_id: invocation.agent_id,
+            actual_agent_id: agent.id,
+            expected_recognized_deployment_key: invocation.recognized_deployment_key,
+            actual_recognized_deployment_key: recognized_deployment.recognized_deployment_key,
           },
         )
       end

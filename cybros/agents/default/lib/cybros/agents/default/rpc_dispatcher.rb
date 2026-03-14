@@ -62,6 +62,8 @@ module Cybros
               "agent_capabilities_version" => @application.agent_capabilities_version,
               "agent_tool_catalog" => @application.agent_tool_catalog,
             }
+          when "attachments.import"
+            @application.import_attachments(params: normalized_params)
           when "on_conversation_created"
             Hooks::OnConversationCreated.new(application: @application).call(params: normalized_params)
           when "on_lane_first_user_message"

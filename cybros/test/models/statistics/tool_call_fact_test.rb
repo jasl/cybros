@@ -81,6 +81,8 @@ class Statistics::ToolCallFactTest < ActiveSupport::TestCase
   end
 
   test "stores programmable runtime routing and capability dimensions" do
+    agent = create_agent!
+    recognized_deployment = create_recognized_deployment!(agent: agent)
     fact =
       Statistics::ToolCallFact.create!(
         valid_attributes(
@@ -89,10 +91,10 @@ class Statistics::ToolCallFactTest < ActiveSupport::TestCase
           kernel_capability_registry_version: "kernel:v1",
           tool_surface_id: "tool_surface_123",
           tool_surface_label: "bundled_default.before_agent_step",
-          implementation_source: "agent_program",
+          implementation_source: "agent",
           implementation_ref: "agent://compact_context",
-          agent_program_id: uuidv7,
-          agent_program_version: "default-agent-capabilities:v1",
+          recognized_deployment: recognized_deployment,
+          agent_capabilities_version: "default-agent-capabilities:v1",
         )
       )
 
@@ -102,10 +104,11 @@ class Statistics::ToolCallFactTest < ActiveSupport::TestCase
     assert_equal "kernel:v1", fact.kernel_capability_registry_version
     assert_equal "tool_surface_123", fact.tool_surface_id
     assert_equal "bundled_default.before_agent_step", fact.tool_surface_label
-    assert_equal "agent_program", fact.implementation_source
+    assert_equal "agent", fact.implementation_source
     assert_equal "agent://compact_context", fact.implementation_ref
-    assert fact.agent_program_id.present?
-    assert_equal "default-agent-capabilities:v1", fact.agent_program_version
+    assert_equal recognized_deployment.id, fact.recognized_deployment_id
+    assert_equal recognized_deployment.recognized_deployment_key, fact.recognized_deployment_key
+    assert_equal "default-agent-capabilities:v1", fact.agent_capabilities_version
   end
 
   private

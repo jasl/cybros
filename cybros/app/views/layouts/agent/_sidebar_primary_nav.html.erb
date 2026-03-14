@@ -2,7 +2,7 @@
   <%= sidebar_nav_item label: "Dashboard", path: dashboard_path, icon_class: "icon-[lucide--layout-dashboard] size-5" %>
   <%= sidebar_nav_item label: "Conversations", path: conversations_path, icon_class: "icon-[lucide--messages-square] size-5" %>
   <% if Current.user&.owner? || Current.user&.admin? %>
-    <%= sidebar_nav_item label: "Agents", path: system_settings_agent_programs_path, icon_class: "icon-[lucide--sparkles] size-5" %>
+    <%= sidebar_nav_item label: "Agents", path: dashboard_path, icon_class: "icon-[lucide--sparkles] size-5" %>
   <% end %>
   <%= sidebar_nav_item label: "Statistics", path: statistics_path, icon_class: "icon-[lucide--chart-column] size-5" %>
 </ul>

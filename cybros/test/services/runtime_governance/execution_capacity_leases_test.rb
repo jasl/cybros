@@ -1,8 +1,33 @@
 require "test_helper"
 
 class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
+  test "acquires and releases leases for agent-scoped capacity snapshots" do
+    capacity = create_agent_capacity_snapshot!(max_concurrent_tasks: 2, max_queued_tasks: 4)
+
+    acquired =
+      RuntimeGovernance::ExecutionCapacityLeases.acquire!(
+        capacity: capacity,
+        execution_request_id: "exec-agent-1",
+        holder_type: "ConversationRun",
+        holder_id: SecureRandom.uuid,
+      )
+
+    assert_equal "acquired", acquired.fetch(:decision)
+    assert_equal "agent", acquired.fetch(:lease).subject_type
+    assert_equal capacity.fetch("scope_id"), acquired.fetch(:lease).subject_id
+
+    released =
+      RuntimeGovernance::ExecutionCapacityLeases.release!(
+        subject_type: capacity.fetch("scope_type"),
+        subject_id: capacity.fetch("scope_id"),
+        execution_request_id: "exec-agent-1",
+      )
+
+    assert_equal "released", released.status
+  end
+
   test "acquires idempotently and releases execution leases by durable request id" do
-    capacity = create_capacity_snapshot!(max_concurrent_tasks: 2, max_queued_tasks: 4)
+    capacity = create_agent_capacity_snapshot!(max_concurrent_tasks: 2, max_queued_tasks: 4)
 
     acquired =
       RuntimeGovernance::ExecutionCapacityLeases.acquire!(
@@ -43,7 +68,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   end
 
   test "parks work when execution concurrency is exhausted" do
-    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    capacity = create_agent_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
 
     RuntimeGovernance::ExecutionCapacityLeases.acquire!(
       capacity: capacity,
@@ -68,7 +93,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   end
 
   test "denies work when execution backlog is already at the queued limit" do
-    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 1)
+    capacity = create_agent_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 1)
 
     RuntimeGovernance::ExecutionCapacityLeases.acquire!(
       capacity: capacity,
@@ -96,7 +121,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   end
 
   test "reconciles expired execution leases so new work can acquire" do
-    capacity = create_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+    capacity = create_agent_capacity_snapshot!(max_concurrent_tasks: 1, max_queued_tasks: 2)
     stale =
       ExecutionCapacityLease.create!(
         subject_type: capacity.fetch("scope_type"),
@@ -134,9 +159,25 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
 
   private
 
-  def create_capacity_snapshot!(max_concurrent_tasks:, max_queued_tasks:)
+  def create_agent_capacity_snapshot!(max_concurrent_tasks:, max_queued_tasks:)
+    program =
+      create_agent_record!(
+        name: "Fixture Program #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
+        manifest_snapshot: {},
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+      )
+    target = create_target!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+    materialize_agent_runtime!(program: program, execution_target: target).execution_capacity_snapshot
+  end
+
+  def create_target!(max_concurrent_tasks:, max_queued_tasks:)
     location =
-      ExecutionLocation.create!(
+      create_execution_location_profile!(
         name: "Fixture host #{SecureRandom.hex(4)}",
         kind: "host",
         platform: "macos_arm64",
@@ -149,7 +190,7 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
         default_timeout_s: 900,
       )
     workspace =
-      Workspace.create!(
+      create_workspace_profile!(
         execution_location: location,
         name: "Fixture workspace #{SecureRandom.hex(4)}",
         root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
@@ -159,14 +200,13 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
         tags: ["fixture"],
       )
     target =
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: "Fixture target",
         status: "active",
         sandboxed: true,
       )
-
-    RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: target)
+    target
   end
 end

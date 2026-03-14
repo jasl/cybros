@@ -3,10 +3,9 @@ class RunDraft < ApplicationRecord
 
   belongs_to :conversation
   belongs_to :initiated_by_user, class_name: "User", optional: true
-  belongs_to :agent_program
-  belongs_to :agent_deployment
+  belongs_to :agent, optional: true
+  belongs_to :recognized_deployment, optional: true
   belongs_to :provider_credential, class_name: "LLMProviderCredential", optional: true
-  belongs_to :proposed_execution_target, class_name: "ExecutionTarget", optional: true
   belongs_to :materialized_conversation_run, class_name: "ConversationRun", optional: true
 
   before_validation :normalize_payloads
@@ -14,11 +13,14 @@ class RunDraft < ApplicationRecord
   validates :status, presence: true
   validates :permission_mode, presence: true
   validates :trigger_snapshot, presence: true
+  validates :agent, presence: true
+  validates :recognized_deployment, presence: true
   validates :contract_fingerprint, presence: true
   validates :deployment_fingerprint, presence: true
   validates :deployment_activated_at, presence: true
   validates :agent_config_schema_fingerprint, presence: true
   validates :expires_at, presence: true
+  validates :recognized_deployment_key, presence: true, if: :recognized_deployment_id?
 
   validate :binding_consistency
 
@@ -53,6 +55,8 @@ class RunDraft < ApplicationRecord
       self.approval_state = normalize_hash(self[:approval_state])
       self.staged_kv_ops = Array(self[:staged_kv_ops]).map { |value| value.is_a?(Hash) ? value.deep_stringify_keys : value }
       self.staged_prompt_buffer_ops = Array(self[:staged_prompt_buffer_ops]).map { |value| value.is_a?(Hash) ? value.deep_stringify_keys : value }
+      self.agent ||= conversation&.agent || recognized_deployment&.agent
+      self.recognized_deployment_key ||= recognized_deployment&.recognized_deployment_key
     end
 
     def normalize_hash(value)
@@ -60,18 +64,27 @@ class RunDraft < ApplicationRecord
     end
 
     def binding_consistency
-      return if agent_program.blank? || agent_deployment.blank?
+      if recognized_deployment.present?
+        if agent.blank?
+          errors.add(:agent, "must exist")
+        elsif recognized_deployment.agent_id != agent_id
+          errors.add(:recognized_deployment, "must belong to the selected agent")
+        end
 
-      if agent_deployment.agent_program_id != agent_program_id
-        errors.add(:agent_deployment, "must belong to the selected agent program")
-      end
+        if recognized_deployment_key.to_s != recognized_deployment.recognized_deployment_key.to_s
+          errors.add(:recognized_deployment_key, "must match the recognized deployment")
+        end
 
-      if agent_deployment.contract_fingerprint != contract_fingerprint
+        if recognized_deployment.contract_fingerprint.present? &&
+            recognized_deployment.contract_fingerprint.to_s != contract_fingerprint.to_s
+          errors.add(:contract_fingerprint, "must match the recognized deployment")
+        end
+
+        if recognized_deployment.deployment_fingerprint.to_s != deployment_fingerprint.to_s
+          errors.add(:deployment_fingerprint, "must match the recognized deployment")
+        end
+      elsif contract_fingerprint.blank?
         errors.add(:contract_fingerprint, "must match the deployed contract")
-      end
-
-      if agent_deployment.deployment_fingerprint != deployment_fingerprint
-        errors.add(:deployment_fingerprint, "must match the selected deployment")
       end
     end
 end

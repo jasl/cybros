@@ -11,6 +11,7 @@ module Cybros
         :dag_node_id,
         :execution_scope,
         :subagent,
+        :workspace,
       ) do
         PRIMARY_SCOPE = "primary"
         SUBAGENT_SCOPE = "subagent"
@@ -28,6 +29,7 @@ module Cybros
             dag_node_id: node.id,
             execution_scope: scope.fetch(:execution_scope),
             subagent: scope[:subagent],
+            workspace: workspace_payload_for(conversation),
           )
         end
 
@@ -46,6 +48,7 @@ module Cybros
             dag_node_id: node&.id || dag_node_id,
             execution_scope: scope.fetch(:execution_scope),
             subagent: scope[:subagent],
+            workspace: workspace_payload_for(conversation),
           )
         end
 
@@ -60,8 +63,10 @@ module Cybros
             "dag_node_id" => dag_node_id,
             "execution_scope" => execution_scope,
             "subagent" => subagent,
+            "workspace" => workspace,
           }
           payload.delete("subagent") if subagent.nil?
+          payload.delete("workspace") if workspace.nil?
           payload
         end
 
@@ -112,6 +117,17 @@ module Cybros
               parent&.turn_id_for_node_id(parent_dag_node_id)
             rescue StandardError
               nil
+            end
+
+            def workspace_payload_for(conversation)
+              return nil unless conversation&.logical_workspace_initialized?
+
+              {
+                "conversation_id" => conversation.id,
+                "logical_workspace_key" => conversation.logical_workspace_key,
+                "logical_workspace_root_path" => conversation.logical_workspace_root_path,
+                "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at&.iso8601,
+              }.compact
             end
         end
       end

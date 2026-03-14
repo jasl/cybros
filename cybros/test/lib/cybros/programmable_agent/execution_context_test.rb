@@ -87,9 +87,8 @@ class Cybros::ProgrammableAgent::ExecutionContextTest < ActiveSupport::TestCase
         user: parent.user,
         parent_conversation: parent,
         title: "Subagent",
-        agent_program: parent.agent_program,
+        agent: parent.agent,
         agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
-        default_execution_target: parent.default_execution_target,
         metadata: {
           "agent" => { "agent_profile" => "coding" },
           "subagent" => {

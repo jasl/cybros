@@ -27,30 +27,21 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
 
   test "requires invocation and deployment bindings to stay aligned" do
     invocation = create_invocation!
-    other_program =
-      AgentProgram.create!(
-        name: "Other Program",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
-        published_contract_fingerprint: "contract:v2",
-        manifest_snapshot: {},
-        global_config: {},
-        global_config_schema: { "type" => "object" },
-        conversation_config_schema: { "type" => "object" },
-        config_schema_fingerprint: "config:v2",
-      )
+    other_invocation = create_invocation!
 
     session =
       build_session(
-        agent_program: other_program,
-        agent_deployment: invocation.agent_deployment,
+        agent: invocation.agent,
+        recognized_deployment: other_invocation.recognized_deployment,
+        recognized_deployment_key: other_invocation.recognized_deployment_key,
         agent_rpc_invocation: invocation,
         conversation: invocation.conversation,
         scope_id: invocation.scope_id,
       )
 
     refute_predicate session, :valid?
-    assert_includes session.errors[:agent_deployment], "must belong to the selected agent program"
-    assert_includes session.errors[:agent_rpc_invocation], "must match the deployment binding"
+    assert_includes session.errors[:recognized_deployment], "must belong to the selected agent"
+    assert_includes session.errors[:agent_rpc_invocation], "must match the recognized deployment binding"
   end
 
   private
@@ -60,8 +51,9 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
 
     AgentRPCSession.new(
       {
-        agent_deployment: invocation.agent_deployment,
-        agent_program: invocation.agent_deployment.agent_program,
+        agent: invocation.agent,
+        recognized_deployment: invocation.recognized_deployment,
+        recognized_deployment_key: invocation.recognized_deployment_key,
         agent_rpc_invocation: invocation,
         conversation: invocation.conversation,
         scope_type: "run_draft",
@@ -77,8 +69,7 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
   end
 
   def create_invocation!
-    conversation = create_conversation!
-    program = AgentProgram.create!(
+    program = create_agent_record!(
       name: "Fixture Program",
       config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
       published_contract_fingerprint: "contract:v1",
@@ -88,7 +79,9 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
       conversation_config_schema: { "type" => "object" },
       config_schema_fingerprint: "config:v1",
     )
-    deployment = AgentDeployment.create!(
+    target = build_default_execution_profile!
+    agent = materialize_agent_runtime!(program: program, execution_target: target)
+    deployment = create_runtime_binding_record!(
       agent_program: program,
       transport_kind: "websocket",
       endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -99,15 +92,25 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
       health_status: "healthy",
       protocol_version: "agent_rpc.v1",
       agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: AgentDeployments::REQUIRED_METHODS,
+      supported_methods: Agents::Protocol::REQUIRED_METHODS,
       manifest_snapshot: {},
       schema_snapshot: {},
       capability_snapshot: {},
       inspection_details: {},
+      activated_at: Time.current.change(usec: 0),
     )
+    recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+    conversation =
+      create_conversation!(
+        agent: agent,
+        agent_program: program,
+        default_execution_target: target,
+      )
 
     AgentRPCInvocation.create!(
-      agent_deployment: deployment,
+      agent: agent,
+      recognized_deployment: recognized_deployment,
+      recognized_deployment_key: recognized_deployment.recognized_deployment_key,
       conversation: conversation,
       scope_type: "run_draft",
       scope_id: SecureRandom.uuid,

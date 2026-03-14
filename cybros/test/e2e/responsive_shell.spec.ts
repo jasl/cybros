@@ -1,12 +1,10 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { bundledDefaultRuntimeState, signIn, createHighPriorityMockProvider, openNewConversation } from "./helpers"
 
 async function openConversation(page) {
   await createHighPriorityMockProvider(page)
-  await page.goto("/conversations")
-  await page.locator("main").getByPlaceholder("New conversation title").fill(`E2E Responsive ${Date.now()}`)
-  await page.locator("main").getByRole("button", { name: "New" }).click()
-  await expect(page).toHaveURL(/\/conversations\//)
+  const bundled = bundledDefaultRuntimeState()
+  await openNewConversation(page, `E2E Responsive ${Date.now()}`, bundled.agentName)
 }
 
 test.describe("Responsive agent shell", () => {
@@ -22,7 +20,7 @@ test.describe("Responsive agent shell", () => {
 
     // Left drawer open
     await page.getByRole("button", { name: "Open navigation" }).click()
-    await expect(page.getByRole("button", { name: "New chat" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible()
     await page.evaluate(() => {
       const input = document.getElementById("left_drawer")
       if (input instanceof HTMLInputElement) {
@@ -44,7 +42,7 @@ test.describe("Responsive agent shell", () => {
 
     // Open navigation, then close again (drawer wiring works).
     await page.getByRole("button", { name: "Open navigation" }).click()
-    await expect(page.getByRole("button", { name: "New chat" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Dashboard" })).toBeVisible()
     await page.evaluate(() => {
       const input = document.getElementById("left_drawer")
       if (input instanceof HTMLInputElement) {

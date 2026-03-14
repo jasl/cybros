@@ -49,8 +49,15 @@ module Cybros
           code: "cybros.programmable_agent.tool_execution.conversation_run_required",
         ) if conversation_run.nil?
 
+        deployment = conversation_run.agent&.active_runtime_binding
+        AgentCore::ValidationError.raise!(
+          "conversation_run is missing its active agent runtime binding",
+          code: "cybros.programmable_agent.tool_execution.runtime_binding_required",
+          details: { conversation_run_id: conversation_run.id, agent_id: conversation_run.agent_id },
+        ) if deployment.nil?
+
         AgentRPC::LifecycleCaller.call!(
-          deployment: conversation_run.agent_deployment,
+          deployment: deployment,
           conversation: conversation_run.conversation,
           scope_type: "conversation_run",
           scope_id: conversation_run.id,
@@ -72,14 +79,14 @@ module Cybros
         end
 
         def request_payload
-          {
-            "tool_call_id" => tool_call_id,
-            "logical_tool_name" => logical_tool_name,
-            "effective_tool_id" => effective_tool_id,
-            "implementation_source" => "agent_program",
-            "implementation_ref" => implementation_ref,
-            "capability_registry_snapshot_id" => capability_registry_snapshot_id,
-            "tool_surface_id" => tool_surface_id,
+        {
+          "tool_call_id" => tool_call_id,
+          "logical_tool_name" => logical_tool_name,
+          "effective_tool_id" => effective_tool_id,
+          "implementation_source" => "agent",
+          "implementation_ref" => implementation_ref,
+          "capability_registry_snapshot_id" => capability_registry_snapshot_id,
+          "tool_surface_id" => tool_surface_id,
             "arguments" => arguments,
           }
         end

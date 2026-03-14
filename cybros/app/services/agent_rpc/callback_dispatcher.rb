@@ -115,17 +115,9 @@ module AgentRPC
         AgentRPC::KernelServices::Tokens.estimate_text(draft: draft, text: payload.fetch("text"))
       when "tokens.estimate_messages"
         AgentRPC::KernelServices::Tokens.estimate_messages(draft: draft, messages: payload.fetch("messages"))
-      when "execution_target.list"
-        AgentRPC::KernelServices::ExecutionTargets.list(entrypoint: draft.conversation, draft: draft)
-      when "execution_target.get"
-        AgentRPC::KernelServices::ExecutionTargets.get(
-          entrypoint: draft.conversation,
-          draft: draft,
-          execution_target_id: payload.fetch("execution_target_id"),
-        )
       when "tool_surface.manifest"
         AgentRPC::KernelServices::ToolSurfaceManifest.call!(
-          deployment: session.agent_deployment,
+          deployment: runtime_deployment!,
           payload: payload,
         )
       else
@@ -246,6 +238,20 @@ module AgentRPC
           "Callback session is not bound to an invocation.",
           code: "cybros.agent_rpc.callback_invocation_missing",
           details: { agent_rpc_session_id: session.id },
+        )
+      end
+
+      def runtime_deployment!
+        deployment = session.agent&.active_runtime_binding
+        return deployment if deployment.present?
+
+        AgentCore::ValidationError.raise!(
+          "Callback session is missing its pinned runtime deployment.",
+          code: "cybros.agent_rpc.runtime_binding_missing",
+          details: {
+            agent_rpc_session_id: session.id,
+            recognized_deployment_id: session.recognized_deployment_id,
+          },
         )
       end
   end

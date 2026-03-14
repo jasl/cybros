@@ -30,6 +30,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
         endpoint_url: server.rpc_url,
         deployment_fingerprint: "fixture-deployment-v1",
       )
+    sync_agent_runtime_from_binding!(agent: runtime.fetch(:agent), deployment: replacement)
 
     perform_enqueued_jobs only: Automations::ExecuteConversationJob do
       execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
@@ -41,14 +42,14 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
 
     assert_equal [execution_conversation.id], seen_conversation_ids
     assert_equal runtime.fetch(:automation).id, execution_conversation.automation_id
-    assert_equal runtime.fetch(:automation).agent_program_id, execution_conversation.agent_program_id
-    assert_equal runtime.fetch(:automation).execution_target_id, execution_conversation.default_execution_target_id
+    assert_equal runtime.fetch(:agent).id, execution_conversation.agent_id
+    assert_nil execution_conversation[:agent_program_id]
+    assert_nil execution_conversation[:default_execution_target_id]
     assert_equal draft.conversation_id, execution_conversation.id
     assert_equal "finalized", draft.status
     assert_equal conversation_run.id, draft.materialized_conversation_run_id
-    assert_equal replacement.id, draft.agent_deployment_id
-    assert_equal replacement.id, conversation_run.agent_deployment_id
-    assert_equal runtime.fetch(:target).id, conversation_run.execution_target_id
+    assert_equal replacement.deployment_fingerprint, draft.recognized_deployment.deployment_fingerprint
+    assert_equal replacement.deployment_fingerprint, conversation_run.recognized_deployment.deployment_fingerprint
     assert_equal "full_access", conversation_run.effective_permission_mode
     assert_equal draft.id, conversation_run.snapshot.dig("draft", "id")
     assert_equal scheduled_for.iso8601, execution_conversation.metadata.dig("schedule", "scheduled_for")
@@ -93,12 +94,12 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
       program = create_program!
       deployment = active_deployment!(program: program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Automation target")
+      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: "full_access",
           status: "active",
           schedule_kind: "rrule",
@@ -111,7 +112,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
           },
         )
 
-      { automation: automation, program: program, deployment: deployment, target: target }
+      { agent: agent, automation: automation, program: program, deployment: deployment, target: target }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -124,7 +125,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -140,7 +141,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -151,7 +152,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -162,7 +163,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -175,7 +176,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -185,7 +186,7 @@ class AutomationExecutionRunDraftFlowTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

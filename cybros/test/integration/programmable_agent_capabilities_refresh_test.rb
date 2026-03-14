@@ -15,7 +15,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
     program = create_program!
     deployment = create_registered_deployment!(program: program, endpoint_url: server.rpc_url)
 
-    AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+    inspect_agent_runtime!(agent: deployment)
     original_snapshot = deployment.reload.capability_snapshot.deep_dup
 
     with_kernel_catalog(version: "kernel:v2") do
@@ -57,7 +57,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
     program = create_program!
     deployment = create_registered_deployment!(program: program, endpoint_url: server.rpc_url)
 
-    AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+    inspect_agent_runtime!(agent: deployment)
     original_snapshot = deployment.reload.capability_snapshot.deep_dup
 
     agent_capabilities_version = "fixture-agent-capabilities:v2"
@@ -91,7 +91,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
     program = create_program!
     deployment = create_registered_deployment!(program: program, endpoint_url: server.rpc_url)
 
-    AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+    inspect_agent_runtime!(agent: deployment)
 
     error =
       assert_raises(AgentCore::ValidationError) do
@@ -130,7 +130,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -146,7 +146,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
     end
 
     def create_registered_deployment!(program:, endpoint_url:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -156,7 +156,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
         status: "inactive",
         health_status: "unknown",
         protocol_version: "agent_rpc.v1",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

@@ -18,7 +18,7 @@ module Cybros
       SNAPSHOT_ID_PREFIX = "csnap_".freeze
       EXECUTION_MODES = %w[serial parallel_safe].freeze
 
-      attr_reader :agent_program_id, :agent_program_version, :effective_tools, :kernel_registry_version, :snapshot_id
+      attr_reader :agent_key, :agent_capabilities_version, :effective_tools, :kernel_registry_version, :snapshot_id
 
       def self.build(**attributes)
         new(**attributes)
@@ -59,8 +59,8 @@ module Cybros
 
         instance = allocate
         instance.instance_variable_set(:@kernel_registry_version, normalized.fetch(:kernel_capability_registry_version, "").to_s.freeze)
-        instance.instance_variable_set(:@agent_program_id, normalized.fetch(:agent_program_id, "").to_s.freeze)
-        instance.instance_variable_set(:@agent_program_version, normalized.fetch(:agent_capabilities_version, normalized.fetch(:agent_program_version, "")).to_s.freeze)
+        instance.instance_variable_set(:@agent_key, normalized.fetch(:agent_key, "").to_s.freeze)
+        instance.instance_variable_set(:@agent_capabilities_version, normalized.fetch(:agent_capabilities_version, "").to_s.freeze)
         instance.instance_variable_set(:@effective_tools, effective_tools.freeze)
         instance.instance_variable_set(:@effective_tools_by_id, effective_tools.index_by(&:effective_tool_id).freeze)
         instance.instance_variable_set(:@routes_by_logical_name, effective_tools.index_by(&:logical_tool_name).freeze)
@@ -68,13 +68,13 @@ module Cybros
         instance
       end
 
-      def initialize(kernel_registry_version:, agent_program_id:, agent_program_version:, kernel_tools:, agent_tools:)
+      def initialize(kernel_registry_version:, agent_key:, agent_capabilities_version:, kernel_tools:, agent_tools:)
         @kernel_registry_version = kernel_registry_version.to_s
-        @agent_program_id = agent_program_id.to_s
-        @agent_program_version = agent_program_version.to_s
+        @agent_key = agent_key.to_s
+        @agent_capabilities_version = agent_capabilities_version.to_s
 
         kernel_catalog = normalize_catalog(kernel_tools, implementation_source: "kernel")
-        agent_catalog = normalize_catalog(agent_tools, implementation_source: "agent_program")
+        agent_catalog = normalize_catalog(agent_tools, implementation_source: "agent")
         reject_reserved_agent_tools!(agent_catalog)
 
         @effective_tools = merge_catalogs(kernel_catalog: kernel_catalog, agent_catalog: agent_catalog).freeze
@@ -184,8 +184,8 @@ module Cybros
         def build_snapshot_id
           payload = {
             kernel_registry_version: kernel_registry_version,
-            agent_program_id: agent_program_id,
-            agent_program_version: agent_program_version,
+            agent_key: agent_key,
+            agent_capabilities_version: agent_capabilities_version,
             effective_tools:
               effective_tools.map do |tool|
                 {

@@ -166,6 +166,7 @@ class Conversation::NodeActionPolicy
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
+      return unavailable_entry(reason: "attachments_not_editable") if attachment_bearing_user_message?
       return unavailable_entry(reason: "not_latest_user_message") if user_message? && !latest_user_message?
       return unavailable_entry(reason: "not_editable_now") unless node.can_edit?
 
@@ -185,6 +186,14 @@ class Conversation::NodeActionPolicy
 
     def user_message?
       node.node_type.to_s == Messages::UserMessage.node_type_key
+    end
+
+    def attachment_bearing_user_message?
+      return false unless user_message?
+
+      Array(node.body_input["attachments"]).any?
+    rescue StandardError
+      false
     end
 
     def latest_user_message?

@@ -5,44 +5,65 @@
 <% end %>
 
 <div class="p-6 space-y-6" data-testid="dashboard-page">
-  <div class="flex items-center justify-end gap-2">
-    <%= form_with url: conversations_path, method: :post do %>
-      <button type="submit" class="btn btn-primary btn-sm gap-2">
-        <span class="icon-[lucide--plus] size-4"></span>
-        New chat
-      </button>
-    <% end %>
-    <% if Current.user&.owner? || Current.user&.admin? %>
-      <%= link_to system_settings_agent_programs_path, class: "btn btn-ghost btn-sm gap-2" do %>
-        <span class="icon-[lucide--sparkles] size-4"></span>
-        Agents
-      <% end %>
-    <% end %>
-  </div>
-
   <div class="overflow-x-auto">
     <div class="stats stats-horizontal w-full bg-base-100 border border-base-300 rounded-box shadow-sm">
       <div class="stat min-w-64">
-      <div class="stat-title">LLM providers</div>
-      <div class="stat-value text-xl"><%= @provider_count %></div>
-      <div class="stat-desc opacity-60">Configured providers</div>
+        <div class="stat-title">LLM providers</div>
+        <div class="stat-value text-xl"><%= @provider_count %></div>
+        <div class="stat-desc opacity-60">Configured providers</div>
       </div>
       <div class="stat min-w-64">
-      <div class="stat-title">Agent programs</div>
-      <div class="stat-value text-xl"><%= @agent_program_count %></div>
-      <div class="stat-desc opacity-60">Available agents</div>
+        <div class="stat-title">Available agents</div>
+        <div class="stat-value text-xl"><%= @agent_count %></div>
+        <div class="stat-desc opacity-60">Launchable runtimes</div>
       </div>
       <div class="stat min-w-64">
-      <div class="stat-title">Runs</div>
-      <div class="stat-value text-xl"><%= @run_state_counts.values.sum %></div>
-      <div class="stat-desc opacity-60">
-        <%= @run_state_counts.fetch("running", 0) %> running · <%= @run_state_counts.fetch("failed", 0) %> failed
-      </div>
+        <div class="stat-title">Runs</div>
+        <div class="stat-value text-xl"><%= @run_state_counts.values.sum %></div>
+        <div class="stat-desc opacity-60">
+          <%= @run_state_counts.fetch("running", 0) %> running · <%= @run_state_counts.fetch("failed", 0) %> failed
+        </div>
       </div>
     </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="card bg-base-100 border border-base-300 shadow-sm lg:col-span-3">
+      <div class="card-body">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="card-title">Agents</h2>
+          <span class="text-sm opacity-60"><%= @agents.length %> available</span>
+        </div>
+
+        <% if @agents.empty? %>
+          <p class="opacity-70">No active agents are currently available.</p>
+        <% else %>
+          <div class="divide-y divide-base-300">
+            <% @agents.each do |agent| %>
+              <div
+                class="flex flex-col gap-3 py-4 md:flex-row md:items-center md:justify-between"
+                data-testid="dashboard-agent-row"
+                data-agent-id="<%= agent.id %>"
+                data-bundled-agent-key="<%= agent.bundled_agent_key %>">
+                <div class="space-y-1">
+                  <div class="font-medium"><%= agent.name %></div>
+                  <div class="text-sm opacity-70"><%= agent.description.presence || agent.config_namespace %></div>
+                </div>
+
+                <%= form_with url: conversations_path, method: :post, class: "shrink-0", data: { turbo: false } do |form| %>
+                  <%= form.hidden_field :agent_id, name: "conversation[agent_id]", value: agent.id %>
+                  <button type="submit" class="btn btn-primary btn-sm gap-2">
+                    <span class="icon-[lucide--plus] size-4"></span>
+                    New conversation
+                  </button>
+                <% end %>
+              </div>
+            <% end %>
+          </div>
+        <% end %>
+      </div>
+    </div>
+
     <div class="card bg-base-100 border border-base-300 shadow-sm">
       <div class="card-body">
         <h2 class="card-title">Health</h2>

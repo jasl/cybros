@@ -15,7 +15,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     program = create_program!
     deployment = create_registered_deployment!(program: program, endpoint_url: server.rpc_url)
 
-    AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+    inspect_agent_runtime!(agent: deployment)
     deployment.reload
 
     first_snapshot = deployment.capability_snapshot.deep_dup
@@ -37,7 +37,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
   end
 
   test "bundled default inspection also materializes the capability snapshot through handshake" do
-    program = AgentPrograms::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
+    program = Agents::Creator.create_from_bundled_source!(name: "Default assistant", bundled_agent_key: "default")
     host =
       Cybros::BundledAgentHost::Application.new(
         source_root: Rails.root.join("agents/default"),
@@ -51,7 +51,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
       deployment_bearer_secret_ref: "secret://bundled",
     )
 
-    AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+    inspect_agent_runtime!(agent: deployment)
 
     deployment.reload
     assert_includes deployment.supported_methods, "capabilities.handshake"
@@ -80,7 +80,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
 
     error =
       assert_raises(AgentCore::ValidationError) do
-        AgentDeployments::InspectionService.new(deployment: deployment).inspect!
+        inspect_agent_runtime!(agent: deployment)
       end
 
     deployment.reload
@@ -95,7 +95,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
   private
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -111,7 +111,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     end
 
     def create_registered_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1", deployment_bearer_secret_ref: "secret://fixture")
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -121,7 +121,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
         status: "inactive",
         health_status: "unknown",
         protocol_version: "agent_rpc.v1",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

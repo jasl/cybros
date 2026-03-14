@@ -64,6 +64,30 @@ module Cybros
           RPCDispatcher.new(application: self).dispatch(method_name: method_name, params: params)
         end
 
+        def import_attachments(params:)
+          attachments = Array(params["attachments"]).select { |attachment| attachment.is_a?(Hash) }
+
+          {
+            "imports" =>
+              attachments.map do |attachment|
+                attachment_id = attachment.fetch("id").to_s
+                filename = attachment.fetch("filename").to_s
+
+                {
+                  "id" => attachment_id,
+                  "remote_ref" => {
+                    "kind" => "attachment_import",
+                    "locator" => "attachment-import://#{attachment_id}/#{sanitize_attachment_filename(filename)}",
+                    "filename" => filename,
+                    "content_type" => attachment.fetch("content_type").to_s,
+                    "byte_size" => attachment.fetch("byte_size"),
+                    "digest" => attachment.fetch("digest").to_s,
+                  },
+                }
+              end,
+          }
+        end
+
         def prompt_text(prompt_key)
           relative = manifest.fetch("prompts").fetch(prompt_key.to_s)
           safe_join(relative).read
@@ -86,6 +110,10 @@ module Cybros
           return candidate if candidate == root || candidate.to_s.start_with?(root.to_s + File::SEPARATOR)
 
           raise "prompt path escapes bundled default source root"
+        end
+
+        def sanitize_attachment_filename(filename)
+          filename.to_s.gsub(/[^a-zA-Z0-9.\-_]+/, "_")
         end
       end
 

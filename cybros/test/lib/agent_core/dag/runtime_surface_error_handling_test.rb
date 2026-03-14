@@ -276,6 +276,9 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[on_context_pressure],
+        },
         rpc_overrides: {
           "on_context_pressure" => lambda do |_params, _base_result, _identity|
             {
@@ -303,7 +306,7 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
       execute_programmable_agent!(
         server: server,
         provider_delegate: provider_delegate,
-        deployment_supported_methods: AgentDeployments::REQUIRED_METHODS + %w[on_context_pressure],
+        deployment_supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[on_context_pressure],
         runtime_overrides: {
           context_window_tokens: 10_000,
           context_soft_limit_tokens: 1,
@@ -313,8 +316,8 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
           snapshot =
             Cybros::ProgrammableAgent::CapabilitySnapshot.build(
               kernel_registry_version: "kernel:v1",
-              agent_program_id: program.id,
-              agent_program_version: "agent:v1",
+              agent_key: program.config_namespace,
+              agent_capabilities_version: "agent:v1",
               kernel_tools: [
                 {
                   logical_tool_name: "compact_context",
@@ -462,7 +465,7 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
       agent = turn.fetch(:agent_node)
 
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -473,7 +476,7 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
@@ -484,13 +487,16 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: deployment_supported_methods || (AgentDeployments::REQUIRED_METHODS + %w[before_finalize_output after_task_notice]),
+          supported_methods: deployment_supported_methods || Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent_runtime = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      conversation.update!(agent: agent_runtime, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+      recognized_deployment = recognize_agent_runtime!(agent: agent_runtime, deployment: deployment)
       snapshot =
         {
           "draft" => {
@@ -499,19 +505,11 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
           },
         }.deep_merge(run_snapshot_builder ? run_snapshot_builder.call(program: program, deployment: deployment, agent_node: agent) : {})
       run =
-        ConversationRun.create!(
+        create_conversation_run!(
           conversation: conversation,
           dag_node_id: agent.id,
-          state: "queued",
-          queued_at: Time.current.change(usec: 0),
-          snapshot_version: 1,
-          initiated_by_user: conversation.user,
-          effective_permission_mode: "default",
-          agent_program: program,
-          contract_fingerprint: "contract:v1",
-          agent_deployment: deployment,
-          deployment_fingerprint: "fixture-deployment-v1",
-          deployment_activated_at: deployment.activated_at,
+          agent: agent_runtime,
+          recognized_deployment: recognized_deployment,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
@@ -553,8 +551,8 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
     def build_capability_snapshot(program_id:)
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: program_id,
-        agent_program_version: "agent:v1",
+        agent_key: program_id,
+        agent_capabilities_version: "agent:v1",
         kernel_tools: [],
         agent_tools: [
           {
@@ -569,8 +567,8 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
       {
         "capability_registry_snapshot_id" => snapshot.snapshot_id,
         "kernel_capability_registry_version" => snapshot.kernel_registry_version,
-        "agent_program_id" => snapshot.agent_program_id,
-        "agent_capabilities_version" => snapshot.agent_program_version,
+        "agent_key" => snapshot.agent_key,
+        "agent_capabilities_version" => snapshot.agent_capabilities_version,
         "effective_tools" => snapshot.effective_tools.map do |tool|
           {
             "logical_tool_name" => tool.logical_tool_name,

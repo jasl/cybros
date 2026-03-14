@@ -25,8 +25,13 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal run.id, draft.materialized_conversation_run_id
     assert_equal true, draft.planning.dig("step_plan", "fixture")
     assert_equal "fixture_plan_v2", draft.planning.dig("step_plan", "kind")
-    assert_equal runtime.fetch(:target).id, run.execution_target_id
-    assert_equal runtime.fetch(:deployment).id, run.agent_deployment_id
+    assert_equal draft.recognized_deployment_id, run.recognized_deployment_id
+    assert_equal draft.recognized_deployment_key, run.recognized_deployment_key
+    assert_equal "agent", draft.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal runtime.fetch(:agent).id, draft.runtime_governors.dig("execution_capacity", "scope_id")
+    assert_equal "agent", run.runtime_governors.dig("execution_capacity", "scope_type")
+    assert_equal runtime.fetch(:agent).id, run.runtime_governors.dig("execution_capacity", "scope_id")
+    assert_equal runtime.fetch(:deployment).deployment_fingerprint, run.deployment_fingerprint
     assert_equal "default", run.effective_permission_mode
   ensure
     server&.shutdown
@@ -164,17 +169,11 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning pins before_agent_step to the draft deployment selected at open time" do
+  test "planning snapshots the selected runtime deployment fingerprint onto the draft" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
     pinned_deployment = runtime.fetch(:deployment)
-    alternate_deployment =
-      inactive_deployment!(
-        program: runtime.fetch(:program),
-        endpoint_url: "http://127.0.0.1:1",
-        deployment_fingerprint: "deployment:v2",
-      )
     service =
       RunDrafts::ConversationTurnPlanningService.new(
         conversation: conversation,
@@ -186,22 +185,97 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
           "user_input" => "Pin deployment",
         },
       )
-    deployment_sequence = [pinned_deployment, alternate_deployment]
-    singleton = class << service; self; end
+    draft = service.send(:create_draft!)
 
-    singleton.alias_method :__test_original_resolve_deployment!, :resolve_deployment!
-    singleton.define_method(:resolve_deployment!) { deployment_sequence.shift || alternate_deployment }
-
-    draft = service.open_and_prepare!
-
-    assert_equal pinned_deployment.id, draft.agent_deployment_id
-    assert_equal "prepared", draft.status
+    assert_equal runtime.fetch(:agent).id, draft.agent_id
+    assert_predicate draft.recognized_deployment_id, :present?
+    assert_equal draft.recognized_deployment.recognized_deployment_key, draft.recognized_deployment_key
+    assert_equal runtime.fetch(:agent).id, draft.recognized_deployment.agent_id
+    assert_equal pinned_deployment.deployment_fingerprint, draft.deployment_fingerprint
   ensure
-    if defined?(singleton) && singleton.method_defined?(:__test_original_resolve_deployment!)
-      singleton.alias_method :resolve_deployment!, :__test_original_resolve_deployment!
-      singleton.remove_method :__test_original_resolve_deployment!
-    end
     server&.shutdown
+  end
+
+  test "agent deployment upgrades only affect future turns while historical runs stay pinned to their recognized deployment" do
+    primary_server = Cybros::ProgrammableAgentFixture::Server.new.start
+    upgraded_server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: { "deployment_fingerprint" => "fixture-deployment-v2" },
+      ).start
+    runtime = create_programmable_runtime!(server: primary_server)
+    conversation = runtime.fetch(:conversation)
+
+    first_draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "First turn before upgrade",
+        },
+      )
+    RunDrafts::FinalizeService.finalize!(draft: first_draft)
+    first_run = first_draft.reload.materialized_conversation_run
+
+    upgrade_agent_runtime!(
+      agent: runtime.fetch(:agent),
+      endpoint_url: upgraded_server.rpc_url,
+      deployment_fingerprint: "fixture-deployment-v2",
+    )
+
+    second_draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Second turn after upgrade",
+        },
+      )
+    RunDrafts::FinalizeService.finalize!(draft: second_draft)
+    second_run = second_draft.reload.materialized_conversation_run
+
+    assert_equal "fixture-deployment-v1", first_run.reload.deployment_fingerprint
+    assert_equal "fixture-deployment-v2", second_run.deployment_fingerprint
+    assert_equal first_draft.recognized_deployment_id, first_run.recognized_deployment_id
+    assert_equal second_draft.recognized_deployment_id, second_run.recognized_deployment_id
+    refute_equal first_run.recognized_deployment_id, second_run.recognized_deployment_id
+  ensure
+    primary_server&.shutdown
+    upgraded_server&.shutdown
+  end
+
+  test "finalization rejects drafts when the live agent transport retargets in place without changing deployment fingerprint" do
+    primary_server = Cybros::ProgrammableAgentFixture::Server.new.start
+    replacement_server = Cybros::ProgrammableAgentFixture::Server.new.start
+    runtime = create_programmable_runtime!(server: primary_server)
+    conversation = runtime.fetch(:conversation)
+    draft =
+      RunDrafts::ConversationTurnPlanningService.open_and_prepare!(
+        conversation: conversation,
+        initiated_by_user: conversation.user,
+        selected_model_ref: "openai/gpt-5.4",
+        trigger_snapshot: {
+          "kind" => "user_turn",
+          "dag_node_id" => SecureRandom.uuid,
+          "user_input" => "Retarget me",
+        },
+      )
+
+    runtime.fetch(:agent).update!(endpoint_url: replacement_server.rpc_url)
+
+    error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
+
+    assert_equal "cybros.run_drafts.stale", error.code
+    assert_nil draft.reload.materialized_conversation_run_id
+    assert_equal 0, ConversationRun.where(conversation: conversation).count
+  ensure
+    primary_server&.shutdown
+    replacement_server&.shutdown
   end
 
   test "finalization rejects drafts that have not completed planning" do
@@ -245,9 +319,8 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         },
       )
     draft.update!(staged_public_settings_patch: { "tone" => "concise" })
-    runtime.fetch(:deployment).update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
-    replacement_deployment!(
-      program: runtime.fetch(:program),
+    upgrade_agent_runtime!(
+      agent: runtime.fetch(:agent),
       endpoint_url: server.rpc_url,
       deployment_fingerprint: "deployment:v2",
     )
@@ -306,10 +379,10 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         },
       )
     draft.update!(staged_public_settings_patch: { "tone" => "concise" })
-    draft.proposed_execution_target.update!(
-      max_concurrent_tasks_override: 2,
-      max_queued_tasks_override: 5,
-      default_timeout_s_override: 600,
+    runtime.fetch(:agent).update!(
+      max_concurrent_tasks: 2,
+      max_queued_tasks: 5,
+      default_timeout_s: 600,
     )
 
     error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
@@ -495,13 +568,14 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "planning params read the draft-selected program config after the live conversation selection changes" do
+  test "planning params read the draft-selected agent config after the live conversation selection changes" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
     original_program = runtime.fetch(:program)
     alternate_program = create_program!
     active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
+    alternate_agent = materialize_agent_runtime!(program: alternate_program, execution_target: runtime.fetch(:target))
     conversation.update!(
       agent_config: {
         original_program.config_namespace => { "mode" => "review" },
@@ -520,8 +594,8 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         },
       )
     conversation.update!(
-      agent_program: alternate_program,
-      agent_config_schema_fingerprint: alternate_program.config_schema_fingerprint,
+      agent: alternate_agent,
+      agent_config_schema_fingerprint: alternate_agent.config_schema_fingerprint,
     )
     live_conversation = Conversation.find(conversation.id)
     service =
@@ -532,8 +606,8 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         trigger_snapshot: draft.trigger_snapshot,
       )
 
-    assert_equal original_program.id, draft.agent_program_id
-    assert_equal alternate_program.id, live_conversation.agent_program_id
+    assert_equal runtime.fetch(:agent).id, draft.agent_id
+    assert_equal alternate_agent.id, live_conversation.agent_id
     assert_equal({ "mode" => "alternate" }, live_conversation.selected_agent_config)
     assert_equal(
       { "mode" => "review" },
@@ -543,13 +617,14 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
-  test "conversation config get reads the draft-selected program namespace after the live conversation selection changes" do
+  test "conversation config get reads the draft-selected agent namespace after the live conversation selection changes" do
     server = Cybros::ProgrammableAgentFixture::Server.new.start
     runtime = create_programmable_runtime!(server:)
     conversation = runtime.fetch(:conversation)
     original_program = runtime.fetch(:program)
     alternate_program = create_program!
     active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
+    alternate_agent = materialize_agent_runtime!(program: alternate_program, execution_target: runtime.fetch(:target))
     conversation.update!(
       agent_config: {
         original_program.config_namespace => { "mode" => "review" },
@@ -569,13 +644,13 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       )
 
     conversation.update!(
-      agent_program: alternate_program,
-      agent_config_schema_fingerprint: alternate_program.config_schema_fingerprint,
+      agent: alternate_agent,
+      agent_config_schema_fingerprint: alternate_agent.config_schema_fingerprint,
     )
     live_conversation = Conversation.find(conversation.id)
-    draft_for_read = Struct.new(:bound_conversation, :agent_program).new(live_conversation, original_program)
+    draft_for_read = Struct.new(:bound_conversation, :agent).new(live_conversation, runtime.fetch(:agent))
 
-    assert_equal alternate_program.id, live_conversation.agent_program_id
+    assert_equal alternate_agent.id, live_conversation.agent_id
     assert_equal({ "mode" => "alternate" }, live_conversation.selected_agent_config)
     assert_equal(
       { "config" => { "mode" => "review" } },
@@ -643,7 +718,11 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       staged_kv_ops: [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],
     )
     pinned_deployment.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
-    replacement = replacement_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "deployment:v2")
+    upgrade_agent_runtime!(
+      agent: runtime.fetch(:agent),
+      endpoint_url: server.rpc_url,
+      deployment_fingerprint: "deployment:v2",
+    )
 
     first_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft) }
 
@@ -656,8 +735,11 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     assert_equal({}, conversation.selected_agent_config)
     assert_nil LaneKVEntry.find_by(lane: conversation.chat_lane, key: "shared.stage")
 
-    replacement.update!(status: "inactive", deactivated_at: Time.current.change(usec: 0))
-    pinned_deployment.update!(status: "active", health_status: "healthy", deactivated_at: nil)
+    upgrade_agent_runtime!(
+      agent: runtime.fetch(:agent),
+      endpoint_url: server.rpc_url,
+      deployment_fingerprint: pinned_deployment.deployment_fingerprint,
+    )
 
     second_error = assert_raises(AgentCore::ValidationError) { RunDrafts::FinalizeService.finalize!(draft: draft.reload) }
 
@@ -701,16 +783,30 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       program = create_program!
       deployment = active_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Primary target")
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       ensure_active_openai_credential!
-      conversation = create_conversation!(user: user, title: "Chat")
+      conversation =
+        create_conversation!(
+          user: user,
+          title: "Chat",
+          agent: agent,
+          agent_program: program,
+          default_execution_target: target,
+        )
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
         permission_mode: permission_mode,
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        agent_config_schema_fingerprint: agent.config_schema_fingerprint,
       )
 
-      { conversation: conversation, program: program, deployment: deployment, target: target }
+      {
+        agent: agent,
+        conversation: conversation,
+        deployment: deployment,
+        program: program,
+        recognized_deployment: recognized_deployment,
+        target: target,
+      }
     end
 
     def build_open_draft!(conversation:, selected_model_ref:, trigger_snapshot:)
@@ -719,7 +815,8 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
           entrypoint: conversation,
           selected_model_ref: selected_model_ref,
         )
-      deployment = conversation.agent_program.active_healthy_deployment
+      deployment = conversation.agent.active_healthy_deployment_for_published_contract
+      recognized_deployment = RecognizedDeployment.recognize!(agent: conversation.agent, deployment: deployment)
 
       RunDraft.create!(
         conversation: conversation,
@@ -727,14 +824,14 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         status: "open",
         permission_mode: resolved.fetch(:permission_mode),
         trigger_snapshot: trigger_snapshot,
-        agent_program: conversation.agent_program,
-        contract_fingerprint: conversation.agent_program.published_contract_fingerprint,
-        agent_deployment: deployment,
+        agent: conversation.agent,
+        recognized_deployment: recognized_deployment,
+        recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+        contract_fingerprint: conversation.agent.published_contract_fingerprint,
         deployment_fingerprint: deployment.deployment_fingerprint,
         deployment_activated_at: deployment.activated_at&.change(usec: 0),
         agent_config_schema_fingerprint: conversation.agent_config_schema_fingerprint,
         provider_credential: resolved.fetch(:provider_credential),
-        proposed_execution_target: resolved.fetch(:proposed_execution_target),
         selected_model_ref: resolved.fetch(:selected_model_ref),
         runtime_governors: resolved.fetch(:runtime_governors),
         prepare_invocation_id: SecureRandom.uuid,
@@ -749,7 +846,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -765,7 +862,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -776,7 +873,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -790,7 +887,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     end
 
     def inactive_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -801,7 +898,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -812,7 +909,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -825,7 +922,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -835,7 +932,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,
@@ -857,5 +954,26 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       )
       credential.save!
       credential
+    end
+
+    def upgrade_agent_runtime!(agent:, endpoint_url:, deployment_fingerprint:, agent_sdk_version: "fixture-ruby-sdk/1.0")
+      activated_at = 1.second.from_now.change(usec: 0)
+      agent.update!(
+        transport_kind: "http_jsonrpc",
+        endpoint_url: endpoint_url,
+        deployment_bearer_secret_ref: "secret://fixture",
+        deployment_fingerprint: deployment_fingerprint,
+        status: "active",
+        health_status: "healthy",
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: agent_sdk_version,
+        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
+        capability_snapshot: {},
+        inspection_details: {},
+        activated_at: activated_at,
+        deactivated_at: nil,
+        last_health_checked_at: activated_at,
+        last_inspected_at: activated_at,
+      )
     end
 end

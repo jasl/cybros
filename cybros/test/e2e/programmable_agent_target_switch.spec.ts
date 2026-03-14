@@ -1,77 +1,74 @@
 import { test, expect } from "@playwright/test"
 import {
+  activateProgrammableAgentRuntime,
+  bundledDefaultRuntimeState,
+  createHighPriorityMockProvider,
   conversationIdFromUrl,
-  ensureOpenAiDefaultModel,
   openNewConversation,
   programmableConversationState,
-  seedActiveProgrammableDeployment,
-  seedExecutionTargets,
-  seedProgrammableAgentProgram,
+  seedProgrammableAgent,
   signIn,
   selectConversationRuntimeOption,
-  waitForTailAgentState,
   waitForTailAgentToFinish,
 } from "./helpers"
 
-async function openProgrammableConversation(page, suffix: string) {
-  ensureOpenAiDefaultModel()
-  const program = seedProgrammableAgentProgram(`E2E Target Switch Program ${suffix}`)
-  const targets = seedExecutionTargets(`target-switch-${suffix}`, true)
-  seedActiveProgrammableDeployment(program.programId)
-
-  await openNewConversation(page, `Programmable Target Switch ${suffix}`)
-  await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", program.programName)
-  await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", targets.primaryTargetName)
-
-  return { program, targets }
-}
-
-test.describe("Programmable agent target switching", () => {
+test.describe("Conversation agent switching", () => {
   test.beforeEach(async ({ page }) => {
     await signIn(page)
   })
 
-  test("default mode confirms a visible target switch and finalizes the alternate target after approval", async ({ page }) => {
+  test("switching the composer agent to a programmable runtime persists and drives the next turn", async ({ page }) => {
     test.setTimeout(180_000)
 
-    const suffix = `${Date.now()}-default`
-    const { targets } = await openProgrammableConversation(page, suffix)
-    await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Default")
+    await createHighPriorityMockProvider(page)
+    const suffix = `${Date.now()}-programmable`
+    const programmable = seedProgrammableAgent(`E2E Switch Agent ${suffix}`)
+    const deployment = activateProgrammableAgentRuntime(programmable.agentId)
+
+    await openNewConversation(page, `Programmable Agent Switch ${suffix}`)
+    await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", programmable.agentName)
     await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
-    await page.getByPlaceholder("Message…").fill("[fixture:switch-target]")
+    await page.getByPlaceholder("Message…").fill("Use the switched programmable runtime")
     await page.getByRole("button", { name: "Send" }).click()
-
-    await waitForTailAgentState(page, "awaiting_approval")
-    let state = programmableConversationState(conversationIdFromUrl(page))
-    expect(state.latestDraft.status).toBe("awaiting_approval")
-    expect(state.latestDraft.proposedExecutionTargetName).toBe(targets.alternateTargetName)
-
-    await page.getByRole("button", { name: "Approve" }).last().click()
     await waitForTailAgentToFinish(page)
-
-    state = programmableConversationState(conversationIdFromUrl(page))
-    expect(state.defaultExecutionTargetName).toBe(targets.alternateTargetName)
-    expect(state.latestRun.executionTargetName).toBe(targets.alternateTargetName)
-  })
-
-  test("full access auto-allows a visible target switch without parking for approval", async ({ page }) => {
-    test.setTimeout(180_000)
-
-    const suffix = `${Date.now()}-full`
-    const { targets } = await openProgrammableConversation(page, suffix)
-    await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Full access")
-    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
-
-    await page.getByPlaceholder("Message…").fill("[fixture:switch-target]")
-    await page.getByRole("button", { name: "Send" }).click()
-
-    await waitForTailAgentToFinish(page)
-    await expect(page.getByRole("button", { name: "Approve" })).toHaveCount(0)
 
     const state = programmableConversationState(conversationIdFromUrl(page))
+
+    expect(state.agentName).toBe(programmable.agentName)
     expect(state.latestDraft.status).toBe("finalized")
-    expect(state.defaultExecutionTargetName).toBe(targets.alternateTargetName)
-    expect(state.latestRun.executionTargetName).toBe(targets.alternateTargetName)
+    expect(state.latestRun.state).toBe("succeeded")
+    expect(state.latestRun.deploymentFingerprint).toBe(deployment.deploymentFingerprint)
+  })
+
+  test("switching back to the bundled default agent applies to later turns", async ({ page }) => {
+    test.setTimeout(180_000)
+
+    await createHighPriorityMockProvider(page)
+    const bundled = bundledDefaultRuntimeState()
+    const suffix = `${Date.now()}-bundled`
+    const programmable = seedProgrammableAgent(`E2E Return Agent ${suffix}`)
+    activateProgrammableAgentRuntime(programmable.agentId)
+
+    await openNewConversation(page, `Bundled Return ${suffix}`)
+    await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", programmable.agentName)
+    await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
+
+    await page.getByPlaceholder("Message…").fill("First programmable turn")
+    await page.getByRole("button", { name: "Send" }).click()
+    await waitForTailAgentToFinish(page)
+
+    await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", bundled.agentName)
+    await page.getByPlaceholder("Message…").fill("Return to the bundled default runtime")
+    await page.getByRole("button", { name: "Send" }).click()
+    await waitForTailAgentToFinish(page)
+
+    const state = programmableConversationState(conversationIdFromUrl(page))
+
+    expect(state.agentName).toBe(bundled.agentName)
+    expect(state.latestDraft.status).toBe("finalized")
+    expect(state.latestRun.state).toBe("succeeded")
+    expect(state.latestRun.deploymentFingerprint).toBe(bundled.deploymentFingerprint)
+    expect(state.latestAgentNode.outputText || "").toContain("Return to the bundled default runtime")
   })
 })

@@ -21,16 +21,6 @@ Rails.application.routes.draw do
       end
       resource :runtime_settings, only: %i[show edit update]
       resource :runtime_governance, only: :show, controller: "runtime_governance"
-      resources :agent_programs, only: %i[index new create show] do
-        post :fork, on: :member
-      end
-      resources :agent_deployments, only: %i[index new create show] do
-        post :inspect, on: :member
-        post :activate, on: :member
-      end
-      resources :execution_locations, only: %i[index show edit update]
-      resources :workspaces, only: %i[index show edit update]
-      resources :execution_targets, only: %i[index show edit update]
       resources :automations, only: %i[index show] do
         resources :executions, only: [], controller: "automation_executions" do
           post :approve, on: :member
@@ -42,7 +32,6 @@ Rails.application.routes.draw do
 
   post "agent_rpc/callbacks/:scope_type/:scope_id", to: "agent_rpc/callbacks#create", as: :agent_rpc_callback
 
-  resources :agent_programs, only: %i[index show]
   resources :conversations, only: %i[index show create update] do
     get :composer_status, on: :member
     post :branch, on: :member

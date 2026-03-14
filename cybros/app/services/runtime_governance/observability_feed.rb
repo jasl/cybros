@@ -9,9 +9,8 @@ module RuntimeGovernance
     }.freeze
     SUBJECT_KIND_LABELS = {
       "llm_provider_credential" => "Provider credential",
-      "execution_location" => "Execution location",
-      "execution_target" => "Execution target",
-      "agent_deployment" => "Agent deployment",
+      "agent" => "Agent",
+      "recognized_deployment" => "Runtime identity",
     }.freeze
 
     def self.build(recent_limit: DEFAULT_RECENT_LIMIT, recent_window: RECENT_WINDOW)
@@ -70,7 +69,7 @@ module RuntimeGovernance
       def recent_execution_capacity_denials
         @recent_execution_capacity_denials ||=
           ConversationRun.where(state: "failed")
-            .includes(:execution_target)
+            .includes(:agent)
             .where("updated_at >= ?", recent_cutoff)
             .order(updated_at: :desc, id: :desc)
             .to_a
@@ -161,7 +160,6 @@ module RuntimeGovernance
         group.fetch(:recent_execution_capacity_denials) << {
           run_id: run.id,
           message: run.error["message"].to_s,
-          execution_target_id: snapshot["execution_target_id"],
           occurred_at: run.updated_at,
         }
         touch_group!(group, run.updated_at)
@@ -213,9 +211,8 @@ module RuntimeGovernance
             run.present? ? "Run #{run.id} (#{run.runtime_state})" : "Conversation run #{owner_id}"
           when "RunDraft"
             "Draft #{owner_id}"
-          when "AgentDeployment"
-            deployment = AgentDeployment.includes(:agent_program).find_by(id: owner_id)
-            deployment.present? ? "#{deployment.agent_program.name} deployment" : "Deployment #{owner_id}"
+          when "RecognizedDeployment"
+            runtime_identity_label(RecognizedDeployment.includes(:agent).find_by(id: owner_id), fallback_id: owner_id)
           else
             "#{owner_type} #{owner_id}"
           end
@@ -226,13 +223,10 @@ module RuntimeGovernance
         case subject_type
         when "llm_provider_credential"
           LLMProviderCredential.find_by(id: subject_id)&.provider_key.to_s.presence || "Provider credential #{subject_id}"
-        when "execution_location"
-          ExecutionLocation.find_by(id: subject_id)&.name.to_s.presence || "Execution location #{subject_id}"
-        when "execution_target"
-          ExecutionTarget.find_by(id: subject_id)&.name.to_s.presence || "Execution target #{subject_id}"
-        when "agent_deployment"
-          deployment = AgentDeployment.includes(:agent_program).find_by(id: subject_id)
-          deployment&.agent_program&.name.to_s.presence || "Deployment #{subject_id}"
+        when "agent"
+          Agent.find_by(id: subject_id)&.name.to_s.presence || "Agent #{subject_id}"
+        when "recognized_deployment"
+          runtime_identity_label(RecognizedDeployment.includes(:agent).find_by(id: subject_id), fallback_id: subject_id)
         else
           "#{subject_type} #{subject_id}"
         end
@@ -245,21 +239,13 @@ module RuntimeGovernance
           return if credential.blank?
 
           [credential.credential_type, credential.status].compact.join(" • ")
-        when "execution_location"
-          location = ExecutionLocation.find_by(id: subject_id)
-          return if location.blank?
+        when "agent"
+          agent = Agent.find_by(id: subject_id)
+          return if agent.blank?
 
-          [location.platform, location.environment].compact.join(" • ")
-        when "execution_target"
-          target = ExecutionTarget.includes(:execution_location, :workspace).find_by(id: subject_id)
-          return if target.blank?
-
-          [target.execution_location&.name, target.workspace&.name].compact.join(" • ")
-        when "agent_deployment"
-          deployment = AgentDeployment.find_by(id: subject_id)
-          return if deployment.blank?
-
-          [deployment.status, deployment.health_status].compact.join(" • ")
+          [agent.source_kind, agent.bundled_agent_key.presence || agent.config_namespace].compact.join(" • ")
+        when "recognized_deployment"
+          runtime_identity_subtitle(RecognizedDeployment.includes(:agent).find_by(id: subject_id))
         end
       end
 
@@ -269,6 +255,23 @@ module RuntimeGovernance
 
       def event_sort_key(event)
         event[:id] || event[:run_id] || event[:execution_request_id] || event[:request_id] || event[:owner_id] || event[:holder_id]
+      end
+
+      def runtime_identity_label(recognized_deployment, fallback_id:)
+        return "Runtime #{fallback_id}" if recognized_deployment.blank?
+
+        agent_name = recognized_deployment.agent&.name.to_s.presence || "Agent"
+        fingerprint = recognized_deployment.deployment_fingerprint.to_s.presence || recognized_deployment.id
+        "#{agent_name} runtime #{fingerprint}"
+      end
+
+      def runtime_identity_subtitle(recognized_deployment)
+        return if recognized_deployment.blank?
+
+        [
+          recognized_deployment.agent_sdk_version.presence,
+          recognized_deployment.protocol_version.presence,
+        ].compact.join(" • ").presence
       end
 
       def self.flatten_subject_group(group)

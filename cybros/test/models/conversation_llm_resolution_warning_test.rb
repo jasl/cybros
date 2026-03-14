@@ -9,7 +9,7 @@ class ConversationLlmResolutionWarningTest < ActiveSupport::TestCase
         metadata: {
           "agent" => {
             "agent_profile" => "coding",
-            "agent_program" => { "model_prefer" => ["does-not-exist"] },
+            "model_prefer" => ["does-not-exist"],
           },
         },
       )

@@ -61,15 +61,23 @@ class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
 
     def create_runtime!
       user = create_user!
-      program = create_program!
-      target = create_execution_target!(name: "Recorder target")
-      deployment = active_deployment!(program: program, endpoint_url: "http://127.0.0.1:9", deployment_fingerprint: "fixture-deployment-v1")
+      agent =
+        create_agent!(
+          name: "Recorder Agent",
+          config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
+          published_contract_fingerprint: "contract:v1",
+          config_schema_fingerprint: "config:v1",
+        )
+      recognized_deployment =
+        create_recognized_deployment!(
+          agent: agent,
+          deployment_fingerprint: "fixture-deployment-v1",
+        )
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: "full_access",
           status: "active",
           schedule_kind: "rrule",
@@ -89,9 +97,9 @@ class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
           automation_dispatch_key: SecureRandom.uuid,
           automation_triggered_at: Time.current.change(usec: 0),
           title: "Recorder execution",
-          agent_program: program,
-          default_execution_target: target,
+          agent: agent,
           permission_mode: "full_access",
+          agent_config_schema_fingerprint: agent.config_schema_fingerprint,
           metadata: {},
         )
 
@@ -105,98 +113,27 @@ class Automations::ExecutionStateRecorderTest < ActiveSupport::TestCase
           queued_at: Time.current.change(usec: 0),
           snapshot_version: 1,
           effective_permission_mode: "full_access",
-          agent_program: program,
-          contract_fingerprint: program.published_contract_fingerprint,
-          agent_deployment: deployment,
-          deployment_fingerprint: deployment.deployment_fingerprint,
-          deployment_activated_at: deployment.activated_at,
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+          contract_fingerprint: recognized_deployment.contract_fingerprint,
+          deployment_fingerprint: recognized_deployment.deployment_fingerprint,
+          deployment_activated_at: Time.current.change(usec: 0),
           provider_credential: credential,
-          execution_target: target,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: agent.config_schema_fingerprint,
           effective_policy: {},
           runtime_governors: runtime_governors_snapshot(
             provider_credential: credential,
             selected_model_ref: "openai/gpt-5.4",
-            execution_target: target,
+            agent: agent,
           ),
           snapshot: { "draft" => { "id" => SecureRandom.uuid } },
         )
 
       { conversation: conversation, conversation_run: conversation_run }
-    end
-
-    def create_program!
-      AgentProgram.create!(
-        name: "Fixture Program",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
-        published_contract_fingerprint: "contract:v1",
-        manifest_snapshot: {
-          "agent_program_key" => "fixture-program",
-          "name" => "Fixture Program",
-        },
-        global_config: {},
-        global_config_schema: { "type" => "object" },
-        conversation_config_schema: { "type" => "object" },
-        config_schema_fingerprint: "config:v1",
-      )
-    end
-
-    def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
-        agent_program: program,
-        transport_kind: "http_jsonrpc",
-        endpoint_url: endpoint_url,
-        deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
-        deployment_fingerprint: deployment_fingerprint,
-        status: "active",
-        health_status: "healthy",
-        protocol_version: "agent_rpc.v1",
-        agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
-        manifest_snapshot: {},
-        schema_snapshot: {},
-        capability_snapshot: {},
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
-    end
-
-    def create_execution_target!(name:)
-      location =
-        ExecutionLocation.create!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        Workspace.create!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      ExecutionTarget.create!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
-      )
     end
 
     def ensure_active_openai_credential!

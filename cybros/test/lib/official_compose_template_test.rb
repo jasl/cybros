@@ -10,9 +10,6 @@ class OfficialComposeTemplateTest < ActiveSupport::TestCase
     assert_equal "${SECRET_KEY_BASE:-compose-local-secret-key-base}", environment.fetch("SECRET_KEY_BASE")
     assert_equal "false", environment.fetch("RAILS_ASSUME_SSL")
     assert_equal "false", environment.fetch("RAILS_FORCE_SSL")
-    assert_equal "1", environment.fetch("CYBROS_MANAGED_AGENT_AUTOLAUNCH")
-    assert_equal "agent_deployments", environment.fetch("CYBROS_MANAGED_AGENT_PUBLIC_HOST")
-    assert_equal "0.0.0.0", environment.fetch("CYBROS_MANAGED_AGENT_BIND_HOST")
     assert_equal "/rails/agent-workspace", environment.fetch("CYBROS_AGENT_WORKSPACE_ROOT")
 
     %w[
@@ -23,9 +20,7 @@ class OfficialComposeTemplateTest < ActiveSupport::TestCase
       assert environment.fetch(key).start_with?("${#{key}:-compose-local-")
     end
 
-    agent_deployments_depends_on = compose.fetch("services").fetch("agent_deployments").fetch("depends_on")
-    assert_equal ["db"], agent_deployments_depends_on.keys
-    assert_equal "service_healthy", agent_deployments_depends_on.dig("db", "condition")
+    refute compose.fetch("services").key?("agent_deployments")
   end
 
   test "production docker image seeds the managed agent workspace volume" do

@@ -1,0 +1,2 @@
+Attachment note fixture.
+Line two for digest coverage.

@@ -27,15 +27,9 @@
           <% end %>
         </li>
         <li>
-          <%= link_to system_settings_agent_programs_path, class: "gap-2" do %>
+          <%= link_to dashboard_path, class: "gap-2" do %>
             <span class="icon-[lucide--sparkles] size-4"></span>
-            Agent Programs
-          <% end %>
-        </li>
-        <li>
-          <%= link_to system_settings_execution_targets_path, class: "gap-2" do %>
-            <span class="icon-[lucide--server-cog] size-4"></span>
-            Execution Targets
+            Agents
           <% end %>
         </li>
       <% end %>
@@ -101,13 +95,13 @@
 
       <% message_form_id = dom_id(@conversation, :message_form) %>
       <% permission_form_id = dom_id(@conversation, :permission_mode_form) %>
-      <% agent_program_form_id = dom_id(@conversation, :agent_program_form) %>
-      <% execution_target_form_id = dom_id(@conversation, :execution_target_form) %>
+      <% agent_form_id = dom_id(@conversation, :agent_form) %>
 
-      <%= form_with url: conversation_messages_path(@conversation),
-        method: :post,
-        html: { id: message_form_id },
-        data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
+	      <%= form_with url: conversation_messages_path(@conversation),
+	        method: :post,
+	        multipart: true,
+	        html: { id: message_form_id },
+	        data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
         <% needs_model_reselection = @model_picker_alert_message.present? && @selected_model_ref.blank? %>
         <% if @model_picker_alert_message.present? %>
           <div role="alert" class="alert alert-warning alert-soft text-sm">
@@ -151,6 +145,16 @@
         <div
           data-testid="conversation-composer-input"
           class="bg-base-200 rounded-3xl pl-5 pr-2 py-2 flex items-end gap-2 focus-within:ring-2 focus-within:ring-primary/40 focus-within:ring-offset-2 focus-within:ring-offset-base-100">
+          <label class="btn btn-ghost btn-circle btn-sm shrink-0 mb-0.5" aria-label="Add files">
+            <span class="icon-[lucide--paperclip] size-4"></span>
+	            <input
+	              type="file"
+	              name="attachments[]"
+	              multiple
+	              class="hidden"
+	              data-message-form-target="attachmentInput"
+	              data-action="click->message-form#prepareAttachmentSelection change->message-form#attachmentInputChanged">
+	          </label>
           <textarea
             name="content"
             rows="1"
@@ -204,15 +208,15 @@
             <% end %>
 
             <select
-              name="conversation[agent_program_id]"
-              form="<%= agent_program_form_id %>"
+              name="conversation[agent_id]"
+              form="<%= agent_form_id %>"
               data-testid="conversation-composer-agent-picker"
               aria-label="Agent"
               onchange="this.form.requestSubmit()"
               class="select select-bordered select-xs max-w-full">
-              <% @agent_program_options.each do |program| %>
-                <option value="<%= program.id %>" <%= @selected_agent_program&.id == program.id ? "selected" : nil %>>
-                  <%= program.name %>
+              <% @agent_options.each do |agent| %>
+                <option value="<%= agent.id %>" <%= @selected_agent&.id == agent.id ? "selected" : nil %>>
+                  <%= agent.name %>
                 </option>
               <% end %>
             </select>
@@ -231,20 +235,6 @@
               <% end %>
             </select>
 
-            <select
-              name="conversation[default_execution_target_id]"
-              form="<%= execution_target_form_id %>"
-              data-testid="conversation-composer-execution-target-picker"
-              aria-label="Execution target"
-              onchange="this.form.requestSubmit()"
-              class="select select-bordered select-xs max-w-full">
-              <option value="" <%= @selected_execution_target.nil? ? "selected" : nil %>>No target selected</option>
-              <% @execution_target_options.each do |target| %>
-                <option value="<%= target.fetch("id") %>" <%= @selected_execution_target&.id == target.fetch("id") ? "selected" : nil %>>
-                  <%= target.fetch("name") %>
-                </option>
-              <% end %>
-            </select>
           </div>
 
           <div class="flex items-center gap-1">
@@ -269,24 +259,15 @@
         </div>
       <% end %>
 
-      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: agent_program_form_id, class: "hidden" } do %>
+      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: agent_form_id, class: "hidden" } do %>
       <% end %>
 
       <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: permission_form_id, class: "hidden" } do %>
       <% end %>
 
-      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: execution_target_form_id, class: "hidden" } do %>
-      <% end %>
-
-      <% if @selected_agent_program_stale %>
+      <% if @selected_agent_stale %>
         <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-agent-stale-warning">
           <span>Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment.</span>
-        </div>
-      <% end %>
-
-      <% if @selected_execution_target_stale %>
-        <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-execution-target-stale-warning">
-          <span>Selected execution target is no longer available. Future runs will stay blocked until you choose another target or the operator restores this target.</span>
         </div>
       <% end %>
     </div>

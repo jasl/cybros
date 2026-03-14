@@ -55,7 +55,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
     ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
-    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    program = Agents::BootstrapBundledDefaultService.ensure_agent!
 
     conversation =
       create_conversation!(
@@ -76,7 +76,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "dev", credential_type: "api_key", api_key: "sk-dev")
     program =
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -164,7 +164,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     program =
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -175,7 +175,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         config_schema_fingerprint: "config:v1",
       )
     deployment =
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -186,7 +186,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -196,35 +196,32 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation)
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(
-      conversation: conversation,
-      dag_node_id: node.id,
-      state: "queued",
-      queued_at: Time.current.change(usec: 0),
-      snapshot_version: 1,
-      initiated_by_user: conversation.user,
-      effective_permission_mode: "default",
-      agent_program: program,
-      contract_fingerprint: "contract:v1",
-      agent_deployment: deployment,
-      deployment_fingerprint: "fixture-deployment-v1",
-      deployment_activated_at: deployment.activated_at,
-      selected_model_ref: "openai/gpt-5.4",
-      effective_public_settings: {},
-      effective_agent_config: {},
-      agent_config_schema_fingerprint: program.config_schema_fingerprint,
-      effective_policy: {},
-      runtime_governors: {
-        "provider_limiter" => {
-          "provider_key" => "openai",
+      build_conversation_run_attributes(
+        conversation: conversation,
+        dag_node_id: node.id,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {
+          "provider_limiter" => {
+            "provider_key" => "openai",
+          },
         },
-      },
-      snapshot: {
-        "draft" => {
-          "id" => SecureRandom.uuid,
-          "planning" => { "step_plan" => { "fixture" => true } },
+        snapshot: {
+          "draft" => {
+            "id" => SecureRandom.uuid,
+            "planning" => { "step_plan" => { "fixture" => true } },
+          },
         },
-      },
+      ),
     )
 
     runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
@@ -238,7 +235,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
-    program = AgentPrograms::BootstrapBundledDefaultService.ensure_program!
+    program = Agents::BootstrapBundledDefaultService.ensure_agent!
     conversation =
       create_conversation!(
         metadata: {
@@ -280,7 +277,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     program =
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -291,7 +288,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         config_schema_fingerprint: "config:v1",
       )
     deployment =
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -302,7 +299,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {
@@ -314,30 +311,26 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     agent_node = build_pending_agent_node(conversation: conversation)
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(
-      conversation: conversation,
-      dag_node_id: agent_node.id,
-      state: "queued",
-      queued_at: Time.current.change(usec: 0),
-      snapshot_version: 1,
-      initiated_by_user: conversation.user,
-      effective_permission_mode: "default",
-      agent_program: program,
-      contract_fingerprint: "contract:v1",
-      agent_deployment: deployment,
-      deployment_fingerprint: "fixture-deployment-v1",
-      deployment_activated_at: deployment.activated_at,
-      selected_model_ref: "openai/gpt-5.4",
-      effective_public_settings: {},
-      effective_agent_config: {},
-      agent_config_schema_fingerprint: program.config_schema_fingerprint,
-      effective_policy: {},
-      runtime_governors: {
-        "provider_limiter" => {
-          "provider_key" => "openai",
+      build_conversation_run_attributes(
+        conversation: conversation,
+        dag_node_id: agent_node.id,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {
+          "provider_limiter" => {
+            "provider_key" => "openai",
+          },
         },
-      },
-      snapshot: {
+        snapshot: {
         "capability_snapshot" => {
           "capability_registry_snapshot_id" => "csnap_fixture",
         },
@@ -350,7 +343,8 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
             },
           },
         },
-      },
+        },
+      ),
     )
     task_node =
       conversation.root_graph.nodes.create!(
@@ -363,7 +357,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
           "logical_tool_name" => "compact_context",
           "requested_name" => "compact_context",
           "effective_tool_id" => "etool_compact",
-          "implementation_source" => "agent_program",
+          "implementation_source" => "agent",
           "implementation_ref" => "agent://compact_context",
           "capability_registry_snapshot_id" => "csnap_fixture",
           "tool_surface_id" => "surface_fixture",
@@ -386,7 +380,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")
 
     program =
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -397,7 +391,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         config_schema_fingerprint: "config:v1",
       )
     deployment =
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -408,7 +402,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -418,40 +412,37 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation)
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(
-      conversation: conversation,
-      dag_node_id: node.id,
-      state: "queued",
-      queued_at: Time.current.change(usec: 0),
-      snapshot_version: 1,
-      initiated_by_user: conversation.user,
-      effective_permission_mode: "default",
-      agent_program: program,
-      contract_fingerprint: "contract:v1",
-      agent_deployment: deployment,
-      deployment_fingerprint: "fixture-deployment-v1",
-      deployment_activated_at: deployment.activated_at,
-      selected_model_ref: "openai/gpt-5.4",
-      effective_public_settings: {},
-      effective_agent_config: {
-        "llm_options" => {
-          "stream" => false,
-          "temperature" => 0.1,
+      build_conversation_run_attributes(
+        conversation: conversation,
+        dag_node_id: node.id,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {
+          "llm_options" => {
+            "stream" => false,
+            "temperature" => 0.1,
+          },
         },
-      },
-      agent_config_schema_fingerprint: program.config_schema_fingerprint,
-      effective_policy: {},
-      runtime_governors: {
-        "provider_limiter" => {
-          "provider_key" => "openai",
+        agent_config_schema_fingerprint: program.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors: {
+          "provider_limiter" => {
+            "provider_key" => "openai",
+          },
         },
-      },
-      snapshot: {
-        "draft" => {
-          "id" => SecureRandom.uuid,
-          "planning" => { "step_plan" => { "fixture" => true } },
+        snapshot: {
+          "draft" => {
+            "id" => SecureRandom.uuid,
+            "planning" => { "step_plan" => { "fixture" => true } },
+          },
         },
-      },
+      ),
     )
 
     runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)

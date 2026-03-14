@@ -1,7 +1,6 @@
 module RunDrafts
   class FinalizeService
     SNAPSHOT_VERSION = 1
-    ConversationEntrypoint = Struct.new(:permission_mode, :default_execution_target, keyword_init: true)
 
     def self.finalize!(draft:, debug: {}, error: {})
       new(draft: draft, debug: debug, error: error).finalize!
@@ -110,16 +109,17 @@ module RunDrafts
       end
 
       def ensure_fresh_binding!
-        deployment = reload_record(draft.agent_deployment)
-        target = reload_record(draft.proposed_execution_target)
-        resolved = resolve_current_binding!(target: target)
+        agent = reload_record(draft.agent)
+        recognized_deployment = reload_record(draft.recognized_deployment)
+        deployment = reload_record(agent&.active_runtime_binding)
+        recognized_deployment = resolve_current_recognized_deployment!(agent: agent, deployment: deployment)
+        resolved = resolve_current_binding!
         resolved_provider_credential = resolved.fetch(:provider_credential)
         fresh =
           deployment_fresh?(deployment) &&
-            target.present? &&
-            RuntimeGovernance::ExecutionTargetSwitchPolicy.visible_target?(target) &&
+            agent.present? &&
+            recognized_deployment.recognized_deployment_key.to_s == draft.recognized_deployment_key.to_s &&
             resolved_provider_credential&.id.to_s == draft.provider_credential_id.to_s &&
-            resolved.fetch(:proposed_execution_target).id.to_s == draft.proposed_execution_target_id.to_s &&
             resolved.fetch(:runtime_governors) == draft.runtime_governors
 
         return if fresh
@@ -134,7 +134,6 @@ module RunDrafts
         apply_agent_config_patch!
         apply_kv_ops!
         apply_prompt_buffer_ops!
-        apply_execution_target_selection!
       end
 
       def apply_public_settings_patch!
@@ -149,13 +148,15 @@ module RunDrafts
         return if conversation.blank?
         return if draft.staged_agent_config_patch.blank?
 
-        namespace = draft.agent_program.config_namespace.to_s
+        namespace = draft.agent&.config_namespace.to_s.presence
+        return if namespace.blank?
+
         agent_config = conversation.agent_config.deep_dup
         current_namespace = agent_config[namespace].is_a?(Hash) ? agent_config[namespace] : {}
         agent_config[namespace] = current_namespace.deep_merge(draft.staged_agent_config_patch)
         conversation.agent_config = agent_config
-        if conversation.agent_program_id.to_s == draft.agent_program_id.to_s
-          conversation.agent_config_schema_fingerprint = conversation.agent_program.config_schema_fingerprint
+        if conversation.agent_id.to_s == draft.agent_id.to_s
+          conversation.agent_config_schema_fingerprint = conversation.agent.config_schema_fingerprint
         end
         conversation.save!
       end
@@ -227,14 +228,6 @@ module RunDrafts
         entry.save!
       end
 
-      def apply_execution_target_selection!
-        return if conversation.blank?
-        return unless draft.proposed_execution_target.present?
-        return if conversation.default_execution_target_id.to_s == draft.proposed_execution_target_id.to_s
-
-        conversation.update!(default_execution_target: draft.proposed_execution_target)
-      end
-
       def materialize_conversation_run!
         ConversationRun.create!(
           conversation: conversation,
@@ -244,16 +237,16 @@ module RunDrafts
           snapshot_version: SNAPSHOT_VERSION,
           initiated_by_user: draft.initiated_by_user,
           effective_permission_mode: draft.permission_mode,
-          agent_program: draft.agent_program,
+          agent: draft.agent,
+          recognized_deployment: draft.recognized_deployment,
+          recognized_deployment_key: draft.recognized_deployment_key,
           contract_fingerprint: draft.contract_fingerprint,
-          agent_deployment: draft.agent_deployment,
           deployment_fingerprint: draft.deployment_fingerprint,
           deployment_activated_at: draft.deployment_activated_at,
           provider_credential: draft.provider_credential,
-          execution_target: draft.proposed_execution_target,
           selected_model_ref: draft.selected_model_ref,
           effective_public_settings: conversation.public_settings,
-          effective_agent_config: conversation.selected_agent_config_for(draft.agent_program),
+          effective_agent_config: conversation.selected_agent_config_for(draft.agent),
           agent_config_schema_fingerprint: draft.agent_config_schema_fingerprint,
           effective_policy: effective_policy_summary,
           runtime_governors: draft.runtime_governors,
@@ -264,7 +257,7 @@ module RunDrafts
               "planning" => draft.planning,
               "approval_state" => draft.approval_state,
             },
-            "capability_snapshot" => normalize_hash(draft.agent_deployment&.capability_snapshot),
+            "capability_snapshot" => normalize_hash(draft.recognized_deployment&.capability_snapshot),
           },
           debug: debug,
           error: error,
@@ -308,7 +301,7 @@ module RunDrafts
       end
 
       def deployment_fresh?(deployment)
-        active_deployment = draft.agent_program&.active_healthy_deployment
+        active_deployment = draft.agent&.active_runtime_binding
 
         deployment.present? &&
           deployment.status == "active" &&
@@ -319,12 +312,29 @@ module RunDrafts
           active_deployment&.id == deployment.id
       end
 
-      def resolve_current_binding!(target:)
-        RuntimeGovernance::DraftGovernorResolver.resolve!(
-          entrypoint: conversation,
-          selected_model_ref: draft.selected_model_ref,
-          execution_target: target,
-        )
+      def resolve_current_binding!
+        provider_resolution = RuntimeGovernance::ProviderCredentialLimiter.resolve!(selected_model_ref: draft.selected_model_ref)
+
+        {
+          provider_credential: provider_resolution.fetch(:provider_credential),
+          runtime_governors: {
+            "provider_limiter" => provider_resolution.fetch(:snapshot),
+            "execution_capacity" =>
+              if draft.agent.present?
+                RuntimeGovernance::ExecutionCapacityResolver.resolve!(agent: draft.agent)
+              end,
+          }.compact,
+        }
+      end
+
+      def resolve_current_recognized_deployment!(agent:, deployment:)
+        return draft.recognized_deployment if deployment.blank? || agent.blank?
+
+        AgentRPC::SessionAuthorizer.resolve_initialized_runtime!(
+          deployment: deployment,
+          agent: agent,
+          expected_recognized_deployment: draft.recognized_deployment,
+        ).fetch(:recognized_deployment)
       end
 
       def persist_terminal_status_for!(error)
@@ -352,7 +362,8 @@ module RunDrafts
           code: "cybros.run_drafts.stale",
           details: {
             run_draft_id: draft.id,
-            agent_deployment_id: draft.agent_deployment_id,
+            recognized_deployment_id: draft.recognized_deployment_id,
+            recognized_deployment_key: draft.recognized_deployment_key,
             deployment_fingerprint: draft.deployment_fingerprint,
           },
         )

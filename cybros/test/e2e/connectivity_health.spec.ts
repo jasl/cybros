@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test"
-import { signIn, createHighPriorityMockProvider } from "./helpers"
+import { signIn, createHighPriorityMockProvider, openNewConversation } from "./helpers"
 
 test.describe("Connectivity health banner", () => {
   test("shows banner and pings /up when disconnected", async ({ page }) => {
@@ -10,10 +10,7 @@ test.describe("Connectivity health banner", () => {
       await route.fulfill({ status: 200, contentType: "text/plain", body: "ok" })
     })
 
-    await page.goto("/conversations")
-    await page.getByPlaceholder("New conversation title").fill(`E2E Connectivity ${Date.now()}`)
-    await page.locator("main").getByRole("button", { name: "New", exact: true }).click()
-    await expect(page).toHaveURL(/\/conversations\//)
+    await openNewConversation(page, `E2E Connectivity ${Date.now()}`)
 
     const alert = page.locator('[data-connectivity-health-target="disconnectedAlert"]')
 

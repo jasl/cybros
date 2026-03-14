@@ -38,8 +38,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
 
     assert_response :success
     assert_includes response.body, runtime.fetch(:automation).task_payload.fetch("prompt")
-    assert_includes response.body, runtime.fetch(:program).name
-    assert_includes response.body, runtime.fetch(:target).name
+    assert_includes response.body, runtime.fetch(:agent).name
     assert_includes response.body, "full_access"
     assert_includes response.body, "completed"
     refute_includes response.body, "Standalone"
@@ -47,8 +46,8 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     get system_settings_automation_path(runtime.fetch(:automation))
 
     assert_response :success
-    assert_includes response.body, runtime.fetch(:program).name
-    assert_includes response.body, runtime.fetch(:target).name
+    assert_includes response.body, runtime.fetch(:agent).name
+    assert_includes response.body, runtime.fetch(:agent).config_namespace
     assert_includes response.body, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
     assert_includes response.body, "UTC"
     assert_includes response.body, scheduled_for.iso8601
@@ -145,14 +144,14 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     def create_automation_runtime!(endpoint_url:, permission_mode:)
       user = create_user!
       program = create_program!
-      active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
+      deployment = active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Operator automation target")
+      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: permission_mode,
           status: "active",
           schedule_kind: "rrule",
@@ -165,7 +164,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
           },
         )
 
-      { automation: automation, program: program, target: target }
+      { agent: agent, automation: automation, program: program, target: target }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -187,7 +186,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Operator Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -203,7 +202,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -214,7 +213,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -225,7 +224,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -238,7 +237,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -248,7 +247,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

@@ -204,25 +204,20 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     assert_equal({ "status" => "branch" }, main_lane.lane_kv_entries.find_by!(key: "shared.stage").value)
   end
 
-  test "task executor executes agent_program routed tools through agent rpc using effective tool metadata" do
+  test "task executor executes agent routed tools through agent rpc using effective tool metadata" do
     conversation = create_conversation!
     turn = conversation.append_user_message!(content: "Hello")
     program = create_program!
     deployment = create_deployment!(program: program)
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
-      ConversationRun.create!(
+      create_conversation_run!(
         conversation: conversation,
         dag_node_id: turn.fetch(:agent_node).id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: "contract:v1",
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
@@ -241,7 +236,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
           "logical_tool_name" => "compact_context",
           "requested_name" => "compact_context",
           "effective_tool_id" => "etool_compact",
-          "implementation_source" => "agent_program",
+          "implementation_source" => "agent",
           "implementation_ref" => "agent://compact_context",
           "capability_registry_snapshot_id" => "csnap_fixture",
           "tool_surface_id" => "surface_fixture",
@@ -279,13 +274,16 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     assert_equal "agent compacted", AgentCore::Resources::Tools::ToolResult.from_h(result.payload.fetch("result")).text
     assert_equal "compact_context", result.metadata.dig("tool", "logical_tool_name")
     assert_equal "etool_compact", result.metadata.dig("tool", "effective_tool_id")
-    assert_equal "agent_program", result.metadata.dig("tool", "implementation_source")
+    assert_equal "agent", result.metadata.dig("tool", "implementation_source")
   end
 
   test "subagent result hooks can update the parent placeholder and append follow-up work after the current task" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[after_subagent_result],
+        },
         rpc_overrides: {
           "after_subagent_result" => lambda do |_params, _base_result, _identity|
             {
@@ -322,8 +320,8 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         selected_tool_ids: [route.effective_tool_id],
         tool_surface_label: "fixture-after-subagent-result",
       )
-    deployment =
-      AgentDeployment.create!(
+      deployment =
+        create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -334,27 +332,22 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS + %w[after_subagent_result],
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[after_subagent_result],
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: capability_snapshot_payload(snapshot),
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
+          inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
-      ConversationRun.create!(
+      create_conversation_run!(
         conversation: conversation,
         dag_node_id: agent_node.id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: "contract:v1",
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
@@ -462,7 +455,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
         identity_overrides: {
-          "supported_methods" => AgentDeployments::REQUIRED_METHODS + %w[before_subagent_spawn],
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
         },
         rpc_overrides: {
           "before_subagent_spawn" => lambda do |_params, _base_result, _identity|
@@ -499,8 +492,8 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         selected_tool_ids: [compact_route.effective_tool_id],
         tool_surface_label: "fixture-before-subagent-spawn",
       )
-    deployment =
-      AgentDeployment.create!(
+      deployment =
+        create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -511,27 +504,22 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_subagent_spawn],
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: capability_snapshot_payload(snapshot),
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
+          inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
-      ConversationRun.create!(
+      create_conversation_run!(
         conversation: conversation,
         dag_node_id: agent_node.id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: "contract:v1",
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
@@ -645,7 +633,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         required_bearer: "secret://fixture",
         identity_overrides: {
-          "supported_methods" => AgentDeployments::REQUIRED_METHODS + %w[before_subagent_spawn],
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
         },
         rpc_overrides: {
           "before_subagent_spawn" => lambda do |_params, _base_result, _identity|
@@ -672,8 +660,8 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     agent_node = turn.fetch(:agent_node)
     program = create_program!
     snapshot = build_capability_snapshot(program_id: program.id)
-    deployment =
-      AgentDeployment.create!(
+      deployment =
+        create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
@@ -684,27 +672,22 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS + %w[before_subagent_spawn],
+        supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[before_subagent_spawn],
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: capability_snapshot_payload(snapshot),
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
+          inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
+    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+    recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
-      ConversationRun.create!(
+      create_conversation_run!(
         conversation: conversation,
         dag_node_id: agent_node.id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: "default",
-        agent_program: program,
-        contract_fingerprint: "contract:v1",
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
+        agent: agent,
+        recognized_deployment: recognized_deployment,
         effective_public_settings: {},
         effective_agent_config: {},
         effective_policy: {},
@@ -856,7 +839,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -869,7 +852,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     end
 
     def create_deployment!(program:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -880,7 +863,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -892,8 +875,8 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     def build_capability_snapshot(program_id:)
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: program_id,
-        agent_program_version: "agent:v1",
+        agent_key: program_id,
+        agent_capabilities_version: "agent:v1",
         kernel_tools: [
           {
             logical_tool_name: "compact_context",
@@ -913,8 +896,8 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
       {
         "capability_registry_snapshot_id" => snapshot.snapshot_id,
         "kernel_capability_registry_version" => snapshot.kernel_registry_version,
-        "agent_program_id" => snapshot.agent_program_id,
-        "agent_capabilities_version" => snapshot.agent_program_version,
+        "agent_key" => snapshot.agent_key,
+        "agent_capabilities_version" => snapshot.agent_capabilities_version,
         "effective_tools" => snapshot.effective_tools.map { |tool| effective_tool_payload(tool) },
       }
     end

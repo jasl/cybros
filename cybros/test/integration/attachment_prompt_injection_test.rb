@@ -1,0 +1,254 @@
+require "test_helper"
+require_relative "../support/programmable_agent_runtime_test_support"
+
+class AttachmentPromptInjectionTest < ActiveSupport::TestCase
+  include ActiveJob::TestHelper
+  include ProgrammableAgentRuntimeTestSupport
+
+  setup do
+    clear_enqueued_jobs
+    clear_performed_jobs
+  end
+
+  test "planning and runtime hook payloads include attachment manifests workspace descriptors and multimodal image inputs" do
+    captured_params = {}
+    llm_payloads = []
+    llm_server =
+      MockLLMServer.new do |payload|
+        llm_payloads << payload.deep_dup
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            captured_params[:prepare] = params.deep_dup
+            base_result
+          end,
+          "before_finalize_output" => lambda do |params, base_result, _identity|
+            captured_params[:finalize] = params.deep_dup
+            base_result
+          end,
+        },
+      ).start
+
+    with_catalog_yaml(mock_vision_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_programmable_runtime!(server: server)
+      conversation = runtime.fetch(:conversation)
+
+      result =
+        conversation.append_user_message!(
+          content: "Inspect these files",
+          model_ref: "dev/vision-model",
+          attachments: [
+            uploaded_fixture("attachment-note.txt", "image/png"),
+            uploaded_fixture("attachment-log.csv", "text/csv"),
+          ],
+        )
+      user_node = result.fetch(:user_node)
+      agent_node = result.fetch(:agent_node)
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
+
+      assert_predicate conversation.reload, :logical_workspace_initialized?
+
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
+
+      expected_workspace = {
+        "conversation_id" => conversation.id,
+        "logical_workspace_key" => conversation.logical_workspace_key,
+        "logical_workspace_root_path" => conversation.logical_workspace_root_path,
+        "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at.iso8601,
+      }
+      expected_manifest =
+        Conversations::AttachmentManifestBuilder.build(
+          conversation: conversation,
+          source_message_node_id: user_node.id,
+        )
+
+      assert_equal expected_manifest, captured_params.dig(:prepare, "attachment_manifest")
+      assert_equal expected_manifest, captured_params.dig(:finalize, "attachment_manifest")
+      assert_equal expected_workspace, captured_params.dig(:prepare, "session_context", "workspace")
+      assert_equal expected_workspace, captured_params.dig(:prepare, "execution_context", "workspace")
+      assert_equal expected_workspace, captured_params.dig(:finalize, "session_context", "workspace")
+      assert_equal expected_workspace, captured_params.dig(:finalize, "execution_context", "workspace")
+
+      latest_user_message =
+        Array(captured_params.dig(:finalize, "provider_input", "messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+      content = latest_user_message.fetch("content")
+      text_blocks = Array(content).select { |block| block.is_a?(Hash) && block["type"].to_s == "text" }.map { |block| block["text"].to_s }
+      image_blocks = Array(content).select { |block| block.is_a?(Hash) && block["type"].to_s == "image" }
+
+      assert_includes text_blocks.join("\n"), "Inspect these files"
+      assert_includes text_blocks.join("\n"), "Attachment 1: attachment-note.txt (image/png)"
+      assert_includes text_blocks.join("\n"), "Attachment 2: attachment-log.csv (text/csv)"
+      refute_includes text_blocks.join("\n"), fixture_content("attachment-log.csv")
+      assert_equal 1, image_blocks.length
+      assert_equal "url", image_blocks.first.fetch("source_type")
+      assert_equal "image/png", image_blocks.first.fetch("media_type")
+      assert_match %r{/rails/active_storage/blobs/redirect/}, image_blocks.first.fetch("url")
+
+      llm_user_message =
+        Array(llm_payloads.last&.dig("messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+      llm_text_blocks =
+        Array(llm_user_message&.fetch("content", nil))
+          .select { |block| block.is_a?(Hash) && block["type"].to_s == "text" }
+          .map { |block| block["text"].to_s }
+      llm_image_blocks =
+        Array(llm_user_message&.fetch("content", nil))
+          .select { |block| block.is_a?(Hash) && block["type"].to_s == "image_url" }
+
+      assert_includes llm_text_blocks.join("\n"), "Inspect these files"
+      assert_includes llm_text_blocks.join("\n"), "Attachment 1: attachment-note.txt (image/png)"
+      assert_includes llm_text_blocks.join("\n"), "Attachment 2: attachment-log.csv (text/csv)"
+      refute_includes llm_text_blocks.join("\n"), fixture_content("attachment-log.csv")
+      assert_equal 1, llm_image_blocks.length
+      assert_match %r{/rails/active_storage/blobs/redirect/}, llm_image_blocks.first.dig("image_url", "url")
+      assert_equal "succeeded", run.reload.state
+    end
+  ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
+  private
+
+    def create_programmable_runtime!(server:)
+      user = create_user!
+      program =
+        create_agent_record!(
+          name: "Attachment Prompt Agent #{SecureRandom.hex(4)}",
+          config_namespace: "fixture.attachment.prompt.#{SecureRandom.hex(4)}",
+          published_contract_fingerprint: "contract:v1",
+          manifest_snapshot: {},
+          global_config: {},
+          global_config_schema: { "type" => "object" },
+          conversation_config_schema: { "type" => "object" },
+          config_schema_fingerprint: "config:v1",
+        )
+      location =
+        create_execution_location_profile!(
+          name: "Attachment prompt host #{SecureRandom.hex(4)}",
+          kind: "host",
+          platform: "macos_arm64",
+          status: "active",
+          trust_group: "operator",
+          environment: "development",
+          tags: ["fixture"],
+          max_concurrent_tasks: 4,
+          max_queued_tasks: 16,
+          default_timeout_s: 900,
+        )
+      workspace =
+        create_workspace_profile!(
+          execution_location: location,
+          name: "Attachment prompt workspace #{SecureRandom.hex(4)}",
+          root_path: "/tmp/attachment-prompt-workspace-#{SecureRandom.hex(4)}",
+          workspace_type: "git",
+          status: "active",
+          capability_tags: ["git"],
+          tags: ["fixture"],
+        )
+      target =
+        create_execution_profile!(
+          execution_location: location,
+          workspace: workspace,
+          name: "Attachment prompt target #{SecureRandom.hex(4)}",
+          status: "active",
+          sandboxed: true,
+        )
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      fixture_identity = Cybros::ProgrammableAgentFixture.identity
+      supported_methods = fixture_identity.fetch("supported_methods")
+      deployment =
+        create_runtime_binding_record!(
+        agent_program: program,
+        transport_kind: "http_jsonrpc",
+        endpoint_url: server.rpc_url,
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
+        status: "active",
+        health_status: "healthy",
+        protocol_version: fixture_identity.fetch("protocol_version"),
+        agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+        supported_methods: supported_methods,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {
+          "agent_capabilities_version" => "fixture-agent-capabilities:v1",
+          "observed_runtime_identity" => {
+            "supported_methods" => supported_methods,
+          },
+        },
+        inspection_details: {},
+        activated_at: Time.current.change(usec: 0),
+      )
+      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+
+      conversation =
+        create_conversation!(
+          user: user,
+          title: "Attachment Prompt Chat",
+          agent: agent,
+        )
+
+      { conversation: conversation, agent: agent, program: program, target: target }
+    end
+
+    def uploaded_fixture(name, content_type)
+      Rack::Test::UploadedFile.new(fixture_path(name), content_type)
+    end
+
+    def fixture_path(name)
+      Rails.root.join("test/fixtures/files/#{name}")
+    end
+
+    def fixture_content(name)
+      File.binread(fixture_path(name))
+    end
+
+    def mock_vision_catalog_yaml(base_url:)
+      <<~YAML
+        version: 1
+        default_model_ref: "dev/vision-model"
+        providers:
+          dev:
+            display_name: "Dev"
+            enabled: true
+            adapter_key: "dev"
+            base_url: "#{base_url}"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            models:
+              vision-model:
+                display_name: "Vision Mock"
+                api_model: "vision-model"
+                context_window_tokens: 20000
+                capabilities:
+                  input: { text: true, image: true }
+                  tools: { tool_calling: true }
+                  protocol: "chat_completions"
+      YAML
+    end
+
+    def run_claimed_nodes_until_idle!(graph:)
+      10.times do
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+        return if claimed.empty?
+
+        claimed.each do |node|
+          node.update!(claim_after_at: nil) if node.respond_to?(:claim_after_at) && node.claim_after_at.present?
+          DAG::Runner.run_node!(node.id)
+        end
+      end
+
+      flunk "expected graph to become idle"
+    end
+end

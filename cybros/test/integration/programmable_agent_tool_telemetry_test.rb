@@ -14,7 +14,7 @@ class ProgrammableAgentToolTelemetryTest < ActiveSupport::TestCase
     graph = conversation.root_graph
     lane_id = graph.main_lane.id
     turn_id = uuidv7
-    deployment = conversation.agent_program.active_healthy_deployment
+    recognized_deployment = recognize_agent_runtime!(agent: conversation.agent)
     provider_credential = LLMProviderCredential.find_by!(provider_key: "dev")
 
     agent =
@@ -27,45 +27,38 @@ class ProgrammableAgentToolTelemetryTest < ActiveSupport::TestCase
       )
 
     ConversationRun.create!(
-      conversation: conversation,
-      dag_node_id: agent.id,
-      state: "queued",
-      queued_at: Time.current.change(usec: 0),
-      snapshot_version: 1,
-      initiated_by_user: conversation.user,
-      effective_permission_mode: "default",
-      agent_program: conversation.agent_program,
-      contract_fingerprint: deployment.contract_fingerprint,
-      agent_deployment: deployment,
-      deployment_fingerprint: deployment.deployment_fingerprint,
-      deployment_activated_at: deployment.activated_at,
-      provider_credential: provider_credential,
-      execution_target: conversation.default_execution_target,
-      selected_model_ref: "openai/gpt-5.4",
-      effective_public_settings: {},
-      effective_agent_config: {},
-      agent_config_schema_fingerprint: conversation.agent_program.config_schema_fingerprint,
-      effective_policy: {},
-      runtime_governors:
-        runtime_governors_snapshot(
-          provider_credential: provider_credential,
-          selected_model_ref: "openai/gpt-5.4",
-          execution_target: conversation.default_execution_target,
-        ),
-      snapshot: {
-        "draft" => {
-          "planning" => {
-            "tool_surface" => {
-              "tool_surface_label" => "bundled_default.before_agent_step",
+      build_conversation_run_attributes(
+        conversation: conversation,
+        dag_node_id: agent.id,
+        agent: conversation.agent,
+        recognized_deployment: recognized_deployment,
+        provider_credential: provider_credential,
+        selected_model_ref: "openai/gpt-5.4",
+        effective_public_settings: {},
+        effective_agent_config: {},
+        agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
+        effective_policy: {},
+        runtime_governors:
+          runtime_governors_snapshot(
+            provider_credential: provider_credential,
+            selected_model_ref: "openai/gpt-5.4",
+            agent: conversation.agent,
+          ),
+        snapshot: {
+          "draft" => {
+            "planning" => {
+              "tool_surface" => {
+                "tool_surface_label" => "bundled_default.before_agent_step",
+              },
             },
           },
+          "capability_snapshot" => {
+            "capability_registry_snapshot_id" => "cap_snapshot_123",
+            "kernel_capability_registry_version" => "kernel:v1",
+            "agent_capabilities_version" => "default-agent-capabilities:v1",
+          },
         },
-        "capability_snapshot" => {
-          "capability_registry_snapshot_id" => "cap_snapshot_123",
-          "kernel_capability_registry_version" => "kernel:v1",
-          "agent_program_version" => "default-agent-capabilities:v1",
-        },
-      },
+      ),
     )
 
     started_at = Time.current.change(usec: 0) - 2.seconds
@@ -81,14 +74,14 @@ class ProgrammableAgentToolTelemetryTest < ActiveSupport::TestCase
         name: "compact_context",
         requested_name: "compact_context",
         tool_call_id: "tc_programmable",
-        source: "agent_program",
+        source: "agent",
         started_at: started_at,
         finished_at: finished_at,
         metadata: {
           "tool" => {
             "logical_tool_name" => "compact_context",
             "effective_tool_id" => "etool_compact",
-            "implementation_source" => "agent_program",
+            "implementation_source" => "agent",
             "implementation_ref" => "agent://compact_context",
             "capability_registry_snapshot_id" => "cap_snapshot_123",
             "tool_surface_id" => "tool_surface_123",
@@ -101,21 +94,22 @@ class ProgrammableAgentToolTelemetryTest < ActiveSupport::TestCase
     stats = Cybros::Statistics::ToolReliabilityStats.snapshot
 
     assert_equal "compact_context", fact.logical_tool_name
-    assert_equal "agent_program", fact.implementation_source
+    assert_equal "agent", fact.implementation_source
     assert_equal "agent://compact_context", fact.implementation_ref
     assert_equal "cap_snapshot_123", fact.capability_registry_snapshot_id
     assert_equal "kernel:v1", fact.kernel_capability_registry_version
     assert_equal "tool_surface_123", fact.tool_surface_id
     assert_equal "bundled_default.before_agent_step", fact.tool_surface_label
-    assert_equal conversation.agent_program_id, fact.agent_program_id
-    assert_equal "default-agent-capabilities:v1", fact.agent_program_version
+    assert_equal recognized_deployment.id, fact.recognized_deployment_id
+    assert_equal recognized_deployment.recognized_deployment_key, fact.recognized_deployment_key
+    assert_equal "default-agent-capabilities:v1", fact.agent_capabilities_version
     assert_equal 120, fact.duration_ms
 
-    agent_program_row = stats.fetch("by_implementation_source").find { |row| row.fetch("implementation_source") == "agent_program" }
+    agent_row = stats.fetch("by_implementation_source").find { |row| row.fetch("implementation_source") == "agent" }
     tool_surface_row = stats.fetch("by_tool_surface_id").find { |row| row.fetch("tool_surface_id") == "tool_surface_123" }
     logical_tool_row = stats.fetch("by_logical_tool_name").find { |row| row.fetch("logical_tool_name") == "compact_context" }
 
-    assert_equal 1, agent_program_row.fetch("total_calls")
+    assert_equal 1, agent_row.fetch("total_calls")
     assert_equal 1, tool_surface_row.fetch("total_calls")
     assert_equal 1, logical_tool_row.fetch("total_calls")
   end

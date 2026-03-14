@@ -296,34 +296,31 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     def create_conversation_run!(conversation:, dag_node_id:)
       program = create_program!
       deployment = create_deployment!(program)
+      agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
+      recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
 
       ConversationRun.create!(
-        conversation: conversation,
-        dag_node_id: dag_node_id,
-        state: "queued",
-        queued_at: Time.current.change(usec: 0),
-        snapshot_version: 1,
-        initiated_by_user: conversation.user,
-        effective_permission_mode: conversation.permission_mode,
-        agent_program: program,
-        contract_fingerprint: program.published_contract_fingerprint,
-        agent_deployment: deployment,
-        deployment_fingerprint: deployment.deployment_fingerprint,
-        deployment_activated_at: deployment.activated_at,
-        selected_model_ref: "openai/gpt-5.4",
-        effective_public_settings: {},
-        effective_agent_config: {},
-        agent_config_schema_fingerprint: program.config_schema_fingerprint,
-        effective_policy: {},
-        runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4"),
-        snapshot: { "origin" => "dag_runner_test" },
-        debug: {},
-        error: {},
+        build_conversation_run_attributes(
+          conversation: conversation,
+          dag_node_id: dag_node_id,
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          effective_permission_mode: conversation.permission_mode,
+          selected_model_ref: "openai/gpt-5.4",
+          effective_public_settings: {},
+          effective_agent_config: {},
+          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          effective_policy: {},
+          runtime_governors: runtime_governors_snapshot(selected_model_ref: "openai/gpt-5.4", agent: agent),
+          snapshot: { "origin" => "dag_runner_test" },
+          error: {},
+        ).merge(debug: {}),
       )
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Runner Fixture Program #{SecureRandom.hex(4)}",
         config_namespace: "dag.runner.fixture.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
@@ -336,7 +333,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
     end
 
     def create_deployment!(program)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -348,7 +345,7 @@ class DAG::RunnerTest < ActiveSupport::TestCase
         activated_at: Time.current.change(usec: 0),
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},

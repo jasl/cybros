@@ -12,8 +12,8 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     RunDraft.delete_all
     Event.delete_all
     Conversation.delete_all
-    AgentDeployment.delete_all
-    AgentProgram.delete_all
+    RecognizedDeployment.delete_all
+    Agent.delete_all
     Session.delete_all
     User.delete_all
     Identity.delete_all
@@ -70,9 +70,10 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     assert_response :success
     assert_includes response.body, 'data-layout="agent"'
 
-    program = AgentProgram.find_by!(bundled_agent_key: "default")
-    deployment = program.active_healthy_deployment
-    assert_equal "bundled", program.source_kind
+    agent = Agent.find_by!(bundled_agent_key: "default")
+    deployment = agent.active_runtime_binding
+    assert_equal "bundled", agent.source_kind
+    assert_equal "default", agent.bundled_agent_key
     assert_equal "healthy", deployment&.health_status
     assert_equal "active", deployment&.status
   end

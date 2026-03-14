@@ -46,8 +46,8 @@ class Cybros::ProgrammableAgent::ToolSurfaceManifestTest < ActiveSupport::TestCa
     def build_snapshot
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(
         kernel_registry_version: "kernel:v1",
-        agent_program_id: "agent-program-123",
-        agent_program_version: "2026-03-11",
+        agent_key: "fixture-agent",
+        agent_capabilities_version: "2026-03-11",
         kernel_tools: [
           {
             logical_tool_name: "cybros_shell_exec",

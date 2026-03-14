@@ -36,11 +36,6 @@ class SmokePagesTest < ActionDispatch::IntegrationTest
     get conversation_path(conversation)
     assert_response :success
 
-    get agent_programs_path
-    assert_redirected_to system_settings_agent_programs_path
-    follow_redirect!
-    assert_response :success
-
     get settings_profile_path
     assert_response :success
 
@@ -50,7 +45,7 @@ class SmokePagesTest < ActionDispatch::IntegrationTest
     get system_settings_llm_providers_path
     assert_response :success
 
-    get system_settings_agent_programs_path
+    get dashboard_path
     assert_response :success
   end
 end

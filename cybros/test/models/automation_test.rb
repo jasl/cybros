@@ -18,8 +18,7 @@ class AutomationTest < ActiveSupport::TestCase
 
     refute_predicate automation, :valid?
     assert_includes automation.errors[:user], "must exist"
-    assert_includes automation.errors[:agent_program], "must exist"
-    assert_includes automation.errors[:execution_target], "must exist"
+    assert_includes automation.errors[:agent], "can't be blank"
     assert_includes automation.errors[:base], "must define exactly one schedule or trigger"
     assert_includes automation.errors[:task_payload], "must be a JSON object"
   end
@@ -101,8 +100,7 @@ class AutomationTest < ActiveSupport::TestCase
 
       Automation.new(
         user: resolved_user,
-        agent_program: create_program!,
-        execution_target: create_execution_target!(name: "Automation target"),
+        agent: create_agent!,
         permission_mode: "full_access",
         status: "active",
         schedule_kind: schedule_kind,
@@ -114,8 +112,14 @@ class AutomationTest < ActiveSupport::TestCase
       )
     end
 
+    def create_agent!
+      program = create_program!
+      target = create_execution_target!(name: "Automation target")
+      create_agent_runtime!(program: program, execution_target: target)
+    end
+
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Automation Program #{SecureRandom.hex(4)}",
         config_namespace: "automation.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -129,7 +133,7 @@ class AutomationTest < ActiveSupport::TestCase
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -142,7 +146,7 @@ class AutomationTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -152,7 +156,7 @@ class AutomationTest < ActiveSupport::TestCase
           tags: ["automation"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

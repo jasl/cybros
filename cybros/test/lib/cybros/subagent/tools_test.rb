@@ -90,7 +90,9 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
 
     child = find_subagent_conversation_by_subagent_id!(payload.fetch("subagent_id"))
 
-    assert_equal parent.agent_program_id, child.agent_program_id
+    assert_equal parent.agent_id, child.agent_id
+    assert_nil child[:agent_program_id]
+    assert_nil child[:default_execution_target_id]
     assert_equal parent.agent_config_schema_fingerprint, child.agent_config_schema_fingerprint
     assert_equal "subagent:my_agent", child.metadata.dig("agent", "key")
     assert_equal "review", child.metadata.dig("agent", "agent_profile")
@@ -415,7 +417,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program #{SecureRandom.hex(4)}",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",

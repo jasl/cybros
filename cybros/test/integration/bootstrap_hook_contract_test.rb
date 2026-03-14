@@ -33,7 +33,7 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
     def create_programmable_runtime!(server:)
       user = create_user!
       program =
-        AgentProgram.create!(
+        create_agent_record!(
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
@@ -47,7 +47,7 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       deployment =
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
@@ -58,7 +58,7 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
           health_status: "healthy",
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},
@@ -66,11 +66,12 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
           activated_at: Time.current.change(usec: 0),
         )
       conversation = create_conversation!(user: user, title: "Chat")
+      agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
       conversation.update!(
-        agent_program: program,
+        agent: agent,
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
       )
 
-      { conversation: conversation, deployment: deployment }
+      { agent: agent, conversation: conversation, deployment: deployment }
     end
 end

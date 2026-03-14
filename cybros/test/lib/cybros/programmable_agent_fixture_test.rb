@@ -13,7 +13,7 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     assert_equal "fixture-deployment", identity.fetch("agent_deployment_key")
     assert_equal "fixture-deployment-v1", identity.fetch("deployment_fingerprint")
     assert_equal "fixture-ruby-sdk/1.0", identity.fetch("agent_sdk_version")
-    assert_equal AgentDeployments::REQUIRED_METHODS, identity.fetch("supported_methods")
+    assert_equal Agents::Protocol::DEFAULT_SUPPORTED_METHODS, identity.fetch("supported_methods")
   end
 
   test "server responds to health before_agent_step on_context_pressure before_subagent_spawn and before_finalize_output over http" do
@@ -230,30 +230,12 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     end
   end
 
-  test "before_agent_step switch-target proposes the paired alternate target when older visible targets exist" do
-    current_target_id = "target-current"
-
-    callback_rpc =
-      lambda do |_session, method_name, params|
-        case method_name
-        when "execution_target.list"
-          {
-            "targets" => [
-              { "id" => "approval-old", "name" => "approval-1773037603066 Primary" },
-              { "id" => current_target_id, "name" => "target-switch-123 Primary" },
-              { "id" => "target-alternate", "name" => "target-switch-123 Alternate" },
-            ],
-          }
-        else
-          flunk("unexpected callback #{method_name}")
-        end
-      end
-
+  test "before_agent_step switch-target token no longer authors legacy target proposals" do
     fixture = Cybros::ProgrammableAgentFixture
     eigenclass = class << fixture; self end
     original_callback_rpc = fixture.method(:callback_rpc)
     eigenclass.send(:define_method, :callback_rpc) do |*args|
-      callback_rpc.call(*args)
+      raise "unexpected callback #{args[1]}"
     end
 
     begin
@@ -263,12 +245,11 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
           {
             "conversation_id" => "conv_switch",
             "user_input" => "[fixture:switch-target]",
-            "execution_target_id" => current_target_id,
             "callback_session" => { "endpoint" => "http://fixture.test/rpc", "bearer" => "secret" },
           },
         )
 
-      assert_equal "target-alternate", prepare.dig("planning", "execution_target_proposal", "execution_target_id")
+      assert_nil prepare.dig("planning", "execution_target_proposal")
     ensure
       eigenclass.send(:define_method, :callback_rpc, original_callback_rpc)
     end

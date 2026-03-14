@@ -14,7 +14,7 @@ module AgentRPC
       end
 
       def get
-        { "config" => conversation.selected_agent_config_for(draft.agent_program) }
+        { "config" => conversation.selected_agent_config_for(draft.agent) }
       end
 
       def update!(patch:)

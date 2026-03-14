@@ -92,14 +92,14 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
 
       DAG::Runner.run_node!(agent_node.id)
 
-      snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(deployment.capability_snapshot)
-      route = snapshot.route_for!("subagent_spawn")
       turn_tasks =
         conversation.root_graph.nodes
           .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
           .order(:id)
           .to_a
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
+      snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(run.snapshot.fetch("capability_snapshot"))
+      route = snapshot.route_for!("subagent_spawn")
       finalize_invocation = AgentRPCInvocation.find_by(scope_type: "conversation_run", scope_id: run.id, method: "before_finalize_output")
       task =
         turn_tasks.find do |node|
@@ -112,13 +112,13 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
         "llm_request=#{captured_request.inspect}"
 
       assert_equal ["subagent_spawn"], Array(captured_tools).map { |tool| tool_name_for(tool) }
-      assert_equal deployment.capability_snapshot.fetch("capability_registry_snapshot_id"), observed_planning_payload.dig("capability_snapshot", "capability_registry_snapshot_id")
+      assert_equal run.snapshot.dig("capability_snapshot", "capability_registry_snapshot_id"), observed_planning_payload.dig("capability_snapshot", "capability_registry_snapshot_id")
       assert_equal "subagent_spawn", task.body_input.fetch("requested_name")
       assert_equal "subagent_spawn", task.body_input.fetch("logical_tool_name")
       assert_equal route.effective_tool_id, task.body_input.fetch("effective_tool_id")
-      assert_equal "agent_program", task.body_input.fetch("implementation_source")
+      assert_equal "agent", task.body_input.fetch("implementation_source")
       assert_equal "agent://subagent_spawn", task.body_input.fetch("implementation_ref")
-      assert_equal deployment.capability_snapshot.fetch("capability_registry_snapshot_id"), task.body_input.fetch("capability_registry_snapshot_id")
+      assert_equal run.snapshot.dig("capability_snapshot", "capability_registry_snapshot_id"), task.body_input.fetch("capability_registry_snapshot_id")
       assert_match(/\Asurface_/, task.body_input.fetch("tool_surface_id"))
     end
   ensure
@@ -189,8 +189,8 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
       pinned_snapshot_id = run.snapshot.dig("capability_snapshot", "capability_registry_snapshot_id")
 
-      deployment.update!(
-        capability_snapshot: deployment.capability_snapshot.deep_merge(
+      conversation.agent.update!(
+        capability_snapshot: conversation.agent.capability_snapshot.deep_merge(
           "capability_registry_snapshot_id" => "csnap_mutated_after_finalize"
         ),
       )
@@ -216,7 +216,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
   private
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -232,7 +232,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
     end
 
     def create_active_deployment!(program:, endpoint_url:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -243,7 +243,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -254,7 +254,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
 
     def create_programmable_conversation!(program:, llm_options: nil)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "Primary host",
           kind: "host",
           platform: "macos_arm64",
@@ -267,7 +267,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "Primary workspace",
           root_path: "/tmp/programmable-routing-#{SecureRandom.hex(4)}",
@@ -277,7 +277,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
           tags: ["fixture"],
         )
       target =
-        ExecutionTarget.create!(
+        create_execution_profile!(
           execution_location: location,
           workspace: workspace,
           name: "Primary target",
@@ -286,9 +286,9 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
         )
 
       conversation = create_conversation!(title: "Programmable routing")
+      agent = create_agent_runtime!(program: program, execution_target: target)
       conversation.update!(
-        agent_program: program,
-        default_execution_target: target,
+        agent: agent,
         permission_mode: "default",
         agent_config: {
           program.config_namespace => {

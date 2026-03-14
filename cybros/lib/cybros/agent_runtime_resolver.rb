@@ -4,6 +4,7 @@ module Cybros
     require_relative "llm/capability_gated_provider"
     require_relative "llm/codex_oauth"
     require_relative "bootstrap/tools"
+    require_relative "attachments/tools"
     require_relative "context_budget/default_policy"
     require_relative "context_budget/tools"
     require_relative "programmable_agent"
@@ -26,11 +27,11 @@ module Cybros
     def model_resolution_for(conversation:)
       catalog = Cybros::LLM::Catalog.effective
       agent_metadata = agent_metadata_for(conversation)
-      agent_program = agent_program_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
-      preferred_models = preferred_models_for(agent_metadata: agent_metadata, agent_program: agent_program)
+      agent = agent_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
+      preferred_models = preferred_models_for(agent_metadata: agent_metadata, agent: agent)
       model_ref =
         parse_explicit_model_ref(conversation&.metadata)&.join("/") ||
-          default_model_ref_for(agent_metadata: agent_metadata, agent_program: agent_program, catalog: catalog)
+          default_model_ref_for(agent_metadata: agent_metadata, agent: agent, catalog: catalog)
       provider_key, model_key = validate_model_ref!(model_ref: model_ref).values_at(:provider_key, :model_key)
       model_spec = catalog.model(provider_key, model_key)
 
@@ -56,10 +57,10 @@ module Cybros
 
     def runtime_surface_resolution_for(conversation:, token_counter:)
       agent_metadata = agent_metadata_for(conversation)
-      agent_program = agent_program_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
-      if agent_program.present?
+      agent = agent_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
+      if agent.present?
         return build_runtime_surface_resolution(
-          definition: { runtime_surface: agent_program.runtime_surface_config },
+          definition: { runtime_surface: agent.runtime_surface_config },
           token_counter: token_counter,
         )
       end
@@ -130,8 +131,9 @@ module Cybros
       raise_model_not_found!(model_ref: ref, provider_key: provider_key, model_key: model_key, catalog: catalog)
     end
 
-    def default_model_ref_for(agent_metadata:, agent_program: nil, catalog: Cybros::LLM::Catalog.effective)
-      preferred_model_ref = preferred_model_ref_for(agent_metadata: agent_metadata, agent_program: agent_program, catalog: catalog)
+    def default_model_ref_for(agent_metadata:, agent: nil, catalog: Cybros::LLM::Catalog.effective)
+      subject = agent
+      preferred_model_ref = preferred_model_ref_for(agent_metadata: agent_metadata, agent: subject, catalog: catalog)
       return preferred_model_ref if preferred_model_ref.present?
 
       site_default_model_ref = Account.instance.llm_default_model_ref.to_s.strip
@@ -181,8 +183,8 @@ module Cybros
       end
     end
 
-    def preferred_model_ref_for(agent_metadata:, agent_program:, catalog:)
-      preferences = preferred_models_for(agent_metadata: agent_metadata, agent_program: agent_program)
+    def preferred_model_ref_for(agent_metadata:, agent:, catalog:)
+      preferences = preferred_models_for(agent_metadata: agent_metadata, agent: agent)
       return nil if preferences.empty?
 
       preferences.each do |preference|
@@ -345,12 +347,12 @@ module Cybros
       conversation_run = latest_conversation_run_for(node)
 
       agent_metadata = agent_metadata_for(conversation)
-      agent_program = agent_program_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
+      agent = agent_for_manifest_defaults(conversation: conversation, agent_metadata: agent_metadata)
       llm_selection =
         resolve_llm_selection(
           node: node,
           agent_metadata: agent_metadata,
-          agent_program: agent_program,
+          agent: agent,
           selected_model_ref_override: conversation_run&.selected_model_ref,
         )
       tools_registry ||= build_tools_registry
@@ -360,7 +362,7 @@ module Cybros
         conversation: conversation,
         conversation_run: conversation_run,
         agent_metadata: agent_metadata,
-        agent_program: agent_program,
+        agent: agent,
         provider: provider,
         programmable_provider: programmable_provider,
         tools_registry: tools_registry,
@@ -416,9 +418,9 @@ module Cybros
           text_store: nil,
         )
       runtime_surface_resolution =
-        if agent_program.present?
+        if agent.present?
           build_runtime_surface_resolution(
-            definition: { runtime_surface: agent_program.runtime_surface_config },
+            definition: { runtime_surface: agent.runtime_surface_config },
             token_counter: llm_selection.fetch(:token_counter, nil),
           )
         else
@@ -455,7 +457,7 @@ module Cybros
         runtime_llm_options_for(
           conversation: conversation,
           conversation_run: conversation_run,
-          agent_program: agent_program,
+          agent: agent,
           llm_selection: llm_selection,
         )
       runtime_kwargs[:llm_options] = runtime_llm_options if runtime_llm_options.any?
@@ -496,7 +498,7 @@ module Cybros
           ).to_h,
         }
         capability_snapshot = conversation_run&.snapshot&.dig("capability_snapshot")
-        capability_snapshot = conversation_run&.agent_deployment&.capability_snapshot unless capability_snapshot.is_a?(Hash)
+        capability_snapshot = conversation_run&.recognized_deployment&.capability_snapshot unless capability_snapshot.is_a?(Hash)
         if capability_snapshot.is_a?(Hash) && capability_snapshot.any?
           cybros_attrs[:capability_snapshot] = AgentCore::Utils.deep_stringify_keys(capability_snapshot)
         end
@@ -512,12 +514,12 @@ module Cybros
       AgentCore::DAG::Runtime.new(**runtime_kwargs)
     end
 
-    def runtime_llm_options_for(conversation:, conversation_run:, agent_program:, llm_selection:)
+    def runtime_llm_options_for(conversation:, conversation_run:, agent:, llm_selection:)
       base_llm_options =
         if conversation_run&.effective_agent_config.is_a?(Hash)
           conversation_run.effective_agent_config["llm_options"]
-        elsif conversation.present? && agent_program.present?
-          conversation.selected_agent_config_for(agent_program)["llm_options"]
+        elsif conversation.present? && agent.present?
+          conversation.selected_agent_config_for(agent)["llm_options"]
         end
 
       options = base_llm_options.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(base_llm_options) : {}
@@ -531,7 +533,7 @@ module Cybros
     end
     private_class_method :runtime_llm_options_for
 
-    def resolve_llm_selection(node:, agent_metadata:, agent_program:, selected_model_ref_override: nil)
+    def resolve_llm_selection(node:, agent_metadata:, agent:, selected_model_ref_override: nil)
       catalog = Cybros::LLM::Catalog.effective
 
       conversation = conversation_for(node)
@@ -545,7 +547,7 @@ module Cybros
           validate_model_ref!(model_ref: explicit_model_ref)
           normalize_model_ref(model_ref: explicit_model_ref)
         else
-          default_model_ref_for(agent_metadata: agent_metadata, agent_program: agent_program, catalog: catalog)
+          default_model_ref_for(agent_metadata: agent_metadata, agent: agent, catalog: catalog)
         end
 
       provider_key, model_key = selected_model_ref.split("/", 2).map(&:to_s)
@@ -573,10 +575,10 @@ module Cybros
     end
     private_class_method :programmable_provider_for
 
-    def ensure_programmable_runtime_available!(node:, conversation:, conversation_run:, agent_metadata:, agent_program:, provider:, programmable_provider:, tools_registry:)
+    def ensure_programmable_runtime_available!(node:, conversation:, conversation_run:, agent_metadata:, agent:, provider:, programmable_provider:, tools_registry:)
       return if provider.present?
       return if explicit_agent_profile_metadata?(agent_metadata)
-      return unless agent_program.present?
+      return unless agent.present?
       return if programmable_provider.present?
       return if kernel_task_executable_without_materialized_run?(node: node, tools_registry: tools_registry)
 
@@ -587,7 +589,7 @@ module Cybros
           conversation_id: conversation&.id,
           conversation_run_id: conversation_run&.id,
           dag_node_id: node&.id,
-          agent_program_id: agent_program&.id,
+          agent_id: agent&.id,
         }.compact,
       )
     end
@@ -597,7 +599,7 @@ module Cybros
       return false unless node&.node_type.to_s == Messages::Task.node_type_key
 
       input = node.body_input.is_a?(Hash) ? node.body_input : {}
-      return false if input["implementation_source"].to_s == "agent_program"
+      return false if input["implementation_source"].to_s == "agent"
 
       tool_name =
         input["logical_tool_name"].to_s.presence ||
@@ -866,6 +868,7 @@ module Cybros
     def build_tools_registry
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::Bootstrap::Tools.build)
+      registry.register_many(Cybros::Attachments::Tools.build)
       registry.register_many(Cybros::ContextBudget::Tools.build)
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
@@ -919,10 +922,7 @@ module Cybros
     def model_prefer_from_agent_metadata(agent_metadata)
       return [] unless agent_metadata.is_a?(Hash)
 
-      agent_program = agent_metadata.fetch("agent_program", nil)
-      agent_program = agent_program.is_a?(Hash) ? agent_program : {}
-
-      prefer = agent_program.fetch("model_prefer", nil) || agent_program.fetch("model", nil)
+      prefer = agent_metadata.fetch("model_prefer", nil) || agent_metadata.fetch("model", nil)
       prefer = prefer.fetch("prefer", nil) if prefer.is_a?(Hash)
 
       Array(prefer).map { |v| v.to_s.strip }.reject(&:empty?).uniq
@@ -931,20 +931,20 @@ module Cybros
     end
     private_class_method :model_prefer_from_agent_metadata
 
-    def model_prefer_from_agent_program(agent_program)
-      return [] unless agent_program.respond_to?(:preferred_model_refs)
+    def model_prefer_from_agent(agent)
+      return [] unless agent.respond_to?(:preferred_model_refs)
 
-      Array(agent_program.preferred_model_refs).map { |value| value.to_s.strip }.reject(&:empty?).uniq
+      Array(agent.preferred_model_refs).map { |value| value.to_s.strip }.reject(&:empty?).uniq
     rescue StandardError
       []
     end
-    private_class_method :model_prefer_from_agent_program
+    private_class_method :model_prefer_from_agent
 
-    def preferred_models_for(agent_metadata:, agent_program:)
+    def preferred_models_for(agent_metadata:, agent:)
       if explicit_agent_profile_metadata?(agent_metadata)
         model_prefer_from_agent_metadata(agent_metadata)
-      elsif agent_program.present?
-        model_prefer_from_agent_program(agent_program)
+      elsif agent.present?
+        model_prefer_from_agent(agent)
       else
         model_prefer_from_agent_metadata(agent_metadata)
       end
@@ -1030,14 +1030,14 @@ module Cybros
     end
     private_class_method :agent_metadata_for
 
-    def agent_program_for_manifest_defaults(conversation:, agent_metadata:)
+    def agent_for_manifest_defaults(conversation:, agent_metadata:)
       return nil if explicit_agent_profile_metadata?(agent_metadata)
 
-      conversation&.agent_program
+      conversation&.agent
     rescue StandardError
       nil
     end
-    private_class_method :agent_program_for_manifest_defaults
+    private_class_method :agent_for_manifest_defaults
 
     def explicit_agent_profile_metadata?(agent_metadata)
       return false unless agent_metadata.is_a?(Hash) && agent_metadata.key?("agent_profile")

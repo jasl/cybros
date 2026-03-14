@@ -1,9 +1,8 @@
 require "test_helper"
 
 class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
-  test "admit! acquires idempotently by durable execution request id" do
-    target = create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-    run = create_conversation_run!(execution_target: target)
+  test "admit! acquires idempotently by durable execution request id for agent-scoped snapshots" do
+    run = create_conversation_run!
 
     first = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run)
     second = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run)
@@ -11,9 +10,11 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
     assert_equal "acquired", first.fetch(:decision)
     assert_equal first.fetch(:lease).id, second.fetch(:lease).id
     assert_equal "conversation_run:#{run.id}", first.fetch(:execution_request_id)
+    assert_equal "agent", first.fetch(:capacity).fetch("scope_type")
+    assert_equal run.agent_id, first.fetch(:capacity).fetch("scope_id")
   end
 
-  test "admit! honors execution target override snapshots" do
+  test "admit! keeps agent-scoped lease identity even when imported capacity came from target overrides" do
     target =
       create_execution_target!(
         max_concurrent_tasks: 1,
@@ -29,7 +30,10 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
 
     assert_equal "acquired", first.fetch(:decision)
     assert_equal "acquired", second.fetch(:decision)
-    assert_equal "execution_target", first.fetch(:capacity).fetch("scope_type")
+    assert_equal "agent", first.fetch(:capacity).fetch("scope_type")
+    assert_equal run_one.agent_id, first.fetch(:capacity).fetch("scope_id")
+    assert_equal 2, first.fetch(:capacity).fetch("max_concurrent_tasks")
+    assert_equal 3, first.fetch(:capacity).fetch("max_queued_tasks")
   end
 
   test "admit! requires an execution capacity snapshot" do
@@ -54,115 +58,137 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
 
   private
 
-  def create_conversation_run!(execution_target: create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2), runtime_governors: nil)
-    conversation = create_conversation!
-    program = create_program!
-    deployment = create_deployment!(program)
-    credential =
-      LLMProviderCredential.create!(
-        provider_key: "openai-#{SecureRandom.hex(4)}",
-        credential_type: "api_key",
-        status: "active",
-        api_key: "sk-test",
-      )
-    runtime_governors ||= runtime_governors_snapshot(
-      provider_credential: credential,
-      selected_model_ref: "openai/gpt-5.4",
-      execution_target: execution_target,
-    )
+    def create_conversation_run!(execution_target: nil, runtime_governors: nil)
+      runtime = create_runtime!(execution_target: execution_target)
+      conversation =
+        create_conversation!(
+          agent: runtime.fetch(:agent),
+          agent_program: runtime.fetch(:program),
+          default_execution_target: execution_target,
+        )
+      runtime_governors ||= default_runtime_governors(runtime: runtime, execution_target: execution_target)
 
-    ConversationRun.create!(
-      conversation: conversation,
-      dag_node_id: SecureRandom.uuid,
-      state: "queued",
-      queued_at: Time.current.change(usec: 0),
-      snapshot_version: 1,
-      initiated_by_user: conversation.user,
-      effective_permission_mode: "default",
-      agent_program: program,
-      contract_fingerprint: program.published_contract_fingerprint,
-      agent_deployment: deployment,
-      deployment_fingerprint: deployment.deployment_fingerprint,
-      deployment_activated_at: deployment.activated_at || Time.current.change(usec: 0),
-      provider_credential: credential,
-      execution_target: execution_target,
-      selected_model_ref: "openai/gpt-5.4",
-      effective_public_settings: {},
-      effective_agent_config: {},
-      agent_config_schema_fingerprint: program.config_schema_fingerprint,
-      effective_policy: {},
-      runtime_governors: runtime_governors,
-      snapshot: { "execution_target_id" => execution_target.id },
-    )
-  end
-
-  def create_execution_target!(max_concurrent_tasks:, max_queued_tasks:, **overrides)
-    location =
-      ExecutionLocation.create!(
-        name: "Fixture host #{SecureRandom.hex(4)}",
-        kind: "host",
-        platform: "macos_arm64",
-        status: "active",
-        trust_group: "operator",
-        environment: "development",
-        tags: ["fixture"],
-        max_concurrent_tasks: max_concurrent_tasks,
-        max_queued_tasks: max_queued_tasks,
-        default_timeout_s: 900,
+      ConversationRun.create!(
+        build_conversation_run_attributes(
+          conversation: conversation,
+          dag_node_id: SecureRandom.uuid,
+          agent: runtime.fetch(:agent),
+          recognized_deployment: runtime.fetch(:recognized_deployment),
+          state: "queued",
+          queued_at: Time.current.change(usec: 0),
+          initiated_by_user: conversation.user,
+          effective_permission_mode: "default",
+          provider_credential: runtime.fetch(:credential),
+          selected_model_ref: "openai/gpt-5.4",
+          effective_public_settings: {},
+          effective_agent_config: {},
+          agent_config_schema_fingerprint: runtime.fetch(:agent).config_schema_fingerprint,
+          effective_policy: {},
+          runtime_governors: runtime_governors,
+          snapshot: { "agent" => { "id" => runtime.fetch(:agent).id } },
+        ),
       )
-    workspace =
-      Workspace.create!(
-        execution_location: location,
-        name: "Fixture workspace #{SecureRandom.hex(4)}",
-        root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
-        workspace_type: "git",
-        status: "active",
-        capability_tags: ["git"],
-        tags: ["fixture"],
-      )
+    end
 
-    ExecutionTarget.create!(
+    def default_runtime_governors(runtime:, execution_target:)
+      runtime_governors_snapshot(
+        provider_credential: runtime.fetch(:credential),
+        selected_model_ref: "openai/gpt-5.4",
+        agent: runtime.fetch(:agent),
+      )
+    end
+
+    def create_runtime!(execution_target: nil)
+      program = create_program!
+      target = execution_target || create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
+      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      deployment = create_deployment!(program)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      credential =
+        LLMProviderCredential.create!(
+          provider_key: "openai-#{SecureRandom.hex(4)}",
+          credential_type: "api_key",
+          status: "active",
+          api_key: "sk-test",
+        )
+
       {
-        execution_location: location,
-        workspace: workspace,
-        name: "Fixture target",
+        agent: agent,
+        credential: credential,
+        deployment: deployment,
+        program: program,
+        recognized_deployment: recognized_deployment,
+        target: target,
+      }
+    end
+
+    def create_execution_target!(max_concurrent_tasks:, max_queued_tasks:, **overrides)
+      location =
+        create_execution_location_profile!(
+          name: "Fixture host #{SecureRandom.hex(4)}",
+          kind: "host",
+          platform: "macos_arm64",
+          status: "active",
+          trust_group: "operator",
+          environment: "development",
+          tags: ["fixture"],
+          max_concurrent_tasks: max_concurrent_tasks,
+          max_queued_tasks: max_queued_tasks,
+          default_timeout_s: 900,
+        )
+      workspace =
+        create_workspace_profile!(
+          execution_location: location,
+          name: "Fixture workspace #{SecureRandom.hex(4)}",
+          root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
+          workspace_type: "git",
+          status: "active",
+          capability_tags: ["git"],
+          tags: ["fixture"],
+        )
+
+      create_execution_profile!(
+        {
+          execution_location: location,
+          workspace: workspace,
+          name: "Fixture target",
+          status: "active",
+          sandboxed: true,
+        }.merge(overrides),
+      )
+    end
+
+    def create_program!
+      create_agent_record!(
+        name: "Fixture Program #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
+        manifest_snapshot: {},
+        global_config: {},
+        global_config_schema: { "type" => "object" },
+        conversation_config_schema: { "type" => "object" },
+        config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+      )
+    end
+
+    def create_deployment!(program)
+      create_runtime_binding_record!(
+        agent_program: program,
+        transport_kind: "websocket",
+        endpoint_url: "http://127.0.0.1:4319/rpc",
+        deployment_bearer_secret_ref: "secret://fixture",
+        contract_fingerprint: program.published_contract_fingerprint,
+        deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
         status: "active",
-        sandboxed: true,
-      }.merge(overrides),
-    )
-  end
-
-  def create_program!
-    AgentProgram.create!(
-      name: "Fixture Program #{SecureRandom.hex(4)}",
-      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
-      published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
-      manifest_snapshot: {},
-      global_config: {},
-      global_config_schema: { "type" => "object" },
-      conversation_config_schema: { "type" => "object" },
-      config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
-    )
-  end
-
-  def create_deployment!(program)
-    AgentDeployment.create!(
-      agent_program: program,
-      transport_kind: "websocket",
-      endpoint_url: "http://127.0.0.1:4319/rpc",
-      deployment_bearer_secret_ref: "secret://fixture",
-      contract_fingerprint: program.published_contract_fingerprint,
-      deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
-      status: "active",
-      health_status: "healthy",
-      activated_at: Time.current.change(usec: 0),
-      protocol_version: "agent_rpc.v1",
-      agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: AgentDeployments::REQUIRED_METHODS,
-      manifest_snapshot: {},
-      schema_snapshot: {},
-      capability_snapshot: {},
-      inspection_details: {},
-    )
-  end
+        health_status: "healthy",
+        activated_at: Time.current.change(usec: 0),
+        protocol_version: "agent_rpc.v1",
+        agent_sdk_version: "fixture-ruby-sdk/1.0",
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
+        manifest_snapshot: {},
+        schema_snapshot: {},
+        capability_snapshot: {},
+        inspection_details: {},
+      )
+    end
 end

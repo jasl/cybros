@@ -21,14 +21,6 @@
             Conversations
           <% end %>
         </li>
-        <% if Current.user&.owner? || Current.user&.admin? %>
-          <li>
-            <%= link_to system_settings_agent_programs_path, class: "gap-2" do %>
-              <span class="icon-[lucide--sparkles] size-4"></span>
-              Agents
-            <% end %>
-          </li>
-        <% end %>
       </ul>
     <% end %>
   </div>

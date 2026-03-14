@@ -1,40 +1,36 @@
 module RuntimeGovernance
   class DraftGovernorResolver
-    def self.resolve!(entrypoint:, selected_model_ref:, execution_target: nil)
+    def self.resolve!(entrypoint:, selected_model_ref:)
       new(
         entrypoint: entrypoint,
         selected_model_ref: selected_model_ref,
-        execution_target: execution_target,
       ).resolve!
     end
 
-    def self.apply!(draft:, entrypoint:, selected_model_ref:, execution_target: nil)
+    def self.apply!(draft:, entrypoint:, selected_model_ref:)
       new(
         entrypoint: entrypoint,
         selected_model_ref: selected_model_ref,
-        execution_target: execution_target,
       ).apply!(draft: draft)
     end
 
-    def initialize(entrypoint:, selected_model_ref:, execution_target: nil)
+    def initialize(entrypoint:, selected_model_ref:)
       @entrypoint = entrypoint
       @selected_model_ref = selected_model_ref.to_s
-      @execution_target = execution_target
     end
 
     def resolve!
       provider_resolution = ProviderCredentialLimiter.resolve!(selected_model_ref: selected_model_ref)
-      target = resolved_execution_target!
+      agent = resolved_agent
 
       {
         permission_mode: resolved_permission_mode,
         selected_model_ref: selected_model_ref,
         provider_credential: provider_resolution.fetch(:provider_credential),
-        proposed_execution_target: target,
         runtime_governors: {
           "provider_limiter" => provider_resolution.fetch(:snapshot),
-          "execution_capacity" => ExecutionCapacityResolver.resolve!(execution_target: target),
-        },
+          "execution_capacity" => resolved_execution_capacity(agent: agent),
+        }.compact,
       }
     end
 
@@ -43,7 +39,7 @@ module RuntimeGovernance
       draft.assign_attributes(
         permission_mode: resolved.fetch(:permission_mode),
         provider_credential: resolved.fetch(:provider_credential),
-        proposed_execution_target: resolved.fetch(:proposed_execution_target),
+        agent: resolved_agent || draft.agent,
         selected_model_ref: resolved.fetch(:selected_model_ref),
         runtime_governors: resolved.fetch(:runtime_governors),
       )
@@ -52,32 +48,18 @@ module RuntimeGovernance
 
     private
 
-      attr_reader :entrypoint, :selected_model_ref, :execution_target
+      attr_reader :entrypoint, :selected_model_ref
 
-      def resolved_execution_target!
-        return execution_target if execution_target.present?
+      def resolved_agent
+        return entrypoint.agent if entrypoint.respond_to?(:agent) && entrypoint.agent.present?
 
-        if entrypoint.respond_to?(:default_execution_target) && entrypoint.default_execution_target.present?
-          return entrypoint.default_execution_target
-        end
+        nil
+      end
 
-        if entrypoint.respond_to?(:execution_target) && entrypoint.execution_target.present?
-          return entrypoint.execution_target
-        end
+      def resolved_execution_capacity(agent:)
+        return nil if agent.blank?
 
-        if entrypoint.respond_to?(:default_execution_target_id) && entrypoint.default_execution_target_id.present?
-          return ExecutionTarget.find(entrypoint.default_execution_target_id)
-        end
-
-        if entrypoint.respond_to?(:execution_target_id) && entrypoint.execution_target_id.present?
-          return ExecutionTarget.find(entrypoint.execution_target_id)
-        end
-
-        AgentCore::ValidationError.raise!(
-          "Execution target is required for programmable execution.",
-          code: "cybros.runtime_governance.execution_target_missing",
-          details: {},
-        )
+        ExecutionCapacityResolver.resolve!(agent: agent)
       end
 
       def resolved_permission_mode

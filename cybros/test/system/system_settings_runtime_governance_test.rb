@@ -10,9 +10,8 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
     track_record(owner.identity)
     provider_credential = create_provider_credential!(provider_key: "browser-provider")
     create_provider_wait!(provider_credential: provider_credential)
-    execution_target = create_execution_target!(name: "Browser host")
-    create_execution_wait!(execution_target: execution_target)
-    create_execution_denial!(execution_target: execution_target)
+    execution_wait_agent = create_execution_wait!
+    denied_agent = create_execution_denial!
     create_deployment_with_backoff!
 
     sign_in_as!(email: owner.identity.email)
@@ -24,7 +23,8 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
     assert_text(/Execution capacity/i)
     assert_text(/Deployment backoff/i)
     assert_text "browser-provider"
-    assert_text "Browser host"
+    assert_text execution_wait_agent.name
+    assert_text denied_agent.name
     assert_text "execution_capacity_denied"
   end
 
@@ -35,12 +35,9 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
       Array(@tracked_provider_budget_reservations).reverse_each(&:destroy!)
       Array(@tracked_execution_capacity_leases).reverse_each(&:destroy!)
       Array(@tracked_conversation_runs).reverse_each(&:destroy!)
+      Array(@tracked_recognized_deployments).reverse_each(&:destroy!)
       Array(@tracked_conversations).reverse_each(&:destroy!)
-      Array(@tracked_agent_deployments).reverse_each(&:destroy!)
-      Array(@tracked_agent_programs).reverse_each(&:destroy!)
-      Array(@tracked_execution_targets).reverse_each(&:destroy!)
-      Array(@tracked_workspaces).reverse_each(&:destroy!)
-      Array(@tracked_execution_locations).reverse_each(&:destroy!)
+      Agent.where(id: Array(@tracked_agents).map(&:id)).delete_all
       Array(@tracked_llm_provider_credentials).reverse_each(&:destroy!)
       Array(@tracked_users).reverse_each(&:destroy!)
       Array(@tracked_identities).reverse_each(&:destroy!)
@@ -56,18 +53,12 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
         (@tracked_execution_capacity_leases ||= []) << record
       when ConversationRun
         (@tracked_conversation_runs ||= []) << record
+      when RecognizedDeployment
+        (@tracked_recognized_deployments ||= []) << record
       when Conversation
         (@tracked_conversations ||= []) << record
-      when AgentDeployment
-        (@tracked_agent_deployments ||= []) << record
-      when AgentProgram
-        (@tracked_agent_programs ||= []) << record
-      when ExecutionTarget
-        (@tracked_execution_targets ||= []) << record
-      when Workspace
-        (@tracked_workspaces ||= []) << record
-      when ExecutionLocation
-        (@tracked_execution_locations ||= []) << record
+      when Agent
+        (@tracked_agents ||= []) << record
       when LLMProviderCredential
         (@tracked_llm_provider_credentials ||= []) << record
       when User
@@ -93,24 +84,37 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
       )
     end
 
-    def create_execution_wait!(execution_target:)
+    def create_execution_wait!
+      program = create_program!(name: "Browser execution wait")
+      agent = track_record(materialize_agent_runtime!(program: program))
+
       track_record(
         RuntimeGovernance::RuntimeWaits.park!(
           owner_type: "ConversationRun",
           owner_id: SecureRandom.uuid,
           reason_type: "execution_capacity",
-          subject_type: "execution_location",
-          subject_id: execution_target.execution_location_id,
+          subject_type: "agent",
+          subject_id: agent.id,
           retry_at: 5.minutes.from_now.change(usec: 0),
           details: { "execution_request_id" => "browser-execution-wait" },
         ),
       )
+
+      agent
     end
 
-    def create_execution_denial!(execution_target:)
-      conversation = track_record(create_conversation!(user: @tracked_users.first))
+    def create_execution_denial!
       program = create_program!(name: "Browser denial")
+      agent = track_record(materialize_agent_runtime!(program: program))
       deployment = create_deployment!(program: program)
+      recognized_deployment = track_record(RecognizedDeployment.recognize!(agent: agent, deployment: deployment))
+      conversation =
+        track_record(
+          create_conversation!(
+            user: @tracked_users.first,
+            agent: agent,
+          ),
+        )
       credential = create_provider_credential!(provider_key: "browser-provider-#{SecureRandom.hex(4)}")
 
       track_record(
@@ -122,42 +126,46 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
           snapshot_version: 1,
           initiated_by_user: conversation.user,
           effective_permission_mode: "default",
-          agent_program: program,
-          contract_fingerprint: program.published_contract_fingerprint,
-          agent_deployment: deployment,
+          agent: agent,
+          recognized_deployment: recognized_deployment,
+          recognized_deployment_key: recognized_deployment.recognized_deployment_key,
+          contract_fingerprint: deployment.contract_fingerprint,
           deployment_fingerprint: deployment.deployment_fingerprint,
           deployment_activated_at: deployment.activated_at || Time.current.change(usec: 0),
           provider_credential: credential,
-          execution_target: execution_target,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: agent.config_schema_fingerprint,
           effective_policy: {},
           runtime_governors: {
             "provider_limiter" => provider_limiter_snapshot(
               provider_credential: credential,
               selected_model_ref: "openai/gpt-5.4",
             ),
-            "execution_capacity" => RuntimeGovernance::ExecutionCapacityResolver.resolve!(execution_target: execution_target),
+            "execution_capacity" => RuntimeGovernance::ExecutionCapacityResolver.resolve!(agent: agent),
           },
-          snapshot: { "execution_target_id" => execution_target.id },
+          snapshot: {},
           error: { "message" => "execution_capacity_denied: queue full" },
         ),
       )
+
+      agent
     end
 
     def create_deployment_with_backoff!
       program = create_program!(name: "Browser backoff")
+      agent = track_record(materialize_agent_runtime!(program: program))
       deployment = create_deployment!(program: program)
+      recognized_deployment = track_record(RecognizedDeployment.recognize!(agent: agent, deployment: deployment))
 
       track_record(
         RuntimeGovernance::RuntimeWaits.park!(
-          owner_type: "AgentDeployment",
-          owner_id: deployment.id,
+          owner_type: "RecognizedDeployment",
+          owner_id: recognized_deployment.id,
           reason_type: "deployment_backoff",
-          subject_type: "agent_deployment",
-          subject_id: deployment.id,
+          subject_type: "recognized_deployment",
+          subject_id: recognized_deployment.id,
           retry_at: 10.minutes.from_now.change(usec: 0),
           details: { "attempt" => 2 },
         ),
@@ -175,49 +183,9 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
       )
     end
 
-    def create_execution_target!(name:)
-      location =
-        track_record(
-          ExecutionLocation.create!(
-            name: name,
-            kind: "host",
-            platform: "macos_arm64",
-            status: "active",
-            trust_group: "operator",
-            environment: "development",
-            tags: ["fixture"],
-            max_concurrent_tasks: 2,
-            max_queued_tasks: 4,
-            default_timeout_s: 900,
-          ),
-        )
-      workspace =
-        track_record(
-          Workspace.create!(
-            execution_location: location,
-            name: "#{name} workspace",
-            root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-            workspace_type: "git",
-            status: "active",
-            capability_tags: ["git"],
-            tags: ["fixture"],
-          ),
-        )
-
-      track_record(
-        ExecutionTarget.create!(
-          execution_location: location,
-          workspace: workspace,
-          name: "#{name} target",
-          status: "active",
-          sandboxed: true,
-        ),
-      )
-    end
-
     def create_program!(name:)
       track_record(
-        AgentProgram.create!(
+        create_agent_record!(
           name: "#{name} #{SecureRandom.hex(4)}",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
@@ -232,7 +200,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
 
     def create_deployment!(program:)
       track_record(
-        AgentDeployment.create!(
+        create_runtime_binding_record!(
           agent_program: program,
           transport_kind: "websocket",
           endpoint_url: "http://127.0.0.1:4319/rpc",
@@ -244,7 +212,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
           activated_at: Time.current.change(usec: 0),
           protocol_version: "agent_rpc.v1",
           agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: AgentDeployments::REQUIRED_METHODS,
+          supported_methods: Agents::Protocol::REQUIRED_METHODS,
           manifest_snapshot: {},
           schema_snapshot: {},
           capability_snapshot: {},

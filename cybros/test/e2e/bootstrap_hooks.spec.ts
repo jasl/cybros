@@ -3,7 +3,6 @@ import {
   bundledDefaultRuntimeState,
   conversationIdFromUrl,
   ensureOpenAiDefaultModel,
-  ensureSingleBundledExecutionTarget,
   openNewConversation,
   programmableConversationState,
   signIn,
@@ -36,11 +35,8 @@ test.describe("Bootstrap hooks", () => {
     test.setTimeout(180_000)
 
     ensureOpenAiDefaultModel()
-    const runtimeTarget = ensureSingleBundledExecutionTarget()
-    expect(runtimeTarget.executionTargetName).toBeTruthy()
     const bundled = bundledDefaultRuntimeState()
-    expect(bundled.programName).toBe("Default")
-    expect(bundled.executionTargetName).toBe(runtimeTarget.executionTargetName)
+    expect(bundled.agentName).toBe("Default")
 
     await openNewConversation(page, "Conversation")
 

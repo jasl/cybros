@@ -78,14 +78,14 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
     def create_automation_runtime!(endpoint_url:)
       user = create_user!
       program = create_program!
-      active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
+      deployment = active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Automation target")
+      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
           user: user,
-          agent_program: program,
-          execution_target: target,
+          agent: agent,
           permission_mode: "full_access",
           status: "active",
           schedule_kind: "rrule",
@@ -98,7 +98,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
           },
         )
 
-      { automation: automation, program: program, target: target }
+      { agent: agent, automation: automation, program: program, target: target }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -124,7 +124,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
     end
 
     def create_program!
-      AgentProgram.create!(
+      create_agent_record!(
         name: "Fixture Program",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
@@ -140,7 +140,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
     end
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
-      AgentDeployment.create!(
+      create_runtime_binding_record!(
         agent_program: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
@@ -151,7 +151,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
         health_status: "healthy",
         protocol_version: "agent_rpc.v1",
         agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: AgentDeployments::REQUIRED_METHODS,
+        supported_methods: Agents::Protocol::REQUIRED_METHODS,
         manifest_snapshot: {},
         schema_snapshot: {},
         capability_snapshot: {},
@@ -162,7 +162,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
 
     def create_execution_target!(name:)
       location =
-        ExecutionLocation.create!(
+        create_execution_location_profile!(
           name: "#{name} host",
           kind: "host",
           platform: "macos_arm64",
@@ -175,7 +175,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
           default_timeout_s: 900,
         )
       workspace =
-        Workspace.create!(
+        create_workspace_profile!(
           execution_location: location,
           name: "#{name} workspace",
           root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
@@ -185,7 +185,7 @@ class Automations::ExecuteConversationJobTest < ActiveJob::TestCase
           tags: ["fixture"],
         )
 
-      ExecutionTarget.create!(
+      create_execution_profile!(
         execution_location: location,
         workspace: workspace,
         name: name,

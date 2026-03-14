@@ -1,12 +1,11 @@
 import { test, expect } from "@playwright/test"
 import {
+  activateProgrammableAgentRuntime,
+  createHighPriorityMockProvider,
   conversationIdFromUrl,
-  ensureOpenAiDefaultModel,
   openNewConversation,
   programmableConversationState,
-  seedActiveProgrammableDeployment,
-  seedExecutionTargets,
-  seedProgrammableAgentProgram,
+  seedProgrammableAgent,
   signIn,
   selectConversationRuntimeOption,
   waitForTailAgentState,
@@ -21,16 +20,13 @@ test.describe("Programmable agent approval resume", () => {
   test("parks for approval, resumes locally, and commits replay-safe callback staging exactly once", async ({ page }) => {
     test.setTimeout(180_000)
 
-    ensureOpenAiDefaultModel()
+    await createHighPriorityMockProvider(page)
     const suffix = Date.now().toString()
-    const program = seedProgrammableAgentProgram(`E2E Approval Program ${suffix}`)
-    const targets = seedExecutionTargets(`approval-${suffix}`, false)
-    seedActiveProgrammableDeployment(program.programId)
+    const agent = seedProgrammableAgent(`E2E Approval Agent ${suffix}`)
+    activateProgrammableAgentRuntime(agent.agentId)
 
-    await openNewConversation(page, `Programmable Approval ${suffix}`)
-    await selectConversationRuntimeOption(page, "conversation-composer-agent-picker", program.programName)
+    await openNewConversation(page, `Programmable Approval ${suffix}`, agent.agentName)
     await selectConversationRuntimeOption(page, "conversation-composer-permission-picker", "Default")
-    await selectConversationRuntimeOption(page, "conversation-composer-execution-target-picker", targets.primaryTargetName)
     await selectConversationRuntimeOption(page, "conversation-composer-model-picker", "Mock model")
 
     await page.getByPlaceholder("Message…").fill("[fixture:stage-state] [fixture:replay-kv] [fixture:approval]")

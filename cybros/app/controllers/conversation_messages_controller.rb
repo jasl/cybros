@@ -89,11 +89,16 @@ class ConversationMessagesController < ApplicationController
   def create
     content = params.fetch(:content, "").to_s
     content = content.strip
+    attachments = Array(params[:attachments]).flatten.compact
     edit_node_id = params.fetch(:edit_node_id, "").to_s.strip.presence
     model_ref = params.fetch(:model_ref, "").to_s.strip.presence
     input_policy_override = params[:input_policy_override]
 
-    if content.blank?
+    if attachments.any? && edit_node_id.present?
+      raise ArgumentError, "Editing attachments is not supported yet."
+    end
+
+    if content.blank? && attachments.empty?
       respond_to do |format|
         format.turbo_stream { head :no_content }
         format.html { redirect_to conversation_path(@conversation) }
@@ -111,6 +116,7 @@ class ConversationMessagesController < ApplicationController
     else
       @conversation.append_user_message_and_project!(
         content: content,
+        attachments: attachments,
         mode: :preview,
         model_ref: model_ref,
         input_policy_override: input_policy_override,
