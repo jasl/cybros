@@ -35,7 +35,7 @@
 - 责任：
   - 图变更的事务边界（`mutate!(turn_id: nil)`：可选 turn_id 传播）
   - 图级别锁（`with_graph_lock!` / `with_graph_try_lock`：advisory lock + 行锁；用于与 tick/runner/mutations 串行化）
-  - 语义策略：由 `DAG::Graph` 自身实现（不额外引入 policy 层），包含 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等
+  - 图级语义与注入点：`DAG::Graph` 自身承载 node_type↔body 映射、leaf invariant 的合法性/修复动作、transcript 过滤/预览、可见性 gating、lease 时长等；同时允许 attachable 注入 `dag_graph_hooks` 与 `dag_graph_policy` 做 best-effort observability / defense-in-depth
   - 叶子不变量自修复（`validate_leaf_invariant!`）
   - 触发调度推进（`kick!` → `DAG::TickGraphJob`）
 
@@ -43,6 +43,7 @@
 
 - `dag_node_body_namespace`：返回 NodeBody 命名空间（Module，例如 `Messages`），用于按约定映射 `node_type` → `#{namespace}::#{node_type.camelize}`
 - `dag_graph_hooks`：返回 `DAG::GraphHooks`（用于可观测/审计的 best-effort 投影，例如写入 `events` 表）
+- `dag_graph_policy`：返回 `DAG::GraphPolicy`（用于对 fork/rerun/adopt/edit/visibility changes 等用户语义操作做 defense-in-depth gate；不阻塞 runner/leaf repair/tick 等引擎自动化路径）
 
 ### 分区：`DAG::Lane`
 
@@ -175,6 +176,17 @@ conversation graphs 的 node_type ↔ body STI 映射按约定决定（由 `atta
 - 约束：引擎侧会对 `event_type` 做白名单校验（`DAG::GraphHooks::EventTypes::ALL`），建议只使用常量（避免 typo）。
 
 hooks 覆盖的动作（里程碑 1）包括：node/edge 创建、replace/compress、leaf repair、node state 迁移，以及可见性 defer/apply（`node_visibility_*`）。完整列表见 `docs/dag/behavior_spec.md` 的第 9 节。
+
+### GraphPolicy（可选）：`DAG::GraphPolicy`
+
+> 这是 defense-in-depth 层，不是 App 动作授权的唯一来源。
+
+- 接口：`app/models/dag/graph_policy.rb`
+  - `assert_allowed!(operation:, graph:, subject: nil, details: {})`
+- 注入点：`attachable.dag_graph_policy`（例如 `Conversation` 可返回 `Messages::GraphPolicy`）
+- 默认：`DAG::GraphPolicy::ALLOW_ALL`
+- gate 范围：只覆盖用户语义 mutation 入口，例如 `fork_from!`、`adopt_version!`、`rerun!`、`edit!`、strict/deferred visibility changes
+- 不覆盖：`create_node/create_edge`、runner 状态流转、leaf repair、turn head 维护、visibility patch apply、tick / scheduler 等引擎自动维护路径
 
 ## 图不变量（Invariants）
 
@@ -413,5 +425,5 @@ bin/rails runner script/bench/dag_engine.rb
 
 ## 当前已知限制（里程碑 1 范围内）
 
-- executor 仅提供接口与默认 NotImplemented 行为（真实 LLM/tool/MCP 执行不在当前 scope）
+- `DAG::ExecutorRegistry` 对未注册 node_type 仍会回落到默认 `NotImplementedExecutor`；但当前应用已经在 `config/initializers/agent_core.rb` 注册了 `agent_message` / `character_message` / `task` executors，programmable-agent、tool、MCP 等主路径执行属于当前 scope。新增自定义 node_type 时仍需显式注册 executor。
 - branch 边为纯 lineage：用于 provenance/可视化；不参与 scheduler/context/leaf。分支合并通过在 target lane 创建 `dependency/sequence` join 节点表达；是否归档 source lanes 属于产品选择（见 `DAG::Mutations#merge_lanes!`、`DAG::Mutations#archive_lane!` 与场景测试）。

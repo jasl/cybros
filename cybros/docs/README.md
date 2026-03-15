@@ -8,7 +8,7 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Workflow engine (scheduler/runner/jobs/hooks): `docs/dag/workflow_engine.md`
 - Normative behavior spec (nodes/edges/states/invariants/streaming): `docs/dag/behavior_spec.md`
 - Sub-agent patterns: `docs/dag/subagent_patterns.md`
-- Audit history: `docs/dag/audit.md`
+- Historical DAG audit report: `docs/reports/2026-02-19-dag-engine-audit.md`
 - Errors: `docs/dag/errors.md`
 
 ## AgentCore (DAG-first)

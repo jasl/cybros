@@ -1,9 +1,11 @@
-# DAG Public API（v1 草案）
+# DAG Public API（Engine v1 草案）
 
-本文件定义 **DAG 引擎对 App 域暴露的稳定 Public API**（鼓励开发者/Agent 只通过这些 API 操作图），以减少对内部实现细节（表结构、具体 SQL、内部类）的耦合。
+本文件定义 **DAG 引擎层的稳定 Public API**，供 `Conversation` facade、引擎内部集成、jobs、诊断脚本与测试使用，以减少对内部实现细节（表结构、具体 SQL、内部类）的耦合。
 
-> 重要约定（Lane-first）：**App 侧默认只操作 Lane / Turn / Message（Node）视图**。
-> `DAG::Graph` 仍存在，但其“全图语义”读 API（closure / mermaid / audit-like）必须被视为 **危险操作**，只用于后台/诊断/离线任务，不应出现在用户同步请求路径。
+> 重要约定（Conversation-first for App）：
+> - **App 域**（controllers/views/channels/user-sync services）默认走 `Conversation` facade，而不是直接调用 `DAG::*`。
+> - 本文档里的 `DAG::Lane` / `DAG::Turn` / `DAG::Graph` API 是**引擎稳定依赖面**，不是产品同步请求层的首选入口。
+> - `DAG::Graph` 的“全图语义”读 API（closure / mermaid / audit-like）仍然属于 **危险操作**，只用于后台/诊断/离线任务。
 
 ---
 
@@ -20,9 +22,9 @@
 
 ## 2) 读 API（Read-only）
 
-### 2.1 Lane-level（App-safe；面向真实产品 UI）
+### 2.1 Lane-level（Engine-safe bounded reads；通常由 `Conversation` 包装）
 
-推荐 UI 优先使用 Lane-scoped 的分页原语，避免把不同 Lane 的内容混在一个列表里。
+产品 UI 通常通过 `Conversation` facade 间接使用这些 lane-scoped 原语，以避免把不同 Lane 的内容混在一个列表里。
 
 - `DAG::Lane#message_page(limit:, before_message_id: nil, after_message_id: nil, mode: :preview|:full, include_deleted: false)`
   - **用途**：按“消息节点（transcript candidates）”分页，满足“取最近 X 条消息”的 UI 需求。
@@ -56,7 +58,7 @@ Executor 组装上下文（bounded window；Lane 入口避免 App 直接持有 G
   - 实现细节（重要）：引擎会对 context window 的候选 **nodes/edges** 做内部 hard cap（安全带），超限时 raise `DAG::SafetyLimits::Exceeded`（避免单个 turn 或脏数据导致爆炸扫描）。
   - 可选：通过 ENV 调整（仅引擎内部）：`DAG_MAX_CONTEXT_NODES` / `DAG_MAX_CONTEXT_EDGES`
 
-LLM 用量统计（Lane-scoped；App-safe；可用于 tokscale-like 汇总/报表）：
+LLM 用量统计（Lane-scoped；Engine-safe；可用于 tokscale-like 汇总/报表）：
 
 - `DAG::Lane#llm_usage_stats(since: nil, until_time: nil, include_compressed: false, include_deleted: false)`
   - **用途**：聚合本 Lane 内（可按时间范围过滤）的 LLM token 使用情况，并给出 prompt/prefix cache 命中率相关指标。
@@ -66,7 +68,7 @@ LLM 用量统计（Lane-scoped；App-safe；可用于 tokscale-like 汇总/报�
     - `"by_model"`：按 `provider+model` 分组的同结构数组（按 `total_tokens` 逆序）
     - `"by_day"`：按日期分组（`DATE(COALESCE(finished_at, created_at))`）的同结构数组
 
-### 2.2 Turn-level（App-safe；Turn 是“有规则的子图视图”）
+### 2.2 Turn-level（Engine-safe；Turn 是“有规则的子图视图”）
 
 - `DAG::Turn#start_message_node_id(include_deleted: false)`（turn head：通常为 `user_message`，也可能是 `agent_message/character_message`）
 - `DAG::Turn#end_message_node_id(include_deleted: false)`（按 `message_nodes` 投影后的最后一条 message；用于“运行中用 start、结束后用 end”的 UI 表示）
@@ -80,9 +82,9 @@ Graph 是引擎聚合根（锁/事务边界），但 **全图语义** 的读 API
 - `DAG::Graph#transcript_closure_for*`（危险：祖先闭包）
 - `DAG::Graph#to_mermaid(...)`（危险：可能扫全图）
 - `DAG::Graph#llm_usage_stats(lane_id: nil, since: nil, until_time: nil, include_compressed: false, include_deleted: false)`
-  - 说明：`lane_id: nil` 会聚合所有 lanes 的用量；可能较重，产品 UI 路径优先走 `DAG::Lane#llm_usage_stats`。
+  - 说明：`lane_id: nil` 会聚合所有 lanes 的用量；可能较重，产品/UI 层应优先走 `Conversation` facade，底层再委托到 lane-scoped 聚合。
 
-> 说明：Graph 仍提供若干 bounded window 的读 API（例如 `context_for`），但产品层推荐从 `DAG::Lane` 入口调用，以避免“无意间把 Graph 当作 App 的常用入口”。
+> 说明：Graph 仍提供若干 bounded window 的读 API（例如 `context_for`），但产品层应优先消费 `Conversation` facade；只有引擎内部或诊断代码才直接从 `DAG::Lane` / `DAG::Graph` 入口调用。
 
 ---
 
@@ -162,6 +164,7 @@ end
 
 优先顺序：
 
-1. 先为缺失能力补一个 Public API（带测试与文档），并在 App 域迁移到新 API。
-2. 必要时允许破坏性改动：重命名/拆分 API、调整返回结构、调整索引/迁移（允许 `db:reset`）。
-3. 只有在紧急 debug/一次性脚本中，才临时直接读写表；且应在 PR 内明确标注并尽快回收。
+1. 如果需求来自产品/App，同步先补 `Conversation` facade（带测试与文档），再在内部接到合适的 DAG API。
+2. 如果缺的是引擎稳定依赖面，再补/调整 DAG Public API（带测试与文档）。
+3. 必要时允许破坏性改动：重命名/拆分 API、调整返回结构、调整索引/迁移（允许 `db:reset`）。
+4. 只有在紧急 debug/一次性脚本中，才临时直接读写表；且应在 PR 内明确标注并尽快回收。
