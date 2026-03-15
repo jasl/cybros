@@ -103,10 +103,10 @@ This design does not leave any targeted OpenClaw loop capability unmapped. Each 
 - final output authority through `before_finalize_output`
 - deployment identity and capability snapshot pinning
 
-### Explicitly Deferred
+### Explicitly Deferred Or Intentionally Not Adopted
 
-- OpenClaw `IDENTITY.md` as a first-class editable workspace identity contract
-- OpenClaw `HEARTBEAT.md` / `HEARTBEAT_OK` behavior
+- OpenClaw `IDENTITY.md` as a first-class editable workspace identity contract is not adopted for Cybros bundled `claw`; current mutable identity guidance belongs in `SOUL`
+- OpenClaw `HEARTBEAT.md` / `HEARTBEAT_OK` behavior is not adopted for Cybros bundled `claw`; periodic silent work should be modeled later with Cybros automations instead
 - OpenClaw reply tags, messaging sections, and self-update instructions
 - narrow profile self-mutation as a required follow-up phase
 - full agent-program self-upgrade / platform self-update as a later, more complex follow-up
@@ -119,7 +119,7 @@ The most important intentional divergence is memory storage shape: OpenClaw read
 
 Self-update is also intentionally split:
 
-- required follow-up: profile self-mutation for agent-owned/profile-owned state such as `SOUL`, `USER`, and future profile bootstrap material
+- required follow-up: profile self-mutation for agent-owned/profile-owned state such as `SOUL` and `USER`
 - later follow-up: true agent self-upgrade or platform self-update, which would require a separate control-plane design
 
 ## Capability Model
@@ -191,10 +191,11 @@ Subagents do not inject the full conversation memory body by default.
 Bootstrap inputs are split by ownership:
 
 - bundled/repo/profile-owned: `AGENTS`, `SOUL`, `USER`, `TOOLS`
-- optional bundled/profile-owned later: `IDENTITY`, `HEARTBEAT`
 - conversation-owned: `MEMORY`
 
-This preserves OpenClaw’s bootstrap pattern without forcing everything into per-conversation files.
+This preserves the useful part of OpenClaw’s bootstrap pattern without forcing everything into per-conversation files.
+
+`IDENTITY` and `HEARTBEAT` are intentionally not adopted for Cybros bundled `claw`.
 
 ### Bootstrap Budgeting
 

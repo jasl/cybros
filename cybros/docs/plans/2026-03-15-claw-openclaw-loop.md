@@ -837,7 +837,7 @@ These are intentionally excluded from the current implementation and acceptance 
 
 - `A3`: profile self-mutation
   - agent-owned/profile-owned state only
-  - likely scope: `SOUL`, `USER`, future profile bootstrap material
+  - likely scope: `SOUL`, `USER`
   - explicit user intent required
   - no Cybros platform config writes, no deployment mutation, no restart semantics
 - later: full agent-program self-upgrade / platform self-update
