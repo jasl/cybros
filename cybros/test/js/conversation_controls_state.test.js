@@ -65,4 +65,39 @@ describe("deriveConversationControlsState", () => {
       showRetry: true,
     })
   })
+
+  test("hides retry when the current retryable tail bubble was ignored", () => {
+    const state = deriveConversationControlsState(
+      [
+        {
+          nodeId: "agent_1",
+          isTail: false,
+          actionPolicy: {
+            actions: {
+              stop: { available: false },
+              retry: { available: false },
+            },
+          },
+        },
+        {
+          nodeId: "agent_2",
+          isTail: true,
+          actionPolicy: {
+            actions: {
+              stop: { available: false },
+              retry: { available: true },
+            },
+          },
+        },
+      ],
+      { ignoredRetryNodeId: "agent_2" },
+    )
+
+    expect(state).toEqual({
+      activeNodeId: null,
+      showStop: false,
+      lastErroredNodeId: "agent_2",
+      showRetry: false,
+    })
+  })
 })

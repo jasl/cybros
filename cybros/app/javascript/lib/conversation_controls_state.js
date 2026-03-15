@@ -4,7 +4,7 @@ function actionAvailable(policy, key) {
   return entry?.available === true
 }
 
-export function deriveConversationControlsState(bubbles) {
+export function deriveConversationControlsState(bubbles, { ignoredRetryNodeId = null } = {}) {
   const entries = Array.isArray(bubbles) ? bubbles : []
 
   let stopBubble = null
@@ -24,6 +24,6 @@ export function deriveConversationControlsState(bubbles) {
     activeNodeId: stopBubble?.nodeId || null,
     showStop: stopBubble !== null,
     lastErroredNodeId: retryBubble?.nodeId || null,
-    showRetry: retryBubble !== null,
+    showRetry: retryBubble !== null && retryBubble?.nodeId !== ignoredRetryNodeId,
   }
 }

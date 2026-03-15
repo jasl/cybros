@@ -30,7 +30,7 @@ export default class extends Controller {
     conversationId: String,
   }
 
-  static targets = ["scroll", "stopButton", "retryButton", "stuckAlert"]
+  static targets = ["scroll", "stopButton", "retryAlert", "retryButton", "stuckAlert"]
 
   connect() {
     this.cursor = window.localStorage.getItem(this.#cursorKey()) || ""
@@ -40,6 +40,7 @@ export default class extends Controller {
     }
     this.activeNodeId = null
     this.lastErroredNodeId = null
+    this.ignoredRetryNodeId = null
     this.lastEventAt = null
     this.pendingEventsByNodeId = new Map()
     this.pendingNodeStateByNodeId = new Map()
@@ -156,6 +157,14 @@ export default class extends Controller {
         await this.#toastRetryFailure(response)
       })
       .catch(() => {})
+  }
+
+  ignoreRetry() {
+    const nodeId = this.lastErroredNodeId
+    if (!nodeId) return
+
+    this.ignoredRetryNodeId = nodeId
+    this.#hideRetry()
   }
 
   #received(data) {
@@ -367,10 +376,12 @@ export default class extends Controller {
         isTail: index === bubbles.length - 1,
         actionPolicy: parseActionPolicy(bubble),
       })),
+      { ignoredRetryNodeId: this.ignoredRetryNodeId },
     )
 
     this.activeNodeId = controls.activeNodeId
     this.lastErroredNodeId = controls.lastErroredNodeId
+    if (!controls.lastErroredNodeId) this.ignoredRetryNodeId = null
 
     if (controls.showStop) this.#showStop()
     else this.#hideStop()
@@ -394,6 +405,7 @@ export default class extends Controller {
     if (to === "running") {
       this.activeNodeId = nodeId
       this.lastErroredNodeId = null
+      this.ignoredRetryNodeId = null
       this.lastEventAt = Date.now()
       if (bubble) bubble.setAttribute("data-node-state", "running")
       this.#showSpinner(bubble)
@@ -577,13 +589,19 @@ export default class extends Controller {
   }
 
   #showRetry() {
-    if (!this.hasRetryButtonTarget) return
-    this.retryButtonTarget.classList.remove("hidden")
+    if (this.hasRetryAlertTarget) {
+      this.retryAlertTarget.classList.remove("hidden")
+      return
+    }
+    if (this.hasRetryButtonTarget) this.retryButtonTarget.classList.remove("hidden")
   }
 
   #hideRetry() {
-    if (!this.hasRetryButtonTarget) return
-    this.retryButtonTarget.classList.add("hidden")
+    if (this.hasRetryAlertTarget) {
+      this.retryAlertTarget.classList.add("hidden")
+      return
+    }
+    if (this.hasRetryButtonTarget) this.retryButtonTarget.classList.add("hidden")
   }
 
   #checkStuck() {

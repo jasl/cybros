@@ -110,6 +110,31 @@
 
         <%= render "conversations/composer_status_rail", conversation: @conversation, composer_state: @composer_state %>
         <div
+          role="alert"
+          class="alert alert-warning text-sm hidden"
+          data-testid="conversation-composer-retry-alert"
+          data-conversation-channel-target="retryAlert">
+          <span class="icon-[lucide--triangle-alert] size-4"></span>
+          <span class="flex-1">The latest assistant run did not finish. Retry it or ignore this alert.</span>
+          <div class="flex items-center gap-1">
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs"
+              data-testid="conversation-composer-retry-action"
+              data-conversation-channel-target="retryButton"
+              data-action="click->conversation-channel#retry">
+              Retry
+            </button>
+            <button
+              type="button"
+              class="btn btn-ghost btn-xs"
+              data-testid="conversation-composer-ignore-action"
+              data-action="click->conversation-channel#ignoreRetry">
+              Ignore
+            </button>
+          </div>
+        </div>
+        <div
           class="hidden items-center justify-between rounded-2xl border border-base-300 bg-base-200/70 px-3 py-2 text-xs"
           data-message-form-target="editMode">
           <span data-message-form-target="editModeLabel">Editing your last message. Sending will regenerate the latest assistant reply.</span>
@@ -235,15 +260,6 @@
               data-action="click->conversation-channel#stop">
               <span class="icon-[lucide--square] size-3"></span>
               Stop
-            </button>
-
-            <button
-              type="button"
-              class="btn btn-ghost btn-xs hidden"
-              data-conversation-channel-target="retryButton"
-              data-action="click->conversation-channel#retry">
-              <span class="icon-[lucide--refresh-cw] size-3"></span>
-              Retry
             </button>
           </div>
         </div>

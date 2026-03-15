@@ -152,6 +152,7 @@ export default class extends Controller {
   async #retryTail() {
     const retryButton = this.element.querySelector("[data-conversation-channel-target='retryButton']")
     if (!retryButton || retryButton.classList.contains("hidden")) return
+    if (retryButton.closest(".hidden")) return
 
     retryButton.click()
   }

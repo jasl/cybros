@@ -206,6 +206,19 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[data-testid="conversation-composer-agent-picker"]', count: 0
   end
 
+  test "show renders a hidden retry alert above the composer input with retry and ignore actions" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_match(/data-testid="conversation-composer-retry-alert".*data-testid="conversation-composer-input"/m, response.body)
+    assert_select '[data-testid="conversation-composer-retry-alert"].hidden', count: 1
+    assert_select '[data-testid="conversation-composer-retry-action"]', count: 1
+    assert_select '[data-testid="conversation-composer-ignore-action"]', count: 1
+  end
+
   test "index no longer renders a generic new conversation form" do
     user = sign_in_owner!
     create_conversation!(user: user, title: "Existing")
