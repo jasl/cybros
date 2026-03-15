@@ -193,6 +193,19 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select 'select[name="model_ref"][data-testid="conversation-composer-model-picker"] option[selected]', text: "GPT‑5.3 Codex"
   end
 
+  test "show renders inline runtime controls without an agent picker" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select '[data-testid="conversation-composer-runtime-controls"]', count: 1
+    assert_select '[data-testid="conversation-composer-runtime-controls"] select[data-testid="conversation-composer-model-picker"]', count: 1
+    assert_select '[data-testid="conversation-composer-runtime-controls"] select[data-testid="conversation-composer-permission-picker"]', count: 1
+    assert_select 'select[data-testid="conversation-composer-agent-picker"]', count: 0
+  end
+
   test "index no longer renders a generic new conversation form" do
     user = sign_in_owner!
     create_conversation!(user: user, title: "Existing")

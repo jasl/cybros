@@ -15,16 +15,15 @@ class ConversationAgentSelectionTest < ActionDispatch::IntegrationTest
 
   test "show warns when the selected agent runtime is no longer active and healthy" do
     user = sign_in_owner!
-    healthy_agent = create_agent_runtime!(name: "Healthy agent").fetch(:agent)
     stale_agent = create_agent_runtime!(name: "Unavailable agent", deployment_status: "inactive", health_status: "unhealthy").fetch(:agent)
     conversation = create_conversation!(user: user, title: "Chat", agent: stale_agent)
 
     get conversation_path(conversation)
 
     assert_response :success
-    assert_includes response.body, "Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment."
-    assert_select 'select[name="conversation[agent_id]"] option[selected]', text: stale_agent.name
-    assert_select 'select[name="conversation[agent_id]"] option', text: healthy_agent.name
+    assert_includes response.body, "Selected agent has no active healthy deployment. Future runs will stay blocked until the operator restores this deployment."
+    assert_select '[data-testid="conversation-agent-stale-warning"]', count: 1
+    assert_select 'select[data-testid="conversation-composer-agent-picker"]', count: 0
   end
 
   test "update rejects selecting an agent that is not currently active and healthy" do

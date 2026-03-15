@@ -78,9 +78,7 @@ class ConversationsController < AgentController
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
     @composer_state = @conversation.composer_state
     @permission_mode_options = Conversation::PERMISSION_MODE_LABELS
-    @selected_agent = @conversation.agent
-    @agent_options = selectable_agents_for(@conversation)
-    @selected_agent_stale = @selected_agent.present? && !@selected_agent.selectable_for_conversation?
+    @selected_agent_stale = @conversation.agent.present? && !@conversation.agent.selectable_for_conversation?
 
     begin
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
@@ -326,15 +324,6 @@ class ConversationsController < AgentController
             options: grouped_options,
           }
         end
-    end
-
-    def selectable_agents_for(conversation)
-      agents = Agent.all.select(&:selectable_for_conversation?)
-      selected = conversation.agent
-      if selected.present? && agents.none? { |agent| agent.id == selected.id }
-        agents << selected
-      end
-      agents.sort_by { |agent| agent.name.to_s.downcase }
     end
 
     def resolve_selected_agent!(raw_id)

@@ -19,7 +19,9 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
     get conversation_path(conversation)
 
     assert_response :success
-    assert_select 'select[name="conversation[agent_id]"] option[selected]', text: default_agent.name
+    assert_select 'select[data-testid="conversation-composer-agent-picker"]', count: 0
+    assert_select '[data-testid="conversation-composer-runtime-controls"] select[data-testid="conversation-composer-model-picker"]', count: 1
+    assert_select '[data-testid="conversation-composer-runtime-controls"] select[data-testid="conversation-composer-permission-picker"]', count: 1
     assert_select 'select[name="conversation[default_execution_target_id]"]', count: 0
   end
 

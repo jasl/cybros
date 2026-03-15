@@ -162,6 +162,32 @@ class ConversationActionPolicyUiTest < ActionDispatch::IntegrationTest
     assert_select '[data-message-actions-target="swipeRight"][disabled]', count: 1
   end
 
+  test "show swipe counter excludes errored historical versions" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    post conversation_messages_path(conversation), params: { content: "Hello" }
+    agent_v1 = conversation.reload.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent_v1.mark_running!
+    agent_v1.mark_finished!(content: "Hi v1")
+
+    post regenerate_conversation_path(conversation), params: { agent_node_id: agent_v1.id }
+    agent_v2 = conversation.reload.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent_v2.mark_running!
+    agent_v2.mark_errored!(error: "boom")
+
+    agent_v3 = conversation.root_graph.nodes.find(conversation.retry_agent_node!(failed_node_id: agent_v2.id))
+    agent_v3.mark_running!
+    agent_v3.mark_finished!(content: "Hi v3")
+
+    get conversation_path(conversation)
+    assert_response :success
+
+    assert_select '[data-message-actions-target="swipeCount"]', text: "2 / 2"
+    assert_select '[data-message-actions-target="swipeLeft"]:not([disabled])', count: 1
+    assert_select '[data-message-actions-target="swipeRight"][disabled]', count: 1
+  end
+
   test "show hides regenerate for a non-tail assistant and leaves branch available" do
     user = sign_in_owner!
     conversation = create_conversation!(user: user, title: "Chat")

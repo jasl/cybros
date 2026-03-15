@@ -90,12 +90,12 @@ class Conversation::NodeActionPolicy
     def swipe_entry
       supported = node.body&.swipable? == true
       return unsupported_entry unless supported
-      metadata = swipe_metadata
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
       return unavailable_entry(reason: "not_tail") unless tail_agent?
       return unavailable_entry(reason: "not_finished") unless node.finished?
 
+      metadata = swipe_metadata
       entry(supported: true, available: true, **metadata)
     end
 
@@ -290,7 +290,7 @@ class Conversation::NodeActionPolicy
     end
 
     def swipe_metadata
-      versions = node.versions(include_inactive: true).to_a
+      versions = conversation.send(:swipeable_versions_for, node)
       total = versions.length
       current_index = versions.index { |candidate| candidate.id.to_s == node.id.to_s }
       current = current_index ? current_index + 1 : nil

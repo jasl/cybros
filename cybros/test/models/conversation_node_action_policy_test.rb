@@ -61,6 +61,32 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal false, policy.dig("actions", "swipe", "right_available")
   end
 
+  test "swipe metadata excludes errored historical versions" do
+    conversation = create_conversation!
+
+    conversation.append_user_message!(content: "Hello")
+    agent_v1 = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+    agent_v1.mark_running!
+    agent_v1.mark_finished!(content: "Hi v1")
+
+    regen = conversation.regenerate!(agent_node_id: agent_v1.id)
+    agent_v2 = regen.fetch(:node)
+    agent_v2.mark_running!
+    agent_v2.mark_errored!(error: "boom")
+
+    agent_v3 = conversation.root_graph.nodes.find(conversation.retry_agent_node!(failed_node_id: agent_v2.id))
+    agent_v3.mark_running!
+    agent_v3.mark_finished!(content: "Hi v3")
+
+    policy = policy_for(conversation: conversation, node: agent_v3)
+
+    assert_equal true, policy.dig("actions", "swipe", "available")
+    assert_equal 2, policy.dig("actions", "swipe", "current")
+    assert_equal 2, policy.dig("actions", "swipe", "total")
+    assert_equal true, policy.dig("actions", "swipe", "left_available")
+    assert_equal false, policy.dig("actions", "swipe", "right_available")
+  end
+
   test "latest finished assistant remains rerunnable when followed only by a leaf-terminal authority task" do
     conversation = create_conversation!
 

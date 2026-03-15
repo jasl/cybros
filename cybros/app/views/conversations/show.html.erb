@@ -95,7 +95,6 @@
 
       <% message_form_id = dom_id(@conversation, :message_form) %>
       <% permission_form_id = dom_id(@conversation, :permission_mode_form) %>
-      <% agent_form_id = dom_id(@conversation, :agent_form) %>
 
 	      <%= form_with url: conversation_messages_path(@conversation),
 	        method: :post,
@@ -171,63 +170,54 @@
 
         <div
           data-testid="conversation-composer-footer"
-          class="mt-2.5 flex flex-wrap items-center justify-between gap-x-3 gap-y-2 px-2 pt-1">
-          <div class="flex flex-wrap items-center gap-2">
-            <% if @llm_model_options.present? %>
-              <select
-                name="model_ref"
-                data-testid="conversation-composer-model-picker"
-                aria-label="Model"
-                form="<%= message_form_id %>"
-                <%= needs_model_reselection ? "required" : nil %>
-                class="select select-bordered select-xs max-w-full">
-                <% if needs_model_reselection %>
-                  <option value="" selected>Please reselect a model</option>
-                <% end %>
-                <% @llm_model_option_groups.each do |group| %>
-                  <optgroup label="<%= group.fetch(:provider_display_name) %>">
-                    <% group.fetch(:options).each do |opt| %>
-                      <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
-                        <%= opt.fetch(:label, opt.fetch(:model_display_name)) %>
-                      </option>
-                    <% end %>
-                  </optgroup>
-                <% end %>
-              </select>
-            <% else %>
-              <select
-                data-testid="conversation-composer-model-picker"
-                aria-label="Model"
-                class="select select-bordered select-xs max-w-full"
-                disabled>
-                <option>No models configured</option>
-              </select>
-              <% if Current.user&.owner? || Current.user&.admin? %>
-                <%= link_to "Configure", system_settings_llm_providers_path, class: "link link-primary text-xs" %>
+          class="mt-2.5 flex flex-col gap-2 px-2 pt-1 sm:flex-row sm:items-center sm:justify-between">
+          <div
+            data-testid="conversation-composer-runtime-controls"
+            class="grid min-w-0 flex-1 grid-cols-1 gap-2 sm:grid-cols-[minmax(16rem,1fr)_11rem] sm:items-center">
+            <div class="min-w-0">
+              <% if @llm_model_options.present? %>
+                <select
+                  name="model_ref"
+                  data-testid="conversation-composer-model-picker"
+                  aria-label="Model"
+                  form="<%= message_form_id %>"
+                  <%= needs_model_reselection ? "required" : nil %>
+                  class="select select-bordered select-xs w-full min-w-0">
+                  <% if needs_model_reselection %>
+                    <option value="" selected>Please reselect a model</option>
+                  <% end %>
+                  <% @llm_model_option_groups.each do |group| %>
+                    <optgroup label="<%= group.fetch(:provider_display_name) %>">
+                      <% group.fetch(:options).each do |opt| %>
+                        <option value="<%= opt.fetch(:model_ref) %>" <%= opt.fetch(:model_ref) == @selected_model_ref ? "selected" : "" %>>
+                          <%= opt.fetch(:label, opt.fetch(:model_display_name)) %>
+                        </option>
+                      <% end %>
+                    </optgroup>
+                  <% end %>
+                </select>
+              <% else %>
+                <div class="flex items-center gap-2">
+                  <select
+                    data-testid="conversation-composer-model-picker"
+                    aria-label="Model"
+                    class="select select-bordered select-xs min-w-0 flex-1"
+                    disabled>
+                    <option>No models configured</option>
+                  </select>
+                  <% if Current.user&.owner? || Current.user&.admin? %>
+                    <%= link_to "Configure", system_settings_llm_providers_path, class: "link link-primary shrink-0 text-xs" %>
+                  <% end %>
+                </div>
               <% end %>
-            <% end %>
-
-            <select
-              name="conversation[agent_id]"
-              form="<%= agent_form_id %>"
-              data-testid="conversation-composer-agent-picker"
-              aria-label="Agent"
-              onchange="this.form.requestSubmit()"
-              class="select select-bordered select-xs max-w-full">
-              <% @agent_options.each do |agent| %>
-                <option value="<%= agent.id %>" <%= @selected_agent&.id == agent.id ? "selected" : nil %>>
-                  <%= agent.name %>
-                </option>
-              <% end %>
-            </select>
-
+            </div>
             <select
               name="conversation[permission_mode]"
               form="<%= permission_form_id %>"
               data-testid="conversation-composer-permission-picker"
               aria-label="Permissions"
               onchange="this.form.requestSubmit()"
-              class="select select-bordered select-xs max-w-full">
+              class="select select-bordered select-xs w-full">
               <% @permission_mode_options.each do |value, label| %>
                 <option value="<%= value %>" <%= @conversation.permission_mode == value ? "selected" : nil %>>
                   <%= label %>
@@ -259,15 +249,12 @@
         </div>
       <% end %>
 
-      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: agent_form_id, class: "hidden" } do %>
-      <% end %>
-
       <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: permission_form_id, class: "hidden" } do %>
       <% end %>
 
       <% if @selected_agent_stale %>
         <div role="alert" class="alert alert-warning alert-soft text-sm mt-2" data-testid="conversation-agent-stale-warning">
-          <span>Selected agent has no active healthy deployment. Future runs will stay blocked until you choose another agent or the operator restores this deployment.</span>
+          <span>Selected agent has no active healthy deployment. Future runs will stay blocked until the operator restores this deployment.</span>
         </div>
       <% end %>
     </div>

@@ -311,12 +311,10 @@ export async function openConversationWithMockRuntime(page: Page, title: string)
 function conversationRuntimeOptionPersisted({
   conversationId,
   testId,
-  label,
   expectedValue,
 }: {
   conversationId: string
   testId: string
-  label: string
   expectedValue: string | null
 }) {
   const state = programmableConversationState(conversationId)
@@ -324,8 +322,6 @@ function conversationRuntimeOptionPersisted({
   switch (testId) {
     case "conversation-composer-model-picker":
       return state.selectedModelRef === expectedValue
-    case "conversation-composer-agent-picker":
-      return state.agentName === label
     case "conversation-composer-permission-picker":
       return state.permissionMode === expectedValue
     default:
@@ -358,7 +354,7 @@ export async function selectConversationRuntimeOption(page: Page, testId: string
 
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {
-    if (conversationRuntimeOptionPersisted({ conversationId, testId, label, expectedValue })) {
+    if (conversationRuntimeOptionPersisted({ conversationId, testId, expectedValue })) {
       await page.reload({ waitUntil: "domcontentloaded" })
       return
     }

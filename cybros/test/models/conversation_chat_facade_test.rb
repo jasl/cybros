@@ -530,6 +530,32 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     assert new_agent.reload.compressed_at.present?
   end
 
+  test "select_swipe! skips errored historical versions" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+    lane = conversation.chat_lane
+
+    conversation.append_user_message!(content: "Hello")
+    agent_v1 = graph.leaf_nodes.where(lane_id: lane.id).order(:id).last
+    agent_v1.mark_running!
+    agent_v1.mark_finished!(content: "v1")
+
+    regen = conversation.regenerate!(agent_node_id: agent_v1.id)
+    agent_v2 = regen.fetch(:node)
+    agent_v2.mark_running!
+    agent_v2.mark_errored!(error: "boom")
+
+    agent_v3 = graph.nodes.find(conversation.retry_agent_node!(failed_node_id: agent_v2.id))
+    agent_v3.mark_running!
+    agent_v3.mark_finished!(content: "v3")
+
+    selected = conversation.select_swipe!(agent_node_id: agent_v3.id, direction: :left)
+
+    assert_equal agent_v1.id, selected.id
+    assert_nil selected.reload.compressed_at
+    assert agent_v3.reload.compressed_at.present?
+  end
+
   test "soft_delete_node! cancels queued run for that node" do
     conversation = create_conversation!(title: "Chat")
     result = conversation.append_user_message!(content: "Hello")

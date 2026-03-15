@@ -948,16 +948,22 @@ class Conversation < ApplicationRecord
           .exists?
       raise Cybros::Error, "cannot swipe while a version is in-flight" if in_flight
 
-      versions = node.versions(include_inactive: true).to_a
+      all_versions = node.versions(include_inactive: true).to_a
+      versions = swipeable_versions_for(node)
       raise ArgumentError, "no versions" if versions.empty?
 
-      active_idx = versions.index { |v| v.compressed_at.nil? }
+      active_idx = versions.index { |v| v.id.to_s == node.id.to_s }
       raise Cybros::Error, "missing active version" if active_idx.nil?
 
       target_idx =
         if !position.nil?
           raw = position.to_s
           if AgentCore::Utils.uuid_like?(raw)
+            candidate = all_versions.find { |v| v.id.to_s == raw }
+            raise ArgumentError, "unknown version_id" if candidate.nil?
+            raise Cybros::Error, "cannot swipe deleted version" if candidate.deleted?
+            raise Cybros::Error, "target version must be finished" unless candidate.state == DAG::Node::FINISHED
+
             idx = versions.index { |v| v.id.to_s == raw }
             raise ArgumentError, "unknown version_id" if idx.nil?
             idx
@@ -1219,6 +1225,12 @@ class Conversation < ApplicationRecord
   end
 
   private
+
+    def swipeable_versions_for(node)
+      node.versions(include_inactive: true).select do |candidate|
+        candidate.state == DAG::Node::FINISHED && !candidate.deleted?
+      end
+    end
 
     def normalize_runtime_settings
       self.permission_mode = permission_mode.to_s.strip.presence || "default"
