@@ -36,6 +36,15 @@ module Cybros
         end
       end
 
+      FinishSilently = Data.define(:type, :reason) do
+        def to_h
+          {
+            "type" => type,
+            "reason" => reason,
+          }.compact
+        end
+      end
+
       Halt = Data.define(:type, :reason, :message) do
         def to_h
           {
@@ -80,7 +89,7 @@ module Cybros
         "before_subagent_spawn" => %w[noop set_step_status create_task deny halt],
         "after_task_notice" => %w[noop set_step_status create_task emit_message],
         "after_subagent_result" => %w[noop set_step_status create_task emit_message],
-        "before_finalize_output" => %w[noop set_step_status emit_message create_task halt],
+        "before_finalize_output" => %w[noop set_step_status emit_message finish_silently create_task halt],
       }.freeze
       CREATE_TASK_PLACEMENT_POLICY = {
         "on_conversation_created" => %w[append],
@@ -258,6 +267,8 @@ module Cybros
               )
             when "emit_message"
               HookActions::EmitMessage.new(type: type, message: normalize_hash(raw["message"]).presence || raw["message"])
+            when "finish_silently"
+              HookActions::FinishSilently.new(type: type, reason: raw["reason"].to_s.presence)
             when "halt"
               HookActions::Halt.new(type: type, reason: raw["reason"].to_s.presence, message: raw["message"].to_s.presence)
             when "deny"
@@ -341,13 +352,13 @@ module Cybros
           end
 
           def validate_emit_message_actions!(actions)
-            emit_indexes = actions.each_index.select { |index| actions[index].type == "emit_message" }
+            emit_indexes = actions.each_index.select { |index| %w[emit_message finish_silently].include?(actions[index].type) }
             return if emit_indexes.empty?
 
             invalid_followup =
               emit_indexes.any? do |emit_index|
                 actions[(emit_index + 1)..].to_a.any? do |action|
-                  %w[emit_message set_step_status].include?(action.type)
+                  %w[emit_message finish_silently set_step_status].include?(action.type)
                 end
               end
             return unless invalid_followup

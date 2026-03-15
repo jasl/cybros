@@ -8,6 +8,7 @@ module TestSupport
       capabilities.handshake
       capabilities.refresh
       attachments.import
+      tool.execute
       on_conversation_created
       on_lane_first_user_message
       before_agent_step
@@ -44,7 +45,7 @@ module TestSupport
 
       module_function
 
-      def capture(rpc_url:, bearer:)
+      def capture(rpc_url:, bearer:, cached_agent_capabilities_version: "claw-agent-capabilities:v1")
         callback = TestSupport::CallbackHarness.new.start
 
         normalize(
@@ -68,7 +69,7 @@ module TestSupport
               http_post(
                 rpc_url,
                 body: rpc_body(id: 6, method: "capabilities.handshake",
-                               params: { "cached_agent_capabilities_version" => "claw-agent-capabilities:v1" }),
+                               params: { "cached_agent_capabilities_version" => cached_agent_capabilities_version }),
                 authorization: "Bearer #{bearer}"
               )
             ),
@@ -982,7 +983,12 @@ module TestSupport
       end
 
       def expected_agent_capabilities_version
-        "#{expected_agent_program_key}-agent-capabilities:v1"
+        @expected_agent_capabilities_version ||=
+          Cybros::Agents::Claw::Application.new(
+            source_root: TestPaths.source_root,
+            deployment_fingerprint: expected_deployment_fingerprint,
+            required_bearer: required_bearer,
+          ).agent_capabilities_version
       end
 
       def bearer_header

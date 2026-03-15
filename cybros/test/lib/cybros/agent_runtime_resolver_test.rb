@@ -511,7 +511,7 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     end
   end
 
-  test "runtime_for does not expose memory tools outside test when memory backend is not explicitly configured" do
+  test "runtime_for exposes only the agent-owned conversation memory tools when no kernel memory backend is configured" do
     node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
 
     with_env("SIMPLE_INFERENCE_BASE_URL" => nil, "SIMPLE_INFERENCE_API_KEY" => nil) do
@@ -524,14 +524,21 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
             instrumenter: AgentCore::Observability::NullInstrumenter.new,
           )
 
-        refute runtime.tools_registry.include?("memory_search")
-        refute runtime.tools_registry.include?("memory_store")
+        assert runtime.tools_registry.include?("memory_search")
+        assert runtime.tools_registry.include?("memory_get")
+        assert runtime.tools_registry.include?("memory_store")
+        assert runtime.tools_registry.include?("web_search")
+        assert runtime.tools_registry.include?("web_fetch")
         refute runtime.tools_registry.include?("memory_forget")
+        assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
       end
     end
   end
 
-  test "runtime_for does not expose memory tools outside test even when memory backend is explicitly configured" do
+  test "runtime_for keeps the agent-owned conversation memory tools authoritative even when a kernel memory backend is configured" do
     node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
 
     with_env("SIMPLE_INFERENCE_BASE_URL" => "http://memory.example", "SIMPLE_INFERENCE_API_KEY" => nil) do
@@ -544,11 +551,34 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
             instrumenter: AgentCore::Observability::NullInstrumenter.new,
           )
 
-        refute runtime.tools_registry.include?("memory_search")
-        refute runtime.tools_registry.include?("memory_store")
+        assert runtime.tools_registry.include?("memory_search")
+        assert runtime.tools_registry.include?("memory_get")
+        assert runtime.tools_registry.include?("memory_store")
+        assert runtime.tools_registry.include?("web_search")
+        assert runtime.tools_registry.include?("web_fetch")
         refute runtime.tools_registry.include?("memory_forget")
+        assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
+        assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
       end
     end
+  end
+
+  test "build_tools_registry includes agent-owned claw coding tool definitions" do
+    registry = Cybros::AgentRuntimeResolver.send(:build_tools_registry)
+
+    %w[read write edit apply_patch glob search exec memory_search memory_get memory_store web_search web_fetch].each do |tool_name|
+      assert registry.include?(tool_name), "expected #{tool_name} to be registered"
+    end
+
+    assert_equal "read", registry.find("read").metadata[:permission_class]
+    assert_equal "mutate", registry.find("write").metadata[:permission_class]
+    assert_equal "boundary", registry.find("exec").metadata[:permission_class]
+    assert_equal "read", registry.find("memory_search").metadata[:permission_class]
+    assert_equal "mutate", registry.find("memory_store").metadata[:permission_class]
+    assert_equal "read", registry.find("web_search").metadata[:permission_class]
+    assert_equal "read", registry.find("web_fetch").metadata[:permission_class]
   end
 
   private

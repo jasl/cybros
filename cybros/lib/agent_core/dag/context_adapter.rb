@@ -117,6 +117,7 @@ module AgentCore
           input = input.is_a?(Hash) ? input : {}
           output = output.is_a?(Hash) ? output : {}
           metadata = metadata.is_a?(Hash) ? metadata : {}
+          return nil if internal_runtime_task?(input: input, metadata: metadata)
 
           tool_call_id = input.fetch("tool_call_id", nil).to_s.strip
           name = input.fetch("name", input.fetch("requested_name", "")).to_s.strip
@@ -183,6 +184,18 @@ module AgentCore
           projection.is_a?(Hash) ? projection : {}
         rescue StandardError
           {}
+        end
+
+        def internal_runtime_task?(input:, metadata:)
+          source = input.fetch("source", "").to_s
+          generated_by = metadata.fetch("generated_by", "").to_s
+
+          source == "hook_action" ||
+            source == "turn_internal_task_queue" ||
+            generated_by == "programmable_agent_hook" ||
+            generated_by == "turn_internal_task_queue"
+        rescue StandardError
+          false
         end
     end
   end

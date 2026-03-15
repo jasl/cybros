@@ -64,6 +64,8 @@ module Cybros
             }
           when "attachments.import"
             @application.import_attachments(params: normalized_params)
+          when "tool.execute"
+            ToolExecutor.new(application: @application).call(params: normalized_params)
           when "on_conversation_created"
             Hooks::OnConversationCreated.new(application: @application).call(params: normalized_params)
           when "on_lane_first_user_message"

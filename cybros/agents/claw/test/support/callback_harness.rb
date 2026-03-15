@@ -17,9 +17,9 @@ module TestSupport
       end
     end
 
-    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries
+    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries, :memory_document
 
-    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil)
+    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil, memory_document: "")
       @required_bearer = required_bearer
       @proposal_decision = proposal_decision
       @targets =
@@ -30,6 +30,7 @@ module TestSupport
         Array(prompt_buffer_entries).map do |entry|
           deep_copy(entry)
         end
+      @memory_document = memory_document.to_s
       @calls = []
       @server = nil
       @thread = nil
@@ -98,6 +99,14 @@ module TestSupport
       case method_name
       when "conversation.settings.update", "conversation.config.update"
         { "status" => "staged", "operation_id" => params["operation_id"] }
+      when "conversation.memory.get"
+        memory_result
+      when "conversation.memory.put"
+        @memory_document = params.fetch("body", params["content"]).to_s
+        memory_result
+      when "conversation.memory.append"
+        @memory_document += params.fetch("text", params["content"]).to_s
+        memory_result
       when "lane.kv.set", "lane.kv.delete"
         { "status" => "staged", "operation_id" => params["operation_id"] }
       when "lane.kv.get"
@@ -201,6 +210,15 @@ module TestSupport
           "sandboxed" => true
         }
       ]
+    end
+
+    def memory_result
+      {
+        "document" => {
+          "kind" => "conversation_memory",
+          "body" => @memory_document
+        }
+      }
     end
 
     def deep_copy(value)

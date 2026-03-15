@@ -119,6 +119,59 @@ class AgentCore::DAG::ContextAdapterProjectedToolResultTest < ActiveSupport::Tes
     assert_equal "ok", tool_message.content
   end
 
+  test "context adapter skips internal runtime tasks that were not model-issued tool calls" do
+    context =
+      AgentCore::DAG::ContextAdapter.new(
+        context_nodes: [
+          user_node("Continue"),
+          {
+            "node_type" => Messages::Task.node_type_key,
+            "state" => DAG::Node::FINISHED,
+            "payload" => {
+              "input" => {
+                "name" => "cybros_seed_message",
+                "requested_name" => "cybros_seed_message",
+                "tool_call_id" => "hook_action:on_conversation_created:append:lane:abc",
+                "source" => "hook_action",
+              },
+              "output" => {
+                "result" => AgentCore::Resources::Tools::ToolResult.success(text: "hello").to_h,
+              },
+              "output_preview" => {
+                "result" => "hello",
+              },
+            },
+            "metadata" => {
+              "generated_by" => "programmable_agent_hook",
+            },
+          },
+          {
+            "node_type" => Messages::Task.node_type_key,
+            "state" => DAG::Node::FINISHED,
+            "payload" => {
+              "input" => {
+                "name" => "cybros_generate_title",
+                "requested_name" => "cybros_generate_title",
+                "tool_call_id" => "turn_internal_task:abc",
+                "source" => "turn_internal_task_queue",
+              },
+              "output" => {
+                "result" => AgentCore::Resources::Tools::ToolResult.success(text: "Conversation").to_h,
+              },
+              "output_preview" => {
+                "result" => "Conversation",
+              },
+            },
+            "metadata" => {
+              "generated_by" => "turn_internal_task_queue",
+            },
+          },
+        ],
+      ).call
+
+    refute context.messages.any? { |message| message.role == :tool_result }
+  end
+
   private
 
     def user_node(content)

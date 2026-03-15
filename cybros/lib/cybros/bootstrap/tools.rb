@@ -37,52 +37,55 @@ module Cybros
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])
           lane = lane_for!(task_node: task_node, lane_id: args["lane_id"])
           content = args.fetch("content").to_s.strip
+          begin
+            AgentCore::ValidationError.raise!(
+              "bootstrap seed message content must be present",
+              code: "cybros.bootstrap.seed_message.content_blank",
+            ) if content.blank?
 
-          AgentCore::ValidationError.raise!(
-            "bootstrap seed message content must be present",
-            code: "cybros.bootstrap.seed_message.content_blank",
-          ) if content.blank?
+            message_node = existing_sequence_agent_child(task_node)
 
-          message_node = existing_sequence_agent_child(task_node)
-
-          if message_node.nil?
-            graph = task_node.graph
-            graph.mutate!(turn_id: task_node.turn_id) do |m|
-              message_node =
-                m.create_node(
-                  node_type: Messages::AgentMessage.node_type_key,
-                  state: DAG::Node::FINISHED,
-                  lane_id: lane.id,
-                  body_output: { "content" => content },
-                  metadata: normalize_metadata(args["metadata"]).merge(
-                    "generated_by" => "cybros_seed_message",
-                    "source_task_id" => task_node.id,
-                    "transcript_visible" => true,
-                    "transcript_preview" => content,
-                    "bootstrap_message_role" => args["role"].to_s.presence || "assistant",
-                  ),
-                )
-              m.create_edge(from_node: task_node, to_node: message_node, edge_type: DAG::Edge::SEQUENCE)
+            if message_node.nil?
+              graph = task_node.graph
+              graph.mutate!(turn_id: task_node.turn_id) do |m|
+                message_node =
+                  m.create_node(
+                    node_type: Messages::AgentMessage.node_type_key,
+                    state: DAG::Node::FINISHED,
+                    lane_id: lane.id,
+                    body_output: { "content" => content },
+                    metadata: normalize_metadata(args["metadata"]).merge(
+                      "generated_by" => "cybros_seed_message",
+                      "source_task_id" => task_node.id,
+                      "transcript_visible" => true,
+                      "transcript_preview" => content,
+                      "bootstrap_message_role" => args["role"].to_s.presence || "assistant",
+                    ),
+                  )
+                m.create_edge(from_node: task_node, to_node: message_node, edge_type: DAG::Edge::SEQUENCE)
+              end
             end
-          end
 
-          if ActiveModel::Type::Boolean.new.cast(args["exclude_from_context"])
-            if message_node.can_exclude_from_context?
-              message_node.exclude_from_context!
-            else
-              message_node.request_exclude_from_context!
+            if ActiveModel::Type::Boolean.new.cast(args["exclude_from_context"])
+              if message_node.can_exclude_from_context?
+                message_node.exclude_from_context!
+              else
+                message_node.request_exclude_from_context!
+              end
             end
-          end
 
-          AgentCore::Resources::Tools::ToolResult.success(
-            text: content,
-            metadata: {
-              "conversation_id" => conversation.id,
-              "lane_id" => lane.id,
-              "message_node_id" => message_node.id,
-              "generated_by" => "cybros_seed_message",
-            },
-          )
+            AgentCore::Resources::Tools::ToolResult.success(
+              text: content,
+              metadata: {
+                "conversation_id" => conversation.id,
+                "lane_id" => lane.id,
+                "message_node_id" => message_node.id,
+                "generated_by" => "cybros_seed_message",
+              },
+            )
+          ensure
+            exclude_bootstrap_task_from_context!(task_node)
+          end
         end
       end
       private_class_method :build_seed_message_tool
@@ -108,37 +111,40 @@ module Cybros
           task_node = current_task_node!(context)
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])
           lane = lane_for!(task_node: task_node, lane_id: args["lane_id"])
+          begin
+            public_settings_patch = normalize_hash(args["public_settings_patch"])
+            agent_config_patch = normalize_hash(args["agent_config_patch"])
+            kv_ops = normalize_kv_ops(args["kv_ops"])
+            prompt_buffer_ops = normalize_prompt_buffer_ops(args["prompt_buffer_ops"])
 
-          public_settings_patch = normalize_hash(args["public_settings_patch"])
-          agent_config_patch = normalize_hash(args["agent_config_patch"])
-          kv_ops = normalize_kv_ops(args["kv_ops"])
-          prompt_buffer_ops = normalize_prompt_buffer_ops(args["prompt_buffer_ops"])
+            if public_settings_patch.blank? && agent_config_patch.blank? && kv_ops.empty? && prompt_buffer_ops.empty?
+              AgentCore::ValidationError.raise!(
+                "bootstrap state requires at least one mutation",
+                code: "cybros.bootstrap.bootstrap_state.mutations_required",
+              )
+            end
 
-          if public_settings_patch.blank? && agent_config_patch.blank? && kv_ops.empty? && prompt_buffer_ops.empty?
-            AgentCore::ValidationError.raise!(
-              "bootstrap state requires at least one mutation",
-              code: "cybros.bootstrap.bootstrap_state.mutations_required",
+            ApplicationRecord.transaction do
+              apply_public_settings_patch!(conversation: conversation, patch: public_settings_patch)
+              apply_agent_config_patch!(conversation: conversation, patch: agent_config_patch)
+              apply_kv_ops!(lane: lane, task_node: task_node, operations: kv_ops)
+              apply_prompt_buffer_ops!(lane: lane, operations: prompt_buffer_ops)
+            end
+
+            AgentCore::Resources::Tools::ToolResult.success(
+              text: "Bootstrap state applied.",
+              metadata: {
+                "conversation_id" => conversation.id,
+                "lane_id" => lane.id,
+                "public_settings_patch" => public_settings_patch,
+                "agent_config_patch" => agent_config_patch,
+                "kv_ops_count" => kv_ops.length,
+                "prompt_buffer_ops_count" => prompt_buffer_ops.length,
+              },
             )
+          ensure
+            exclude_bootstrap_task_from_context!(task_node)
           end
-
-          ApplicationRecord.transaction do
-            apply_public_settings_patch!(conversation: conversation, patch: public_settings_patch)
-            apply_agent_config_patch!(conversation: conversation, patch: agent_config_patch)
-            apply_kv_ops!(lane: lane, task_node: task_node, operations: kv_ops)
-            apply_prompt_buffer_ops!(lane: lane, operations: prompt_buffer_ops)
-          end
-
-          AgentCore::Resources::Tools::ToolResult.success(
-            text: "Bootstrap state applied.",
-            metadata: {
-              "conversation_id" => conversation.id,
-              "lane_id" => lane.id,
-              "public_settings_patch" => public_settings_patch,
-              "agent_config_patch" => agent_config_patch,
-              "kv_ops_count" => kv_ops.length,
-              "prompt_buffer_ops_count" => prompt_buffer_ops.length,
-            },
-          )
         end
       end
       private_class_method :build_bootstrap_state_tool
@@ -163,23 +169,26 @@ module Cybros
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])
           lane = lane_for!(task_node: task_node, lane_id: args["lane_id"])
           user_node = resolve_user_node!(conversation: conversation, lane: lane, user_node_id: args["user_node_id"])
+          begin
+            current_title = conversation.title.to_s
+            if generic_title?(current_title)
+              candidate = title_candidate_for(user_node.body_input["content"])
+              conversation.update!(title: candidate) if candidate.present?
+            end
 
-          current_title = conversation.title.to_s
-          if generic_title?(current_title)
-            candidate = title_candidate_for(user_node.body_input["content"])
-            conversation.update!(title: candidate) if candidate.present?
+            AgentCore::Resources::Tools::ToolResult.success(
+              text: conversation.reload.title.to_s,
+              metadata: {
+                "conversation_id" => conversation.id,
+                "lane_id" => lane.id,
+                "user_node_id" => user_node.id,
+                "title" => conversation.title,
+                "noop" => !generic_title?(current_title),
+              },
+            )
+          ensure
+            exclude_bootstrap_task_from_context!(task_node)
           end
-
-          AgentCore::Resources::Tools::ToolResult.success(
-            text: conversation.reload.title.to_s,
-            metadata: {
-              "conversation_id" => conversation.id,
-              "lane_id" => lane.id,
-              "user_node_id" => user_node.id,
-              "title" => conversation.title,
-              "noop" => !generic_title?(current_title),
-            },
-          )
         end
       end
       private_class_method :build_generate_title_tool
@@ -201,15 +210,18 @@ module Cybros
           task_node = current_task_node!(context)
           conversation = conversation_for!(task_node: task_node, conversation_id: args["conversation_id"])
           lane = lane_for!(task_node: task_node, lane_id: args["lane_id"])
-
-          AgentCore::Resources::Tools::ToolResult.success(
-            text: "Lane summary bootstrap recorded.",
-            metadata: {
-              "conversation_id" => conversation.id,
-              "lane_id" => lane.id,
-              "generated_by" => "cybros_enqueue_lane_summary",
-            },
-          )
+          begin
+            AgentCore::Resources::Tools::ToolResult.success(
+              text: "Lane summary bootstrap recorded.",
+              metadata: {
+                "conversation_id" => conversation.id,
+                "lane_id" => lane.id,
+                "generated_by" => "cybros_enqueue_lane_summary",
+              },
+            )
+          ensure
+            exclude_bootstrap_task_from_context!(task_node)
+          end
         end
       end
       private_class_method :build_enqueue_lane_summary_tool
@@ -225,6 +237,17 @@ module Cybros
         )
       end
       private_class_method :current_task_node!
+
+      def exclude_bootstrap_task_from_context!(task_node)
+        return unless task_node.present?
+
+        if task_node.can_exclude_from_context?
+          task_node.exclude_from_context!
+        else
+          task_node.request_exclude_from_context!
+        end
+      end
+      private_class_method :exclude_bootstrap_task_from_context!
 
       def conversation_for!(task_node:, conversation_id:)
         conversation = task_node.lane&.attachable

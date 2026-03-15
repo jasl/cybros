@@ -12,6 +12,7 @@ supported_methods:
   - capabilities.handshake
   - capabilities.refresh
   - attachments.import
+  - tool.execute
   - on_conversation_created
   - on_lane_first_user_message
   - before_agent_step

@@ -1,9 +1,11 @@
+require "digest"
 require "json"
 require "net/http"
 require "pathname"
 require "securerandom"
 require "uri"
 require "yaml"
+require_relative "tools/web_provider"
 
 module Cybros
   module Agents
@@ -15,12 +17,16 @@ module Cybros
           source_root: Rails.root,
           deployment_key: ENV.fetch("CLAW_DEPLOYMENT_KEY", "claw"),
           deployment_fingerprint: ENV.fetch("CLAW_DEPLOYMENT_FINGERPRINT", "deployment:bundled-claw"),
-          required_bearer: ENV.fetch("CLAW_REQUIRED_BEARER", "secret://agent")
+          required_bearer: ENV.fetch("CLAW_REQUIRED_BEARER", "secret://agent"),
+          web_search_backend: ENV.fetch("CLAW_WEB_SEARCH_BACKEND", "duckduckgo_html"),
+          web_search_endpoint: ENV["CLAW_WEB_SEARCH_ENDPOINT"]
         )
           @source_root = Pathname.new(source_root.to_s)
           @deployment_key = deployment_key.to_s
           @deployment_fingerprint = deployment_fingerprint.to_s
           @required_bearer = required_bearer
+          @web_search_backend = web_search_backend.to_s
+          @web_search_endpoint = web_search_endpoint
         end
 
         def manifest
@@ -40,11 +46,26 @@ module Cybros
         end
 
         def agent_capabilities_version
-          "claw-agent-capabilities:v1"
+          @agent_capabilities_version ||= begin
+            payload = {
+              "supported_methods" => supported_methods,
+              "agent_tool_catalog" => agent_tool_catalog
+            }
+            digest = Digest::SHA256.hexdigest(JSON.generate(payload)).first(16)
+            "claw-agent-capabilities:#{digest}"
+          end
+        end
+
+        def web_provider
+          @web_provider ||= Tools::WebProvider.new(backend: @web_search_backend, search_endpoint: @web_search_endpoint)
+        end
+
+        def web_tools_enabled?
+          web_provider.enabled?
         end
 
         def agent_tool_catalog
-          []
+          @agent_tool_catalog ||= build_agent_tool_catalog.freeze
         end
 
         def call(method_name:, params:)
@@ -90,6 +111,19 @@ module Cybros
         end
 
         private
+
+        def build_agent_tool_catalog
+          tool_names = %w[read write edit apply_patch glob search exec memory_search memory_get memory_store]
+          tool_names.concat(%w[web_search web_fetch]) if web_tools_enabled?
+
+          tool_names.map do |tool_name|
+            {
+              "logical_tool_name" => tool_name,
+              "implementation_ref" => "claw:#{tool_name}",
+              "execution_mode" => "serial"
+            }
+          end
+        end
 
         def safe_join(relative)
           candidate = source_root.join(relative.to_s).expand_path

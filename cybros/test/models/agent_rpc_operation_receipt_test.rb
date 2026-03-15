@@ -27,6 +27,50 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
     assert_includes duplicate.errors[:operation_id], "has already been taken"
   end
 
+  test "record_or_replay reuses the first conversation memory append snapshot" do
+    invocation = create_invocation!
+    session = create_session!(invocation: invocation)
+
+    first =
+      AgentRPC::OperationReceiptStore.record_or_replay!(
+        invocation: invocation,
+        session: session,
+        operation_id: "operation-memory-append",
+        method_name: "conversation.memory.append",
+        payload: { "text" => "\nRemember beta" },
+        status: "applied",
+        response_snapshot: {
+          "document" => {
+            "kind" => "conversation_memory",
+            "body" => "Remember alpha\nRemember beta",
+          },
+        },
+      )
+    replay =
+      AgentRPC::OperationReceiptStore.record_or_replay!(
+        invocation: invocation,
+        session: session,
+        operation_id: "operation-memory-append",
+        method_name: "conversation.memory.append",
+        payload: { "text" => "\nRemember beta" },
+        status: "applied",
+        response_snapshot: {
+          "document" => {
+            "kind" => "conversation_memory",
+            "body" => "should not replace the stored snapshot",
+          },
+        },
+      )
+
+    assert_equal false, first.fetch(:replayed)
+    assert_equal true, replay.fetch(:replayed)
+    assert_equal first.fetch(:receipt).id, replay.fetch(:receipt).id
+    assert_equal(
+      "Remember alpha\nRemember beta",
+      replay.fetch(:receipt).response_snapshot.dig("document", "body"),
+    )
+  end
+
   private
 
     def create_invocation!
@@ -79,6 +123,24 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
         deployment_activated_at: Time.current,
         request_payload_hash: "sha256:payload-1",
         status: "succeeded",
+      )
+    end
+
+    def create_session!(invocation:)
+      AgentRPCSession.create!(
+        agent: invocation.agent,
+        recognized_deployment: invocation.recognized_deployment,
+        recognized_deployment_key: invocation.recognized_deployment_key,
+        agent_rpc_invocation: invocation,
+        conversation: invocation.conversation,
+        scope_type: invocation.scope_type,
+        scope_id: invocation.scope_id,
+        deployment_fingerprint: invocation.binding_fingerprint,
+        deployment_activated_at: invocation.deployment_activated_at,
+        session_token_digest: Digest::SHA256.hexdigest("arpc_#{SecureRandom.hex(24)}"),
+        allowed_methods: %w[conversation.memory.append],
+        expires_at: 5.minutes.from_now.change(usec: 0),
+        status: "open",
       )
     end
 end

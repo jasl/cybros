@@ -368,6 +368,119 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "programmable on_context_pressure can prepend memory_store before compact_context without creating a hidden loop" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + %w[on_context_pressure],
+        },
+        rpc_overrides: {
+          "on_context_pressure" => lambda do |_params, _base_result, _identity|
+            {
+              "actions" => [
+                {
+                  "type" => "set_step_status",
+                  "text" => "Flushing memory before compaction",
+                  "state" => "running",
+                },
+                {
+                  "type" => "create_task",
+                  "logical_tool_name" => "memory_store",
+                  "placement" => "prepend",
+                  "input" => {
+                    "content" => "[auto-memory-flush] durable state",
+                    "mode" => "append",
+                  },
+                },
+                {
+                  "type" => "create_task",
+                  "logical_tool_name" => "compact_context",
+                  "placement" => "prepend",
+                  "input" => {
+                    "reason" => "soft_limit_reached",
+                  },
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+    provider_delegate = SuccessfulProvider.new
+    result, run =
+      execute_programmable_agent!(
+        server: server,
+        provider_delegate: provider_delegate,
+        deployment_supported_methods: Agents::Protocol::REQUIRED_METHODS + %w[on_context_pressure],
+        runtime_overrides: {
+          context_window_tokens: 10_000,
+          context_soft_limit_tokens: 1,
+          context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
+        },
+        run_snapshot_builder: lambda do |program:, **|
+          snapshot =
+            Cybros::ProgrammableAgent::CapabilitySnapshot.build(
+              kernel_registry_version: "kernel:v1",
+              agent_key: program.config_namespace,
+              agent_capabilities_version: "agent:v1",
+              kernel_tools: [
+                {
+                  logical_tool_name: "compact_context",
+                  implementation_ref: "kernel://compact_context",
+                },
+              ],
+              agent_tools: [
+                {
+                  logical_tool_name: "memory_store",
+                  implementation_ref: "agent://memory_store",
+                },
+              ],
+            )
+          tool_surface =
+            Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+              capability_registry_snapshot: snapshot,
+              selected_tool_ids: snapshot.effective_tools.map(&:effective_tool_id),
+              tool_surface_label: "fixture-memory-flush-on-context-pressure",
+            )
+
+          {
+            "capability_snapshot" => capability_snapshot_payload(snapshot),
+            "draft" => {
+              "planning" => {
+                "tool_surface" => tool_surface_payload(tool_surface, snapshot: snapshot),
+              },
+            },
+          }
+        end,
+      )
+    graph = run.conversation.root_graph
+    agent_node = graph.nodes.find(run.dag_node_id)
+    prepended_tasks =
+      graph.nodes
+        .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
+        .order(:id)
+        .to_a
+    deferred_agent =
+      graph.nodes
+        .where(node_type: Messages::AgentMessage.node_type_key, turn_id: agent_node.turn_id)
+        .where.not(id: agent_node.id)
+        .order(:id)
+        .sole
+
+    assert_equal DAG::Node::STOPPED, result.state
+    assert_equal "Flushing memory before compaction", agent_node.reload.body_output_preview.fetch("content")
+    assert_equal 0, provider_delegate.calls
+    assert_equal 2, prepended_tasks.size
+    assert_equal %w[memory_store compact_context], prepended_tasks.map { |task| task.body_input.fetch("requested_name") }
+    assert_equal DAG::Node::PENDING, deferred_agent.state
+    assert_empty graph.nodes.where(node_type: Messages::SystemMessage.node_type_key, turn_id: agent_node.turn_id)
+    assert graph.edges.exists?(from_node_id: agent_node.id, to_node_id: prepended_tasks.first.id, edge_type: DAG::Edge::SEQUENCE)
+    assert graph.edges.exists?(from_node_id: prepended_tasks.first.id, to_node_id: prepended_tasks.second.id, edge_type: DAG::Edge::SEQUENCE)
+    assert graph.edges.exists?(from_node_id: prepended_tasks.second.id, to_node_id: deferred_agent.id, edge_type: DAG::Edge::SEQUENCE)
+  ensure
+    server&.shutdown
+  end
+
   test "programmable after_task_notice hook contract failures fail fast" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(

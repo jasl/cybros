@@ -158,6 +158,39 @@ class Cybros::ProgrammableAgent::HookEnvelopeTest < ActiveSupport::TestCase
     assert_equal "cybros.programmable_agent.hook_action.emit_message_followup_forbidden", error.code
   end
 
+  test "before_finalize_output accepts finish_silently as an explicit silent success action" do
+    envelope =
+      Cybros::ProgrammableAgent::HookEnvelope.parse!(
+        hook_name: "before_finalize_output",
+        request_payload: {},
+        payload: {
+          "actions" => [
+            { "type" => "finish_silently", "reason" => "silent_housekeeping" },
+          ],
+        },
+      )
+
+    assert_equal "finish_silently", envelope.actions.sole.type
+  end
+
+  test "finish_silently forbids later visible output actions in the same envelope" do
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        Cybros::ProgrammableAgent::HookEnvelope.parse!(
+          hook_name: "before_finalize_output",
+          request_payload: {},
+          payload: {
+            "actions" => [
+              { "type" => "finish_silently", "reason" => "silent_housekeeping" },
+              { "type" => "emit_message", "message" => { "content" => "too late" } },
+            ],
+          },
+        )
+      end
+
+    assert_equal "cybros.programmable_agent.hook_action.emit_message_followup_forbidden", error.code
+  end
+
   test "create_task forbids explicit routing metadata authored by the agent" do
     error =
       assert_raises(AgentCore::ValidationError) do

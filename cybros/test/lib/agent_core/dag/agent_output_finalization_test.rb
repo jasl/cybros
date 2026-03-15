@@ -126,6 +126,51 @@ class AgentCore::DAG::AgentOutputFinalizationTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "programmable before_finalize_output can finish silently without leaking the draft output" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        identity_overrides: {
+          "supported_methods" => PROGRAMMABLE_SUPPORTED_METHODS,
+        },
+        rpc_overrides: {
+          "before_finalize_output" => lambda do |_params, _base_result, _identity|
+            {
+              "actions" => [
+                {
+                  "type" => "set_step_status",
+                  "text" => "Running silent housekeeping",
+                  "state" => "running",
+                },
+                {
+                  "type" => "finish_silently",
+                  "reason" => "silent_housekeeping",
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+
+    result, run =
+      execute_programmable_agent!(
+        server: server,
+        provider_message: AgentCore::Message.new(role: :assistant, content: "NO_REPLY"),
+      )
+    invocation = AgentRPCInvocation.find_by!(scope_type: "conversation_run", scope_id: run.id, method: "before_finalize_output")
+    agent_node = run.conversation.root_graph.nodes.find(run.dag_node_id)
+    output_preview = DAG::NodeBody.where(id: agent_node.body_id).pick(:output_preview)
+
+    assert_equal DAG::Node::FINISHED, result.state
+    assert_equal "", result.content
+    assert_equal "", result.payload.fetch("content")
+    assert_equal true, result.payload.fetch("silent_finalization")
+    refute output_preview.fetch("content", "").present?
+    assert_equal "succeeded", invocation.status
+  ensure
+    server&.shutdown
+  end
+
   test "programmable before_finalize_output halt stops the current agent step" do
     server =
       Cybros::ProgrammableAgentFixture::Server.new(

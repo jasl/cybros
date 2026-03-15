@@ -45,6 +45,90 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     llm_server&.shutdown
   end
 
+  test "bundled claw injects full bootstrap sections and conversation memory into the actual model request" do
+    llm_payloads = []
+    llm_server =
+      MockLLMServer.new do |payload|
+        llm_payloads << payload.deep_dup
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      conversation = create_conversation!(title: "Prompt Builder Full")
+      AgentRPC::KernelServices::ConversationMemory.put!(conversation: conversation, body: "Remember alpha")
+
+      run_bundled_claw_turn!(
+        conversation: conversation,
+        user_content: "Inspect runtime context",
+        model_ref: "dev/mock-model",
+        llm_payloads: llm_payloads,
+      )
+
+      system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+
+      assert_includes system_prompt, "## Tooling"
+      assert_includes system_prompt, "## Safety"
+      assert_includes system_prompt, "## Workspace"
+      assert_includes system_prompt, "## Documentation"
+      assert_includes system_prompt, "## Current Date & Time"
+      assert_includes system_prompt, "## Runtime"
+      assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
+      assert_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
+      assert_includes system_prompt, "<bootstrap_source name=\"USER\">"
+      assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
+      assert_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
+      assert_includes system_prompt, "Remember alpha"
+      assert_includes system_prompt, "Execution scope: primary"
+    end
+  ensure
+    llm_server&.shutdown
+  end
+
+  test "bundled claw uses minimal bootstrap sections for delegated subagent model requests" do
+    llm_payloads = []
+    llm_server =
+      MockLLMServer.new do |payload|
+        llm_payloads << payload.deep_dup
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      conversation =
+        create_conversation!(
+          title: "Prompt Builder Subagent",
+          metadata: {
+            "agent" => { "agent_profile" => "subagent" },
+            "subagent" => {
+              "subagent_id" => SecureRandom.uuid,
+              "parent_turn_id" => SecureRandom.uuid,
+              "parent_dag_node_id" => SecureRandom.uuid,
+            },
+          },
+        )
+      AgentRPC::KernelServices::ConversationMemory.put!(conversation: conversation, body: "Do not inject full memory here")
+
+      run_bundled_claw_turn!(
+        conversation: conversation,
+        user_content: "Handle delegated work",
+        model_ref: "dev/mock-model",
+        llm_payloads: llm_payloads,
+      )
+
+      system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+
+      assert_includes system_prompt, "Execution scope: subagent"
+      assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
+      assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
+      refute_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
+      refute_includes system_prompt, "<bootstrap_source name=\"USER\">"
+      refute_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
+      refute_includes system_prompt, "Do not inject full memory here"
+      refute_includes system_prompt, "## Documentation"
+    end
+  ensure
+    llm_server&.shutdown
+  end
+
   test "bundled claw drops working_notes from the model request before history when prompt budget is tight" do
     llm_payloads = []
     llm_server =
@@ -60,7 +144,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       )
 
     with_runtime_token_counter(counter) do
-      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 8_000)) do
+      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 9_000)) do
         conversation = create_conversation!(title: "Prompt Budget")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "summaries", kind: "summary", content: "Keep this compact summary.")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "handoff", kind: "handoff", content: "Keep this handoff note.")

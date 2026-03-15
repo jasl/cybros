@@ -1,6 +1,12 @@
 module Cybros
   module ProgrammableAgent
     class ToolExecution
+      TOOL_EXECUTE_CALLBACK_METHODS = %w[
+        conversation.memory.get
+        conversation.memory.put
+        conversation.memory.append
+      ].freeze
+
       def self.call!(
         conversation_run:,
         tool_call_id:,
@@ -64,7 +70,7 @@ module Cybros
           method_name: "tool.execute",
           invocation_id: invocation_id,
           request_payload: request_payload,
-          allowed_callback_methods: [],
+          allowed_callback_methods: TOOL_EXECUTE_CALLBACK_METHODS,
         )
       end
 
@@ -79,16 +85,44 @@ module Cybros
         end
 
         def request_payload
-        {
-          "tool_call_id" => tool_call_id,
-          "logical_tool_name" => logical_tool_name,
-          "effective_tool_id" => effective_tool_id,
-          "implementation_source" => "agent",
-          "implementation_ref" => implementation_ref,
-          "capability_registry_snapshot_id" => capability_registry_snapshot_id,
-          "tool_surface_id" => tool_surface_id,
+          payload = {
+            "tool_call_id" => tool_call_id,
+            "logical_tool_name" => logical_tool_name,
+            "effective_tool_id" => effective_tool_id,
+            "implementation_source" => "agent",
+            "implementation_ref" => implementation_ref,
+            "capability_registry_snapshot_id" => capability_registry_snapshot_id,
+            "tool_surface_id" => tool_surface_id,
             "arguments" => arguments,
           }
+
+          if (context_payload = conversation_context_payload).present?
+            payload.merge!(context_payload)
+          end
+
+          payload
+        end
+
+        def conversation_context_payload
+          conversation = conversation_run.conversation
+          return {} unless conversation.present?
+
+          {
+            "session_context" => SessionContext.from_conversation(conversation).to_h,
+            "execution_context" => execution_context_for(conversation).to_h,
+          }
+        rescue StandardError
+          {}
+        end
+
+        def execution_context_for(conversation)
+          node = conversation.root_graph.nodes.find_by(id: conversation_run.dag_node_id)
+          return ExecutionContext.from_conversation_node(conversation: conversation, node: node) if node.present?
+
+          ExecutionContext.from_conversation_step(
+            conversation: conversation,
+            dag_node_id: conversation_run.dag_node_id,
+          )
         end
     end
   end

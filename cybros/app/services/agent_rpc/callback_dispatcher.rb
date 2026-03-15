@@ -13,6 +13,8 @@ module AgentRPC
     MUTATING_METHODS = %w[
       conversation.settings.update
       conversation.config.update
+      conversation.memory.put
+      conversation.memory.append
       lane.kv.set
       lane.kv.delete
       lane.prompt_buffer.put
@@ -55,6 +57,22 @@ module AgentRPC
           apply_public_state_mutation! do
             AgentRPC::KernelServices::ConversationConfig.update!(draft: draft, patch: payload.fetch("patch", {}))
           end
+        end
+      when "conversation.memory.get"
+        AgentRPC::KernelServices::ConversationMemory.get(conversation: bound_conversation)
+      when "conversation.memory.put"
+        apply_mutation! do
+          AgentRPC::KernelServices::ConversationMemory.put!(
+            conversation: bound_conversation,
+            body: payload.fetch("body", payload["content"]),
+          )
+        end
+      when "conversation.memory.append"
+        apply_mutation! do
+          AgentRPC::KernelServices::ConversationMemory.append!(
+            conversation: bound_conversation,
+            text: payload.fetch("text", payload["content"]),
+          )
         end
       when "lane.kv.get"
         AgentRPC::KernelServices::LaneKV.get(draft: draft, key: payload.fetch("key"))
@@ -230,6 +248,25 @@ module AgentRPC
             end
 
             RunDraft.find(session.scope_id)
+          end
+      end
+
+      def bound_conversation
+        @bound_conversation ||=
+          begin
+            if session.conversation.present?
+              session.conversation
+            elsif session.scope_type == "run_draft"
+              draft.bound_conversation
+            elsif session.scope_type == "conversation_run"
+              ConversationRun.find(session.scope_id).conversation
+            else
+              AgentCore::ValidationError.raise!(
+                "Callback scope type is not supported.",
+                code: "cybros.agent_rpc.callback_scope_unsupported",
+                details: { scope_type: session.scope_type, scope_id: session.scope_id },
+              )
+            end
           end
       end
 

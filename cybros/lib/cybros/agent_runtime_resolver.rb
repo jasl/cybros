@@ -5,6 +5,7 @@ module Cybros
     require_relative "llm/codex_oauth"
     require_relative "bootstrap/tools"
     require_relative "attachments/tools"
+    require_relative "agent_owned_tools"
     require_relative "context_budget/default_policy"
     require_relative "context_budget/tools"
     require_relative "programmable_agent"
@@ -816,6 +817,7 @@ module Cybros
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::Bootstrap::Tools.build)
       registry.register_many(Cybros::Attachments::Tools.build)
+      registry.register_many(Cybros::AgentOwnedTools.build)
       registry.register_many(Cybros::ContextBudget::Tools.build)
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)

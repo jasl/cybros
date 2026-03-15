@@ -1,6 +1,8 @@
 require_relative "claw/manifest"
 require_relative "claw/identity"
 require_relative "claw/rpc_dispatcher"
+require_relative "claw/tools/workspace_tools"
+require_relative "claw/tool_executor"
 require_relative "claw/application"
 require_relative "claw/hooks/on_conversation_created"
 require_relative "claw/hooks/on_lane_first_user_message"

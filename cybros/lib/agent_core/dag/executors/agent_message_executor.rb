@@ -330,6 +330,18 @@ module AgentCore
                   terminal_action: result.terminal_action,
                 )
               end
+              if result.silent_finish
+                return FinalizeOutputOutcome.new(
+                  output_payload:
+                    silent_output_payload(
+                      fallback: output_payload,
+                      runtime: runtime,
+                      stop_reason: stop_reason,
+                      model: model,
+                    ),
+                  terminal_action: nil,
+                )
+              end
               emitted_message = result.emitted_message
               if emitted_message.is_a?(Hash)
                 return FinalizeOutputOutcome.new(
@@ -599,6 +611,19 @@ module AgentCore
               reason: terminal_action.reason.to_s.presence || "programmable_agent_halt",
               metadata: metadata,
             )
+          end
+
+          def silent_output_payload(fallback:, runtime:, stop_reason:, model:)
+            payload =
+              build_agent_output_payload(
+                Message.new(role: :assistant, content: ""),
+                runtime: runtime,
+                stop_reason: stop_reason,
+                model: model,
+                directives: fallback["directives"],
+              )
+            payload["silent_finalization"] = true
+            payload
           end
 
           def normalize_assistant_message(value, fallback:)

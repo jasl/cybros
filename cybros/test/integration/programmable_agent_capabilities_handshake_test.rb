@@ -54,10 +54,16 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     inspect_agent_runtime!(agent: deployment)
 
     deployment.reload
+    expected_application =
+      Cybros::Agents::Claw::Application.new(
+        source_root: Rails.root.join("agents/claw"),
+        deployment_fingerprint: "bundled-claw-test",
+        required_bearer: "secret://bundled",
+      )
     assert_includes deployment.supported_methods, "capabilities.handshake"
     assert_includes deployment.supported_methods, "capabilities.refresh"
     assert_equal "refreshed", deployment.capability_snapshot.fetch("status")
-    assert_equal "claw-agent-capabilities:v1", deployment.capability_snapshot.fetch("agent_capabilities_version")
+    assert_equal expected_application.agent_capabilities_version, deployment.capability_snapshot.fetch("agent_capabilities_version")
     assert_match(/\Acsnap_/, deployment.capability_snapshot.fetch("capability_registry_snapshot_id"))
   ensure
     host&.shutdown

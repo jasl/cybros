@@ -1,6 +1,31 @@
 require "test_helper"
 
 class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCase
+  test "direct bootstrap append tasks cap generated tool_call_ids to provider-safe length" do
+    conversation = create_conversation!(title: "Hook action bootstrap append")
+
+    result =
+      Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+        hook_name: "on_conversation_created",
+        actions: [
+          Cybros::ProgrammableAgent::HookActions::CreateTask.new(
+            type: "create_task",
+            logical_tool_name: "cybros_seed_message",
+            input: {},
+            placement: "append",
+            metadata: nil,
+          ),
+        ],
+        placeholder_node: nil,
+        lane: conversation.chat_lane,
+      )
+
+    task_node = result.created_tasks.sole
+
+    assert_equal "cybros_seed_message", task_node.body_input.fetch("requested_name")
+    assert_operator task_node.body_input.fetch("tool_call_id").length, :<=, 64
+  end
+
   test "create_task append does not materialize a routed follow-up task chain immediately from the pinned conversation run snapshot" do
     conversation = create_conversation!(title: "Hook action append")
     turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
@@ -667,6 +692,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
     assert_nil result.terminal_action
     assert_equal "Compacting context", agent_node.reload.body_output_preview.fetch("content")
     assert_equal "compact_context", prepended_task.body_input.fetch("requested_name")
+    assert_operator prepended_task.body_input.fetch("tool_call_id").length, :<=, 64
     assert_equal task_node.id, prepended_task.metadata.fetch("source_node_id")
     assert_equal({ "source" => "before_subagent_spawn" }, prepended_task.metadata.fetch("authored_metadata"))
     assert_equal DAG::Node::PENDING, deferred_task.state
@@ -674,6 +700,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
     assert_equal task_node.body_input.fetch("requested_name"), deferred_task.body_input.fetch("requested_name")
     assert_equal task_node.body_input.fetch("arguments"), deferred_task.body_input.fetch("arguments")
     refute_equal task_node.body_input.fetch("tool_call_id"), deferred_task.body_input.fetch("tool_call_id")
+    assert_operator deferred_task.body_input.fetch("tool_call_id").length, :<=, 64
     assert_equal "task-metadata", deferred_task.metadata.fetch("existing")
     assert_equal task_node.id, deferred_task.metadata.fetch("deferred_from_node_id")
     assert_equal task_node.body_input.fetch("tool_call_id"), deferred_task.metadata.fetch("deferred_from_tool_call_id")

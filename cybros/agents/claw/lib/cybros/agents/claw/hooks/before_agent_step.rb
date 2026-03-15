@@ -3,6 +3,11 @@ module Cybros
     module Claw
       module Hooks
         class BeforeAgentStep
+          BOOTSTRAP_SOURCE_CHAR_CAP = 320
+          BOOTSTRAP_TOTAL_CHAR_CAP = 900
+          FULL_PROMPT_MODE = "full"
+          MINIMAL_PROMPT_MODE = "minimal"
+
           def initialize(application:)
             @application = application
           end
@@ -46,8 +51,7 @@ module Cybros
           private
 
           def build_system_entry(params:)
-            conversation_context = conversation_context_text(params)
-            content = [ @application.full_system_prompt, present_string(conversation_context) ].compact.join("\n\n")
+            content = build_system_prompt_content(params: params)
 
             {
               "id" => SecureRandom.uuid,
@@ -56,24 +60,75 @@ module Cybros
               "kind" => "instruction",
               "content" => content,
               "priority" => 100,
-              "estimated_tokens" => 0,
+              "estimated_tokens" => estimate_tokens(content),
               "metadata" => { "source" => "before_agent_step" }
             }
           end
 
-          def conversation_context_text(params)
+          def build_system_prompt_content(params:)
+            mode = prompt_mode(params)
+            truncated_sources = []
+            bootstrap_sources = build_bootstrap_sources(params: params, mode: mode, truncated_sources: truncated_sources)
+
+            sections = []
+            sections << build_section("Tooling", tooling_lines(params))
+            sections << build_section("Safety", safety_lines)
+            sections << build_section("Workspace", workspace_lines(params))
+            sections << build_section("Documentation", documentation_lines) if mode == FULL_PROMPT_MODE
+            sections << build_section("Current Date & Time", current_date_time_lines)
+            sections << build_section("Runtime", runtime_lines(params: params, mode: mode))
+            if truncated_sources.any?
+              sections << build_section(
+                "Bootstrap Warning",
+                [
+                  "Some bootstrap sources were truncated to fit the prompt budget.",
+                  "Truncated sources: #{truncated_sources.uniq.join(', ')}"
+                ],
+              )
+            end
+            sections << build_section("Bootstrap Context", bootstrap_sources) if bootstrap_sources.present?
+
+            sections.compact.join("\n\n")
+          end
+
+          def prompt_mode(params)
+            execution_scope = params.dig("execution_context", "execution_scope").to_s.strip
+            return MINIMAL_PROMPT_MODE if execution_scope == "subagent"
+            return MINIMAL_PROMPT_MODE if params.dig("execution_context", "subagent").is_a?(Hash)
+
+            agent_profile = resolved_agent_profile(params)
+            return MINIMAL_PROMPT_MODE if %w[subagent minimal].include?(agent_profile)
+
+            FULL_PROMPT_MODE
+          end
+
+          def tooling_lines(params)
+            tool_names = effective_tool_names(params)
+            visible_tools = tool_names.first(12).join(", ")
+            visible_tools += ", ..." if tool_names.length > 12
+            [
+              "Use only tools surfaced by the Cybros capability snapshot and tool.execute.",
+              "Visible tools: #{visible_tools}"
+            ]
+          end
+
+          def safety_lines
+            @application.prompt_text("system").to_s.strip.lines.map(&:chomp)
+          end
+
+          def workspace_lines(params)
             workspace = params.dig("session_context", "workspace")
             attachments = Array(params["attachment_manifest"]).select { |entry| entry.is_a?(Hash) }
-            user_input = params.fetch("user_input", "").to_s.strip
 
             lines = []
-            lines << "Latest request: #{user_input}" unless user_input.empty?
-
             if workspace.is_a?(Hash)
               root_path = workspace["logical_workspace_root_path"].to_s.strip
               workspace_key = workspace["logical_workspace_key"].to_s.strip
+
               lines << "Conversation workspace: #{root_path}" unless root_path.empty?
               lines << "Workspace key: #{workspace_key}" unless workspace_key.empty?
+            else
+              lines << "Conversation workspace: unavailable"
             end
 
             attachments.each_with_index do |attachment, index|
@@ -82,9 +137,169 @@ module Cybros
               label = filename.empty? ? "(unnamed attachment)" : filename
               lines << "Attachment #{index + 1}: #{label} (#{content_type})"
             end
-            return nil if lines.empty?
 
-            "<conversation_runtime_context>\n#{lines.join("\n")}\n</conversation_runtime_context>"
+            lines
+          end
+
+          def documentation_lines
+            [
+              "Consult local Cybros docs before inventing behavior or hidden control paths. Priority references: cybros/AGENTS.md, docs/dag/public_api.md, docs/plans/."
+            ]
+          end
+
+          def current_date_time_lines
+            now = Time.current
+            [
+              "Current time: #{now.iso8601} (#{Time.zone&.name || now.zone || 'UTC'})"
+            ]
+          end
+
+          def runtime_lines(params:, mode:)
+            execution_context = params["execution_context"].is_a?(Hash) ? params["execution_context"] : {}
+            lines = []
+            lines << "Execution scope: #{execution_context["execution_scope"].presence || (mode == MINIMAL_PROMPT_MODE ? "subagent" : "primary")}"
+            lines << "Latest request: #{params.fetch("user_input", "").to_s.strip}" if params.fetch("user_input", "").present?
+            if execution_context["subagent"].is_a?(Hash)
+              subagent = execution_context["subagent"]
+              lines << "Subagent id: #{subagent["subagent_id"]}" if subagent["subagent_id"].present?
+            end
+            lines
+          end
+
+          def build_bootstrap_sources(params:, mode:, truncated_sources:)
+            sources = [
+              [ "AGENTS", @application.prompt_text("agent") ],
+              [ "TOOLS", synthesized_tools_source(params) ]
+            ]
+            if mode == FULL_PROMPT_MODE
+              sources.insert(1, [ "SOUL", @application.prompt_text("soul") ])
+              sources.insert(2, [ "USER", @application.prompt_text("user") ])
+              memory_body = conversation_memory_body(params)
+              sources << [ "MEMORY", memory_body ] if memory_body.present?
+            end
+
+            remaining_budget = BOOTSTRAP_TOTAL_CHAR_CAP
+            rendered_sources = []
+
+            sources.each do |name, content|
+              normalized = normalize_bootstrap_source(name: name, content: content)
+              next if normalized.empty?
+              break if remaining_budget <= 0
+
+              budgeted, truncated = truncate_bootstrap_source(name: name, content: normalized, remaining_budget: remaining_budget)
+              truncated_sources << name if truncated
+              rendered_sources << <<~SOURCE.chomp
+                <bootstrap_source name="#{name}">
+                #{budgeted}
+                </bootstrap_source>
+              SOURCE
+              remaining_budget -= budgeted.length
+            end
+
+            rendered_sources.join("\n\n")
+          end
+
+          def truncate_bootstrap_source(name:, content:, remaining_budget:)
+            marker = "\n...[truncated #{name}]"
+            effective_cap = [ BOOTSTRAP_SOURCE_CHAR_CAP, remaining_budget ].min
+            return [ content, false ] if content.length <= effective_cap
+
+            available = effective_cap - marker.length
+            return [ marker.strip, true ] if available <= 0
+
+            [ content.slice(0, available) + marker, true ]
+          end
+
+          def normalize_bootstrap_source(name:, content:)
+            normalized = content.to_s.strip
+            return normalized if normalized.empty?
+
+            case name
+            when "AGENTS", "SOUL", "USER"
+              excerpt_bootstrap_text(normalized, max_chars: 120)
+            when "MEMORY"
+              excerpt_bootstrap_text(normalized, max_chars: 220)
+            else
+              normalized
+            end
+          end
+
+          def excerpt_bootstrap_text(content, max_chars:)
+            lines = content.lines.map(&:strip).reject(&:empty?)
+            summary = lines.first(2).join(" ")
+            return summary if summary.length <= max_chars
+
+            summary.slice(0, max_chars)
+          end
+
+          def synthesized_tools_source(params)
+            tool_names = effective_tool_names(params)
+            return "No agent-owned tools were surfaced for this step." if tool_names == [ "(none supplied)" ]
+
+            "Logical tools: #{tool_names.join(', ')}"
+          end
+
+          def conversation_memory_body(params)
+            memory_service = "AgentRPC::KernelServices::ConversationMemory".safe_constantize
+            conversation = resolved_conversation(params)
+            return nil if memory_service.nil? || conversation.nil?
+
+            body = memory_service.get(conversation: conversation).dig("document", "body").to_s.strip
+            body.presence
+          rescue StandardError
+            nil
+          end
+
+          def resolved_agent_profile(params)
+            conversation = resolved_conversation(params)
+            return nil if conversation.nil?
+
+            metadata = conversation.respond_to?(:metadata) && conversation.metadata.is_a?(Hash) ? conversation.metadata.deep_stringify_keys : {}
+            metadata.dig("agent", "agent_profile").to_s.strip.presence
+          rescue StandardError
+            nil
+          end
+
+          def resolved_conversation(params)
+            conversation_class = "Conversation".safe_constantize
+            return nil if conversation_class.nil?
+
+            conversation_id =
+              params.dig("execution_context", "conversation_id").to_s.strip.presence ||
+                params.dig("session_context", "conversation_id").to_s.strip.presence ||
+                params["conversation_id"].to_s.strip.presence
+            return nil if conversation_id.blank?
+
+            conversation_class.find_by(id: conversation_id)
+          rescue StandardError
+            nil
+          end
+
+          def effective_tool_names(params)
+            tool_names =
+              Array(params.dig("capability_snapshot", "effective_tools")).filter_map do |entry|
+                next unless entry.is_a?(Hash)
+
+                entry["logical_tool_name"].to_s.strip.presence
+              end
+            return [ "(none supplied)" ] if tool_names.empty?
+
+            tool_names.uniq
+          end
+
+          def build_section(title, lines)
+            normalized_lines =
+              Array(lines).filter_map do |line|
+                text = line.to_s.rstrip
+                text.empty? ? nil : text
+              end
+            return nil if normalized_lines.empty?
+
+            ([ "## #{title}" ] + normalized_lines).join("\n")
+          end
+
+          def estimate_tokens(text)
+            [ (text.to_s.length / 4.0).ceil, 1 ].max
           end
 
           def build_summary(user_input)

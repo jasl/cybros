@@ -53,6 +53,7 @@ class BootstrapToolsTest < ActiveSupport::TestCase
     end
 
     assert_equal DAG::Node::FINISHED, task.reload.state
+    assert task.context_excluded?
     assert_equal "concise", conversation.reload.public_settings["tone"]
     assert_equal "review", conversation.selected_agent_config["mode"]
     assert_equal({ "ready" => true }, lane.lane_kv_entries.find_by!(key: "bootstrap.status").value)
@@ -101,11 +102,92 @@ class BootstrapToolsTest < ActiveSupport::TestCase
     end
 
     assert_equal DAG::Node::FINISHED, task.reload.state
+    assert task.context_excluded?
     assert_equal true, AgentCore::Resources::Tools::ToolResult.from_h(task.body_output.fetch("result")).error?
     assert_equal({}, conversation.reload.public_settings)
     assert_equal({}, conversation.selected_agent_config)
     assert_equal 0, lane.lane_kv_entries.count
     assert_equal 0, lane.lane_prompt_buffer_entries.where(buffer_name: "system").count
+  end
+
+  test "cybros_seed_message excludes its bootstrap task from context while creating the message node" do
+    conversation = nil
+
+    perform_enqueued_jobs do
+      conversation = create_conversation!(title: "Conversation")
+    end
+
+    lane = conversation.chat_lane
+
+    task =
+      enqueue_bootstrap_task!(
+        conversation: conversation,
+        tool_name: "cybros_seed_message",
+        arguments: {
+          "conversation_id" => conversation.id,
+          "lane_id" => lane.id,
+          "content" => "Bootstrapped hello",
+          "exclude_from_context" => true,
+        },
+      )
+
+    perform_enqueued_jobs do
+      conversation.root_graph.kick!
+    end
+
+    message_node =
+      conversation.root_graph.nodes
+        .where(node_type: Messages::AgentMessage.node_type_key)
+        .order(:created_at)
+        .last
+
+    assert_equal DAG::Node::FINISHED, task.reload.state
+    assert task.context_excluded?
+    assert message_node.context_excluded?
+    assert_equal "Bootstrapped hello", message_node.body_output.fetch("content")
+  end
+
+  test "cybros_generate_title excludes its bootstrap task from context after updating the title" do
+    conversation = nil
+
+    perform_enqueued_jobs do
+      conversation = create_conversation!(title: "Conversation")
+    end
+
+    lane = conversation.chat_lane
+    user_node = nil
+    anchor = nil
+
+    conversation.root_graph.mutate! do |m|
+      user_node =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          content: "Summarize the repo bootstrap behavior",
+          metadata: {},
+        )
+      anchor = user_node
+    end
+
+    task =
+      enqueue_bootstrap_task!(
+        conversation: conversation,
+        tool_name: "cybros_generate_title",
+        arguments: {
+          "conversation_id" => conversation.id,
+          "lane_id" => lane.id,
+          "user_node_id" => user_node.id,
+        },
+      )
+
+    perform_enqueued_jobs do
+      conversation.root_graph.kick!
+    end
+
+    assert_equal DAG::Node::FINISHED, task.reload.state
+    assert task.context_excluded?
+    refute_equal "Conversation", conversation.reload.title
   end
 
   private

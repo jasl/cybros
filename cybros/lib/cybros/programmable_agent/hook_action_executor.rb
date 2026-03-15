@@ -4,9 +4,10 @@ module Cybros
   module ProgrammableAgent
     class HookActionExecutor
       TerminalAction = Data.define(:type, :reason, :message)
-      Result = Data.define(:emitted_message, :terminal_action, :deferred_anchor, :created_tasks)
+      Result = Data.define(:emitted_message, :terminal_action, :deferred_anchor, :created_tasks, :silent_finish)
       BOOTSTRAP_HOOKS = %w[on_conversation_created on_lane_first_user_message].freeze
       QUEUE_BACKED_APPEND_HOOKS = (HookEnvelope::CREATE_TASK_PLACEMENT_POLICY.keys - ["on_conversation_created"]).freeze
+      MAX_GENERATED_TOOL_CALL_ID_BYTES = 64
 
       ACTIVE_PLACEHOLDER_STATES = [
         DAG::Node::PENDING,
@@ -39,6 +40,7 @@ module Cybros
         @continuation_materialized = false
         @prepend_continuation_materialized = false
         @deferred_anchor = false
+        @silent_finish = false
       end
 
         def execute!
@@ -50,6 +52,8 @@ module Cybros
             apply_set_step_status!(action)
           when "emit_message"
             apply_emit_message!(action)
+          when "finish_silently"
+            apply_finish_silently!(action)
           when "halt"
             apply_terminal_action!(action)
           when "deny"
@@ -72,6 +76,7 @@ module Cybros
           terminal_action: @terminal_action,
           deferred_anchor: @deferred_anchor,
           created_tasks: (prepended_tasks + appended_tasks).uniq,
+          silent_finish: @silent_finish,
         )
       end
 
@@ -116,6 +121,13 @@ module Cybros
           message["role"] = "assistant" if message["role"].to_s.strip.empty?
 
           @emitted_message = message
+        end
+
+        def apply_finish_silently!(_action)
+          ensure_active_placeholder!(placeholder_node)
+          DAG::NodeBody.where(id: placeholder_node.body_id).update_all(output_preview: {}, updated_at: Time.current) if placeholder_node.body_id.present?
+          placeholder_node.body.reload if placeholder_node.body_id.present?
+          @silent_finish = true
         end
 
         def apply_create_task!(action, action_index:)
@@ -332,7 +344,10 @@ module Cybros
         end
 
         def created_task_tool_call_id(action_index, placement:)
-          "hook_action:#{hook_name}:#{placement}:#{task_creation_anchor_identifier}:#{action_index}"
+          generated_tool_call_id(
+            "hook_action:#{hook_name}:#{placement}:#{task_creation_anchor_identifier}:#{action_index}",
+            fallback: "hook_action:#{placement}:#{action_index}",
+          )
         end
 
         def append_continuation_idempotency_key
@@ -344,7 +359,10 @@ module Cybros
         end
 
         def prepend_continuation_tool_call_id
-          "hook_action:#{hook_name}:prepend_continuation:#{task_creation_anchor_identifier}"
+          generated_tool_call_id(
+            "hook_action:#{hook_name}:prepend_continuation:#{task_creation_anchor_identifier}",
+            fallback: "hook_action:prepend_continuation",
+          )
         end
 
         def summarize_arguments(arguments)
@@ -610,6 +628,38 @@ module Cybros
         def original_tool_call_id(node)
           input = node.body_input.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(node.body_input) : {}
           input["tool_call_id"].to_s.presence
+        end
+
+        def generated_tool_call_id(base, fallback:)
+          candidate = normalized_generated_tool_call_id_base(base, fallback: fallback)
+          id = candidate
+          n = 2
+
+          while generated_tool_call_ids.key?(id)
+            suffix = "__#{n}"
+            available_bytes = [MAX_GENERATED_TOOL_CALL_ID_BYTES - suffix.bytesize, 1].max
+            truncated = AgentCore::Utils.truncate_utf8_bytes(candidate, max_bytes: available_bytes)
+            truncated = "t" if truncated.blank?
+            id = "#{truncated}#{suffix}"
+            n += 1
+          end
+
+          generated_tool_call_ids[id] = true
+          id
+        end
+
+        def normalized_generated_tool_call_id_base(base, fallback:)
+          candidate = AgentCore::Utils.truncate_utf8_bytes(base.to_s, max_bytes: MAX_GENERATED_TOOL_CALL_ID_BYTES)
+          return candidate if candidate.present?
+
+          fallback_id = AgentCore::Utils.truncate_utf8_bytes(fallback.to_s, max_bytes: MAX_GENERATED_TOOL_CALL_ID_BYTES)
+          return fallback_id if fallback_id.present?
+
+          "tc_1"
+        end
+
+        def generated_tool_call_ids
+          @generated_tool_call_ids ||= {}
         end
 
         def append_continuation_already_materialized?

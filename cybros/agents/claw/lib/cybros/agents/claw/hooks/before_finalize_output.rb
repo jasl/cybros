@@ -3,18 +3,26 @@ module Cybros
     module Claw
       module Hooks
         class BeforeFinalizeOutput
+          SILENT_REPLY_TOKEN = "NO_REPLY"
+
           def initialize(application:)
             @application = application
           end
 
           def call(params:)
+            draft_content = params.dig("draft_output", "content").to_s
+            return { "actions" => [ { "type" => "finish_silently", "reason" => "silent_reply" } ] } if silent_reply_text?(draft_content)
+
+            content = compose_content(params)
+            return { "actions" => [ { "type" => "finish_silently", "reason" => "silent_reply" } ] } if content.empty?
+
             {
               "actions" => [
                 {
                   "type" => "emit_message",
                   "message" => {
                     "role" => "assistant",
-                    "content" => compose_content(params)
+                    "content" => content
                   }
                 }
               ]
@@ -24,7 +32,7 @@ module Cybros
           private
 
           def compose_content(params)
-            draft_output = params.dig("draft_output", "content").to_s.strip
+            draft_output = strip_silent_token(params.dig("draft_output", "content").to_s)
             return draft_output unless draft_output.empty?
 
             summary = params.dig("planning", "step_plan", "summary").to_s.strip
@@ -41,6 +49,14 @@ module Cybros
               message.is_a?(Hash) && message["role"].to_s == "user"
             end
             user_message.to_h["content"].to_s.strip
+          end
+
+          def silent_reply_text?(text)
+            text.to_s.match?(/\A\s*#{Regexp.escape(SILENT_REPLY_TOKEN)}\s*\z/)
+          end
+
+          def strip_silent_token(text)
+            text.to_s.gsub(/(?:^|\s+|\*+)#{Regexp.escape(SILENT_REPLY_TOKEN)}\s*\z/, "").strip
           end
         end
       end
