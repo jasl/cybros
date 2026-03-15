@@ -81,6 +81,24 @@ class DAG::GraphAuditTest < ActiveSupport::TestCase
     assert graph.nodes.active.exists?(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING)
   end
 
+  test "scan reports disconnected_graph when active nodes split into multiple components" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    first = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+    second = graph.nodes.create!(node_type: Messages::Task.node_type_key, state: DAG::Node::FINISHED, metadata: {})
+
+    issues = DAG::GraphAudit.scan(graph: graph, types: [DAG::GraphAudit::ISSUE_DISCONNECTED_GRAPH])
+    issue = issues.find { |entry| entry.fetch(:type) == DAG::GraphAudit::ISSUE_DISCONNECTED_GRAPH }
+
+    assert issue.present?
+    assert_equal graph.id, issue.fetch(:subject_id)
+    assert_equal 2, issue.dig(:details, :root_count)
+    assert_equal [first.id, second.id].sort, issue.dig(:details, :root_node_ids).sort
+    assert_equal 2, issue.dig(:details, :component_count)
+    assert_equal [1, 1], issue.dig(:details, :component_sizes).sort
+  end
+
   test "repair! reclaims stale running nodes" do
     conversation = create_conversation!
     graph = conversation.dag_graph

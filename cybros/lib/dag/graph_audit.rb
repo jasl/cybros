@@ -3,6 +3,7 @@
       ISSUE_MISCONFIGURED_GRAPH = "misconfigured_graph"
       ISSUE_CYCLE_DETECTED = "cycle_detected"
       ISSUE_TOPOLOGICAL_SORT_FAILED = "toposort_failed"
+      ISSUE_DISCONNECTED_GRAPH = "disconnected_graph"
       ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE = "active_edge_to_inactive_node"
       ISSUE_STALE_VISIBILITY_PATCH = "stale_visibility_patch"
       ISSUE_LEAF_INVARIANT_VIOLATION = "leaf_invariant_violation"
@@ -16,6 +17,7 @@
         ISSUE_MISCONFIGURED_GRAPH,
         ISSUE_CYCLE_DETECTED,
         ISSUE_TOPOLOGICAL_SORT_FAILED,
+        ISSUE_DISCONNECTED_GRAPH,
         ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE,
         ISSUE_STALE_VISIBILITY_PATCH,
         ISSUE_LEAF_INVARIANT_VIOLATION,
@@ -51,6 +53,11 @@
       if @types.include?(ISSUE_CYCLE_DETECTED) || @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
         issue = cycle_or_toposort_failed_issue
         issues << issue if issue && @types.include?(issue.fetch(:type))
+      end
+
+      if @types.include?(ISSUE_DISCONNECTED_GRAPH)
+        issue = disconnected_graph_issue
+        issues << issue if issue
       end
 
       if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -149,6 +156,10 @@
 
         if @types.include?(ISSUE_TOPOLOGICAL_SORT_FAILED)
           repaired[ISSUE_TOPOLOGICAL_SORT_FAILED] = 0
+        end
+
+        if @types.include?(ISSUE_DISCONNECTED_GRAPH)
+          repaired[ISSUE_DISCONNECTED_GRAPH] = 0
         end
 
         if @types.include?(ISSUE_ACTIVE_EDGE_TO_INACTIVE_NODE)
@@ -575,6 +586,86 @@
           .joins("JOIN dag_nodes to_nodes ON to_nodes.id = dag_edges.to_node_id")
           .where("from_nodes.compressed_at IS NOT NULL OR to_nodes.compressed_at IS NOT NULL")
           .pluck(:id)
+      end
+
+      def disconnected_graph_issue
+        analysis = active_connectivity_analysis
+        return nil if analysis.fetch(:root_count) <= 1 && analysis.fetch(:component_count) <= 1
+
+        issue_hash(
+          type: ISSUE_DISCONNECTED_GRAPH,
+          severity: "error",
+          subject_type: "DAG::Graph",
+          subject_id: @graph.id,
+          details: analysis,
+        )
+      end
+
+      def active_connectivity_analysis
+        node_ids = @graph.nodes.active.pluck(:id)
+        return empty_connectivity_analysis if node_ids.empty?
+
+        node_id_set = node_ids.index_with(true)
+        edge_count = 0
+        parents_by_child = Hash.new { |hash, key| hash[key] = [] }
+        neighbors = Hash.new { |hash, key| hash[key] = [] }
+
+        @graph.edges.active.pluck(:from_node_id, :to_node_id).each do |from_node_id, to_node_id|
+          next unless node_id_set.key?(from_node_id) && node_id_set.key?(to_node_id)
+
+          edge_count += 1
+          parents_by_child[to_node_id] << from_node_id
+          neighbors[from_node_id] << to_node_id
+          neighbors[to_node_id] << from_node_id
+        end
+
+        roots = node_ids.select { |node_id| parents_by_child[node_id].empty? }
+        component_sizes = connected_component_sizes(node_ids: node_ids, neighbors: neighbors)
+
+        {
+          node_count: node_ids.length,
+          edge_count: edge_count,
+          root_count: roots.length,
+          root_node_ids: roots,
+          component_count: component_sizes.length,
+          component_sizes: component_sizes.sort.reverse,
+        }
+      end
+
+      def empty_connectivity_analysis
+        {
+          node_count: 0,
+          edge_count: 0,
+          root_count: 0,
+          root_node_ids: [],
+          component_count: 0,
+          component_sizes: [],
+        }
+      end
+
+      def connected_component_sizes(node_ids:, neighbors:)
+        visited = {}
+        sizes = []
+
+        node_ids.each do |node_id|
+          next if visited[node_id]
+
+          size = 0
+          stack = [node_id]
+
+          until stack.empty?
+            current = stack.pop
+            next if visited[current]
+
+            visited[current] = true
+            size += 1
+            neighbors[current].each { |neighbor| stack << neighbor unless visited[neighbor] }
+          end
+
+          sizes << size
+        end
+
+        sizes
       end
 
       def cycle_or_toposort_failed_issue

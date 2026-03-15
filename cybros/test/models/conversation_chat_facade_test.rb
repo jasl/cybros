@@ -102,6 +102,37 @@ class ConversationChatFacadeTest < ActiveSupport::TestCase
     end
   end
 
+  test "append_user_message! keeps the main lane connected after branching" do
+    root = create_conversation!(title: "Root")
+    graph = root.root_graph
+
+    first_turn = root.append_user_message!(content: "Hello")
+    main_agent = first_turn.fetch(:agent_node)
+    main_agent.mark_running!
+    main_agent.mark_finished!(content: "Done")
+
+    root.create_child!(from_node_id: main_agent.id, kind: "branch", title: "Branch", user_content: "What if?")
+
+    second_turn = root.append_user_message!(content: "Main followup")
+    main_user_2 = second_turn.fetch(:user_node)
+
+    assert_equal main_agent.id,
+                 graph.edges.active
+                   .where(to_node_id: main_user_2.id, edge_type: DAG::Edge::SEQUENCE)
+                   .pick(:from_node_id)
+
+    node_ids = graph.nodes.active.pluck(:id)
+    edge_pairs = graph.edges.active.where(from_node_id: node_ids, to_node_id: node_ids).pluck(:from_node_id, :to_node_id)
+
+    parents_by_child = Hash.new { |hash, key| hash[key] = [] }
+    edge_pairs.each do |from_node_id, to_node_id|
+      parents_by_child[to_node_id] << from_node_id
+    end
+
+    roots = node_ids.select { |node_id| parents_by_child[node_id].empty? }
+    assert_equal 1, roots.length
+  end
+
   test "message_page hides regenerate for non-tail assistants while keeping branch available" do
     conversation = create_conversation!(title: "Chat")
 

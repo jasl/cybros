@@ -1825,7 +1825,13 @@ class Conversation < ApplicationRecord
     end
 
     def head_leaf_for_lane(graph:, lane:, node_type: nil)
-      scope = graph.leaf_nodes.where(lane_id: lane.id)
+      lane_nodes = graph.nodes.active.where(lane_id: lane.id)
+      lane_blocking_edges =
+        graph.edges.active
+          .where(edge_type: DAG::Edge::BLOCKING_EDGE_TYPES)
+          .where(from_node_id: lane_nodes.select(:id), to_node_id: lane_nodes.select(:id))
+
+      scope = lane_nodes.where.not(id: lane_blocking_edges.select(:from_node_id))
       scope = scope.where(node_type: node_type.to_s) if node_type.present?
 
       visible_scope = scope.where(context_excluded_at: nil, deleted_at: nil)
