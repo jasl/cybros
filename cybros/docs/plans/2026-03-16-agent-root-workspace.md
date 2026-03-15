@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Replace conversation-owned logical workspaces and lane-kv memory with an agent-root workspace, three-scope file-backed memory, and OpenClaw-style bootstrap seeding for bundled `claw`.
+**Goal:** Replace conversation-owned logical workspaces and lane-kv memory with an agent-root workspace, three-scope file-backed memory, bundled bootstrap/skill seeding, and agent-local mutable skills for bundled `claw`.
 
-**Architecture:** The cutover keeps Cybros as the owner of DAG execution, approvals, transcript durability, and branch semantics, but moves workspace and memory truth into an agent-owned filesystem root. Each `Agent` gets one root workspace, each `Conversation` gets a lightweight working directory beneath it, and each lane gets an optional hidden `.lanes/<lane_id>` directory only when lane-local state is needed. Memory tools become the controlled API over file-backed `MEMORY.md` and `memory/YYYY-MM-DD.md` files at root, conversation, and lane scope.
+**Architecture:** The cutover keeps Cybros as the owner of DAG execution, approvals, transcript durability, and branch semantics, but moves workspace and memory truth into an agent-owned filesystem root. Each `Agent` gets one root workspace, each `Conversation` gets a lightweight working directory beneath it, and each lane gets an optional hidden `.lanes/<lane_id>` directory only when lane-local state is needed. Memory tools become the controlled API over file-backed `MEMORY.md` and `memory/YYYY-MM-DD.md` files at root, conversation, and lane scope. Bundled `claw` also seeds a live `skills/` tree into that root, merges agent-local skills with platform skills at runtime, and uses an agent-local `self-mutate` skill plus normal file tools to mutate `SOUL.md`, `USER.md`, and `skills/**` under strict confirmation and `.history/` snapshot rules.
 
 **Tech Stack:** Ruby on Rails, ActiveRecord, PostgreSQL, Pathname/FileUtils, bundled `claw` agent host, programmable-agent hooks, DAG lanes/branching, Rails integration tests, real-model acceptance harness
 
@@ -103,7 +103,7 @@ git add app/services/agents/workspace_path_resolver.rb app/services/agents/works
 git commit -m "feat: move workspace ownership to agents"
 ```
 
-### Task 3: Seed Live Agent Roots From Bundled `claw` Prompts
+### Task 3: Seed Live Agent Roots From Bundled `claw` Prompts And Skills
 
 **Files:**
 - Create: `cybros/app/services/agents/workspace_bootstrap.rb`
@@ -117,6 +117,7 @@ git commit -m "feat: move workspace ownership to agents"
 Cover:
 
 - first real agent-root materialization seeds `AGENTS.md`, `SOUL.md`, `USER.md`, and starter memory files
+- first real agent-root materialization seeds bundled `skills/*` into the live root when bundled skills exist
 - bundled source files are only templates after bootstrap
 - `claw` reads live workspace bootstrap files, not just `agents/claw/prompts/*`
 
@@ -134,6 +135,7 @@ Implement:
 - root bootstrap copier
 - idempotent seeding rules
 - prompt file resolution from the live agent root
+- bundled skill seed rules into `<agent-root>/skills`
 
 **Step 4: Run test to verify it passes**
 
@@ -332,11 +334,12 @@ git add app/services/conversations/lane_memory_promotion_service.rb app/services
 git commit -m "feat: add memory promotion windows and branch snapshots"
 ```
 
-### Task 8: Rebuild Prompt Bootstrap Around Live Root Files And Scope Inventory
+### Task 8: Rebuild Prompt Bootstrap Around Live Root Files, Scope Inventory, And Skills
 
 **Files:**
 - Modify: `cybros/agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb`
 - Modify: `cybros/agents/claw/lib/cybros/agents/claw/application.rb`
+- Modify: `cybros/lib/cybros/agent_runtime_resolver.rb`
 - Modify: `cybros/test/integration/programmable_agent_prompt_builder_test.rb`
 - Modify: `cybros/agents/claw/test/integration/rpc_contract_test.rb`
 
@@ -346,6 +349,7 @@ Cover:
 
 - main prompt injects root bootstrap from the live agent root
 - prompt includes root/conversation/lane scope inventory
+- prompt exposes merged available-skills inventory from platform and agent-local skills
 - full conversation/lane memory bodies are not auto-injected
 - delegated prompt mode stays minimal
 
@@ -362,6 +366,7 @@ Implement:
 
 - live-root bootstrap reads
 - scope inventory rendering
+- merged platform + agent-local skills resolution
 - conservative memory injection rules
 - prompt budget updates for the new bootstrap shape
 
@@ -375,11 +380,103 @@ Expected: PASS
 **Step 5: Commit**
 
 ```bash
-git add agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/lib/cybros/agents/claw/application.rb test/integration/programmable_agent_prompt_builder_test.rb agents/claw/test/integration/rpc_contract_test.rb
-git commit -m "feat: bootstrap claw prompts from live agent roots"
+git add agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/lib/cybros/agents/claw/application.rb lib/cybros/agent_runtime_resolver.rb test/integration/programmable_agent_prompt_builder_test.rb agents/claw/test/integration/rpc_contract_test.rb
+git commit -m "feat: bootstrap claw prompts and skills from live agent roots"
 ```
 
-### Task 9: Add Real-LLM Acceptance Harness, Proof, And Final Cleanup
+### Task 9: Add Agent-Local Skills Discovery And Conflict Rules
+
+**Files:**
+- Create: `cybros/app/services/agents/skills_store_builder.rb`
+- Modify: `cybros/lib/cybros/agent_runtime_resolver.rb`
+- Modify: `cybros/test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb`
+- Create: `cybros/test/services/agents/skills_store_builder_test.rb`
+- Modify: `cybros/test/integration/programmable_agent_prompt_builder_test.rb`
+
+**Step 1: Write the failing test**
+
+Cover:
+
+- runtime registers agent-local skills from `<agent-root>/skills`
+- platform skills and agent-local skills are both visible to the prompt/runtime
+- name collisions between platform and agent-local skills fail closed
+- agent-local skills are not loaded from bundled source after bootstrap when live copies exist
+
+**Step 2: Run test to verify it fails**
+
+Run: `bin/rails test test/services/agents/skills_store_builder_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/integration/programmable_agent_prompt_builder_test.rb`
+
+Expected: FAIL because the runtime only registers platform-level skills and has no agent-root skills merge layer or collision handling.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- agent-root skills store builder
+- merged runtime skills store registration
+- fail-closed collision detection
+
+**Step 4: Run test to verify it passes**
+
+Run: `bin/rails test test/services/agents/skills_store_builder_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/integration/programmable_agent_prompt_builder_test.rb`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add app/services/agents/skills_store_builder.rb lib/cybros/agent_runtime_resolver.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/services/agents/skills_store_builder_test.rb test/integration/programmable_agent_prompt_builder_test.rb
+git commit -m "feat: add agent-local skills discovery"
+```
+
+### Task 10: Seed The `self-mutate` Skill And Protected Write Boundaries
+
+**Files:**
+- Create: `cybros/agents/claw/skills/self-mutate/SKILL.md`
+- Modify: `cybros/app/services/agents/workspace_bootstrap.rb`
+- Modify: `cybros/lib/cybros/agent_runtime_resolver.rb`
+- Modify: `cybros/test/scenarios/dag/agent_tool_calls_flow_test.rb`
+- Modify: `cybros/test/integration/bundled_default_agent_execution_test.rb`
+- Modify: `cybros/test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb`
+
+**Step 1: Write the failing test**
+
+Cover:
+
+- bundled `claw` seeds a live `self-mutate` skill into `<agent-root>/skills/self-mutate/`
+- writes to `SOUL.md`, `USER.md`, and `skills/**` always require confirmation
+- attempts to mutate `AGENTS.md` through normal file tools are denied by the protected-path policy
+- the `self-mutate` skill instructs the agent to diff, confirm, snapshot to `.history/`, and then write
+
+**Step 2: Run test to verify it fails**
+
+Run: `bin/rails test test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/scenarios/dag/agent_tool_calls_flow_test.rb test/integration/bundled_default_agent_execution_test.rb`
+
+Expected: FAIL because there is no seeded self-mutate skill and no protected write boundary for mutable bootstrap or skill paths.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- bundled `self-mutate` skill seed
+- protected write-path policy for `SOUL.md`, `USER.md`, and `skills/**`
+- explicit deny for `AGENTS.md` mutation in the agent-owned mutable layer
+- `.history/` snapshot path conventions for mutable bootstrap and skill files
+
+**Step 4: Run test to verify it passes**
+
+Run: `bin/rails test test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb test/scenarios/dag/agent_tool_calls_flow_test.rb test/integration/bundled_default_agent_execution_test.rb`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+git add agents/claw/skills/self-mutate/SKILL.md app/services/agents/workspace_bootstrap.rb lib/cybros/agent_runtime_resolver.rb test/scenarios/dag/agent_tool_calls_flow_test.rb test/integration/bundled_default_agent_execution_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb
+git commit -m "feat: add claw self-mutate skill and protected writes"
+```
+
+### Task 11: Add Real-LLM Acceptance Harness, Proof, And Final Cleanup
 
 **Files:**
 - Create: `cybros/script/live_acceptance/agent_root_workspace.rb`
@@ -413,6 +510,11 @@ Implement:
   4. branch snapshot inheritance
   5. directory-complexity tolerance
   6. compaction durability
+  7. self-mutate `SOUL.md`
+  8. self-mutate `USER.md`
+  9. create a new agent-local skill
+  10. modify an existing agent-local skill
+  11. fail closed on `AGENTS.md` mutation
 - a proof report template that records exact dates, model, environment, and outcomes
 - final doc cleanup for the new ownership model
 
@@ -421,18 +523,18 @@ Implement:
 Run: `bin/rails test test/integration/bundled_default_agent_execution_test.rb test/integration/bundled_agent_parity_test.rb`
 Run: `bin/rails runner script/live_acceptance/agent_root_workspace.rb`
 
-Expected: PASS for the deterministic tests, then a successful live-acceptance run with all six scenarios green and no mid-run manual rescue.
+Expected: PASS for the deterministic tests, then a successful live-acceptance run with all eleven scenarios green and no mid-run manual rescue.
 
 **Step 5: Commit**
 
 ```bash
 git add script/live_acceptance/agent_root_workspace.rb docs/reports/2026-03-16-agent-root-workspace-proof.md docs/product/README.md test/integration/bundled_default_agent_execution_test.rb test/integration/bundled_agent_parity_test.rb
-git commit -m "test: prove agent root workspace flow"
+git commit -m "test: prove agent root workspace and self-mutate flow"
 ```
 
 ### Final Verification
 
-Run: `bin/rails test test/services/agents/workspace_initializer_test.rb test/services/conversations/workspace_initializer_test.rb test/services/agent_rpc/kernel_services/conversation_memory_test.rb test/services/agent_rpc/kernel_services/workspace_memory_test.rb test/integration/conversation_branching_test.rb test/integration/programmable_agent_prompt_builder_test.rb test/integration/default_agent_attachment_transfer_test.rb test/integration/bundled_default_agent_execution_test.rb test/integration/bundled_agent_parity_test.rb test/scenarios/dag/agent_tool_calls_flow_test.rb`
+Run: `bin/rails test test/services/agents/workspace_initializer_test.rb test/services/agents/skills_store_builder_test.rb test/services/conversations/workspace_initializer_test.rb test/services/agent_rpc/kernel_services/conversation_memory_test.rb test/services/agent_rpc/kernel_services/workspace_memory_test.rb test/integration/conversation_branching_test.rb test/integration/programmable_agent_prompt_builder_test.rb test/integration/default_agent_attachment_transfer_test.rb test/integration/bundled_default_agent_execution_test.rb test/integration/bundled_agent_parity_test.rb test/scenarios/dag/agent_tool_calls_flow_test.rb test/lib/cybros/agent_runtime_resolver_tool_policy_test.rb`
 
 Run: `bundle exec ruby -Itest agents/claw/test/integration/rpc_contract_test.rb`
 
@@ -442,7 +544,7 @@ Expected:
 
 - all deterministic tests pass
 - bundled `claw` RPC contract passes
-- live acceptance completes all six scenarios successfully without manual prompt rescue
+- live acceptance completes all eleven scenarios successfully without manual prompt rescue
 
 Plan complete and saved to `docs/plans/2026-03-16-agent-root-workspace.md`. Two execution options:
 

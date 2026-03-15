@@ -65,8 +65,11 @@ The core runtime split remains strict:
 - destructive replacement of conversation-owned logical workspaces with agent-root workspaces
 - destructive replacement of lane-kv memory with file-backed memory files
 - bundled prompt seeding into live agent workspaces
+- bundled skill seeding into live agent workspaces
 - explicit three-scope memory semantics: root, conversation, lane
 - hidden lane directories under conversations
+- agent-local mutable skills under the live agent root
+- agent-side self-mutate workflow for `SOUL.md`, `USER.md`, and agent-local skills
 - prompt/bootstrap changes needed to keep the new directory model usable by real LLMs
 - live acceptance tests against a real model, not only mocks
 
@@ -76,6 +79,8 @@ The core runtime split remains strict:
 - keeping conversation-owned workspace metadata for compatibility
 - turning DAG state into file-backed truth
 - making lanes first-class user-visible filesystem roots
+- allowing live mutation of `AGENTS.md`
+- symlink-based live overlays for bootstrap or skill files
 - strong multi-user filesystem isolation guarantees
 - browser/device/channel behaviors unrelated to workspace and memory ownership
 
@@ -127,8 +132,18 @@ The target layout is:
   SOUL.md
   USER.md
   MEMORY.md
+  skills/
+    self-mutate/
+      SKILL.md
+      scripts/
+      references/
+      assets/
   memory/
     YYYY-MM-DD.md
+  .history/
+    soul/
+    user/
+    skills/
   conversations/
     <conversation_id>/
       MEMORY.md
@@ -151,6 +166,8 @@ This is a semantic topology, not an eager materialization contract.
 V1 should create directories lazily:
 
 - root files are seeded when the agent root is first materialized
+- `skills/` is seeded only when bundled/default agent skills exist
+- `.history/` appears only when the first mutable bootstrap or skill change is written
 - `conversations/<conversation_id>/` appears only when the conversation first needs filesystem state
 - `.lanes/<lane_id>/` appears only when the lane first needs lane-local memory or other lane-local state
 - `MEMORY.md` and `memory/` at conversation/lane scope are created only when first written
@@ -167,15 +184,86 @@ On first agent-root materialization, Cybros copies the bundled defaults into the
 - `SOUL.md`
 - `USER.md`
 - empty or starter `MEMORY.md`
+- bundled `skills/*` when bundled/default skills exist
 - `memory/`
 
 After that:
 
 - the live workspace files are the source of truth
 - the agent program reads from the live workspace, not directly from bundled prompt files
+- the agent program reads agent-local skills from the live root, not only from bundled source directories
 - changing the bundled source later does not silently rewrite existing agent roots
 
 This preserves the OpenClaw bootstrap pattern without forcing runtime personalization to modify bundled source code.
+
+## Agent-Local Skills
+
+### Layering
+
+Skills are split into two layers:
+
+- platform skills: provided by Cybros infrastructure
+- agent-local skills: live under `<agent-root>/skills/` and belong to one `Agent`
+
+This keeps the responsibility split clear:
+
+- Cybros provides the generic skills infrastructure and built-in capabilities
+- bundled `claw` decides how to compose its business-specific workflows on top of that infrastructure
+
+### Agent-Local Skill Root
+
+The live source of truth for agent-local skills is:
+
+- `<agent-root>/skills/<skill_name>/SKILL.md`
+
+Optional subdirectories follow the existing skills contract:
+
+- `scripts/`
+- `references/`
+- `assets/`
+
+Bundled/default agent skills may be seeded into that directory once, then become live editable files.
+
+### Merge And Conflict Rules
+
+Prompt assembly and `skills_*` tools should expose the merged set of:
+
+- platform skills
+- agent-local skills
+
+Name collisions must fail closed.
+
+V1 rule:
+
+- an agent-local skill may not override a platform skill with the same name
+- startup or runtime refresh should surface a stable error instead of silently picking a winner
+
+### Mutable Scope
+
+V1 allows the agent to create and modify:
+
+- `root/SOUL.md`
+- `root/USER.md`
+- `root/skills/**`
+- `root/.history/**`
+
+V1 does not allow the agent to modify:
+
+- `root/AGENTS.md`
+- Cybros platform skill source directories
+- any path outside the resolved agent root
+
+### Why `AGENTS.md` Stays Read-Only
+
+`SOUL.md` and `USER.md` belong to the mutable agent-owned guidance layer.
+
+`AGENTS.md` belongs to the operator/platform contract layer:
+
+- workspace semantics
+- tool-use guardrails
+- runtime structure facts
+
+Letting the agent rewrite that file would blur the line between mutable guidance and the platform contract, and would make it much easier for the prompt surface to drift away from real runtime behavior.
 
 ## Memory Model
 
@@ -303,6 +391,7 @@ Main session prompt assembly should include:
 - a workspace descriptor
 - current date/time and runtime summary
 - a small scope inventory
+- merged available-skills inventory from platform and agent-local skills
 - optionally a short root `MEMORY.md` excerpt under the existing bootstrap budget
 
 The scope inventory should be tiny and explicit, for example:
@@ -334,6 +423,15 @@ At most they receive:
 - minimal root bootstrap
 - current workspace descriptor
 - current scope inventory
+
+### Skills Prompting
+
+Skills should continue to follow the progressive-disclosure model:
+
+- inject only the available-skills inventory by default
+- load skill bodies on demand through `skills_load` / `skills_read_file`
+
+This applies equally to platform and agent-local skills.
 
 ## Lifecycle And Branching
 
@@ -440,6 +538,40 @@ This gives Cybros one stable place to enforce:
 - later approval rules
 - later observability
 
+## Mutable Bootstrap And Skill Writes
+
+V1 does not add a dedicated self-mutate RPC tool.
+
+Instead:
+
+- self-mutate is expressed as an agent-local skill
+- the skill orchestrates existing file tools and optional shell helpers
+- the actual write authority stays inside the normal workspace/file execution surface
+
+### Confirmation Rules
+
+Writes to the following paths must always require confirmation, regardless of broader conversation permission mode:
+
+- `root/SOUL.md`
+- `root/USER.md`
+- `root/skills/**`
+
+This keeps the mutable agent-owned layer reviewable even when ordinary coding/file operations are broadly allowed.
+
+### Write Workflow
+
+The intended self-mutate workflow is:
+
+1. read current file content
+2. prepare new content or patch
+3. generate a diff for user review
+4. wait for confirmation
+5. copy the previous file into `.history/`
+6. write the new file
+7. report the live path and snapshot path
+
+V1 should not rely on symlink-based overlay switching for live bootstrap or skill files.
+
 ## Failure Modes
 
 ### Logical Scope Exists But Files Do Not
@@ -468,6 +600,21 @@ If the conversation-memory snapshot for branch creation fails:
 - branch creation fails as a whole
 - Cybros does not leave a half-initialized child conversation pretending the snapshot succeeded
 
+### Mutable Skill Name Collision
+
+If an agent-local skill name conflicts with a platform skill name:
+
+- fail closed
+- surface a stable error
+- do not silently override either skill
+
+### Read-Only Bootstrap Mutation Attempt
+
+If the agent attempts to mutate `AGENTS.md` through self-mutate workflows:
+
+- deny the write
+- surface a stable error explaining that `AGENTS.md` is read-only in V1
+
 ## Validation Strategy
 
 This design must be validated with a real LLM, not only deterministic tests.
@@ -479,10 +626,13 @@ Add deterministic tests for:
 - agent-root path derivation and materialization
 - lazy conversation/lane directory creation
 - hidden `.lanes` behavior
+- agent-local skill seeding and discovery
+- fail-closed skill-name collision handling
 - memory tool scope rules
 - lane->conversation promotion hooks
 - branch snapshot copy of conversation `MEMORY.md`
 - no automatic conversation->root promotion
+- protected write boundaries for `SOUL.md`, `USER.md`, `skills/**`, and `AGENTS.md`
 
 ### Live Acceptance
 
@@ -496,6 +646,11 @@ Minimum required scenarios:
 4. branch snapshot inheritance
 5. directory-complexity tolerance
 6. compaction durability and lane flush behavior
+7. self-mutate `SOUL.md`
+8. self-mutate `USER.md`
+9. create a new agent-local skill
+10. modify an existing agent-local skill with `.history/` snapshot creation
+11. failed attempt to modify `AGENTS.md`
 
 Required live-test rule:
 
@@ -514,8 +669,15 @@ Each live scenario should pass at least three consecutive times before the desig
 - `Lane` owns optional hidden local state under `.lanes/<lane_id>`
 - root/conversation/lane memory are all file-backed truth
 - bundled prompt files are seed templates, not live runtime truth after bootstrap
+- bundled skills are seed templates, not live runtime truth after bootstrap
+- agent-local mutable skills live under `root/skills/`
+- platform and agent-local skills are merged, but name conflicts fail closed
 - `memory_store` defaults to lane scope
 - lane->conversation promotion happens only at explicit lifecycle points
 - conversation->root promotion is never automatic in V1
 - branching snapshots parent conversation `MEMORY.md` into the child conversation
+- self-mutate is implemented as an agent-local skill, not a dedicated self-mutate RPC tool
+- `SOUL.md`, `USER.md`, and `skills/**` are mutable but always confirmation-gated
+- `AGENTS.md` remains read-only in V1
+- live bootstrap and skill files use ordinary files plus `.history/`, not symlink overlays
 - Cybros keeps loop authority; only workspace and memory ownership move toward the OpenClaw pattern
