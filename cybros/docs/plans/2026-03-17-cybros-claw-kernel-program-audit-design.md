@@ -117,8 +117,9 @@ The audit should end as a structured package, not as informal notes.
 - `Executive Summary`
 - `Kernel / Program Ownership Matrix`
 - `Migration Candidate Ledger`
-- `Refactor Findings And Actions`
-- `Deletion List`
+- `Findings Ledger (Refactor Findings And Actions)`
+- `Hot Path And Performance Notes`
+- `Delete Now List`
 - `Phased Plan`
 
 ### Appendix

@@ -12,6 +12,12 @@
 
 **Design Source:** `cybros/docs/plans/2026-03-17-cybros-claw-kernel-program-audit-design.md`
 
+**Execution Preconditions:**
+- run every command from `/Users/jasl/Workspaces/Cybros/cybros` unless a task says otherwise
+- before any Rails verification command, confirm PostgreSQL is available with `pg_isready`; if it is not, start it with `sudo pg_ctlcluster 18 main start`
+- if `cybros/bin/rails` or `agents/claw/bin/test` fails because the local environment is not bootstrapped, stop and record an environment blocker in the report instead of pretending the audit verified runtime behavior
+- do not refactor product code during this plan; only produce the audit report and the evidence needed to support it
+
 ---
 
 ### Task 1: Create The Audit Report Skeleton
@@ -29,6 +35,7 @@ Add these empty sections in order:
 - Kernel / Program Ownership Matrix
 - Migration Candidate Ledger
 - Findings Ledger
+- Hot Path And Performance Notes
 - Delete Now List
 - Documentation Drift
 - Phase Plan
@@ -155,10 +162,14 @@ git add cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md
 git commit -m "docs: classify claw migration candidates"
 ```
 
-### Task 5: Identify Delete-Now Targets And Compatibility Debt
+### Task 5: Identify Documentation Drift, Delete-Now Targets, And Compatibility Debt
 
 **Files:**
 - Modify: `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md`
+- Reference: `AGENTS.md`
+- Reference: `cybros/README.md`
+- Reference: `agents/claw/README.md`
+- Reference: `cybros/docs/plans/`
 - Reference: `cybros/docs/product/`
 - Reference: `cybros/docs/agent_core/`
 - Reference: `cybros/docs/dag/`
@@ -168,13 +179,17 @@ git commit -m "docs: classify claw migration candidates"
 
 Run:
 
+- `sed -n '1,220p' AGENTS.md`
+- `sed -n '1,220p' cybros/README.md`
+- `sed -n '1,220p' agents/claw/README.md`
+- `find cybros/docs/plans -maxdepth 1 -type f | sort`
 - `find agents/claw -path '*/tmp' -prune -o -path '*/vendor' -prune -o -type f | sort | sed -n '1,240p'`
 - `find cybros/docs/product cybros/docs/agent_core cybros/docs/dag -type f | sort`
 - `rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|AgentProgram|managed-local|in-process host|logical workspace" cybros agents/claw cybros/docs`
 
-Expected: a list of obsolete concepts, compatibility wrappers, stale docs, and runtime leftovers that should be deleted instead of preserved.
+Expected: a list of obsolete concepts, compatibility wrappers, stale docs, drift between README/plan/docs and the current codebase, and runtime leftovers that should be deleted instead of preserved.
 
-**Step 2: Fill the Delete Now List and Findings Ledger**
+**Step 2: Fill the Documentation Drift, Delete Now List, and Findings Ledger**
 
 Each delete/collapse finding should include:
 
@@ -183,14 +198,57 @@ Each delete/collapse finding should include:
 - whether it is code, config, runtime artifact, or doc
 - which later task would become simpler once it is removed
 
+Each documentation-drift finding should include:
+
+- source document
+- code or newer design evidence it conflicts with
+- whether the document should be corrected, narrowed, or deleted
+- whether the drift would mislead the upcoming audit or later refactor work
+
 **Step 3: Commit**
 
 ```bash
 git add cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md
-git commit -m "docs: record delete now targets for kernel program audit"
+git commit -m "docs: record drift and delete targets for kernel program audit"
 ```
 
-### Task 6: Validate High-Risk Judgments With Targeted Commands
+### Task 6: Capture Hot-Path And Performance Evidence
+
+**Files:**
+- Modify: `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md`
+- Reference: `cybros/app/services/agent_rpc/`
+- Reference: `cybros/lib/agent_core/`
+- Reference: `agents/claw/lib/cybros/agents/claw/`
+
+**Step 1: Inspect the main execution path for avoidable work**
+
+Run:
+
+- `rg -n "tool.execute|before_agent_step|on_context_pressure|after_task_notice|after_subagent_result|capabilities.handshake|agent.describe" cybros/app cybros/lib agents/claw/lib agents/claw/agent.yml`
+- `rg -n "JSON\\.|serialize|as_json|to_json|prompt|context|memory|attachments|workspace" cybros/app/services/agent_rpc cybros/lib/agent_core agents/claw/lib/cybros/agents/claw`
+- `find cybros/app/services/agent_rpc cybros/lib/agent_core agents/claw/lib/cybros/agents/claw -type f | sort | sed -n '1,240p'`
+
+Expected: concrete evidence for where hot-path work is duplicated, over-serialized, repeatedly assembled, or otherwise likely to be an architectural performance concern.
+
+**Step 2: Write the Hot Path And Performance Notes**
+
+For each performance finding, record:
+
+- hot path location
+- why it is on the critical path
+- whether the issue is duplicated work, extra I/O, repeated serialization, or unnecessary abstraction
+- whether it should be fixed in Phase 1, later, or only after a boundary move
+
+Do not invent benchmark numbers. If runtime timing evidence is unavailable, say the conclusion is code-structure-based.
+
+**Step 3: Commit**
+
+```bash
+git add cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md
+git commit -m "docs: add hot path evidence to kernel program audit"
+```
+
+### Task 7: Validate High-Risk Judgments With Targeted Commands
 
 **Files:**
 - Modify: `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md`
@@ -219,12 +277,19 @@ git add cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md
 git commit -m "docs: attach verification evidence to kernel program audit"
 ```
 
-### Task 7: Produce The Phase Plan And Big-Bang Appendix
+### Task 8: Produce The Executive Summary, Phase Plan, And Big-Bang Appendix
 
 **Files:**
 - Modify: `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md`
 
-**Step 1: Write the Phase Plan**
+**Step 1: Write the Executive Summary and Phase Plan**
+
+The Executive Summary must answer:
+
+- the most serious boundary error in the current `cybros` / `claw` split
+- the top migration candidates to evaluate now
+- the highest-confidence delete-now items
+- whether the phased path or big-bang path is currently recommended
 
 Define:
 
@@ -250,7 +315,7 @@ git add cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md
 git commit -m "docs: finish kernel program audit execution package"
 ```
 
-### Task 8: Final Sanity Check And Handoff
+### Task 9: Final Sanity Check And Handoff
 
 **Files:**
 - Modify: `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md`
