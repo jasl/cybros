@@ -238,6 +238,18 @@ V1 rule:
 - an agent-local skill may not override a platform skill with the same name
 - startup or runtime refresh should surface a stable error instead of silently picking a winner
 
+### Refresh Boundary
+
+Agent-local skill changes are not required to take effect mid-turn.
+
+V1 rule:
+
+- the currently running turn continues with the skill inventory it started with
+- new or modified agent-local skills must become visible no later than the next top-level prompt assembly for that same agent
+- the runtime must refresh merged skills inventory before that next top-level turn
+
+This avoids the unstable case where a skill rewrites itself and then tries to rely on the modified version in the same execution chain.
+
 ### Mutable Scope
 
 V1 allows the agent to create and modify:
@@ -245,11 +257,13 @@ V1 allows the agent to create and modify:
 - `root/SOUL.md`
 - `root/USER.md`
 - `root/skills/**`
-- `root/.history/**`
+
+Those root-level prompt and skill paths are reserved. Conversation-local or lane-local shadow files such as `conversation/SOUL.md`, `conversation/USER.md`, or `conversation/skills/**` are invalid targets and should be rejected with a hint back to the root-relative path.
 
 V1 does not allow the agent to modify:
 
 - `root/AGENTS.md`
+- `root/.history/**` except through the runtime-managed snapshot flow
 - Cybros platform skill source directories
 - any path outside the resolved agent root
 
@@ -354,9 +368,14 @@ The agent still performs the actual write through normal memory tools. The syste
 
 Default promotion target:
 
-- lane flush -> `conversation/memory/YYYY-MM-DD.md`
+- context-pressure or handoff flush -> `conversation/memory/YYYY-MM-DD.md`
 
 If the agent wants to curate that into `conversation/MEMORY.md`, that must be an explicit write decision.
+
+Branching is stricter than ordinary flush:
+
+- if a branch should inherit lane-local durable conclusions, the pre-branch promotion window must land those conclusions in the parent conversation's `MEMORY.md` before snapshot
+- writing only to `conversation/memory/YYYY-MM-DD.md` is not sufficient for branch inheritance in V1
 
 ### Conversation To Root Promotion
 
@@ -474,7 +493,11 @@ This is intentionally a copy, not a live link.
 
 The copy gives the new branch the durable topic memory without dragging forward all lane-local or append-only noise.
 
-If the branch is created from a live lane that may contain unsynced durable conclusions, the runtime should first offer the lane->conversation promotion window described above, then perform the snapshot copy.
+If the branch is created from a live lane that may contain unsynced durable conclusions, the runtime should first offer the lane->conversation promotion window described above, require any branch-worthy takeaways to be written into the parent conversation's `MEMORY.md`, then perform the snapshot copy.
+
+If no such promotion write occurs, the branch still snapshots the current parent `conversation/MEMORY.md` as-is.
+
+If a branch-specific promotion write is attempted but fails, branch creation should fail rather than silently snapshotting an ambiguous partial state.
 
 ## Deletion And Cleanup
 
@@ -545,8 +568,15 @@ V1 does not add a dedicated self-mutate RPC tool.
 Instead:
 
 - self-mutate is expressed as an agent-local skill
-- the skill orchestrates existing file tools and optional shell helpers
+- the skill orchestrates existing file tools plus optional read-only shell helpers for inspection or diff generation
 - the actual write authority stays inside the normal workspace/file execution surface
+
+Protected live mutations must not rely on unrestricted shell writes.
+
+V1 rule:
+
+- writes to protected bootstrap or skill paths must go through path-aware file mutation surfaces that can enforce confirmation and scope validation
+- `exec` or shell helpers may inspect, diff, or prepare data, but they must not directly write protected paths
 
 ### Confirmation Rules
 
@@ -555,6 +585,8 @@ Writes to the following paths must always require confirmation, regardless of br
 - `root/SOUL.md`
 - `root/USER.md`
 - `root/skills/**`
+
+This rule applies regardless of whether the attempt originates from file tools, memory-adjacent helpers, or `exec`/shell surfaces.
 
 This keeps the mutable agent-owned layer reviewable even when ordinary coding/file operations are broadly allowed.
 
@@ -566,11 +598,17 @@ The intended self-mutate workflow is:
 2. prepare new content or patch
 3. generate a diff for user review
 4. wait for confirmation
-5. copy the previous file into `.history/`
+5. let the runtime copy the previous file into `.history/`
 6. write the new file
 7. report the live path and snapshot path
 
 V1 should not rely on symlink-based overlay switching for live bootstrap or skill files.
+
+`.history/` is system-managed, append-only snapshot storage in V1:
+
+- the agent may read history entries
+- the runtime creates them before protected writes
+- the agent may not arbitrarily overwrite or delete them
 
 ## Failure Modes
 
@@ -593,12 +631,33 @@ Any attempt to write outside the resolved scope root must hard-fail at the agent
 
 This is not optional prompt discipline.
 
+### Protected Path Mutation Via `exec`
+
+If an `exec`/shell command would write to:
+
+- `root/SOUL.md`
+- `root/USER.md`
+- `root/skills/**`
+- `root/AGENTS.md`
+- `root/.history/**`
+
+the runtime must deny it or route it through the same confirmation and read-only rules as the normal protected-path policy.
+
+V1 should prefer denial over trying to infer shell intent after the fact.
+
 ### Branch Snapshot Failure
 
 If the conversation-memory snapshot for branch creation fails:
 
 - branch creation fails as a whole
 - Cybros does not leave a half-initialized child conversation pretending the snapshot succeeded
+
+### Branch Promotion Failure
+
+If a branch-specific promotion write into parent `conversation/MEMORY.md` is attempted and fails:
+
+- branch creation fails
+- Cybros does not silently continue with a partially updated inheritance state
 
 ### Mutable Skill Name Collision
 
@@ -631,8 +690,14 @@ Add deterministic tests for:
 - memory tool scope rules
 - lane->conversation promotion hooks
 - branch snapshot copy of conversation `MEMORY.md`
+- pre-branch promotion into conversation `MEMORY.md` for branch-worthy lane conclusions
+- branch-without-promotion fallback to the current parent `conversation/MEMORY.md`
+- branch-promotion-write failure aborts branch creation
 - no automatic conversation->root promotion
-- protected write boundaries for `SOUL.md`, `USER.md`, `skills/**`, and `AGENTS.md`
+- protected write boundaries for `SOUL.md`, `USER.md`, `skills/**`, `.history/**`, and `AGENTS.md`
+- denial of conversation-local or lane-local shadow paths for `SOUL.md`, `USER.md`, and `skills/**`, with a redirect hint toward the reserved root path
+- protected-path denial for `exec`/shell writes
+- next-turn refresh of new or modified agent-local skills
 
 ### Live Acceptance
 
@@ -652,15 +717,23 @@ Minimum required scenarios:
 10. modify an existing agent-local skill with `.history/` snapshot creation
 11. failed attempt to modify `AGENTS.md`
 
+Skill-creation and skill-mutation scenarios are multi-turn scenarios in V1:
+
+- one turn performs the confirmed write
+- the next top-level turn verifies that the merged available-skills inventory and runtime behavior reflect the new version
+
 Required live-test rule:
 
 - do not rescue the model mid-run with manual instructions such as "open the hidden lane directory"
+- protected writes must still flow through the shipped approval mechanism; the harness may drive that mechanism programmatically, but may not disable or bypass it
 
 The model must succeed using only the shipped bootstrap prompt, tool surface, and workspace defaults.
 
 ### Acceptance Bar
 
 Each live scenario should pass at least three consecutive times before the design is considered validated.
+
+V1 validation should treat one full live-acceptance suite as insufficient evidence.
 
 ## Final Decisions
 
@@ -672,12 +745,16 @@ Each live scenario should pass at least three consecutive times before the desig
 - bundled skills are seed templates, not live runtime truth after bootstrap
 - agent-local mutable skills live under `root/skills/`
 - platform and agent-local skills are merged, but name conflicts fail closed
+- agent-local skill changes become visible on the next top-level turn, not necessarily mid-turn
 - `memory_store` defaults to lane scope
 - lane->conversation promotion happens only at explicit lifecycle points
+- branch-worthy lane conclusions must be curated into conversation `MEMORY.md` before branch snapshot
 - conversation->root promotion is never automatic in V1
 - branching snapshots parent conversation `MEMORY.md` into the child conversation
 - self-mutate is implemented as an agent-local skill, not a dedicated self-mutate RPC tool
 - `SOUL.md`, `USER.md`, and `skills/**` are mutable but always confirmation-gated
+- `.history/` is runtime-managed append-only snapshot storage
+- `exec`/shell may not directly mutate protected bootstrap or skill paths
 - `AGENTS.md` remains read-only in V1
 - live bootstrap and skill files use ordinary files plus `.history/`, not symlink overlays
 - Cybros keeps loop authority; only workspace and memory ownership move toward the OpenClaw pattern
