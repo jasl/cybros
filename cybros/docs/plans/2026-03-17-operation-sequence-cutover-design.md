@@ -88,6 +88,8 @@ This cut is intentionally destructive.
 - receipts, audit data, and tool call projection
 - bootstrap authority and workspace bootstrap lifecycle
 - built-in runtime tools such as `subagent_spawn`, `subagent_run`, and bootstrap authority tools
+  - `subagent_spawn` and `subagent_run` are reserved kernel-owned logical tool names in this cut
+  - capability merge and tool routing must not let bundled-agent catalogs override those names
 
 ### `claw` owns
 
@@ -205,6 +207,8 @@ The envelope and lifecycle are shared, but the executor is not required to be id
 - agent-owned tools continue to route through `tool.execute`
 - both paths use the same admitted operation envelope, queue admission, DAG task materialization, approval surface, and receipts
 
+For this cut, `subagent_spawn` and `subagent_run` are not just examples of built-ins. They are reserved kernel-owned capability names. Bundled `claw` may reference them in prompt/bootstrap content and hook-authored sequences, but it must not win routing for them through `agent_tool_catalog` or capability merge.
+
 This is especially important for:
 
 - `subagent_spawn`
@@ -267,8 +271,10 @@ This cut should remove the following instead of adapting them:
 - dead `execution_target.list` logic and `planning.execution_target_proposal`
 - test/support leftovers that still normalize `execution_target.list` as a live callback method
 - fixture/scenario behavior from the production `before_agent_step` hook
+- any remaining staged-mutation / approval test scenarios must move into test-only fixture or harness paths before those production branches are deleted
 - duplicate workspace bootstrap implementations
 - compatibility-only runtime payload branches that only exist to support old queue or workspace naming
+  - this explicitly includes live `logical_workspace_*` fields once all current consumers are cut over
 
 ## Destructive Migration Notes
 

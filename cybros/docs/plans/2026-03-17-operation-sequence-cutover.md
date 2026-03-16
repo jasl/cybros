@@ -4,7 +4,7 @@
 
 **Goal:** Refactor Cybros so admitted tool use and bundled-agent programmed operations share a queue-first operation path built on `turn_internal_tasks`, while keeping `memory` in `claw` as an explicit policy exception.
 
-**Architecture:** Introduce thin `OperationCall` and `OperationSequence` primitives, validate them close to their current entry points, and flush them into existing `turn_internal_tasks` rows instead of creating ad hoc DAG task nodes directly. Reuse the existing scheduler/materializer path, collapse duplicate workspace bootstrap logic, delete dead compatibility surfaces, and accept destructive database resets instead of carrying compatibility shims.
+**Architecture:** Introduce thin `OperationCall` and `OperationSequence` primitives, validate them close to their current entry points, and flush them into existing `turn_internal_tasks` rows instead of creating ad hoc DAG task nodes directly. Reuse the existing scheduler/materializer path, keep `subagent_spawn` / `subagent_run` kernel-owned, collapse duplicate workspace bootstrap logic, delete dead compatibility surfaces including legacy workspace naming payloads, and accept destructive database resets instead of carrying compatibility shims.
 
 **Tech Stack:** Ruby on Rails, ActiveRecord, DAG runtime, programmable-agent hooks, bundled `claw` Ruby agent package, Minitest, Playwright E2E, PostgreSQL, Bun dev server, OpenRouter-backed live model validation
 
@@ -17,6 +17,7 @@
 - If the refactor makes existing development or test data incompatible, reset the database instead of adding compatibility code.
 - Treat `bin/ci`, `bin/ci_e2e`, and one real `bin/dev` conversation as required acceptance gates, not optional follow-up checks.
 - Treat `pg_isready` as a hard gate before every `bin/rails` invocation in this plan. Do not rely on memory.
+- Do not preserve legacy `logical_workspace_*` payload fields or `execution_target.*` callback paths for compatibility; delete callers/tests and update fixtures instead.
 
 ### Task 1: Lock The Unified-Path Acceptance Criteria
 
@@ -151,6 +152,50 @@ git add cybros/app/models/turn_internal_task.rb cybros/app/services/turn_interna
 git commit -m "feat: preserve operation envelope on queued tasks"
 ```
 
+### Task 3A: Reserve Subagent Built-Ins Under Kernel Authority
+
+**Files:**
+- Modify: `cybros/lib/cybros/programmable_agent/capability_snapshot.rb`
+- Modify: `cybros/test/lib/cybros/programmable_agent/capability_snapshot_test.rb`
+- Modify: `cybros/test/integration/programmable_agent_tool_routing_test.rb`
+- Modify: `cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
+
+**Step 1: Write the failing test**
+
+Cover:
+
+- `subagent_spawn` and `subagent_run` always resolve to kernel-owned capability routes
+- bundled-agent catalogs and synthetic capability snapshots cannot override those logical tool names
+- `subagent_run` still preserves `parallel_safe` execution metadata under the kernel-owned route
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/capability_snapshot_test.rb test/integration/programmable_agent_tool_routing_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
+
+Expected: FAIL because the current capability merge still allows non-reserved logical names like `subagent_spawn` to be agent-routed.
+
+**Step 3: Write minimal implementation**
+
+Implement:
+
+- reserve `subagent_spawn` and `subagent_run` as kernel-owned logical tool names in capability merge
+- reject or ignore agent-side attempts to override those names instead of letting them win routing
+- keep execution metadata, especially `parallel_safe`, sourced from the kernel capability catalog
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/capability_snapshot_test.rb test/integration/programmable_agent_tool_routing_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+cd /Users/jasl/Workspaces/Cybros/cybros
+git add cybros/lib/cybros/programmable_agent/capability_snapshot.rb cybros/test/lib/cybros/programmable_agent/capability_snapshot_test.rb cybros/test/integration/programmable_agent_tool_routing_test.rb cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb
+git commit -m "refactor: reserve subagent built-ins for kernel routing"
+```
+
 ### Task 4: Queue Validated Direct Tool Calls Instead Of Creating DAG Tasks Inline
 
 **Files:**
@@ -170,7 +215,7 @@ Cover:
 - required approval is computed before admission and survives queue materialization
 - queue-materialized direct calls still execute through `TaskExecutor`
 - queue-materialized direct calls still preserve a shared continuation agent node for the turn
-- `subagent_run` keeps its `parallel_safe` execution behavior after the queue cutover
+- kernel-owned `subagent_run` keeps its `parallel_safe` execution behavior after the queue cutover
 
 **Step 2: Run test to verify it fails**
 
@@ -188,6 +233,12 @@ Implement:
 - admitted calls are flushed into `turn_internal_tasks`
 - `TurnInternalTasks::Materializer` learns to splice agent-message sourced queue rows ahead of that continuation
 - `TaskExecutor` continues to execute queue-materialized tasks without a second executor path
+- direct tool queue rows use a deterministic row contract:
+  - `source_hook_name` is a fixed direct-tool marker such as `agent_message_tool_loop`
+  - `source_fingerprint` is derived from the source node plus `tool_call_id`
+  - `queue_position` is allocated from the turn-local queue order
+  - `execution_mode` is derived from the resolved capability route or kernel tool metadata, defaulting to `serial`
+  - `authored_metadata` carries shared envelope fields such as `origin`, `reason`, `approval_hint`, and `idempotency_key`
 
 Do not add a new durable queue model.
 
@@ -267,6 +318,9 @@ git commit -m "feat: cut hook operation contract over to operation sequences"
 - Modify: `agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb`
 - Modify: `agents/claw/test/support/contract_assertions.rb`
 - Modify: `cybros/test/models/agent_rpc_session_test.rb`
+- Modify: `cybros/lib/cybros/programmable_agent_fixture.rb`
+- Modify: `cybros/test/lib/cybros/programmable_agent_fixture_test.rb`
+- Modify: `cybros/test/e2e/programmable_agent_approval_resume.spec.ts`
 
 **Step 1: Write the failing test**
 
@@ -275,6 +329,7 @@ Cover:
 - leftover `execution_target.list` fixture/test references are removed
 - context-pressure memory flush remains `claw` policy and still uses the shared admitted operation envelope
 - production `before_agent_step` no longer ships fixture/scenario behavior
+- any still-needed staged-mutation / approval fixture behavior now lives in test-only fixture or harness code rather than the bundled production hook
 
 **Step 2: Run test to verify it fails**
 
@@ -286,7 +341,7 @@ Expected: FAIL because dead compatibility leftovers and fixture-only branches st
 
 **Step 3: Write minimal implementation**
 
-Keep `memory` in `claw`. Do not move callback-backed `memory` policy into `cybros`. Delete leftover `execution_target` references and fixture-only branches instead of preserving them.
+Keep `memory` in `claw`. Do not move callback-backed `memory` policy into `cybros`. Before deleting production branches, port any still-needed staged-mutation and approval test scenarios into `Cybros::ProgrammableAgentFixture` or equivalent test-only harness code. Then delete leftover `execution_target` references and fixture-only branches instead of preserving them.
 
 **Step 4: Run test to verify it passes**
 
@@ -300,20 +355,29 @@ Expected: PASS
 
 ```bash
 cd /Users/jasl/Workspaces/Cybros/cybros
-git add agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/test/support/contract_assertions.rb cybros/test/models/agent_rpc_session_test.rb
+git add agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/test/support/contract_assertions.rb cybros/test/models/agent_rpc_session_test.rb cybros/lib/cybros/programmable_agent_fixture.rb cybros/test/lib/cybros/programmable_agent_fixture_test.rb cybros/test/e2e/programmable_agent_approval_resume.spec.ts
 git commit -m "refactor: delete execution target leftovers and fixture branches"
 ```
 
-### Task 7: Collapse Workspace Bootstrap And Kernel Authority Tasks
+### Task 7: Collapse Workspace Bootstrap, Delete Legacy Workspace Naming, And Kernel Authority Tasks
 
 **Files:**
 - Modify: `cybros/app/services/agents/workspace_bootstrap.rb`
 - Modify: `cybros/app/services/agents/workspace_initializer.rb`
+- Modify: `cybros/app/models/conversation.rb`
+- Modify: `cybros/app/services/conversations/workspace_initializer.rb`
+- Modify: `cybros/app/services/conversations/attachment_transfer_service.rb`
 - Modify: `cybros/lib/cybros/bootstrap/tools.rb`
+- Modify: `agents/claw/lib/cybros/agents/claw/tool_executor.rb`
 - Modify: `agents/claw/lib/cybros/agents/claw/workspace_bootstrap.rb`
 - Modify: `cybros/test/services/agents/bootstrap_bundled_default_service_test.rb`
+- Modify: `cybros/test/services/conversations/workspace_initializer_test.rb`
 - Modify: `agents/claw/test/integration/rpc_contract_test.rb`
+- Modify: `cybros/test/integration/conversation_bootstrap_dispatch_test.rb`
 - Modify: `cybros/test/integration/bootstrap_lifecycle_test.rb`
+- Modify: `cybros/test/integration/programmable_agent_execution_context_test.rb`
+- Modify: `cybros/test/integration/external_agent_attachment_transfer_test.rb`
+- Modify: `cybros/test/lib/cybros/programmable_agent/tool_execution_test.rb`
 
 **Step 1: Write the failing test**
 
@@ -324,20 +388,22 @@ Cover:
 - bundled `claw` still defines the bootstrap content it needs
 - pre-turn `cybros_seed_message` still works through its explicit bootstrap path
 - turn-scoped `cybros_generate_title` and `cybros_enqueue_lane_summary` still work through the queue-first path
+- live workspace payloads and attachment descriptors no longer export `logical_workspace_*`
+- bundled `claw` resolves workspace only from current `root_path` / `conversation_path` / `lane_path` / `cwd` fields
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/integration/bootstrap_lifecycle_test.rb`
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/services/conversations/workspace_initializer_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/bootstrap_lifecycle_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/external_agent_attachment_transfer_test.rb test/lib/cybros/programmable_agent/tool_execution_test.rb`
 
-Expected: FAIL because workspace bootstrap is still duplicated and authority/tool admission is not fully unified.
+Expected: FAIL because workspace bootstrap is still duplicated, authority/tool admission is not fully unified, and compatibility-only workspace naming still exists in live payloads.
 
 **Step 3: Write minimal implementation**
 
-Collapse the duplication instead of adding adapters. If the simpler cut is to delete one implementation and update callers immediately, do that.
+Collapse the duplication instead of adding adapters. Delete `logical_workspace_*` from live runtime payloads and attachment descriptors instead of translating them forward. If the simpler cut is to delete one implementation and update callers immediately, do that.
 
 **Step 4: Run test to verify it passes**
 
-Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/integration/bootstrap_lifecycle_test.rb`
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/services/agents/bootstrap_bundled_default_service_test.rb test/services/conversations/workspace_initializer_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/bootstrap_lifecycle_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/external_agent_attachment_transfer_test.rb test/lib/cybros/programmable_agent/tool_execution_test.rb`
 
 Expected: PASS
 
@@ -345,8 +411,8 @@ Expected: PASS
 
 ```bash
 cd /Users/jasl/Workspaces/Cybros/cybros
-git add cybros/app/services/agents/workspace_bootstrap.rb cybros/app/services/agents/workspace_initializer.rb cybros/lib/cybros/bootstrap/tools.rb agents/claw/lib/cybros/agents/claw/workspace_bootstrap.rb cybros/test/services/agents/bootstrap_bundled_default_service_test.rb agents/claw/test/integration/rpc_contract_test.rb cybros/test/integration/bootstrap_lifecycle_test.rb
-git commit -m "refactor: collapse workspace bootstrap ownership"
+git add cybros/app/services/agents/workspace_bootstrap.rb cybros/app/services/agents/workspace_initializer.rb cybros/app/models/conversation.rb cybros/app/services/conversations/workspace_initializer.rb cybros/app/services/conversations/attachment_transfer_service.rb cybros/lib/cybros/bootstrap/tools.rb agents/claw/lib/cybros/agents/claw/tool_executor.rb agents/claw/lib/cybros/agents/claw/workspace_bootstrap.rb cybros/test/services/agents/bootstrap_bundled_default_service_test.rb cybros/test/services/conversations/workspace_initializer_test.rb agents/claw/test/integration/rpc_contract_test.rb cybros/test/integration/conversation_bootstrap_dispatch_test.rb cybros/test/integration/bootstrap_lifecycle_test.rb cybros/test/integration/programmable_agent_execution_context_test.rb cybros/test/integration/external_agent_attachment_transfer_test.rb cybros/test/lib/cybros/programmable_agent/tool_execution_test.rb
+git commit -m "refactor: collapse workspace bootstrap ownership and delete legacy workspace naming"
 ```
 
 ### Task 8: Destructive Cleanup, Full Verification, And Live Conversation Proof
