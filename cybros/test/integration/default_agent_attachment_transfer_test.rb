@@ -41,7 +41,8 @@ class DefaultAgentAttachmentTransferTest < ActiveSupport::TestCase
 
       assert_equal false, tool_result.error?
       assert_equal "workspace_copy", metadata.fetch("transfer_mode")
-      assert_predicate conversation.reload, :logical_workspace_initialized?
+      conversation.reload
+      assert_predicate conversation.workspace_root_path, :directory?
       assert_equal agent.workspace_root_path.to_s, metadata.dig("workspace", "root_path")
       assert_equal conversation.workspace_root_path.to_s, metadata.dig("workspace", "conversation_path")
       assert_equal conversation.workspace_root_path.to_s, metadata.dig("workspace", "cwd")

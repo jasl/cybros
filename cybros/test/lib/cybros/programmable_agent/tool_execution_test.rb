@@ -103,16 +103,7 @@ class Cybros::ProgrammableAgent::ToolExecutionTest < ActiveSupport::TestCase
         lifecycle_singleton.define_method(:call!, original_call)
       end
 
-      expected_workspace = {
-        "conversation_id" => conversation.id,
-        "root_path" => conversation.agent.workspace_root_path.to_s,
-        "conversation_path" => conversation.workspace_root_path.to_s,
-        "lane_path" => conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id).to_s,
-        "cwd" => conversation.workspace_root_path.to_s,
-        "logical_workspace_key" => conversation.logical_workspace_key,
-        "logical_workspace_root_path" => conversation.logical_workspace_root_path,
-        "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at.iso8601,
-      }
+      expected_workspace = conversation.workspace_payload(lane_id: conversation.chat_lane.id)
 
       assert_equal expected_workspace, captured.dig(:request_payload, "session_context", "workspace")
       assert_equal expected_workspace, captured.dig(:request_payload, "execution_context", "workspace")

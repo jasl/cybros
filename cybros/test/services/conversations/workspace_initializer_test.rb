@@ -27,7 +27,11 @@ class Conversations::WorkspaceInitializerTest < ActiveSupport::TestCase
       assert_equal Pathname.new(@workspace_root).join("bundled", "claw").cleanpath.to_s, first.fetch(:agent_root_path)
       assert_equal Pathname.new(first.fetch(:agent_root_path)).join("conversations", conversation.id).cleanpath.to_s, first.fetch(:conversation_path)
       assert_equal Pathname.new(first.fetch(:conversation_path)).join(".lanes", conversation.chat_lane.id).cleanpath.to_s, lane_path
-      assert_predicate conversation.logical_workspace_initialized_at, :present?
+      assert_equal first.fetch(:root_path), first.fetch(:agent_root_path)
+      assert_equal first.fetch(:cwd), first.fetch(:conversation_path)
+      assert_nil conversation.logical_workspace_key
+      assert_nil conversation.logical_workspace_root_path
+      assert_nil conversation.logical_workspace_initialized_at
       assert Dir.exist?(first.fetch(:agent_root_path))
       assert Dir.exist?(first.fetch(:conversation_path))
       assert Dir.exist?(lane_path)

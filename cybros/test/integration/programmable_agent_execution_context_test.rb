@@ -47,12 +47,7 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
 
       DAG::Runner.run_node!(agent_node.id)
 
-      expected_workspace = {
-        "conversation_id" => conversation.id,
-        "logical_workspace_key" => conversation.logical_workspace_key,
-        "logical_workspace_root_path" => conversation.logical_workspace_root_path,
-        "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at.iso8601,
-      }
+      expected_workspace = conversation.workspace_payload(lane_id: agent_node.lane_id)
       expected_prepare_session_context = {
         "account_id" => Account.instance.id,
         "user_id" => conversation.user_id,
@@ -170,6 +165,7 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         instrumenter: AgentCore::Observability::NullInstrumenter.new,
       )
     built_context = AgentCore::DAG::ExecutionContextBuilder.build(node: child.dag_graph.nodes.find(child_agent.id), runtime: runtime)
+    expected_workspace = child.workspace_payload(lane_id: child_agent.lane_id)
 
     assert_equal(
       {
@@ -186,6 +182,7 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
           "parent_turn_id" => parent_agent.turn_id,
           "parent_dag_node_id" => parent_agent.id,
         },
+        "workspace" => expected_workspace,
       },
       built_context.attributes.dig(:cybros, :execution_context),
     )

@@ -200,9 +200,10 @@ module TestSupport
                     "session_context" => {
                       "workspace" => {
                         "conversation_id" => "conversation:test-default",
-                        "logical_workspace_key" => "conversation-conversation:test-default",
-                        "logical_workspace_root_path" => "/tmp/cybros/conversations/conversation:test-default",
-                        "logical_workspace_initialized_at" => "2026-03-13T09:00:00Z"
+                        "root_path" => "/tmp/cybros",
+                        "conversation_path" => "/tmp/cybros/conversations/conversation:test-default",
+                        "lane_path" => "/tmp/cybros/conversations/conversation:test-default/.lanes/lane:test-default",
+                        "cwd" => "/tmp/cybros/conversations/conversation:test-default"
                       }
                     },
                     "attachment_manifest" => [
@@ -756,9 +757,10 @@ module TestSupport
               "session_context" => {
                 "workspace" => {
                   "conversation_id" => "conversation:test-default",
-                  "logical_workspace_key" => "conversation-conversation:test-default",
-                  "logical_workspace_root_path" => "/tmp/cybros/conversations/conversation:test-default",
-                  "logical_workspace_initialized_at" => "2026-03-13T09:00:00Z"
+                  "root_path" => "/tmp/cybros",
+                  "conversation_path" => "/tmp/cybros/conversations/conversation:test-default",
+                  "lane_path" => "/tmp/cybros/conversations/conversation:test-default/.lanes/lane:test-default",
+                  "cwd" => "/tmp/cybros/conversations/conversation:test-default"
                 }
               },
               "attachment_manifest" => [
@@ -779,7 +781,10 @@ module TestSupport
         system_entry = payload.dig("result", "planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "content")
 
         assert_includes system_entry, "Review the uploaded files"
-        assert_includes system_entry, "Conversation workspace: /tmp/cybros/conversations/conversation:test-default"
+        assert_includes system_entry, "Agent root: /tmp/cybros"
+        assert_includes system_entry, "Conversation path: /tmp/cybros/conversations/conversation:test-default"
+        assert_includes system_entry, "Lane path: /tmp/cybros/conversations/conversation:test-default/.lanes/lane:test-default"
+        assert_includes system_entry, "cwd: /tmp/cybros/conversations/conversation:test-default"
         assert_includes system_entry, "Attachment 1: screenshot-error.png (image/png)"
         assert_includes system_entry, "Attachment 2: logs.txt (text/plain)"
       ensure

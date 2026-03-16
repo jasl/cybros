@@ -61,10 +61,15 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
     assert_equal "attachment_import", metadata.dig("imports", 0, "remote_ref", "kind")
     assert_equal 1, attachment_calls.length
     descriptor = attachment_calls.first.fetch("attachments").first
+    expected_workspace = conversation.workspace_payload
     assert_match %r{/rails/active_storage/blobs/redirect/}, descriptor.fetch("signed_download_url")
     refute descriptor.key?("bytes_base64")
     assert_equal conversation.id.to_s, descriptor.dig("conversation", "id").to_s
-    assert_equal conversation.reload.logical_workspace_key.to_s, descriptor.dig("workspace", "logical_workspace_key").to_s
+    assert_equal expected_workspace.fetch("root_path"), descriptor.dig("workspace", "root_path")
+    assert_equal expected_workspace.fetch("conversation_path"), descriptor.dig("workspace", "conversation_path")
+    assert_equal expected_workspace.fetch("lane_path"), descriptor.dig("workspace", "lane_path")
+    assert_equal expected_workspace.fetch("cwd"), descriptor.dig("workspace", "cwd")
+    refute descriptor.fetch("workspace").key?("logical_workspace_key")
   end
 
   test "transfer_attachments rejects RPC import payloads with foreign or missing attachment ids" do

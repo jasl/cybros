@@ -1195,8 +1195,9 @@ class RPCContractTest < ActiveSupport::TestCase
     if workspace_root
       workspace_payload = {
         "conversation_id" => "conversation:test-default",
-        "logical_workspace_key" => "conversation-test-default",
-        "logical_workspace_root_path" => workspace_root
+        "root_path" => workspace_root,
+        "conversation_path" => workspace_root,
+        "cwd" => workspace_root,
       }
       params["session_context"] = { "workspace" => workspace_payload }
       params["execution_context"] = { "workspace" => workspace_payload }
@@ -1226,9 +1227,6 @@ class RPCContractTest < ActiveSupport::TestCase
         "conversation_path" => conversation_path,
         "lane_path" => lane_path,
         "cwd" => conversation_path,
-        "logical_workspace_key" => "conversation-#{conversation_id.tr(':', '-')}",
-        "logical_workspace_root_path" => conversation_path,
-        "logical_workspace_initialized_at" => Time.current.change(usec: 0).iso8601
       }
     }
   end

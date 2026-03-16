@@ -222,8 +222,6 @@ module Conversations
               "title" => conversation.title.to_s,
             },
             "workspace" => workspace.slice(
-              "logical_workspace_key",
-              "logical_workspace_root_path",
               "root_path",
               "conversation_path",
               "lane_path",

@@ -13,7 +13,7 @@ class ConversationBootstrapDispatchTest < ActiveSupport::TestCase
     FileUtils.rm_rf(@workspace_root) if @workspace_root.present?
   end
 
-  test "main lane first user message lazily initializes the conversation workspace" do
+  test "conversation bootstrap materializes the workspace under the agent root before the first main-lane user message" do
     conversation = nil
 
     with_default_agent_workspace_root(@workspace_root) do
@@ -24,27 +24,27 @@ class ConversationBootstrapDispatchTest < ActiveSupport::TestCase
         )
 
       conversation.reload
-      refute conversation.logical_workspace_initialized?
+      assert_predicate conversation.workspace_root_path, :directory?
+      assert_predicate conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id), :directory?
+      assert_equal Pathname.new(@workspace_root).join("bundled", "claw", "conversations", conversation.id).cleanpath, conversation.workspace_root_path
       assert_nil conversation.logical_workspace_key
       assert_nil conversation.logical_workspace_root_path
+      assert_nil conversation.logical_workspace_initialized_at
+
+      first_path = conversation.workspace_root_path
+      first_lane_path = conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id)
 
       conversation.append_user_message!(content: "Initialize the workspace")
 
       conversation.reload
-      assert conversation.logical_workspace_initialized?
-      assert_equal "conversation-#{conversation.id}", conversation.logical_workspace_key
-      assert_equal Pathname.new(@workspace_root).join("conversations", "conversation-#{conversation.id}").cleanpath.to_s, conversation.logical_workspace_root_path
-      assert_predicate conversation.logical_workspace_initialized_at, :present?
-      assert Dir.exist?(conversation.logical_workspace_root_path)
-
-      first_key = conversation.logical_workspace_key
-      first_path = conversation.logical_workspace_root_path
+      assert_equal first_path, conversation.workspace_root_path
+      assert_equal first_lane_path, conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id)
 
       conversation.append_user_message!(content: "Keep the same workspace")
 
       conversation.reload
-      assert_equal first_key, conversation.logical_workspace_key
-      assert_equal first_path, conversation.logical_workspace_root_path
+      assert_equal first_path, conversation.workspace_root_path
+      assert_equal first_lane_path, conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id)
     end
   end
 

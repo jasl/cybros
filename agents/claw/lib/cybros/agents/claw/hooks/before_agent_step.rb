@@ -121,13 +121,11 @@ module Cybros
               conversation_path = workspace["conversation_path"].to_s.strip
               lane_path = workspace["lane_path"].to_s.strip
               cwd = workspace["cwd"].to_s.strip
-              workspace_key = workspace["logical_workspace_key"].to_s.strip
 
               lines << "Agent root: #{root_path}" unless root_path.empty?
               lines << "Conversation path: #{conversation_path}" unless conversation_path.empty?
               lines << "Lane path: #{lane_path}" unless lane_path.empty?
               lines << "cwd: #{cwd}" unless cwd.empty?
-              lines << "Workspace key: #{workspace_key}" unless workspace_key.empty?
             else
               lines << "Agent root: unavailable"
             end
@@ -293,7 +291,7 @@ module Cybros
           end
 
           def workspace_root_path(workspace)
-            workspace["root_path"].to_s.strip.presence || workspace["logical_workspace_root_path"].to_s.strip
+            workspace["root_path"].to_s.strip
           end
 
           def scope_state_lines(label:, path:)

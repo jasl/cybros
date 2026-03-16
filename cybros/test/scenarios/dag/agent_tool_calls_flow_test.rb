@@ -121,8 +121,6 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
       def workspace_payload
         {
           "conversation_id" => "conversation:test",
-          "logical_workspace_key" => "conversation-test",
-          "logical_workspace_root_path" => workspace_root.to_s,
           "root_path" => agent_root.to_s,
           "conversation_path" => workspace_root.to_s,
           "lane_path" => lane_root&.to_s,
@@ -280,8 +278,6 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       def workspace_payload
         {
           "conversation_id" => "conversation:test",
-          "logical_workspace_key" => "conversation-test",
-          "logical_workspace_root_path" => workspace_root.to_s,
           "root_path" => agent_root.to_s,
           "conversation_path" => workspace_root.to_s,
           "lane_path" => lane_root&.to_s,

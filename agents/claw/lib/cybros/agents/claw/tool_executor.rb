@@ -93,7 +93,6 @@ module Cybros
 
             root_path =
               workspace.fetch("root_path", "").to_s.strip.presence ||
-                workspace.fetch("logical_workspace_root_path", "").to_s.strip.presence ||
                 workspace.fetch("conversation_path", "").to_s.strip.presence ||
                 workspace.fetch("cwd", "").to_s.strip.presence
             next if root_path.blank?

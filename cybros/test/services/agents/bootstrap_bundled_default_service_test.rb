@@ -61,6 +61,7 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
       assert_predicate agent.workspace_root_path.join("USER.md"), :file?
       assert_predicate agent.workspace_root_path.join("MEMORY.md"), :file?
       assert_predicate agent.workspace_root_path.join("memory"), :directory?
+      assert_predicate agent.workspace_root_path.join("memory", Date.current.strftime("%Y-%m-%d.md")), :file?
     end
   end
 
@@ -129,6 +130,7 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
     assert_equal "Seed user\n", destination_root.join("USER.md").read
     assert_equal "Seed skill\n", destination_root.join("skills/example-skill/SKILL.md").read
     assert_predicate destination_root.join("memory"), :directory?
+    assert_predicate destination_root.join("memory", Date.current.strftime("%Y-%m-%d.md")), :file?
 
     destination_root.join("SOUL.md").write("Live soul\n")
     File.write(File.join(@fixture_source_root, "prompts", "SOUL.md"), "Changed bundled soul\n")

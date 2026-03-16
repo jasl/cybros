@@ -50,16 +50,11 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       agent_node = result.fetch(:agent_node)
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
 
-      assert_predicate conversation.reload, :logical_workspace_initialized?
+      conversation.reload
 
       run_claimed_nodes_until_idle!(graph: conversation.root_graph)
 
-      expected_workspace = {
-        "conversation_id" => conversation.id,
-        "logical_workspace_key" => conversation.logical_workspace_key,
-        "logical_workspace_root_path" => conversation.logical_workspace_root_path,
-        "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at.iso8601,
-      }
+      expected_workspace = conversation.workspace_payload(lane_id: agent_node.lane_id)
       expected_manifest =
         Conversations::AttachmentManifestBuilder.build(
           conversation: conversation,

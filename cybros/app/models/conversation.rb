@@ -210,21 +210,6 @@ class Conversation < ApplicationRecord
     {}
   end
 
-  def logical_workspace_initialized?
-    logical_workspace_key.to_s.present? &&
-      logical_workspace_root_path.to_s.present? &&
-      logical_workspace_initialized_at.present?
-  end
-
-  def logical_workspace_root
-    path = logical_workspace_root_path.to_s.strip
-    return nil if path.blank?
-
-    Pathname.new(path).cleanpath
-  rescue StandardError
-    nil
-  end
-
   def workspace_root_path
     agent.workspace_root_path.join("conversations", id.to_s).cleanpath
   end
@@ -236,16 +221,17 @@ class Conversation < ApplicationRecord
   def workspace_payload(lane_id: nil)
     lane_id = lane_id.presence || chat_lane&.id
     initialized = Conversations::WorkspaceInitializer.initialize!(conversation: self)
+    lane_path =
+      if lane_id.present?
+        Conversations::WorkspaceInitializer.materialize_lane_directory!(conversation: self, lane_id: lane_id).to_s
+      end
 
     {
       "conversation_id" => id,
-      "root_path" => agent.workspace_root_path.to_s,
-      "conversation_path" => workspace_root_path.to_s,
-      "lane_path" => lane_id.present? ? lane_workspace_root_path(lane_id: lane_id).to_s : nil,
-      "cwd" => workspace_root_path.to_s,
-      "logical_workspace_key" => initialized.fetch(:logical_workspace_key).to_s,
-      "logical_workspace_root_path" => initialized.fetch(:logical_workspace_root_path).to_s,
-      "logical_workspace_initialized_at" => initialized.fetch(:logical_workspace_initialized_at)&.iso8601,
+      "root_path" => initialized.fetch(:root_path).to_s,
+      "conversation_path" => initialized.fetch(:conversation_path).to_s,
+      "lane_path" => lane_path,
+      "cwd" => initialized.fetch(:cwd).to_s,
     }.compact
   end
 
