@@ -61,6 +61,8 @@ Whenever `claw` asks the runtime to do work, that work should use the same admit
 
 `proposal or tool call -> validation -> turn_internal_tasks -> DAG task -> approval if needed -> execution -> receipt`
 
+This rule applies to turn-scoped work. Pre-turn bootstrap is a bounded exception in this cut unless the implementation first introduces a synthetic bootstrap turn and anchor node.
+
 ### No New Durable Entity Rule
 
 The durable queue remains `turn_internal_tasks`.
@@ -128,7 +130,7 @@ Recommended programming shape:
 seq = OperationSequence.new(origin: "bootstrap_proposal")
 
 seq << OperationCall.tool(
-  logical_tool_name: "bash",
+  logical_tool_name: "exec",
   arguments: { "command" => "bundle check" },
   reason: "Verify dependencies",
   idempotency_key: "bootstrap.bundle_check"
@@ -183,10 +185,17 @@ The new flow is:
 2. apply policy and runtime-surface review
 3. compute approval preview if needed
 4. build one or more `OperationCall` objects
-5. enqueue them into `turn_internal_tasks`
-6. let the existing scheduler/materializer create DAG task nodes later
+5. create the shared continuation agent node needed for the current turn, if the tool loop requires follow-up execution
+6. enqueue them into `turn_internal_tasks`
+7. let the existing scheduler/materializer splice queued task nodes ahead of that continuation later
 
 This keeps validation close to the point where the model emitted the call, but moves execution staging onto the same queue-backed path already used by other internal operations.
+
+Important implementation note:
+
+- current `TurnInternalTasks::Materializer` only knows how to splice continuations for task-sourced rows
+- direct tool-loop rows are sourced from an `agent_message`
+- the cut therefore has to teach the materializer how to preserve the shared continuation node for agent-message sourced direct tool calls
 
 ## Built-In Tools And Agent-Proxied Tools
 
@@ -222,7 +231,7 @@ Bootstrap should be split into content vs authority.
 - execution and receipts
 - the durable fact that bootstrap has or has not been applied
 
-Bootstrap work is therefore just a sequence of admitted operations, not a special side channel.
+Bootstrap work is therefore just a sequence of admitted operations, not a special side channel, except for the narrow pre-turn `on_conversation_created` case if no synthetic bootstrap turn is introduced in this cut.
 
 ## Workspace Bootstrap
 
@@ -256,6 +265,7 @@ This is an explicit experimental carve-out, not an accident.
 This cut should remove the following instead of adapting them:
 
 - dead `execution_target.list` logic and `planning.execution_target_proposal`
+- test/support leftovers that still normalize `execution_target.list` as a live callback method
 - fixture/scenario behavior from the production `before_agent_step` hook
 - duplicate workspace bootstrap implementations
 - compatibility-only runtime payload branches that only exist to support old queue or workspace naming

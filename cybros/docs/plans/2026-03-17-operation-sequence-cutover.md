@@ -16,6 +16,7 @@
 - If PostgreSQL is not accepting connections, start it using the repository/environment instructions before continuing.
 - If the refactor makes existing development or test data incompatible, reset the database instead of adding compatibility code.
 - Treat `bin/ci`, `bin/ci_e2e`, and one real `bin/dev` conversation as required acceptance gates, not optional follow-up checks.
+- Treat `pg_isready` as a hard gate before every `bin/rails` invocation in this plan. Do not rely on memory.
 
 ### Task 1: Lock The Unified-Path Acceptance Criteria
 
@@ -31,7 +32,7 @@
 Cover these acceptance scenarios:
 
 - a validated direct tool call no longer creates its task node directly inside `AgentMessageExecutor`
-- a hook-authored bootstrap sequence lands in `turn_internal_tasks` in stable order
+- a turn-scoped hook-authored bootstrap sequence lands in `turn_internal_tasks` in stable order
 - a validated `subagent_spawn` or `subagent_run` call also uses the queue-first path
 - invalid or denied operations do not create admitted queue rows
 
@@ -41,15 +42,15 @@ Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/inte
 
 Expected: FAIL because direct tool calls still materialize DAG task nodes immediately and the queue path is not yet shared.
 
-**Step 3: Write minimal implementation**
+**Step 3: Land the test-only baseline**
 
 Only change test code and fixtures needed to express the cutover expectations. Do not implement runtime changes in this step.
 
-**Step 4: Run test to verify it passes**
+**Step 4: Run test to verify it still fails for the expected reason**
 
 Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/integration/programmable_agent_execution_test.rb test/integration/programmable_agent_tool_routing_test.rb test/integration/bootstrap_lifecycle_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb`
 
-Expected: PASS
+Expected: FAIL because the runtime cutover has not been implemented yet.
 
 **Step 5: Commit**
 
@@ -155,6 +156,7 @@ git commit -m "feat: preserve operation envelope on queued tasks"
 **Files:**
 - Modify: `cybros/lib/agent_core/dag/executors/agent_message_executor.rb`
 - Modify: `cybros/lib/agent_core/dag/executors/task_executor.rb`
+- Modify: `cybros/app/services/turn_internal_tasks/materializer.rb`
 - Modify: `cybros/test/integration/programmable_agent_execution_test.rb`
 - Modify: `cybros/test/integration/programmable_agent_tool_routing_test.rb`
 - Modify: `cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
@@ -167,6 +169,7 @@ Cover:
 - validated direct tool calls are admitted into `turn_internal_tasks`
 - required approval is computed before admission and survives queue materialization
 - queue-materialized direct calls still execute through `TaskExecutor`
+- queue-materialized direct calls still preserve a shared continuation agent node for the turn
 - `subagent_run` keeps its `parallel_safe` execution behavior after the queue cutover
 
 **Step 2: Run test to verify it fails**
@@ -180,8 +183,10 @@ Expected: FAIL because direct tool calls still create DAG task nodes inside `exp
 Implement:
 
 - validation and approval preview stay near `expand_tool_loop!`
+- the tool loop still creates the continuation agent node needed for the current turn
 - admitted calls are converted into `OperationCall` objects
 - admitted calls are flushed into `turn_internal_tasks`
+- `TurnInternalTasks::Materializer` learns to splice agent-message sourced queue rows ahead of that continuation
 - `TaskExecutor` continues to execute queue-materialized tasks without a second executor path
 
 Do not add a new durable queue model.
@@ -196,11 +201,11 @@ Expected: PASS
 
 ```bash
 cd /Users/jasl/Workspaces/Cybros/cybros
-git add cybros/lib/agent_core/dag/executors/agent_message_executor.rb cybros/lib/agent_core/dag/executors/task_executor.rb cybros/test/integration/programmable_agent_execution_test.rb cybros/test/integration/programmable_agent_tool_routing_test.rb cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb cybros/test/scenarios/dag/programmable_agent_subagent_fanout_test.rb
+git add cybros/lib/agent_core/dag/executors/agent_message_executor.rb cybros/lib/agent_core/dag/executors/task_executor.rb cybros/app/services/turn_internal_tasks/materializer.rb cybros/test/integration/programmable_agent_execution_test.rb cybros/test/integration/programmable_agent_tool_routing_test.rb cybros/test/lib/agent_core/dag/task_executor_runtime_surface_test.rb cybros/test/scenarios/dag/programmable_agent_subagent_fanout_test.rb
 git commit -m "feat: queue direct tool calls before execution"
 ```
 
-### Task 5: Route Programmable Hook Operations Through The Same Queue Path
+### Task 5: Cut The Hook Contract Over On Both Sides
 
 **Files:**
 - Modify: `cybros/lib/cybros/programmable_agent/hook_envelope.rb`
@@ -208,47 +213,6 @@ git commit -m "feat: queue direct tool calls before execution"
 - Modify: `cybros/test/lib/cybros/programmable_agent/hook_envelope_test.rb`
 - Modify: `cybros/test/lib/cybros/programmable_agent/hook_action_executor_test.rb`
 - Modify: `cybros/test/integration/programmable_agent_hooks_test.rb`
-
-**Step 1: Write the failing test**
-
-Cover:
-
-- hook-authored operations and direct tool calls now serialize to the same queue envelope
-- ordered bootstrap operations preserve stable queue order
-- no new durable entity is introduced for hook-authored sequences
-- old `execution_target` proposal branches are gone from the hook contract
-
-**Step 2: Run test to verify it fails**
-
-Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/hook_envelope_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/integration/programmable_agent_hooks_test.rb`
-
-Expected: FAIL because hook-created tasks still use the older task-specific admission path and dead compatibility logic still exists.
-
-**Step 3: Write minimal implementation**
-
-Implement:
-
-- map hook-authored operations onto `OperationCall` or `OperationSequence`
-- reuse existing `turn_internal_tasks` admission
-- remove dead `execution_target.list` and `planning.execution_target_proposal` handling instead of translating it
-
-**Step 4: Run test to verify it passes**
-
-Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/hook_envelope_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/integration/programmable_agent_hooks_test.rb`
-
-Expected: PASS
-
-**Step 5: Commit**
-
-```bash
-cd /Users/jasl/Workspaces/Cybros/cybros
-git add cybros/lib/cybros/programmable_agent/hook_envelope.rb cybros/lib/cybros/programmable_agent/hook_action_executor.rb cybros/test/lib/cybros/programmable_agent/hook_envelope_test.rb cybros/test/lib/cybros/programmable_agent/hook_action_executor_test.rb cybros/test/integration/programmable_agent_hooks_test.rb
-git commit -m "feat: unify hook operations with queue admission"
-```
-
-### Task 6: Rewrite Bundled Claw Bootstrap Hooks And Remove Production Fixture Branches
-
-**Files:**
 - Modify: `agents/claw/lib/cybros/agents/claw/hooks/on_conversation_created.rb`
 - Modify: `agents/claw/lib/cybros/agents/claw/hooks/on_lane_first_user_message.rb`
 - Modify: `agents/claw/lib/cybros/agents/claw/hooks/on_context_pressure.rb`
@@ -260,23 +224,32 @@ git commit -m "feat: unify hook operations with queue admission"
 
 Cover:
 
-- bootstrap hooks emit ordered queueable operation intents instead of relying on ad hoc task payload assumptions
-- context-pressure memory flush remains `claw` policy, but now uses the shared admitted operation envelope
-- production `before_agent_step` no longer ships fixture/scenario behavior
+- hook-authored operations and direct tool calls now serialize to the same queue envelope
+- ordered bootstrap operations preserve stable queue order
+- pre-turn `on_conversation_created` is handled explicitly, either through a synthetic bootstrap turn or as a documented bounded exception
+- no new durable entity is introduced for hook-authored sequences
+- old `execution_target` proposal branches are gone from the hook contract
 
 **Step 2: Run test to verify it fails**
 
-Run: `cd /Users/jasl/Workspaces/Cybros/cybros/agents/claw && bin/test`
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/hook_envelope_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/integration/programmable_agent_hooks_test.rb`
 
-Expected: FAIL because the bundled hook payloads and contract assertions still describe the older task-oriented contract and fixture behavior.
+Expected: FAIL because the producer and consumer sides still speak the older task-oriented hook contract.
 
 **Step 3: Write minimal implementation**
 
-Keep `memory` in `claw`. Do not move callback-backed `memory` policy into `cybros`. Only change how hook-authored work is described and admitted.
+Implement:
+
+- map hook-authored operations onto `OperationCall` or `OperationSequence`
+- reuse existing `turn_internal_tasks` admission
+- land producer and consumer contract changes together instead of splitting them across separate tasks
+- remove dead `execution_target.list` and `planning.execution_target_proposal` handling instead of translating it
 
 **Step 4: Run test to verify it passes**
 
 Run: `cd /Users/jasl/Workspaces/Cybros/cybros/agents/claw && bin/test`
+
+Then run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/lib/cybros/programmable_agent/hook_envelope_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/integration/programmable_agent_hooks_test.rb`
 
 Expected: PASS
 
@@ -284,8 +257,51 @@ Expected: PASS
 
 ```bash
 cd /Users/jasl/Workspaces/Cybros/cybros
-git add agents/claw/lib/cybros/agents/claw/hooks/on_conversation_created.rb agents/claw/lib/cybros/agents/claw/hooks/on_lane_first_user_message.rb agents/claw/lib/cybros/agents/claw/hooks/on_context_pressure.rb agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/test/integration/rpc_contract_test.rb agents/claw/test/support/contract_assertions.rb
-git commit -m "refactor: rewrite claw hook operation payloads"
+git add cybros/lib/cybros/programmable_agent/hook_envelope.rb cybros/lib/cybros/programmable_agent/hook_action_executor.rb cybros/test/lib/cybros/programmable_agent/hook_envelope_test.rb cybros/test/lib/cybros/programmable_agent/hook_action_executor_test.rb cybros/test/integration/programmable_agent_hooks_test.rb agents/claw/lib/cybros/agents/claw/hooks/on_conversation_created.rb agents/claw/lib/cybros/agents/claw/hooks/on_lane_first_user_message.rb agents/claw/lib/cybros/agents/claw/hooks/on_context_pressure.rb agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/test/integration/rpc_contract_test.rb agents/claw/test/support/contract_assertions.rb
+git commit -m "feat: cut hook operation contract over to operation sequences"
+```
+
+### Task 6: Delete ExecutionTarget Leftovers And Fixture-Only Branches
+
+**Files:**
+- Modify: `agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb`
+- Modify: `agents/claw/test/support/contract_assertions.rb`
+- Modify: `cybros/test/models/agent_rpc_session_test.rb`
+
+**Step 1: Write the failing test**
+
+Cover:
+
+- leftover `execution_target.list` fixture/test references are removed
+- context-pressure memory flush remains `claw` policy and still uses the shared admitted operation envelope
+- production `before_agent_step` no longer ships fixture/scenario behavior
+
+**Step 2: Run test to verify it fails**
+
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/agents/claw && bin/test`
+
+Then run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/models/agent_rpc_session_test.rb`
+
+Expected: FAIL because dead compatibility leftovers and fixture-only branches still exist.
+
+**Step 3: Write minimal implementation**
+
+Keep `memory` in `claw`. Do not move callback-backed `memory` policy into `cybros`. Delete leftover `execution_target` references and fixture-only branches instead of preserving them.
+
+**Step 4: Run test to verify it passes**
+
+Run: `cd /Users/jasl/Workspaces/Cybros/cybros/agents/claw && bin/test`
+
+Then run: `cd /Users/jasl/Workspaces/Cybros/cybros/cybros && bin/rails test test/models/agent_rpc_session_test.rb`
+
+Expected: PASS
+
+**Step 5: Commit**
+
+```bash
+cd /Users/jasl/Workspaces/Cybros/cybros
+git add agents/claw/lib/cybros/agents/claw/hooks/before_agent_step.rb agents/claw/test/support/contract_assertions.rb cybros/test/models/agent_rpc_session_test.rb
+git commit -m "refactor: delete execution target leftovers and fixture branches"
 ```
 
 ### Task 7: Collapse Workspace Bootstrap And Kernel Authority Tasks
@@ -306,7 +322,8 @@ Cover:
 - only one workspace bootstrap implementation survives
 - bootstrap authority stays in `cybros`
 - bundled `claw` still defines the bootstrap content it needs
-- `cybros_seed_message`, `cybros_generate_title`, and `cybros_enqueue_lane_summary` still work through the queue-first path
+- pre-turn `cybros_seed_message` still works through its explicit bootstrap path
+- turn-scoped `cybros_generate_title` and `cybros_enqueue_lane_summary` still work through the queue-first path
 
 **Step 2: Run test to verify it fails**
 
@@ -386,10 +403,11 @@ bin/dev
 
 Manual acceptance checklist:
 
+- if the database was reset, visit `/setup/new`, create the initial owner account, and sign in before running the conversation proof
 - complete one real conversation using the configured OpenRouter-backed model from `.env`
 - verify the conversation still boots and returns a usable answer
 - trigger at least one normal tool call and verify it executes successfully
-- verify a bootstrap-generated operation sequence lands on the queue and completes
+- verify a turn-scoped bootstrap-generated operation sequence lands on the queue and completes
 - verify a `subagent_spawn` or `subagent_run` operation still works end-to-end
 
 Only stop `bin/dev` after collecting the evidence needed to prove the new path works.
