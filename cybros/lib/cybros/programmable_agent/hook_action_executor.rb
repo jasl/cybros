@@ -37,6 +37,7 @@ module Cybros
         @terminal_action = nil
         @appended_tasks = []
         @prepended_tasks = []
+        @staged_append_operations = []
         @continuation_materialized = false
         @prepend_continuation_materialized = false
         @deferred_anchor = false
@@ -68,6 +69,7 @@ module Cybros
             )
           end
         end
+        flush_staged_append_operations!
         materialize_prepend_continuation!
         materialize_append_continuation!
 
@@ -164,7 +166,11 @@ module Cybros
           ensure_active_placeholder!(placeholder_node) unless queue_backed_append_hook?
 
           manifest, tool_route = route_for_created_task!(action)
-          enqueue_append_task!(action, action_index: action_index, manifest: manifest, tool_route: tool_route)
+          if queue_backed_append_hook?
+            stage_append_operation!(action, action_index: action_index, manifest: manifest, tool_route: tool_route)
+          else
+            enqueue_append_task_row!(action:, action_index:, manifest:, tool_route:, queue_payload: nil)
+          end
         end
 
         def apply_bootstrap_append_task!(action, action_index:)
@@ -460,7 +466,7 @@ module Cybros
           anchor_node&.id&.to_s.presence || "lane:#{bootstrap_lane_for_append!.id}"
         end
 
-        def enqueue_append_task!(action, action_index:, manifest:, tool_route:)
+        def enqueue_append_task_row!(action:, action_index:, manifest:, tool_route:, queue_payload:)
           queue_lane = queue_lane_for_append!
           queue_graph = queue_lane.graph
           queue_turn_id = queue_turn_id_for_append!
@@ -485,8 +491,8 @@ module Cybros
               source_node_id: anchor_node&.id || placeholder_node&.id,
               source_hook_name: hook_name,
               logical_tool_name: action.logical_tool_name.to_s,
-              input: AgentCore::Utils.deep_stringify_keys(action.input.is_a?(Hash) ? action.input : {}),
-              authored_metadata: AgentCore::Utils.deep_stringify_keys(action.metadata),
+              input: queued_append_input(action: action, queue_payload: queue_payload),
+              authored_metadata: queued_append_metadata(action: action, queue_payload: queue_payload),
               tool_surface_id: routing[:tool_surface_id],
               capability_registry_snapshot_id: routing[:capability_registry_snapshot_id],
               effective_tool_id: routing[:effective_tool_id],
@@ -498,6 +504,78 @@ module Cybros
             row.queue_position ||= next_queue_position_for(queue_graph: queue_graph, turn_id: queue_turn_id)
             row.save!
           end
+        end
+
+        def stage_append_operation!(action, action_index:, manifest:, tool_route:)
+          staged_append_operation_sequence << queued_append_operation_call(action, action_index: action_index)
+          staged_append_operations << {
+            action: action,
+            action_index: action_index,
+            manifest: manifest,
+            tool_route: tool_route,
+          }
+        end
+
+        def flush_staged_append_operations!
+          return if staged_append_operations.empty?
+
+          payloads = staged_append_operation_sequence.to_queue_payloads
+          staged_append_operations.each_with_index do |entry, index|
+            enqueue_append_task_row!(
+              action: entry.fetch(:action),
+              action_index: entry.fetch(:action_index),
+              manifest: entry.fetch(:manifest),
+              tool_route: entry.fetch(:tool_route),
+              queue_payload: payloads.fetch(index),
+            )
+          end
+        end
+
+        def staged_append_operation_sequence
+          @staged_append_operation_sequence ||= Cybros::ProgrammableAgent::OperationSequence.new(origin: hook_name)
+        end
+
+        def staged_append_operations
+          @staged_append_operations
+        end
+
+        def queued_append_operation_call(action, action_index:)
+          metadata = normalized_action_metadata(action)
+
+          Cybros::ProgrammableAgent::OperationCall.tool(
+            logical_tool_name: action.logical_tool_name.to_s,
+            arguments: action.input.is_a?(Hash) ? action.input : {},
+            reason: metadata["reason"].to_s.presence || "hook_create_task",
+            origin: metadata["origin"].to_s.presence || hook_name,
+            tool_call_id: created_task_tool_call_id(action_index, placement: action.placement.to_s),
+            approval_hint: metadata["approval_hint"].is_a?(Hash) ? metadata["approval_hint"] : nil,
+            idempotency_key: metadata["idempotency_key"].to_s.presence || created_task_idempotency_key(action_index, placement: action.placement.to_s),
+          )
+        end
+
+        def queued_append_input(action:, queue_payload:)
+          return AgentCore::Utils.deep_stringify_keys(action.input.is_a?(Hash) ? action.input : {}) unless queue_payload
+
+          {
+            "tool_call_id" => queue_payload.fetch("tool_call_id"),
+            "arguments" => queue_payload.fetch("arguments"),
+            "requested_name" => action.logical_tool_name.to_s,
+            "name_resolution" => "exact",
+            "arguments_resolution" => "original",
+          }
+        end
+
+        def queued_append_metadata(action:, queue_payload:)
+          metadata = normalized_action_metadata(action)
+          return metadata unless queue_payload
+
+          metadata.except("reason", "origin", "approval_hint", "idempotency_key").merge(
+            queue_payload.except("tool_call_id", "logical_tool_name", "arguments").compact
+          )
+        end
+
+        def normalized_action_metadata(action)
+          AgentCore::Utils.deep_stringify_keys(action.metadata.is_a?(Hash) ? action.metadata : {})
         end
 
         def queued_routing_metadata(manifest:, tool_route:)

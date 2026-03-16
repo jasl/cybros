@@ -84,7 +84,12 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     queued = queued_rows.first
     assert_equal "subagent_spawn", queued.logical_tool_name
-    assert_equal({ "name" => "Helper", "prompt" => "Summarize this" }, queued.input)
+    assert_shared_queue_envelope!(
+      row: queued,
+      requested_name: "subagent_spawn",
+      arguments: { "name" => "Helper", "prompt" => "Summarize this" },
+      origin: "after_task_notice",
+    )
     assert_equal tool_surface.tool_surface_id, queued.tool_surface_id
     assert_equal snapshot.snapshot_id, queued.capability_registry_snapshot_id
     assert_equal route.effective_tool_id, queued.effective_tool_id
@@ -269,8 +274,13 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     assert_equal "Summarizing subagent", agent_node.reload.body_output_preview.fetch("content")
     assert_equal task_node.id, queued.source_node_id
-    assert_equal({ "source" => "after_subagent_result" }, queued.authored_metadata)
-    assert_equal({ "name" => "Helper", "prompt" => "Follow up on the result" }, queued.input)
+    assert_shared_queue_envelope!(
+      row: queued,
+      requested_name: "subagent_spawn",
+      arguments: { "name" => "Helper", "prompt" => "Follow up on the result" },
+      origin: "after_subagent_result",
+      extra_authored_metadata: { "source" => "after_subagent_result" },
+    )
     assert_empty(
       conversation.root_graph.nodes
         .where(node_type: Messages::Task.node_type_key, turn_id: turn_id)
@@ -332,6 +342,75 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
     queued = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.sole
     assert_equal "subagent_run", queued.logical_tool_name
     assert_equal "parallel_safe", queued.execution_mode
+  end
+
+  test "multiple append follow-up tasks share one ordered operation sequence envelope" do
+    conversation = create_conversation!(title: "Hook action append sequence")
+    turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
+    agent_node = nil
+
+    conversation.dag_graph.mutate!(turn_id: turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Hello",
+          metadata: {},
+        )
+
+      agent_node =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::RUNNING,
+          metadata: {},
+        )
+
+      m.create_edge(from_node: user, to_node: agent_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    program = create_program!
+    snapshot = build_capability_snapshot(program_id: program.id)
+    spawn_route = snapshot.route_for!("subagent_spawn")
+    run_route = snapshot.route_for!("subagent_run")
+    tool_surface =
+      Cybros::ProgrammableAgent::ToolSurfaceManifest.new(
+        capability_registry_snapshot: snapshot,
+        selected_tool_ids: [spawn_route.effective_tool_id, run_route.effective_tool_id],
+        tool_surface_label: "fixture-after-task-notice-sequence",
+      )
+    run = create_conversation_run!(conversation: conversation, dag_node_id: agent_node.id, program: program, snapshot: snapshot, tool_surface: tool_surface)
+
+    Cybros::ProgrammableAgent::HookActionExecutor.execute!(
+      hook_name: "after_task_notice",
+      conversation_run: run,
+      actions: [
+        Cybros::ProgrammableAgent::HookActions::CreateTask.new(
+          type: "create_task",
+          logical_tool_name: "subagent_spawn",
+          input: { "name" => "Scout", "prompt" => "Collect context" },
+          placement: "append",
+          metadata: nil,
+        ),
+        Cybros::ProgrammableAgent::HookActions::CreateTask.new(
+          type: "create_task",
+          logical_tool_name: "subagent_run",
+          input: { "name" => "Worker", "prompt" => "Draft the response" },
+          placement: "append",
+          metadata: nil,
+        ),
+      ],
+      placeholder_node: agent_node,
+    )
+
+    queued_rows = conversation.turn_internal_tasks.where(turn_id: turn_id).ordered.to_a
+
+    assert_equal 2, queued_rows.size
+    assert_equal [10, 20], queued_rows.map(&:queue_position)
+    assert_equal [0, 1], queued_rows.map { |row| row.authored_metadata.fetch("step_index") }
+    assert_equal [2, 2], queued_rows.map { |row| row.authored_metadata.fetch("step_count") }
+    assert_equal 1, queued_rows.map { |row| row.authored_metadata.fetch("sequence_id") }.uniq.size
+    assert_equal "after_task_notice", queued_rows.first.authored_metadata.fetch("origin")
+    assert_equal "after_task_notice", queued_rows.last.authored_metadata.fetch("origin")
   end
 
   test "append follow-up tasks on a task anchor do not create a duplicate continuation before materialization" do
@@ -421,7 +500,13 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     assert_equal [existing_continuation.id], continuations.map(&:id)
     assert_equal task_node.id, queued.source_node_id
-    assert_equal({ "source" => "after_subagent_result" }, queued.authored_metadata)
+    assert_shared_queue_envelope!(
+      row: queued,
+      requested_name: "subagent_spawn",
+      arguments: { "name" => "Helper", "prompt" => "Follow up on the result" },
+      origin: "after_subagent_result",
+      extra_authored_metadata: { "source" => "after_subagent_result" },
+    )
     assert conversation.root_graph.edges.active.exists?(
       from_node_id: task_node.id,
       to_node_id: existing_continuation.id,
@@ -608,6 +693,8 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     assert_equal "materialized", queued.status
     assert queued.materialized_task_node_id.present?
+    assert_equal "after_subagent_result", queued.authored_metadata.fetch("origin")
+    assert_equal 0, queued.authored_metadata.fetch("attempt")
   end
 
   test "prepend tasks on a task anchor defer the current tool into a cloned continuation" do
@@ -1034,6 +1121,10 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
             implementation_ref: "kernel://compact_context",
           },
           {
+            logical_tool_name: "subagent_spawn",
+            implementation_ref: "kernel://subagent_spawn",
+          },
+          {
             logical_tool_name: "subagent_run",
             implementation_ref: "kernel://subagent_run",
             execution_mode: "parallel_safe",
@@ -1076,5 +1167,22 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
         "implementation_ref" => tool.implementation_ref,
         "execution_mode" => tool.execution_mode,
       }
+    end
+
+    def assert_shared_queue_envelope!(row:, requested_name:, arguments:, origin:, extra_authored_metadata: {})
+      assert_equal requested_name, row.logical_tool_name
+      assert_equal requested_name, row.input.fetch("requested_name")
+      assert_equal "exact", row.input.fetch("name_resolution")
+      assert_equal "original", row.input.fetch("arguments_resolution")
+      assert_equal arguments, row.input.fetch("arguments")
+      assert row.input.fetch("tool_call_id").present?
+      assert_equal origin, row.authored_metadata.fetch("origin")
+      assert_equal "hook_create_task", row.authored_metadata.fetch("reason")
+      assert row.authored_metadata.fetch("idempotency_key").present?
+      assert_match(/\Aopseq_/, row.authored_metadata.fetch("sequence_id"))
+      assert_equal 1, row.authored_metadata.fetch("step_count")
+      extra_authored_metadata.each do |key, value|
+        assert_equal value, row.authored_metadata.fetch(key.to_s)
+      end
     end
 end
