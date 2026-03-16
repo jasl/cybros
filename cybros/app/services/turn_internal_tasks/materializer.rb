@@ -141,9 +141,10 @@ module TurnInternalTasks
       end
 
       def task_body_input(row)
-        arguments = AgentCore::Utils.deep_stringify_keys(row.input.is_a?(Hash) ? row.input : {})
+        envelope = row.operation_envelope
+        arguments = AgentCore::Utils.deep_stringify_keys(envelope["arguments"].is_a?(Hash) ? envelope["arguments"] : {})
         payload = {
-          "tool_call_id" => "turn_internal_task:#{row.id}",
+          "tool_call_id" => envelope["tool_call_id"],
           "requested_name" => row.logical_tool_name,
           "name" => row.logical_tool_name,
           "name_resolution" => "exact",
@@ -153,6 +154,13 @@ module TurnInternalTasks
           "source" => "turn_internal_task_queue",
           "logical_tool_name" => row.logical_tool_name,
         }
+        payload["reason"] = envelope["reason"] if envelope["reason"].present?
+        payload["origin"] = envelope["origin"] if envelope["origin"].present?
+        payload["approval_hint"] = envelope["approval_hint"] if envelope["approval_hint"].present?
+        payload["idempotency_key"] = envelope["idempotency_key"] if envelope["idempotency_key"].present?
+        payload["sequence_id"] = envelope["sequence_id"] if envelope["sequence_id"].present?
+        payload["step_index"] = envelope["step_index"] unless envelope["step_index"].nil?
+        payload["step_count"] = envelope["step_count"] unless envelope["step_count"].nil?
         payload["capability_registry_snapshot_id"] = row.capability_registry_snapshot_id if row.capability_registry_snapshot_id.present?
         payload["tool_surface_id"] = row.tool_surface_id if row.tool_surface_id.present?
         payload["effective_tool_id"] = row.effective_tool_id if row.effective_tool_id.present?

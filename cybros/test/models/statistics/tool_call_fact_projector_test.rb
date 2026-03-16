@@ -476,6 +476,81 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
     assert_equal "default-agent-capabilities:v1", fact.agent_capabilities_version
   end
 
+  test "projects queue-materialized tasks that carry the operation envelope" do
+    conversation = create_conversation!
+    graph = conversation.root_graph
+    lane = conversation.chat_lane
+    turn = graph.turns.create!(lane: lane, metadata: {})
+
+    agent =
+      create_agent_node!(
+        graph: graph,
+        lane_id: lane.id,
+        turn_id: turn.id,
+        provider_key: "openai",
+        model_ref: "openai/gpt-5.4",
+      )
+
+    row =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: graph,
+        lane: lane,
+        turn: turn,
+        turn_id: turn.id,
+        source_node: agent,
+        source_hook_name: "agent_message_tool_loop",
+        source_fingerprint: "direct-tool:tc_queue",
+        logical_tool_name: "search",
+        input: {
+          "tool_call_id" => "tc_queue",
+          "arguments" => {
+            "query" => "TODO",
+          },
+        },
+        authored_metadata: {
+          "origin" => "direct_tool_loop",
+          "reason" => "inspect repo state",
+          "approval_hint" => {
+            "mode" => "confirm",
+          },
+          "idempotency_key" => "direct.search.tc_queue",
+          "sequence_id" => "opseq_fixture",
+          "step_index" => 0,
+          "step_count" => 1,
+        },
+        capability_registry_snapshot_id: "csnap_fixture",
+        effective_tool_id: "etool_fixture",
+        implementation_source: "agent",
+        implementation_ref: "agent://search",
+        execution_mode: "serial",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+
+    task = graph.nodes.find(row.reload.materialized_task_node_id)
+    task.mark_running!
+    task.mark_finished!(
+      payload: {
+        "result" => AgentCore::Resources::Tools::ToolResult.success(text: "ok").to_h,
+      },
+    )
+
+    fact = Statistics::ToolCallFactProjector.project!(task.reload)
+
+    assert_equal "tc_queue", fact.tool_call_id
+    assert_equal "search", fact.logical_tool_name
+    assert_equal "search", fact.requested_name
+    assert_equal "search", fact.resolved_name
+    assert_equal "turn_internal_task_queue", fact.source
+    assert_equal "csnap_fixture", fact.capability_registry_snapshot_id
+    assert_equal "agent", fact.implementation_source
+    assert_equal "agent://search", fact.implementation_ref
+    assert_equal "success", fact.tool_outcome
+  end
+
   private
 
     def create_agent_node!(graph:, lane_id:, turn_id:, provider_key:, model_ref:)

@@ -210,6 +210,62 @@ class TurnInternalTaskTest < ActiveSupport::TestCase
     end
   end
 
+  test "builds a normalized operation envelope from input and authored metadata" do
+    conversation = create_conversation!(title: "Queue envelope")
+    created = conversation.append_user_message!(content: "Hello")
+    user_node = created.fetch(:user_node)
+    turn = conversation.dag_graph.turns.find(user_node.turn_id)
+
+    row =
+      TurnInternalTask.create!(
+        conversation: conversation,
+        graph: conversation.dag_graph,
+        lane: conversation.chat_lane,
+        turn: turn,
+        turn_id: turn.id,
+        source_node: user_node,
+        source_hook_name: "agent_message_tool_loop",
+        source_fingerprint: "direct-tool:tc_env",
+        logical_tool_name: "search",
+        input: {
+          tool_call_id: "tc_env",
+          arguments: {
+            query: "TODO",
+          },
+        },
+        authored_metadata: {
+          origin: "bootstrap_proposal",
+          reason: "inspect repo state",
+          approval_hint: {
+            mode: "confirm",
+          },
+          idempotency_key: "bootstrap.search",
+          sequence_id: "opseq_fixture",
+          step_index: 0,
+          step_count: 2,
+        },
+        execution_mode: "serial",
+        queue_position: 10,
+        status: "queued",
+      )
+
+    assert_equal(
+      {
+        "tool_call_id" => "tc_env",
+        "logical_tool_name" => "search",
+        "arguments" => { "query" => "TODO" },
+        "reason" => "inspect repo state",
+        "origin" => "bootstrap_proposal",
+        "approval_hint" => { "mode" => "confirm" },
+        "idempotency_key" => "bootstrap.search",
+        "sequence_id" => "opseq_fixture",
+        "step_index" => 0,
+        "step_count" => 2,
+      },
+      row.operation_envelope,
+    )
+  end
+
   test "requires any materialized task node to belong to the selected graph" do
     conversation = create_conversation!(title: "Queue materialized node")
     created = conversation.append_user_message!(content: "Hello")

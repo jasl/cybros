@@ -32,6 +32,23 @@ class TurnInternalTask < ApplicationRecord
   validate :source_node_matches_turn_and_lane
   validate :materialized_task_node_matches_graph
 
+  def operation_envelope
+    metadata = authored_metadata.is_a?(Hash) ? authored_metadata : {}
+
+    {
+      "tool_call_id" => input.fetch("tool_call_id", "turn_internal_task:#{id}").to_s,
+      "logical_tool_name" => logical_tool_name,
+      "arguments" => operation_arguments,
+      "reason" => metadata["reason"],
+      "origin" => metadata["origin"],
+      "approval_hint" => metadata["approval_hint"],
+      "idempotency_key" => metadata["idempotency_key"],
+      "sequence_id" => metadata["sequence_id"],
+      "step_index" => metadata["step_index"],
+      "step_count" => metadata["step_count"],
+    }
+  end
+
   private
 
     def normalize_attributes
@@ -99,6 +116,14 @@ class TurnInternalTask < ApplicationRecord
         payload.map { |element| normalize_json(element) }
       else
         payload
+      end
+    end
+
+    def operation_arguments
+      if input.is_a?(Hash) && input["arguments"].is_a?(Hash)
+        normalize_json(input["arguments"])
+      else
+        normalize_json(input || {})
       end
     end
 end

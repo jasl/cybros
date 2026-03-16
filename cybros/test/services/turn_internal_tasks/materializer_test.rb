@@ -201,9 +201,56 @@ class TurnInternalTasks::MaterializerTest < ActiveSupport::TestCase
     assert_empty queued_tasks
   end
 
+  test "materialize_ready! projects the operation envelope into the materialized task" do
+    conversation = create_conversation!(title: "Materializer operation envelope")
+    graph = conversation.dag_graph
+    row =
+      create_queue_row!(
+        conversation: conversation,
+        queue_position: 10,
+        execution_mode: "serial",
+        source_fingerprint: "envelope-10",
+        source_hook_name: "agent_message_tool_loop",
+        logical_tool_name: "search",
+        input: {
+          "tool_call_id" => "tc_env",
+          "arguments" => {
+            "query" => "TODO",
+          },
+        },
+        authored_metadata: {
+          "origin" => "bootstrap_proposal",
+          "reason" => "inspect repo state",
+          "approval_hint" => {
+            "mode" => "confirm",
+          },
+          "idempotency_key" => "bootstrap.search",
+          "sequence_id" => "opseq_fixture",
+          "step_index" => 0,
+          "step_count" => 2,
+        },
+      )
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+
+    task = graph.nodes.find(row.reload.materialized_task_node_id)
+
+    assert_equal "tc_env", task.body_input.fetch("tool_call_id")
+    assert_equal "search", task.body_input.fetch("logical_tool_name")
+    assert_equal({"query" => "TODO"}, task.body_input.fetch("arguments"))
+    assert_equal "inspect repo state", task.body_input.fetch("reason")
+    assert_equal "bootstrap_proposal", task.body_input.fetch("origin")
+    assert_equal({"mode" => "confirm"}, task.body_input.fetch("approval_hint"))
+    assert_equal "bootstrap.search", task.body_input.fetch("idempotency_key")
+    assert_equal "opseq_fixture", task.body_input.fetch("sequence_id")
+    assert_equal 0, task.body_input.fetch("step_index")
+    assert_equal 2, task.body_input.fetch("step_count")
+    assert_equal "bootstrap_proposal", task.metadata.dig("authored_metadata", "origin")
+  end
+
   private
 
-    def create_queue_row!(conversation:, queue_position:, execution_mode:, turn: nil, source_node: nil, source_fingerprint: nil)
+    def create_queue_row!(conversation:, queue_position:, execution_mode:, turn: nil, source_node: nil, source_fingerprint: nil, source_hook_name: "after_task_notice", logical_tool_name: "subagent_spawn", input: nil, authored_metadata: nil)
       graph = conversation.dag_graph
       lane = conversation.chat_lane
       turn ||= graph.turns.create!(lane: lane, metadata: {})
@@ -222,11 +269,11 @@ class TurnInternalTasks::MaterializerTest < ActiveSupport::TestCase
         lane: lane,
         turn: turn,
         source_node: source_node,
-        source_hook_name: "after_task_notice",
+        source_hook_name: source_hook_name,
         source_fingerprint: source_fingerprint || "notice-#{queue_position}",
-        logical_tool_name: "subagent_spawn",
-        input: { "name" => "worker-#{queue_position}" },
-        authored_metadata: { "source" => "test" },
+        logical_tool_name: logical_tool_name,
+        input: input || { "name" => "worker-#{queue_position}" },
+        authored_metadata: authored_metadata || { "source" => "test" },
         execution_mode: execution_mode,
         queue_position: queue_position,
         status: "queued",
