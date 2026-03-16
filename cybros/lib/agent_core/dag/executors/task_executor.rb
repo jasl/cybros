@@ -373,6 +373,7 @@ module AgentCore
                 "capability_registry_snapshot_id" => route.capability_registry_snapshot_id,
                 "tool_surface_id" => route.tool_surface_id,
               }.select { |_key, value| value.blank? }.keys
+            missing -= optional_programmable_route_fields_for(node)
 
             if missing.any?
               return nil unless strict
@@ -431,6 +432,15 @@ module AgentCore
             end
           rescue StandardError
             "unknown"
+          end
+
+          def optional_programmable_route_fields_for(node)
+            input = node.body_input.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(node.body_input) : {}
+            return [] unless input["source"].to_s == "turn_internal_task_queue"
+
+            ["tool_surface_id"]
+          rescue StandardError
+            []
           end
       end
     end

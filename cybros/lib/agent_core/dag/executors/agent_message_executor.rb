@@ -1331,6 +1331,7 @@ module AgentCore
             tool_policy = runtime.tool_policy
             diagnostic_level = diagnostic_level_for(node)
             budget_compact_task ||= enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
+            capability_snapshot = programmable_capability_snapshot(execution_context: execution_context)
             tool_surface_manifest = programmable_tool_surface_manifest(execution_context: execution_context)
 
             tool_calls = Array(message.tool_calls)
@@ -1419,6 +1420,8 @@ module AgentCore
             invalid = 0
 
             graph.mutate!(turn_id: node.turn_id) do |m|
+              continuation_attached = false
+              queued_direct_tasks_created = false
               next_node =
                 m.create_node(
                   node_type: node.node_type,
@@ -1441,6 +1444,7 @@ module AgentCore
 
                 m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                 m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                continuation_attached = true
                 emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                 tasks_created += 1
               end
@@ -1511,6 +1515,7 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  continuation_attached = true
                   emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                   emit_failed_activity!(
                     task: task,
@@ -1556,6 +1561,7 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  continuation_attached = true
                   emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                   emit_failed_activity!(
                     task: task,
@@ -1599,6 +1605,7 @@ module AgentCore
                 decision = reviewed_tool_call.fetch(:decision)
                 tool_route =
                   programmable_tool_route(
+                    capability_snapshot: capability_snapshot,
                     tool_surface_manifest: tool_surface_manifest,
                     requested_name: requested_name,
                     resolved_name: resolved_name,
@@ -1662,6 +1669,7 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  continuation_attached = true
                   emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                   emit_failed_activity!(
                     task: task,
@@ -1733,10 +1741,11 @@ module AgentCore
                             tool_surface_manifest: tool_surface_manifest,
                           ),
                           body_output: { "result" => tool_error.to_h },
-                        )
+                      )
 
                       m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                       m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      continuation_attached = true
                       emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                       emit_failed_activity!(
                         task: task,
@@ -1751,31 +1760,29 @@ module AgentCore
                     end
                   end
 
-                  task =
-                    m.create_node(
-                      node_type: "task",
-                      state: ::DAG::Node::PENDING,
-                      idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
-                      lane_id: node.lane_id,
-                      metadata: task_metadata,
-                      body_input: task_input_hash(
-                        tool_call_id: tool_call_id,
-                        requested_name: requested_name,
-                        name: resolved_name,
-                        name_resolution: name_resolution,
+                  enqueue_direct_tool_call!(
+                    graph: graph,
+                    source_node: node,
+                    tool_call:
+                      Cybros::ProgrammableAgent::OperationCall.tool(
+                        logical_tool_name: resolved_name,
                         arguments: arguments,
-                        arguments_resolution: arguments_resolution,
-                        repair: repair,
-                        source: task_source,
-                        tool_route: tool_route,
-                        tool_surface_manifest: tool_surface_manifest,
+                        reason: "llm_tool_call",
+                        origin: "agent_message_tool_loop",
+                        tool_call_id: tool_call_id,
+                        idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       ),
-                    )
+                    requested_name: requested_name,
+                    name_resolution: name_resolution,
+                    arguments_resolution: arguments_resolution,
+                    repair: repair,
+                    tool_route: tool_route,
+                    tool_surface_manifest: tool_surface_manifest,
+                    capability_snapshot: capability_snapshot,
+                    runtime: runtime,
+                  )
 
-                  m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
-                  m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
-                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
-
+                  queued_direct_tasks_created = true
                   tasks_created += 1
                 when :confirm
                   task_source = compact_context_task_source(name: resolved_name, source: source)
@@ -1834,10 +1841,11 @@ module AgentCore
                             tool_surface_manifest: tool_surface_manifest,
                           ),
                           body_output: { "result" => tool_error.to_h },
-                        )
+                      )
 
                       m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                       m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                      continuation_attached = true
                       emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                       emit_failed_activity!(
                         task: task,
@@ -1888,6 +1896,7 @@ module AgentCore
 
                     m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                     m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                    continuation_attached = true
                     emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                     emit_failed_activity!(
                       task: task,
@@ -1931,6 +1940,7 @@ module AgentCore
 
                     m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                     m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                    continuation_attached = true
                     emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                     emit_failed_activity!(
                       task: task,
@@ -1955,35 +1965,32 @@ module AgentCore
 
                   required_approvals += 1 if decision.required == true
 
-                  task =
-                    m.create_node(
-                      node_type: "task",
-                      state: ::DAG::Node::AWAITING_APPROVAL,
-                      idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
-                      lane_id: node.lane_id,
-                      metadata: task_metadata.merge("approval" => approval),
-                      body_input: task_input_hash(
-                        tool_call_id: tool_call_id,
-                        requested_name: requested_name,
-                        name: resolved_name,
-                        name_resolution: name_resolution,
+                  enqueue_direct_tool_call!(
+                    graph: graph,
+                    source_node: node,
+                    tool_call:
+                      Cybros::ProgrammableAgent::OperationCall.tool(
+                        logical_tool_name: resolved_name,
                         arguments: arguments,
-                        arguments_resolution: arguments_resolution,
-                        repair: repair,
-                        source: task_source,
-                        approval_preview: approval_preview,
-                        tool_route: tool_route,
-                        tool_surface_manifest: tool_surface_manifest,
+                        reason: "llm_tool_call",
+                        origin: "agent_message_tool_loop",
+                        tool_call_id: tool_call_id,
+                        approval_hint: { mode: "confirm" },
+                        idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       ),
-                    )
+                    requested_name: requested_name,
+                    name_resolution: name_resolution,
+                    arguments_resolution: arguments_resolution,
+                    repair: repair,
+                    approval_preview: approval_preview,
+                    approval: approval,
+                    tool_route: tool_route,
+                    tool_surface_manifest: tool_surface_manifest,
+                    capability_snapshot: capability_snapshot,
+                    runtime: runtime,
+                  )
 
-                  edge_type = decision.required == true && decision.deny_effect.to_s == "block" ? ::DAG::Edge::DEPENDENCY : ::DAG::Edge::SEQUENCE
-
-                  m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
-                  m.create_edge(from_node: task, to_node: next_node, edge_type: edge_type)
-                  emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
-                  emit_waiting_activity!(task: task, diagnostic_level: diagnostic_level, data: approval)
-
+                  queued_direct_tasks_created = true
                   tasks_created += 1
                 else
                   denied += 1
@@ -2017,6 +2024,7 @@ module AgentCore
 
                   m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
                   m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                  continuation_attached = true
                   emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
                   emit_failed_activity!(
                     task: task,
@@ -2028,6 +2036,11 @@ module AgentCore
                     },
                   )
                 end
+              end
+
+              if queued_direct_tasks_created && !continuation_attached
+                m.create_edge(from_node: node, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                continuation_attached = true
               end
             end
 
@@ -2363,6 +2376,17 @@ module AgentCore
             }
           end
 
+          def programmable_capability_snapshot(execution_context:)
+            payload =
+              execution_context.attributes.dig(:cybros, :capability_snapshot) ||
+                execution_context.attributes.dig(:cybros, "capability_snapshot") ||
+                execution_context.attributes.dig("cybros", :capability_snapshot) ||
+                execution_context.attributes.dig("cybros", "capability_snapshot")
+            return nil unless payload.is_a?(Hash) && payload.any?
+
+            Cybros::ProgrammableAgent::CapabilitySnapshot.restore(payload)
+          end
+
           def programmable_tool_surface_manifest(execution_context:)
             payload =
               execution_context.attributes.dig(:cybros, :tool_surface) ||
@@ -2371,25 +2395,158 @@ module AgentCore
                 execution_context.attributes.dig("cybros", "tool_surface")
             return nil unless payload.is_a?(Hash) && payload.any?
 
-            snapshot_payload =
-              execution_context.attributes.dig(:cybros, :capability_snapshot) ||
-                execution_context.attributes.dig(:cybros, "capability_snapshot") ||
-                execution_context.attributes.dig("cybros", :capability_snapshot) ||
-                execution_context.attributes.dig("cybros", "capability_snapshot")
-            return nil unless snapshot_payload.is_a?(Hash) && snapshot_payload.any?
+            snapshot = programmable_capability_snapshot(execution_context: execution_context)
+            return nil unless snapshot
 
-            snapshot = AgentCore::RuntimeSurface::ToolRoutingSnapshot.restore(snapshot_payload)
             AgentCore::RuntimeSurface::ToolSurfaceManifest.restore(
               payload,
               capability_registry_snapshot: snapshot,
             )
           end
 
-          def programmable_tool_route(tool_surface_manifest:, requested_name:, resolved_name:)
-            return nil unless tool_surface_manifest
+          def programmable_tool_route(capability_snapshot:, tool_surface_manifest:, requested_name:, resolved_name:)
+            if tool_surface_manifest
+              return tool_surface_manifest.effective_tool_for(resolved_name) ||
+                tool_surface_manifest.effective_tool_for(requested_name)
+            end
+            return nil unless capability_snapshot
 
-            tool_surface_manifest.effective_tool_for(resolved_name) ||
-              tool_surface_manifest.effective_tool_for(requested_name)
+            capability_snapshot.route_for(resolved_name) ||
+              capability_snapshot.route_for(requested_name)
+          end
+
+          def enqueue_direct_tool_call!(
+            graph:,
+            source_node:,
+            tool_call:,
+            requested_name:,
+            name_resolution:,
+            arguments_resolution:,
+            repair:,
+            approval_preview: nil,
+            approval: nil,
+            tool_route: nil,
+            tool_surface_manifest: nil,
+            capability_snapshot: nil,
+            runtime:
+          )
+            routing =
+              direct_tool_routing_metadata(
+                logical_tool_name: tool_call.logical_tool_name,
+                tool_route: tool_route,
+                tool_surface_manifest: tool_surface_manifest,
+                capability_snapshot: capability_snapshot,
+                runtime: runtime,
+              )
+            payload = tool_call.to_queue_payload
+            source_fingerprint = "direct_tool:#{source_node.id}:#{tool_call.tool_call_id}"
+
+            TurnInternalTask.find_by(turn_id: source_node.turn_id, source_fingerprint: source_fingerprint) ||
+              TurnInternalTask.create!(
+                conversation: direct_tool_conversation_for!(graph: graph, source_node: source_node),
+                graph: graph,
+                lane: source_node.lane,
+                turn: source_node.turn,
+                turn_id: source_node.turn_id,
+                source_node: source_node,
+                source_hook_name: "agent_message_tool_loop",
+                source_fingerprint: source_fingerprint,
+                logical_tool_name: tool_call.logical_tool_name,
+                input:
+                  direct_tool_queue_input(
+                    payload: payload,
+                    requested_name: requested_name,
+                    name_resolution: name_resolution,
+                    arguments_resolution: arguments_resolution,
+                    repair: repair,
+                    approval_preview: approval_preview,
+                  ),
+                authored_metadata: direct_tool_queue_metadata(payload: payload, approval: approval),
+                tool_surface_id: routing[:tool_surface_id],
+                capability_registry_snapshot_id: routing[:capability_registry_snapshot_id],
+                effective_tool_id: routing[:effective_tool_id],
+                implementation_source: routing[:implementation_source],
+                implementation_ref: routing[:implementation_ref],
+                execution_mode: routing[:execution_mode],
+                queue_position: next_queue_position_for(graph: graph, turn_id: source_node.turn_id),
+                status: "queued",
+              )
+          end
+
+          def direct_tool_queue_input(payload:, requested_name:, name_resolution:, arguments_resolution:, repair:, approval_preview:)
+            input = {
+              "tool_call_id" => payload.fetch("tool_call_id"),
+              "arguments" => payload.fetch("arguments"),
+              "requested_name" => requested_name.to_s,
+              "name_resolution" => name_resolution.to_s,
+              "arguments_resolution" => arguments_resolution.to_s,
+            }
+            input["repair"] = AgentCore::Utils.deep_stringify_keys(repair) if repair.present?
+            input["approval_preview"] = AgentCore::Utils.deep_stringify_keys(approval_preview) if approval_preview.present?
+            input
+          end
+
+          def direct_tool_queue_metadata(payload:, approval:)
+            payload.except("tool_call_id", "logical_tool_name", "arguments").compact.tap do |metadata|
+              metadata["approval"] = AgentCore::Utils.deep_stringify_keys(approval) if approval.present?
+            end
+          end
+
+          def direct_tool_routing_metadata(logical_tool_name:, tool_route:, tool_surface_manifest:, capability_snapshot:, runtime:)
+            tool_info = runtime.tools_registry.find(logical_tool_name)
+            execution_mode =
+              if tool_route.respond_to?(:execution_mode) && tool_route.execution_mode.present?
+                tool_route.execution_mode.to_s
+              else
+                tool_execution_mode_from_registry(tool_info)
+              end
+
+            {
+              tool_surface_id: tool_surface_manifest&.tool_surface_id,
+              capability_registry_snapshot_id: capability_snapshot&.snapshot_id,
+              effective_tool_id: tool_route&.effective_tool_id.to_s.presence,
+              implementation_source: tool_route&.implementation_source.to_s.presence,
+              implementation_ref: tool_route&.implementation_ref.to_s.presence,
+              execution_mode: execution_mode,
+            }
+          end
+
+          def tool_execution_mode_from_registry(tool_info)
+            metadata =
+              case tool_info
+              when AgentCore::Resources::Tools::Tool
+                tool_info.metadata
+              when Hash
+                tool_info.fetch(:metadata, tool_info.fetch("metadata", {}))
+              else
+                {}
+              end
+
+            execution_mode = metadata.is_a?(Hash) ? metadata[:execution_mode] || metadata["execution_mode"] : nil
+            execution_mode.to_s.presence || "serial"
+          rescue StandardError
+            "serial"
+          end
+
+          def direct_tool_conversation_for!(graph:, source_node:)
+            attached = source_node.lane&.attachable
+            return attached if attached.is_a?(Conversation)
+
+            attached = graph.attachable
+            return attached if attached.is_a?(Conversation)
+
+            AgentCore::ValidationError.raise!(
+              "direct tool queue admission requires a bound conversation",
+              code: "agent_core.dag.agent_message_executor.direct_tool_conversation_required",
+              details: {
+                graph_id: graph.id,
+                source_node_id: source_node.id,
+              },
+            )
+          end
+
+          def next_queue_position_for(graph:, turn_id:)
+            graph.turn_internal_tasks.where(turn_id: turn_id).maximum(:queue_position).to_i + 10
           end
 
           def task_input_hash(

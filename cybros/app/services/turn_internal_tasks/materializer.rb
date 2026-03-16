@@ -98,7 +98,7 @@ module TurnInternalTasks
           task =
             mutations.create_node(
               node_type: Messages::Task.node_type_key,
-              state: DAG::Node::PENDING,
+              state: task_state_for(row),
               idempotency_key: "turn_internal_task.materialize:#{row.id}",
               lane_id: row.lane_id,
               metadata: task_metadata(row),
@@ -109,7 +109,7 @@ module TurnInternalTasks
           if continuation.present?
             archive_sequence_edge!(from_node: row.source_node, to_node: continuation)
             mutations.create_edge(from_node: row.source_node, to_node: task, edge_type: DAG::Edge::SEQUENCE)
-            mutations.create_edge(from_node: task, to_node: continuation, edge_type: DAG::Edge::SEQUENCE)
+            mutations.create_edge(from_node: task, to_node: continuation, edge_type: continuation_edge_type_for(row))
           else
             mutations.create_edge(from_node: row.source_node, to_node: task, edge_type: DAG::Edge::SEQUENCE)
           end
@@ -129,7 +129,7 @@ module TurnInternalTasks
       end
 
       def task_metadata(row)
-        {
+        metadata = {
           "generated_by" => "turn_internal_task_queue",
           "hook_name" => row.source_hook_name,
           "placement" => "append",
@@ -138,22 +138,27 @@ module TurnInternalTasks
           "queue_position" => row.queue_position,
           "authored_metadata" => row.authored_metadata,
         }.compact
+        metadata["approval"] = task_approval(row) if task_approval(row).present?
+        metadata
       end
 
       def task_body_input(row)
         envelope = row.operation_envelope
         arguments = AgentCore::Utils.deep_stringify_keys(envelope["arguments"].is_a?(Hash) ? envelope["arguments"] : {})
+        row_input = row.input.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(row.input) : {}
         payload = {
           "tool_call_id" => envelope["tool_call_id"],
-          "requested_name" => row.logical_tool_name,
+          "requested_name" => row_input["requested_name"].presence || row.logical_tool_name,
           "name" => row.logical_tool_name,
-          "name_resolution" => "exact",
-          "arguments_resolution" => "original",
+          "name_resolution" => row_input["name_resolution"].presence || "exact",
+          "arguments_resolution" => row_input["arguments_resolution"].presence || "original",
           "arguments" => arguments,
           "arguments_summary" => summarize_arguments(arguments),
           "source" => "turn_internal_task_queue",
           "logical_tool_name" => row.logical_tool_name,
         }
+        payload["repair"] = row_input["repair"] if row_input["repair"].is_a?(Hash)
+        payload["approval_preview"] = row_input["approval_preview"] if row_input["approval_preview"].is_a?(Hash)
         payload["reason"] = envelope["reason"] if envelope["reason"].present?
         payload["origin"] = envelope["origin"] if envelope["origin"].present?
         payload["approval_hint"] = envelope["approval_hint"] if envelope["approval_hint"].present?
@@ -177,6 +182,8 @@ module TurnInternalTasks
       end
 
       def spliceable_continuation_for(row)
+        direct_tool_continuation = direct_tool_loop_continuation_for(row)
+        return direct_tool_continuation if direct_tool_continuation.present?
         return nil unless row.source_node.node_type.to_s == Messages::Task.node_type_key
 
         child_ids =
@@ -216,6 +223,39 @@ module TurnInternalTasks
           .sole
       rescue ActiveRecord::RecordNotFound, ActiveRecord::SoleRecordExceeded
         nil
+      end
+
+      def direct_tool_loop_continuation_for(row)
+        return nil unless row.source_hook_name.to_s == "agent_message_tool_loop"
+        return nil unless row.source_node.node_type.to_s == Messages::AgentMessage.node_type_key
+
+        graph.nodes.active.find_by(
+          turn_id: row.turn_id,
+          lane_id: row.lane_id,
+          node_type: Messages::AgentMessage.node_type_key,
+          idempotency_key: "agent_core.next_from:#{row.source_node_id}",
+        )
+      rescue StandardError
+        nil
+      end
+
+      def task_state_for(row)
+        task_approval(row).present? ? DAG::Node::AWAITING_APPROVAL : DAG::Node::PENDING
+      end
+
+      def continuation_edge_type_for(row)
+        approval = task_approval(row)
+        if approval.is_a?(Hash) && approval["required"] == true && approval["deny_effect"].to_s == "block"
+          DAG::Edge::DEPENDENCY
+        else
+          DAG::Edge::SEQUENCE
+        end
+      end
+
+      def task_approval(row)
+        metadata = row.authored_metadata.is_a?(Hash) ? row.authored_metadata : {}
+        approval = metadata["approval"]
+        approval.is_a?(Hash) ? approval : nil
       end
 
       def archive_sequence_edge!(from_node:, to_node:)

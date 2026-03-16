@@ -108,7 +108,16 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
       assert_equal ["search"], Array(captured_tools).map { |tool| tool_name_for(tool) }
       assert_equal run.snapshot.dig("capability_snapshot", "capability_registry_snapshot_id"), observed_planning_payload.dig("capability_snapshot", "capability_registry_snapshot_id")
       assert_equal "search", queued.logical_tool_name
-      assert_equal({"query" => "TODO"}, queued.input)
+      assert_equal(
+        {
+          "tool_call_id" => "tc_1",
+          "arguments" => { "query" => "TODO" },
+          "requested_name" => "search",
+          "name_resolution" => "exact",
+          "arguments_resolution" => "original",
+        },
+        queued.input,
+      )
       assert_equal route.effective_tool_id, queued.effective_tool_id
       assert_equal "agent", queued.implementation_source
       assert_equal "agent://search", queued.implementation_ref
@@ -351,14 +360,15 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
 
           DAG::Runner.run_node!(agent_node.id)
 
-          task =
-            conversation.root_graph.nodes
-              .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
-              .order(:id)
-              .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_write_soul" }
+          queued = direct_tool_queue_row(conversation: conversation, turn_id: agent_node.turn_id, tool_call_id: "tc_write_soul")
 
-          assert task,
-            "expected tool task for tc_write_soul, got=#{conversation.root_graph.nodes.where(turn_id: agent_node.turn_id).order(:id).map { |node| { id: node.id, type: node.node_type, state: node.state, idempotency_key: node.idempotency_key, body_input: node.body_input, body_output: node.body_output } }}"
+          assert queued,
+            "expected queued row for tc_write_soul, rows=#{conversation.turn_internal_tasks.where(turn_id: agent_node.turn_id).ordered.map { |row| { id: row.id, logical_tool_name: row.logical_tool_name, input: row.input, source_hook_name: row.source_hook_name, status: row.status } }}"
+
+          materialize_until_row!(graph: conversation.root_graph, row: queued)
+
+          task = conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
+
           assert_equal DAG::Node::AWAITING_APPROVAL, task.state
           assert_equal "write", task.body_input.fetch("name")
           assert_equal "../../SOUL.md", task.body_input.dig("arguments", "path")
@@ -427,13 +437,14 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
 
             DAG::Runner.run_node!(agent_node.id)
 
-            task =
-              conversation.root_graph.nodes
-                .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
-                .order(:id)
-                .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_install_skill" }
+            queued = direct_tool_queue_row(conversation: conversation, turn_id: agent_node.turn_id, tool_call_id: "tc_install_skill")
 
-            assert task
+            assert queued
+
+            materialize_until_row!(graph: conversation.root_graph, row: queued)
+
+            task = conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
+
             assert_equal DAG::Node::AWAITING_APPROVAL, task.state
             assert_equal "skills_install", task.body_input.fetch("name")
             assert_equal "github", task.body_input.dig("arguments", "source_kind")
@@ -498,13 +509,14 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
 
             DAG::Runner.run_node!(agent_node.id)
 
-            task =
-              conversation.root_graph.nodes
-                .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
-                .order(:id)
-                .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_install_repo_batch" }
+            queued = direct_tool_queue_row(conversation: conversation, turn_id: agent_node.turn_id, tool_call_id: "tc_install_repo_batch")
 
-            assert task
+            assert queued
+
+            materialize_until_row!(graph: conversation.root_graph, row: queued)
+
+            task = conversation.root_graph.nodes.find(queued.reload.materialized_task_node_id)
+
             assert_equal DAG::Node::AWAITING_APPROVAL, task.state
             assert_equal "repo_root_batch", task.metadata.dig("approval", "payload", "mode")
             assert_equal repo_root, task.metadata.dig("approval", "payload", "repo")
@@ -534,6 +546,26 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
     def direct_tool_queue_row(conversation:, turn_id:, tool_call_id:)
       direct_tool_queue_rows(conversation: conversation, turn_id: turn_id)
         .find { |row| row.input["tool_call_id"].to_s == tool_call_id.to_s }
+    end
+
+    def materialize_until_row!(graph:, row:, max_rounds: 6)
+      max_rounds.times do
+        TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+        row.reload
+        return row if row.materialized_task_node_id.present?
+
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+        break if claimed.empty?
+
+        perform_enqueued_jobs do
+          claimed.each { |node| DAG::Runner.run_node!(node.id) }
+        end
+      end
+
+      row.reload
+      assert row.materialized_task_node_id.present?,
+        "expected row #{row.id} to materialize, status=#{row.status}, queue=#{graph.turn_internal_tasks.where(turn_id: row.turn_id).ordered.map { |queued| { id: queued.id, hook: queued.source_hook_name, logical_tool_name: queued.logical_tool_name, status: queued.status, materialized_task_node_id: queued.materialized_task_node_id, queue_position: queued.queue_position } } }"
+      row
     end
 
     def write_skill!(root, name:, description:)
