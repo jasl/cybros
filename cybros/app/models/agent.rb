@@ -196,6 +196,10 @@ class Agent < ApplicationRecord
     AgentRPCSession.where(agent_id: id, status: "open").update_all(status: "closed", updated_at: at)
   end
 
+  def workspace_root_path
+    Agents::WorkspacePathResolver.resolve(agent: self)
+  end
+
   private
 
     def normalize_contract_fields

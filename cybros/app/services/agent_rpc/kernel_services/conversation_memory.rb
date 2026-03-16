@@ -1,91 +1,40 @@
 module AgentRPC
   module KernelServices
     class ConversationMemory
-      MEMORY_KEY = "cybros.conversation_memory.document".freeze
-
-      def self.get(conversation:)
-        new(conversation: conversation).get
+      def self.get(conversation:, scope: "conversation", lane: nil, target: nil)
+        new(conversation: conversation, scope: scope, lane: lane, target: target).get
       end
 
-      def self.put!(conversation:, body:)
-        new(conversation: conversation).put!(body: body)
+      def self.put!(conversation:, body:, scope: "conversation", lane: nil, target: nil)
+        new(conversation: conversation, scope: scope, lane: lane, target: target).put!(body: body)
       end
 
-      def self.append!(conversation:, text:)
-        new(conversation: conversation).append!(text: text)
+      def self.append!(conversation:, text:, scope: "conversation", lane: nil, target: nil)
+        new(conversation: conversation, scope: scope, lane: lane, target: target).append!(text: text)
       end
 
-      def initialize(conversation:)
+      def initialize(conversation:, scope:, lane:, target:)
         @conversation = conversation
+        @scope = scope
+        @lane = lane || conversation.chat_lane
+        @target = target
       end
 
       def get
-        document_response(body: current_body)
+        WorkspaceMemory.get(conversation: conversation, lane: lane, scope: scope, target: target)
       end
 
       def put!(body:)
-        persisted_body = body.to_s
-
-        root_conversation.with_lock do
-          entry = storage_lane.lane_kv_entries.find_or_initialize_by(key: MEMORY_KEY)
-          entry.value = document_value(body: persisted_body)
-          entry.save!
-        end
-
-        document_response(body: persisted_body)
+        WorkspaceMemory.put!(conversation: conversation, lane: lane, scope: scope, target: target, body: body)
       end
 
       def append!(text:)
-        persisted_body = nil
-
-        root_conversation.with_lock do
-          entry = storage_lane.lane_kv_entries.find_or_initialize_by(key: MEMORY_KEY)
-          persisted_body = extract_body(entry) + text.to_s
-          entry.value = document_value(body: persisted_body)
-          entry.save!
-        end
-
-        document_response(body: persisted_body)
+        WorkspaceMemory.append!(conversation: conversation, lane: lane, scope: scope, target: target, text: text)
       end
 
       private
 
-        attr_reader :conversation
-
-        def root_conversation
-          conversation.root_conversation || conversation
-        end
-
-        def storage_lane
-          root_conversation.chat_lane
-        end
-
-        def current_body
-          extract_body(storage_lane.lane_kv_entries.find_by(key: MEMORY_KEY))
-        end
-
-        def extract_body(entry)
-          value = entry&.value
-          return value.fetch("body", "").to_s if value.is_a?(Hash)
-
-          value.to_s
-        end
-
-        def document_value(body:)
-          {
-            "kind" => "conversation_memory",
-            "body" => body.to_s,
-          }
-        end
-
-        def document_response(body:)
-          {
-            "document" => {
-              "kind" => "conversation_memory",
-              "body" => body.to_s,
-            },
-          }
-        end
+        attr_reader :conversation, :scope, :lane, :target
     end
   end
 end

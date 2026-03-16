@@ -29,7 +29,7 @@ module Cybros
             dag_node_id: node.id,
             execution_scope: scope.fetch(:execution_scope),
             subagent: scope[:subagent],
-            workspace: workspace_payload_for(conversation),
+            workspace: workspace_payload_for(conversation, lane_id: node.lane_id),
           )
         end
 
@@ -48,7 +48,7 @@ module Cybros
             dag_node_id: node&.id || dag_node_id,
             execution_scope: scope.fetch(:execution_scope),
             subagent: scope[:subagent],
-            workspace: workspace_payload_for(conversation),
+            workspace: workspace_payload_for(conversation, lane_id: node&.lane_id || lane&.id),
           )
         end
 
@@ -119,15 +119,10 @@ module Cybros
               nil
             end
 
-            def workspace_payload_for(conversation)
-              return nil unless conversation&.logical_workspace_initialized?
+            def workspace_payload_for(conversation, lane_id:)
+              return nil if conversation.nil?
 
-              {
-                "conversation_id" => conversation.id,
-                "logical_workspace_key" => conversation.logical_workspace_key,
-                "logical_workspace_root_path" => conversation.logical_workspace_root_path,
-                "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at&.iso8601,
-              }.compact
+              conversation.workspace_payload(lane_id: lane_id)
             end
         end
       end

@@ -62,6 +62,8 @@ module AgentCore
                 directives = llm.fetch(:directives, nil)
 
                 message, tool_call_limit_metadata = apply_tool_call_limit(message, runtime: runtime)
+                budget_compact_task = enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
+                should_expand_tool_loop = message.has_tool_calls? || budget_compact_task.present?
 
                 output_payload =
                   build_agent_output_payload(
@@ -72,12 +74,12 @@ module AgentCore
                     directives: directives,
                   )
 
-                if message.has_tool_calls? && !can_expand_tool_loop?(node, runtime: runtime)
+                if should_expand_tool_loop && !can_expand_tool_loop?(node, runtime: runtime)
                   content = "Stopped: exceeded max_steps_per_turn."
                   override_message = Message.new(role: :assistant, content: content)
 
                   output_payload = build_agent_output_payload(override_message, runtime: runtime, stop_reason: :end_turn, model: used_model)
-                  output_payload["tool_calls"] = message.tool_calls.map(&:to_h)
+                  output_payload["tool_calls"] = message.tool_calls.map(&:to_h) if message.has_tool_calls?
                   finalize_output =
                     apply_finalize_output(
                       node: node,
@@ -112,7 +114,7 @@ module AgentCore
 
                   ::DAG::ExecutionResult.finished(content: content, payload: output_payload, metadata: metadata, usage: usage)
                 else
-                  if message.has_tool_calls?
+                  if should_expand_tool_loop
                     tool_loop_metadata =
                       expand_tool_loop!(
                         node,
@@ -121,6 +123,7 @@ module AgentCore
                         runtime: runtime,
                         execution_context: execution_context,
                         provider_metadata: llm.fetch(:metadata, {}),
+                        budget_compact_task: budget_compact_task,
                       )
                   else
                     tool_loop_metadata = {}
@@ -1323,14 +1326,14 @@ module AgentCore
             true
           end
 
-          def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:, provider_metadata:)
+          def expand_tool_loop!(node, message, visible_tools:, runtime:, execution_context:, provider_metadata:, budget_compact_task: nil)
             graph = node.graph
             tool_policy = runtime.tool_policy
             diagnostic_level = diagnostic_level_for(node)
-            budget_compact_task = enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
+            budget_compact_task ||= enqueued_budget_compact_task_for(node: node, execution_context: execution_context)
             tool_surface_manifest = programmable_tool_surface_manifest(execution_context: execution_context)
 
-            tool_calls = message.tool_calls
+            tool_calls = Array(message.tool_calls)
             tool_loop_metadata = {}
             tool_name_repairs = {}
             name_resolution_events = []

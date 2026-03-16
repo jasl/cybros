@@ -2,7 +2,7 @@ require "test_helper"
 require "tmpdir"
 
 class DefaultAgentAttachmentTransferTest < ActiveSupport::TestCase
-  test "transfer_attachments materializes conversation attachments into the logical workspace for the bundled claw agent" do
+  test "transfer_attachments materializes conversation attachments into the conversation directory for the bundled claw agent" do
     workspace_root = Dir.mktmpdir("cybros-default-attachments-")
     agent = Agents::BootstrapBundledDefaultService.ensure_agent!
     conversation = nil
@@ -42,13 +42,17 @@ class DefaultAgentAttachmentTransferTest < ActiveSupport::TestCase
       assert_equal false, tool_result.error?
       assert_equal "workspace_copy", metadata.fetch("transfer_mode")
       assert_predicate conversation.reload, :logical_workspace_initialized?
+      assert_equal agent.workspace_root_path.to_s, metadata.dig("workspace", "root_path")
+      assert_equal conversation.workspace_root_path.to_s, metadata.dig("workspace", "conversation_path")
+      assert_equal conversation.workspace_root_path.to_s, metadata.dig("workspace", "cwd")
+      assert_equal conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id).to_s, metadata.dig("workspace", "lane_path")
 
       imports = metadata.fetch("imports")
       assert_equal 2, imports.length
       assert_equal ["workspace_file", "workspace_file"], imports.map { |entry| entry.dig("remote_ref", "kind") }
 
-      first_destination = File.join(metadata.dig("workspace", "logical_workspace_root_path"), imports.first.dig("remote_ref", "path"))
-      second_destination = File.join(metadata.dig("workspace", "logical_workspace_root_path"), imports.second.dig("remote_ref", "path"))
+      first_destination = File.join(metadata.dig("workspace", "conversation_path"), imports.first.dig("remote_ref", "path"))
+      second_destination = File.join(metadata.dig("workspace", "conversation_path"), imports.second.dig("remote_ref", "path"))
 
       assert_equal fixture_content("attachment-note.txt"), File.binread(first_destination)
       assert_equal fixture_content("attachment-log.csv"), File.binread(second_destination)

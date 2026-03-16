@@ -2,6 +2,7 @@ require "fileutils"
 require "json"
 require "open3"
 require "pathname"
+require "shellwords"
 require "tmpdir"
 
 module Cybros
@@ -18,11 +19,20 @@ module Cybros
           CODEX_MOVE_TO = "*** Move to: ".freeze
           CODEX_END_OF_FILE = "*** End of File".freeze
           PATCH_HEADER_PREFIXES = ["--- ", "+++ "].freeze
+          PROTECTED_CONFIRM_PATHS = %w[SOUL.md USER.md].freeze
+          PROTECTED_DENY_PATHS = %w[AGENTS.md].freeze
+          SHELL_MUTATION_PATTERNS = [
+            /(^|[^<])>>?/,
+            /\|\s*tee\b/,
+            /\b(?:cp|mv|rm|touch|install|truncate|mkdir)\b/,
+            /\bsed\s+-i\b/,
+          ].freeze
 
           class PatchFormatError < StandardError; end
 
-          def initialize(workspace_root:)
+          def initialize(workspace_root:, cwd: nil)
             @workspace_root = normalize_workspace_root(workspace_root)
+            @cwd = normalize_cwd(cwd, workspace_root: @workspace_root)
           end
 
           def call(logical_tool_name:, arguments:)
@@ -48,14 +58,14 @@ module Cybros
 
           private
 
-          attr_reader :workspace_root
+          attr_reader :workspace_root, :cwd
 
           def glob(arguments)
             pattern = arguments.fetch("pattern", "").to_s
             return error_result("glob requires pattern") if pattern.empty?
 
             matches =
-              Dir.glob(pattern, base: workspace_root.to_s, sort: true)
+              Dir.glob(pattern, base: cwd.to_s, sort: true)
                 .select { |path| file_within_workspace?(path) }
                 .uniq
 
@@ -75,10 +85,10 @@ module Cybros
 
             matches = []
 
-            Dir.glob("**/*", base: workspace_root.to_s, sort: true).each do |relative_path|
+            Dir.glob("**/*", base: cwd.to_s, sort: true).each do |relative_path|
               next unless file_within_workspace?(relative_path)
 
-              absolute_path = workspace_root.join(relative_path)
+              absolute_path = cwd.join(relative_path)
               content = read_utf8_file(absolute_path)
               next if content.nil?
 
@@ -128,7 +138,9 @@ module Cybros
             return error_result("write requires content") if content.nil?
 
             absolute_path = resolve_output_path(relative_path)
+            ensure_mutable_path!(absolute_path)
             FileUtils.mkdir_p(absolute_path.dirname)
+            snapshot_protected_path!(absolute_path)
             File.write(absolute_path, content.to_s, mode: "w", encoding: Encoding::UTF_8)
 
             success_result(
@@ -154,6 +166,7 @@ module Cybros
             return error_result("edit requires new_text") if new_text.nil?
 
             absolute_path = resolve_existing_path(relative_path)
+            ensure_mutable_path!(absolute_path)
             content = read_utf8_file(absolute_path)
             return error_result("edit only supports UTF-8 text files") if content.nil?
 
@@ -161,6 +174,7 @@ module Cybros
             return error_result("edit match is ambiguous (#{occurrences} occurrences)") if occurrences != 1
 
             updated = content.sub(old_text.to_s, new_text.to_s)
+            snapshot_protected_path!(absolute_path)
             File.write(absolute_path, updated, mode: "w", encoding: Encoding::UTF_8)
 
             success_result(
@@ -205,12 +219,15 @@ module Cybros
             command = arguments.fetch("command", "").to_s.strip
             return error_result("exec requires command") if command.empty?
 
+            protected_error = protected_exec_error_for(command)
+            return error_result(protected_error) if protected_error
+
             stdout, stderr, status =
               Open3.capture3(
                 "/bin/sh",
                 "-lc",
                 command,
-                chdir: workspace_root.to_s,
+                chdir: cwd.to_s,
               )
 
             success_result(
@@ -237,8 +254,21 @@ module Cybros
             path.realpath
           end
 
+          def normalize_cwd(value, workspace_root:)
+            raw = value.to_s.strip
+            return workspace_root if raw.empty?
+
+            path = Pathname.new(raw).expand_path
+            raise SecurityError, "cwd must exist" unless path.directory?
+
+            real = path.realpath
+            ensure_within_workspace!(real)
+            real
+          end
+
           def resolve_existing_path(relative_path)
             expanded = resolve_under_workspace(relative_path)
+            ensure_not_reserved_agent_root_shadow!(expanded)
             real = expanded.realpath
             ensure_within_workspace!(real)
             real
@@ -246,6 +276,7 @@ module Cybros
 
           def resolve_output_path(relative_path)
             expanded = resolve_under_workspace(relative_path)
+            ensure_not_reserved_agent_root_shadow!(expanded)
             parent = nearest_existing_parent(expanded)
             ensure_within_workspace!(parent.realpath)
             expanded
@@ -254,7 +285,7 @@ module Cybros
           def resolve_under_workspace(relative_path)
             raise SecurityError, "path must be relative to the workspace root" if relative_path.to_s.start_with?("/", "~")
 
-            expanded = workspace_root.join(relative_path).expand_path
+            expanded = cwd.join(relative_path).expand_path
             ensure_within_workspace!(expanded)
             expanded
           end
@@ -282,9 +313,18 @@ module Cybros
             affected_paths = parse_patch_paths(normalized_patch_text)
             raise PatchFormatError, "apply_patch did not include any file paths" if affected_paths.empty?
 
-            affected_files = affected_paths.to_h do |relative_path|
-              [relative_path, resolve_under_workspace(relative_path)]
+            affected_files = affected_paths.each_with_object({}) do |relative_path, memo|
+              workspace_path = resolve_under_workspace(relative_path)
+              ensure_not_reserved_agent_root_shadow!(workspace_path)
+              memo[relative_path] = {
+                workspace_path: workspace_path,
+                patch_path: workspace_path.relative_path_from(workspace_root).to_s,
+              }
             end
+            affected_files.each_value do |entry|
+              ensure_mutable_path!(entry.fetch(:workspace_path))
+            end
+            rewritten_patch_text = rewrite_patch_paths(normalized_patch_text, affected_files:)
 
             Dir.mktmpdir("claw-apply-patch-") do |tmpdir|
               prepare_patch_workspace(tmpdir:, affected_files:)
@@ -297,7 +337,7 @@ module Cybros
                   "--batch",
                   "--forward",
                   "--reject-file=-",
-                  stdin_data: normalized_patch_text,
+                  stdin_data: rewritten_patch_text,
                 )
               raise PatchFormatError, (stderr.presence || stdout.presence || "unknown error") unless status.success?
 
@@ -312,11 +352,15 @@ module Cybros
                 path = resolve_output_path(operation.fetch(:path))
                 raise PatchFormatError, "apply_patch add target already exists: #{operation.fetch(:path)}" if path.exist?
 
+                ensure_mutable_path!(path)
                 FileUtils.mkdir_p(path.dirname)
+                snapshot_protected_path!(path)
                 File.write(path, operation.fetch(:content), mode: "w", encoding: Encoding::UTF_8)
                 { "path" => operation.fetch(:path), "status" => "added" }
               when :delete
                 path = resolve_existing_path(operation.fetch(:path))
+                ensure_mutable_path!(path)
+                snapshot_protected_path!(path)
                 File.delete(path)
                 { "path" => operation.fetch(:path), "status" => "deleted" }
               when :update
@@ -335,7 +379,9 @@ module Cybros
             updated = apply_codex_hunks(original_text: content, hunks: operation.fetch(:hunks))
             target_relative_path = operation[:move_to].presence || operation.fetch(:path)
             target_path = resolve_output_path(target_relative_path)
+            ensure_mutable_path!(target_path)
             FileUtils.mkdir_p(target_path.dirname)
+            snapshot_protected_path!(original_path)
             File.write(target_path, updated, mode: "w", encoding: Encoding::UTF_8)
             File.delete(original_path) if target_path != original_path && original_path.exist?
 
@@ -554,9 +600,26 @@ module Cybros
             paths.uniq
           end
 
+          def rewrite_patch_paths(patch_text, affected_files:)
+            patch_text.each_line.map do |line|
+              next line unless line.start_with?(*PATCH_HEADER_PREFIXES)
+
+              prefix, raw_path = line.split(/\s+/, 2)
+              path = raw_path.to_s.split("\t", 2).first.to_s.strip
+              next line if path.empty? || path == "/dev/null"
+
+              normalized = path.start_with?("a/", "b/") ? path[2..] : path
+              replacement = affected_files.dig(normalized, :patch_path)
+              next line if replacement.blank?
+
+              "#{prefix} #{replacement}#{line.end_with?("\n") ? "\n" : ""}"
+            end.join
+          end
+
           def prepare_patch_workspace(tmpdir:, affected_files:)
-            affected_files.each_value do |workspace_path|
-              relative_path = workspace_path.relative_path_from(workspace_root).to_s
+            affected_files.each_value do |entry|
+              workspace_path = entry.fetch(:workspace_path)
+              relative_path = entry.fetch(:patch_path)
               tmp_path = Pathname.new(tmpdir).join(relative_path)
               FileUtils.mkdir_p(tmp_path.dirname)
               File.write(tmp_path, workspace_path.binread, mode: "wb") if workspace_path.exist?
@@ -564,15 +627,18 @@ module Cybros
           end
 
           def commit_patch_workspace(tmpdir:, affected_files:)
-            affected_files.map do |relative_path, workspace_path|
-              tmp_path = Pathname.new(tmpdir).join(relative_path)
+            affected_files.map do |relative_path, entry|
+              workspace_path = entry.fetch(:workspace_path)
+              tmp_path = Pathname.new(tmpdir).join(entry.fetch(:patch_path))
               existed_before = workspace_path.exist?
 
               if tmp_path.exist?
                 FileUtils.mkdir_p(workspace_path.dirname)
+                snapshot_protected_path!(workspace_path)
                 File.write(workspace_path, tmp_path.binread, mode: "wb")
                 status = existed_before ? "modified" : "added"
               else
+                snapshot_protected_path!(workspace_path)
                 File.delete(workspace_path) if existed_before
                 status = "deleted"
               end
@@ -585,8 +651,112 @@ module Cybros
           end
 
           def file_within_workspace?(relative_path)
-            absolute_path = workspace_root.join(relative_path)
-            absolute_path.file? && absolute_path.expand_path.to_s.start_with?(workspace_root.to_s + File::SEPARATOR)
+            absolute_path = resolve_under_workspace(relative_path)
+            absolute_path.file?
+          rescue SecurityError
+            false
+          end
+
+          def ensure_mutable_path!(path)
+            case protected_path_rule(path)
+            when :deny_agents
+              raise SecurityError, "AGENTS.md is read-only and cannot be modified"
+            when :deny_history
+              raise SecurityError, ".history is runtime-managed and cannot be modified directly"
+            end
+          end
+
+          def ensure_not_reserved_agent_root_shadow!(path)
+            shadow_error = reserved_agent_root_shadow_error_for(path)
+            raise SecurityError, shadow_error if shadow_error.present?
+          end
+
+          def snapshot_protected_path!(path)
+            return unless protected_path_rule(path) == :confirm
+            return unless path.exist?
+
+            snapshot_path = history_snapshot_path_for(path)
+            FileUtils.mkdir_p(snapshot_path.dirname)
+            File.write(snapshot_path, path.binread, mode: "wb")
+          end
+
+          def history_snapshot_path_for(path)
+            timestamp = Time.current.utc.strftime("%Y%m%dT%H%M%S%6NZ")
+            relative_path = path.relative_path_from(workspace_root).to_s
+            workspace_root.join(".history", timestamp, relative_path)
+          end
+
+          def protected_path_rule(path)
+            relative_path = path.relative_path_from(workspace_root).to_s
+            return :deny_agents if PROTECTED_DENY_PATHS.include?(relative_path)
+            return :deny_history if relative_path.start_with?(".history/")
+            return :confirm if PROTECTED_CONFIRM_PATHS.include?(relative_path)
+            return :confirm if relative_path.start_with?("skills/")
+
+            nil
+          rescue ArgumentError
+            nil
+          end
+
+          def protected_exec_error_for(command)
+            raw = command.to_s
+            return nil if raw.blank?
+            return nil unless SHELL_MUTATION_PATTERNS.any? { |pattern| raw.match?(pattern) }
+
+            shell_path_candidates(raw).each do |candidate|
+              path = resolve_under_workspace(candidate)
+              shadow_error = reserved_agent_root_shadow_error_for(path)
+              return shadow_error if shadow_error.present?
+
+              next unless protected_path_rule(path).present?
+
+              return "exec cannot mutate protected agent-root paths; use file tools so approval and snapshots can be enforced"
+            rescue SecurityError
+              next
+            end
+
+            nil
+          end
+
+          def reserved_agent_root_shadow_error_for(path)
+            relative = path.relative_path_from(workspace_root).to_s
+
+            if (guidance_match = relative.match(%r{\Aconversations/[^/]+(?:/\.lanes/[^/]+)?/(SOUL\.md|USER\.md)\z}))
+              filename = guidance_match[1]
+              return "#{filename} is reserved for the agent root; from the current workspace use #{root_relative_hint_for(filename)}"
+            end
+
+            if (skills_match = relative.match(%r{\Aconversations/[^/]+(?:/\.lanes/[^/]+)?/(skills/.+)\z}))
+              reserved_target = skills_match[1]
+              return "agent-local skills live under the agent root; from the current workspace use #{root_relative_hint_for(reserved_target)}"
+            end
+
+            nil
+          rescue ArgumentError
+            nil
+          end
+
+          def root_relative_hint_for(root_relative_path)
+            workspace_root.join(root_relative_path).relative_path_from(cwd).to_s
+          rescue ArgumentError
+            root_relative_path.to_s
+          end
+
+          def shell_path_candidates(command)
+            redirection_targets = command.to_s.scan(/(?:^|\s)(?:\d*>>?|\d*>\>|&>>|&>)\s*([^\s;|&]+)/).flatten
+            tokens = []
+
+            tokens =
+              Shellwords.shellsplit(command.to_s).filter_map do |token|
+                cleaned = token.to_s.strip.gsub(/\A['"]|['"]\z/, "").sub(/[;|&]+\z/, "")
+                next if cleaned.empty?
+                next unless cleaned.include?(File::SEPARATOR) || cleaned.start_with?(".") || %w[SOUL.md USER.md AGENTS.md].include?(cleaned)
+
+                cleaned
+              end
+          rescue ArgumentError
+            tokens = []
+            tokens.concat(redirection_targets).map { |token| token.to_s.strip.gsub(/\A['"]|['"]\z/, "").sub(/[;|&]+\z/, "") }.reject(&:blank?).uniq
           end
 
           def read_utf8_file(path)

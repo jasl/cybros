@@ -1,5 +1,6 @@
 module Cybros
   module AgentRuntimeResolver
+    require "shellwords"
     require_relative "llm/catalog"
     require_relative "llm/capability_gated_provider"
     require_relative "llm/codex_oauth"
@@ -12,6 +13,210 @@ module Cybros
     require_relative "programmable_agent_provider"
 
     MAX_CONTEXT_TURNS = 1000
+    PROTECTED_AGENT_ROOT_CONFIRM_REASON = "protected_agent_root_write".freeze
+    PROTECTED_AGENT_ROOT_DENY_REASON = "protected_agent_root_read_only".freeze
+    PROTECTED_AGENT_ROOT_EXEC_DENY_REASON = "protected_agent_root_exec_mutation".freeze
+
+    class ProtectedAgentPathPolicy < AgentCore::Resources::Tools::Policy::Base
+      def initialize(delegate:)
+        @delegate = delegate
+      end
+
+      def filter(tools:, context:)
+        @delegate.filter(tools: tools, context: context)
+      end
+
+      def authorize(name:, arguments:, context:)
+        decision = @delegate.authorize(name: name, arguments: arguments, context: context)
+        return decision if decision.denied?
+
+        classification = ProtectedAgentPathClassifier.call(name: name, arguments: arguments, context: context)
+
+        case classification.fetch(:action)
+        when :confirm
+          return decision if decision.requires_confirmation?
+
+          AgentCore::Resources::Tools::Policy::Decision.confirm(
+            reason: PROTECTED_AGENT_ROOT_CONFIRM_REASON,
+            required: decision.required == true,
+            deny_effect: decision.deny_effect,
+          )
+        when :deny
+          AgentCore::Resources::Tools::Policy::Decision.deny(reason: classification.fetch(:reason))
+        else
+          decision
+        end
+      end
+    end
+
+    module ProtectedAgentPathClassifier
+      module_function
+
+      CODEX_MUTATION_PREFIXES = ["*** Update File: ", "*** Add File: ", "*** Delete File: "].freeze
+      UNIFIED_PATCH_PREFIXES = ["--- ", "+++ "].freeze
+      SHELL_MUTATION_PATTERNS = [
+        /(^|[^<])>>?/,
+        /\|\s*tee\b/,
+        /\b(?:cp|mv|rm|touch|install|truncate|mkdir)\b/,
+        /\bsed\s+-i\b/,
+      ].freeze
+
+      def call(name:, arguments:, context:)
+        workspace = workspace_payload_for(context)
+        return { action: nil } unless workspace
+
+        case name.to_s
+        when "write", "edit"
+          classify_paths([resolve_relative_path(arguments["path"], workspace)].compact, workspace: workspace)
+        when "apply_patch"
+          classify_paths(patch_target_paths(arguments["patch"], workspace), workspace: workspace)
+        when "exec"
+          if protected_exec_mutation?(command: arguments["command"], workspace: workspace)
+            { action: :deny, reason: PROTECTED_AGENT_ROOT_EXEC_DENY_REASON }
+          else
+            { action: nil }
+          end
+        else
+          { action: nil }
+        end
+      end
+
+      def classify_paths(paths, workspace:)
+        confirm = false
+
+        Array(paths).each do |path|
+          case protected_path_rule(path, workspace.fetch(:root_path))
+          when :deny
+            return { action: :deny, reason: PROTECTED_AGENT_ROOT_DENY_REASON }
+          when :confirm
+            confirm = true
+          end
+        end
+
+        confirm ? { action: :confirm } : { action: nil }
+      end
+      private_class_method :classify_paths
+
+      def protected_exec_mutation?(command:, workspace:)
+        raw = command.to_s
+        return false if raw.blank?
+        return false unless SHELL_MUTATION_PATTERNS.any? { |pattern| raw.match?(pattern) }
+
+        shell_path_candidates(raw).any? do |candidate|
+          path = resolve_relative_path(candidate, workspace)
+          path && protected_path_rule(path, workspace.fetch(:root_path)).present?
+        end
+      end
+      private_class_method :protected_exec_mutation?
+
+      def shell_path_candidates(command)
+        redirection_targets = command.to_s.scan(/(?:^|\s)(?:\d*>>?|\d*>\>|&>>|&>)\s*([^\s;|&]+)/).flatten
+        tokens = []
+
+        tokens =
+          Shellwords.shellsplit(command.to_s).filter_map do |token|
+            cleaned = normalize_shell_token(token)
+            next if cleaned.empty?
+            next unless cleaned.include?(File::SEPARATOR) || cleaned.start_with?(".") || %w[SOUL.md USER.md AGENTS.md].include?(cleaned)
+
+            cleaned
+          end
+      rescue ArgumentError
+        tokens = []
+        tokens.concat(redirection_targets.map { |token| normalize_shell_token(token) }).reject(&:blank?).uniq
+      end
+      private_class_method :shell_path_candidates
+
+      def normalize_shell_token(token)
+        token.to_s.strip.gsub(/\A['"]|['"]\z/, "").sub(/[;|&]+\z/, "")
+      end
+      private_class_method :normalize_shell_token
+
+      def patch_target_paths(patch_text, workspace)
+        raw_paths =
+          if patch_text.to_s.lstrip.start_with?("*** Begin Patch")
+            codex_patch_paths(patch_text)
+          else
+            unified_patch_paths(patch_text)
+          end
+
+        raw_paths.filter_map { |path| resolve_relative_path(path, workspace) }
+      end
+      private_class_method :patch_target_paths
+
+      def codex_patch_paths(patch_text)
+        patch_text.to_s.each_line.filter_map do |line|
+          prefix = CODEX_MUTATION_PREFIXES.find { |value| line.start_with?(value) }
+          next unless prefix
+
+          line.delete_prefix(prefix).strip.presence
+        end.uniq
+      end
+      private_class_method :codex_patch_paths
+
+      def unified_patch_paths(patch_text)
+        patch_text.to_s.each_line.filter_map do |line|
+          next unless line.start_with?(*UNIFIED_PATCH_PREFIXES)
+
+          raw_path = line.split(/\s+/, 2).last.to_s.split("\t", 2).first.to_s.strip
+          next if raw_path.blank? || raw_path == "/dev/null"
+
+          normalized = raw_path.start_with?("a/", "b/") ? raw_path[2..] : raw_path
+          normalized.presence
+        end.uniq
+      end
+      private_class_method :unified_patch_paths
+
+      def workspace_payload_for(context)
+        return nil unless context.respond_to?(:attributes)
+
+        cybros = context.attributes.fetch(:cybros, nil)
+        cybros = AgentCore::Utils.deep_stringify_keys(cybros) if cybros.is_a?(Hash)
+        workspace = cybros&.dig("execution_context", "workspace")
+        return nil unless workspace.is_a?(Hash)
+
+        root_path = workspace.fetch("root_path", "").to_s.strip
+        cwd = workspace.fetch("cwd", "").to_s.strip
+        return nil if root_path.empty? || cwd.empty?
+
+        { root_path: Pathname.new(root_path).expand_path, cwd: Pathname.new(cwd).expand_path }
+      rescue StandardError
+        nil
+      end
+      private_class_method :workspace_payload_for
+
+      def resolve_relative_path(raw_path, workspace)
+        path = raw_path.to_s.strip
+        return nil if path.empty? || path.start_with?("/", "~")
+
+        expanded = workspace.fetch(:cwd).join(path).expand_path
+        ensure_within_root!(expanded, workspace.fetch(:root_path))
+        expanded
+      rescue SecurityError
+        nil
+      end
+      private_class_method :resolve_relative_path
+
+      def protected_path_rule(path, root_path)
+        relative = path.relative_path_from(root_path).to_s
+        return :deny if relative == "AGENTS.md" || relative.start_with?(".history/")
+        return :confirm if relative == "SOUL.md" || relative == "USER.md" || relative.start_with?("skills/")
+
+        nil
+      rescue StandardError
+        nil
+      end
+      private_class_method :protected_path_rule
+
+      def ensure_within_root!(path, root_path)
+        normalized = path.expand_path.to_s
+        root = root_path.expand_path.to_s
+        return if normalized == root || normalized.start_with?(root + File::SEPARATOR)
+
+        raise SecurityError, "path escapes the workspace root"
+      end
+      private_class_method :ensure_within_root!
+    end
 
     module_function
 
@@ -298,7 +503,8 @@ module Cybros
           agent: agent,
           selected_model_ref_override: conversation_run&.selected_model_ref,
         )
-      tools_registry ||= build_tools_registry
+      skills_store = build_skills_store(agent: agent)
+      tools_registry ||= build_tools_registry(skills_store: skills_store)
       programmable_provider = programmable_provider_for(conversation_run, delegate: llm_selection.fetch(:provider, nil))
       ensure_programmable_runtime_available!(
         node: node,
@@ -355,6 +561,7 @@ module Cybros
             profiled_policy
           end
         end
+      tool_policy = protected_agent_root_tool_policy(delegate: tool_policy)
       tool_policy = context_budget_tool_policy(delegate: tool_policy)
 
       provider ||= programmable_provider || llm_selection.fetch(:provider)
@@ -385,6 +592,7 @@ module Cybros
         tool_policy: tool_policy,
         instrumenter: instrumenter,
         prompt_mode: definition.fetch(:prompt_mode, :full),
+        skills_store: skills_store,
         memory_search_limit: definition.fetch(:memory_search_limit) { Cybros::AgentProfiles::DEFAULT_MEMORY_SEARCH_LIMIT },
         prompt_injection_sources: prompt_injection_sources,
         include_skill_locations: definition.fetch(:include_skill_locations, false),
@@ -813,7 +1021,12 @@ module Cybros
     end
     private_class_method :active_provider_credential_for
 
-    def build_tools_registry
+    def build_skills_store(agent:)
+      ::Agents::SkillsStoreBuilder.build(agent: agent)
+    end
+    private_class_method :build_skills_store
+
+    def build_tools_registry(skills_store: nil)
       registry = AgentCore::Resources::Tools::Registry.new
       registry.register_many(Cybros::Bootstrap::Tools.build)
       registry.register_many(Cybros::Attachments::Tools.build)
@@ -825,16 +1038,7 @@ module Cybros
       # Phase 0: always register native skills tools.
       # Memory tools stay disabled until the embedding backend is promoted to a
       # productized Cybros runtime capability.
-      begin
-        skills_dir = Rails.root.join("skills")
-        if skills_dir.directory?
-          registry.register_skills_store(
-            AgentCore::Resources::Skills::FileSystemStore.new(dirs: [skills_dir.to_s], strict: false)
-          )
-        end
-      rescue StandardError
-        # ignore
-      end
+      registry.register_skills_store(skills_store) if skills_store.present?
 
       registry
     end
@@ -844,13 +1048,18 @@ module Cybros
         allowed: ["*"],
         hidden: ["compact_context", "merge_lane_state"],
         context_allowed: lambda { |context|
-          context_budget_action(context) == "advise_compact" ? ["compact_context"] : []
+          %w[advise_compact enqueue_compact].include?(context_budget_action(context)) ? ["compact_context"] : []
         },
         delegate: delegate,
         tool_groups: nil,
       )
     end
     private_class_method :context_budget_tool_policy
+
+    def protected_agent_root_tool_policy(delegate:)
+      ProtectedAgentPathPolicy.new(delegate: delegate)
+    end
+    private_class_method :protected_agent_root_tool_policy
 
     def context_budget_action(context)
       return nil unless context.respond_to?(:attributes)

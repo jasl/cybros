@@ -8,6 +8,9 @@ module Cybros
     module Claw
       module Tools
         class MemoryTools
+          VALID_SCOPES = %w[root conversation lane].freeze
+          DEFAULT_SEARCH_SCOPES = %w[lane conversation root].freeze
+
           def initialize(callback_session:)
             @callback_session = callback_session.is_a?(Hash) ? callback_session.deep_stringify_keys : {}
           end
@@ -15,7 +18,7 @@ module Cybros
           def call(logical_tool_name:, arguments:, tool_call_id:)
             case logical_tool_name.to_s
             when "memory_get"
-              memory_get
+              memory_get(arguments)
             when "memory_search"
               memory_search(arguments)
             when "memory_store"
@@ -29,8 +32,13 @@ module Cybros
 
           attr_reader :callback_session
 
-          def memory_get
-            success_result(JSON.generate(callback_rpc("conversation.memory.get", {})))
+          def memory_get(arguments)
+            scope = normalize_scope(arguments["scope"], default: "conversation")
+            target = normalize_target(arguments["target"])
+
+            success_result(JSON.generate(callback_rpc("conversation.memory.get", request_payload(scope: scope, target: target))))
+          rescue AgentCore::ValidationError => e
+            error_result(e.message, code: e.code)
           rescue StandardError => e
             error_result("memory_get failed: #{e.class}: #{e.message}")
           end
@@ -39,16 +47,28 @@ module Cybros
             query = arguments.fetch("query", "").to_s
             return error_result("memory_search requires query") if query.empty?
 
-            body = callback_rpc("conversation.memory.get", {}).dig("document", "body").to_s
             matches = []
+            scopes = normalize_search_scopes(arguments["scopes"])
+            target = normalize_target(arguments["target"])
 
-            body.each_line.with_index(1) do |line, line_number|
-              next unless line.include?(query)
+            scopes.each do |scope|
+              document =
+                callback_rpc(
+                  "conversation.memory.get",
+                  request_payload(scope: scope, target: target),
+                ).fetch("document", {})
 
-              matches << {
-                "line" => line_number,
-                "snippet" => line.chomp,
-              }
+              body = document["body"].to_s
+              body.each_line.with_index(1) do |line, line_number|
+                next unless line.include?(query)
+
+                matches << {
+                  "scope" => document["scope"].to_s.presence || scope,
+                  "path" => document["path"].to_s,
+                  "line" => line_number,
+                  "snippet" => line.chomp,
+                }
+              end
             end
 
             success_result(
@@ -59,6 +79,8 @@ module Cybros
                 },
               ),
             )
+          rescue AgentCore::ValidationError => e
+            error_result(e.message, code: e.code)
           rescue StandardError => e
             error_result("memory_search failed: #{e.class}: #{e.message}")
           end
@@ -67,34 +89,50 @@ module Cybros
             content = arguments.fetch("content", arguments.fetch("text", "")).to_s
             return error_result("memory_store requires content") if content.empty?
 
+            scope = normalize_scope(arguments["scope"], default: "lane")
+            target = normalize_target(arguments["target"])
             mode = arguments.fetch("mode", "append").to_s
 
             result =
               case mode
               when "append"
-                current_body = callback_rpc("conversation.memory.get", {}).dig("document", "body").to_s
+                current_body =
+                  callback_rpc(
+                    "conversation.memory.get",
+                    request_payload(scope: scope, target: target),
+                  ).dig("document", "body").to_s
                 appended_text = content
                 appended_text = "\n#{appended_text}" if current_body.present? && !appended_text.start_with?("\n")
                 callback_rpc(
                   "conversation.memory.append",
-                  {
-                    "text" => appended_text,
-                    "operation_id" => operation_id_for(tool_call_id, "append"),
-                  },
+                  request_payload(
+                    scope: scope,
+                    target: target,
+                    extra: {
+                      "text" => appended_text,
+                      "operation_id" => operation_id_for(tool_call_id, "append"),
+                    },
+                  ),
                 )
               when "replace"
                 callback_rpc(
                   "conversation.memory.put",
-                  {
-                    "body" => content,
-                    "operation_id" => operation_id_for(tool_call_id, "put"),
-                  },
+                  request_payload(
+                    scope: scope,
+                    target: target,
+                    extra: {
+                      "body" => content,
+                      "operation_id" => operation_id_for(tool_call_id, "put"),
+                    },
+                  ),
                 )
               else
                 return error_result("memory_store mode must be append or replace")
               end
 
             success_result(JSON.generate(result.merge("mode" => mode)))
+          rescue AgentCore::ValidationError => e
+            error_result(e.message, code: e.code)
           rescue StandardError => e
             error_result("memory_store failed: #{e.class}: #{e.message}")
           end
@@ -127,6 +165,40 @@ module Cybros
             [tool_call_id.to_s.presence || "tool-call", "conversation-memory", action].join(":")
           end
 
+          def normalize_scope(value, default:)
+            normalized = value.to_s.strip
+            normalized = default if normalized.empty?
+            return normalized if VALID_SCOPES.include?(normalized)
+
+            AgentCore::ValidationError.raise!(
+              "Memory scope is invalid.",
+              code: "claw.memory.invalid_scope",
+              details: { scope: normalized },
+            )
+          end
+
+          def normalize_search_scopes(value)
+            raw_scopes = value.is_a?(Array) ? value : Array(value).compact
+            return DEFAULT_SEARCH_SCOPES if raw_scopes.empty?
+
+            raw_scopes.map { |scope| normalize_scope(scope, default: "conversation") }
+          end
+
+          def normalize_target(value)
+            normalized = value.to_s.strip
+            return nil if normalized.casecmp("default").zero?
+
+            normalized.presence
+          end
+
+          def request_payload(scope:, target:, extra: {})
+            {}.tap do |payload|
+              payload["scope"] = scope
+              payload["target"] = target if target.present?
+              payload.merge!(extra)
+            end
+          end
+
           def success_result(text)
             {
               "content" => [{ "type" => "text", "text" => text.to_s }],
@@ -135,11 +207,11 @@ module Cybros
             }
           end
 
-          def error_result(text)
+          def error_result(text, code: nil)
             {
               "content" => [{ "type" => "text", "text" => text.to_s }],
               "error" => true,
-              "metadata" => {},
+              "metadata" => code.present? ? { "code" => code.to_s } : {},
             }
           end
         end

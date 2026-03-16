@@ -118,35 +118,60 @@ class RPCContractTest < ActiveSupport::TestCase
     callback&.shutdown
   end
 
-  test "before_agent_step assembles full bootstrap sections and conversation memory excerpts for primary runs" do
-    with_workspace({}) do |workspace_root|
+  test "before_agent_step assembles live root bootstrap and scope inventory for primary runs without injecting conversation memory bodies" do
+    travel_to Time.zone.local(2026, 3, 16, 12, 0, 0) do
       conversation_id = "conversation:test-primary"
-      payload =
-        application.call(
-          method_name: "before_agent_step",
-          params: {
-            "user_input" => "Inspect runtime context",
-            "selected_model_ref" => "dev/mock-model",
-            "effective_permission_mode" => "default",
-            "session_context" => session_context_payload(conversation_id: conversation_id, workspace_root: workspace_root),
-            "execution_context" => execution_context_payload(conversation_id: conversation_id, execution_scope: "primary"),
-            "capability_snapshot" => capability_snapshot_payload(%w[read exec memory_search memory_get memory_store])
-          },
-        )
 
-      system_entry = payload.dig("planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "content")
+      with_workspace(
+        {
+          "AGENTS.md" => "Live AGENTS\n",
+          "SOUL.md" => "Live SOUL\n",
+          "USER.md" => "Live USER\n",
+          "MEMORY.md" => "Root memory stays optional\n",
+          "memory/2026-03-16.md" => "Root daily log\n",
+          "conversations/#{conversation_id}/MEMORY.md" => "Conversation memory should not be injected\n",
+          "conversations/#{conversation_id}/memory/2026-03-16.md" => "Conversation daily log\n",
+          "conversations/#{conversation_id}/.lanes/lane:test-default/MEMORY.md" => "Lane memory should not be injected\n",
+        },
+      ) do |workspace_root|
+        payload =
+          workspace_application(workspace_root).call(
+            method_name: "before_agent_step",
+            params: {
+              "user_input" => "Inspect runtime context",
+              "selected_model_ref" => "dev/mock-model",
+              "effective_permission_mode" => "default",
+              "session_context" => session_context_payload(conversation_id: conversation_id, workspace_root: workspace_root),
+              "execution_context" => execution_context_payload(conversation_id: conversation_id, execution_scope: "primary", workspace_root: workspace_root),
+              "capability_snapshot" => capability_snapshot_payload(%w[read exec memory_search memory_get memory_store])
+            },
+          )
 
-      assert_includes system_entry, "## Tooling"
-      assert_includes system_entry, "## Safety"
-      assert_includes system_entry, "## Workspace"
-      assert_includes system_entry, "## Documentation"
-      assert_includes system_entry, "## Current Date & Time"
-      assert_includes system_entry, "## Runtime"
-      assert_includes system_entry, "<bootstrap_source name=\"AGENTS\">"
-      assert_includes system_entry, "<bootstrap_source name=\"SOUL\">"
-      assert_includes system_entry, "<bootstrap_source name=\"USER\">"
-      assert_includes system_entry, "<bootstrap_source name=\"TOOLS\">"
-      assert_includes system_entry, "Execution scope: primary"
+        system_entry = payload.dig("planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "content")
+
+        assert_includes system_entry, "## Tooling"
+        assert_includes system_entry, "## Safety"
+        assert_includes system_entry, "## Workspace"
+        assert_includes system_entry, "## Scope Inventory"
+        assert_includes system_entry, "## Documentation"
+        assert_includes system_entry, "## Current Date & Time"
+        assert_includes system_entry, "## Runtime"
+        assert_includes system_entry, "<bootstrap_source name=\"AGENTS\">"
+        assert_includes system_entry, "<bootstrap_source name=\"SOUL\">"
+        assert_includes system_entry, "<bootstrap_source name=\"USER\">"
+        assert_includes system_entry, "<bootstrap_source name=\"TOOLS\">"
+        assert_includes system_entry, "Live SOUL"
+        assert_includes system_entry, "Agent root:"
+        assert_includes system_entry, "Conversation path:"
+        assert_includes system_entry, "Lane path:"
+        assert_includes system_entry, "root MEMORY.md: present"
+        assert_includes system_entry, "conversation MEMORY.md: present"
+        assert_includes system_entry, "lane MEMORY.md: present"
+        refute_includes system_entry, "<bootstrap_source name=\"MEMORY\">"
+        refute_includes system_entry, "Conversation memory should not be injected"
+        refute_includes system_entry, "Lane memory should not be injected"
+        assert_includes system_entry, "Execution scope: primary"
+      end
     end
   end
 
@@ -170,6 +195,7 @@ class RPCContractTest < ActiveSupport::TestCase
               execution_context_payload(
                 conversation_id: conversation_id,
                 execution_scope: "subagent",
+                workspace_root: workspace_root,
                 subagent: subagent,
               ),
             "capability_snapshot" => capability_snapshot_payload(%w[read exec memory_search memory_get])
@@ -184,6 +210,7 @@ class RPCContractTest < ActiveSupport::TestCase
       refute_includes system_entry, "<bootstrap_source name=\"SOUL\">"
       refute_includes system_entry, "<bootstrap_source name=\"USER\">"
       refute_includes system_entry, "<bootstrap_source name=\"MEMORY\">"
+      refute_includes system_entry, "## Scope Inventory"
       refute_includes system_entry, "## Documentation"
     end
   end
@@ -200,7 +227,7 @@ class RPCContractTest < ActiveSupport::TestCase
             "selected_model_ref" => "dev/mock-model",
             "effective_permission_mode" => "default",
             "session_context" => session_context_payload(conversation_id: conversation_id, workspace_root: workspace_root),
-            "execution_context" => execution_context_payload(conversation_id: conversation_id, execution_scope: "primary"),
+            "execution_context" => execution_context_payload(conversation_id: conversation_id, execution_scope: "primary", workspace_root: workspace_root),
             "capability_snapshot" => capability_snapshot_payload(oversized_tool_names)
           },
         )
@@ -210,6 +237,51 @@ class RPCContractTest < ActiveSupport::TestCase
       assert_includes system_entry, "## Bootstrap Warning"
       assert_includes system_entry, "[truncated TOOLS]"
       refute_includes system_entry, "tool_79_#{'x' * 180}"
+    end
+  end
+
+  test "application reads live workspace bootstrap files before bundled prompt templates" do
+    Dir.mktmpdir("claw-live-workspace-") do |workspace_root|
+      File.write(File.join(workspace_root, "AGENTS.md"), "Live AGENTS\n")
+      File.write(File.join(workspace_root, "SOUL.md"), "Live SOUL\n")
+      File.write(File.join(workspace_root, "USER.md"), "Live USER\n")
+      File.write(File.join(workspace_root, "MEMORY.md"), "Live MEMORY\n")
+
+      application =
+        Cybros::Agents::Claw::Application.new(
+          source_root: Rails.root.join("agents/claw"),
+          workspace_root: workspace_root,
+          deployment_key: "claw",
+          deployment_fingerprint: "deployment:test-claw",
+        )
+
+      assert_equal "Live AGENTS\n", application.prompt_text("agent")
+      assert_equal "Live SOUL\n", application.prompt_text("soul")
+      assert_equal "Live USER\n", application.prompt_text("user")
+      assert_includes application.full_system_prompt, "Live AGENTS"
+      assert_includes application.full_system_prompt, "Live SOUL"
+      assert_includes application.full_system_prompt, "Live USER"
+    end
+  end
+
+  test "workspace bootstrap seeds the bundled self-mutate skill into a live agent root" do
+    Dir.mktmpdir("claw-live-workspace-") do |workspace_root|
+      Agents::WorkspaceBootstrap.seed!(
+        source_root: Rails.root.join("agents/claw"),
+        destination_root: Pathname.new(workspace_root),
+      )
+
+      skill_path = Pathname.new(workspace_root).join("skills/self-mutate/SKILL.md")
+
+      assert_predicate skill_path, :file?
+      skill_text = skill_path.read
+      assert_includes skill_text, "diff"
+      assert_includes skill_text, "confirm"
+      assert_includes skill_text, ".history"
+      assert_includes skill_text, "next top-level turn"
+      assert_includes skill_text, "../../SOUL.md"
+      assert_includes skill_text, "../../USER.md"
+      assert_includes skill_text, "../../skills/"
     end
   end
 
@@ -467,7 +539,7 @@ class RPCContractTest < ActiveSupport::TestCase
     end
   end
 
-  test "tool.execute memory_store writes through callbacks and memory_get reads back the document" do
+  test "tool.execute memory_store defaults to lane scope and memory_get reads the scoped default target" do
     callback = TestSupport::CallbackHarness.new.start
 
     store_payload =
@@ -480,42 +552,126 @@ class RPCContractTest < ActiveSupport::TestCase
 
     store_result = store_payload.fetch("result")
     refute store_result.fetch("error")
+    assert_equal "lane", JSON.parse(store_result.dig("content", 0, "text")).dig("document", "scope")
     assert_equal "Remember alpha", JSON.parse(store_result.dig("content", 0, "text")).dig("document", "body")
 
     get_payload =
       tool_execute(
         logical_tool_name: "memory_get",
         implementation_ref: "claw:memory_get",
-        arguments: {},
+        arguments: { "scope" => "lane" },
         callback_session: callback_session_payload(callback),
       )
 
     get_result = get_payload.fetch("result")
     refute get_result.fetch("error")
+    assert_equal "lane", JSON.parse(get_result.dig("content", 0, "text")).dig("document", "scope")
     assert_equal "Remember alpha", JSON.parse(get_result.dig("content", 0, "text")).dig("document", "body")
-    assert_equal [ "conversation.memory.get", "conversation.memory.append", "conversation.memory.get" ], callback.calls.map { |call| call.fetch("method") }
+    assert_equal(
+      [
+        ["conversation.memory.get", "lane"],
+        ["conversation.memory.append", "lane"],
+        ["conversation.memory.get", "lane"],
+      ],
+      callback.calls.map { |call| [call.fetch("method"), call.dig("params", "scope")] },
+    )
   ensure
     callback&.shutdown
   end
 
-  test "tool.execute memory_search finds matching lines in the conversation memory body" do
-    callback = TestSupport::CallbackHarness.new(memory_document: "Remember alpha\nSecond beta").start
+  test "tool.execute memory_search searches lane conversation and root in order with source-aware matches" do
+    callback =
+      TestSupport::CallbackHarness.new(
+        memory_documents: {
+          ["lane", "MEMORY.md"] => "Lane alpha",
+          ["conversation", "MEMORY.md"] => "Conversation alpha",
+          ["root", "MEMORY.md"] => "Root alpha",
+        },
+      ).start
 
     payload =
       tool_execute(
         logical_tool_name: "memory_search",
         implementation_ref: "claw:memory_search",
-        arguments: { "query" => "beta" },
+        arguments: { "query" => "alpha" },
         callback_session: callback_session_payload(callback),
       )
 
     result = payload.fetch("result")
     refute result.fetch("error")
 
-    match = JSON.parse(result.dig("content", 0, "text")).fetch("matches").sole
-    assert_equal 2, match.fetch("line")
-    assert_equal "Second beta", match.fetch("snippet")
-    assert_equal [ "conversation.memory.get" ], callback.calls.map { |call| call.fetch("method") }
+    matches = JSON.parse(result.dig("content", 0, "text")).fetch("matches")
+    assert_equal %w[lane conversation root], matches.map { |match| match.fetch("scope") }
+    assert_equal [1, 1, 1], matches.map { |match| match.fetch("line") }
+    assert_equal(
+      [
+        ["conversation.memory.get", "lane"],
+        ["conversation.memory.get", "conversation"],
+        ["conversation.memory.get", "root"],
+      ],
+      callback.calls.map { |call| [call.fetch("method"), call.dig("params", "scope")] },
+    )
+    assert matches.all? { |match| match.fetch("path").end_with?("MEMORY.md") }
+    assert_equal ["Lane alpha", "Conversation alpha", "Root alpha"], matches.map { |match| match.fetch("snippet") }
+  ensure
+    callback&.shutdown
+  end
+
+  test "tool.execute memory_get fails with a stable error for invalid scopes" do
+    callback = TestSupport::CallbackHarness.new.start
+
+    payload =
+      tool_execute(
+        logical_tool_name: "memory_get",
+        implementation_ref: "claw:memory_get",
+        arguments: { "scope" => "invalid" },
+        callback_session: callback_session_payload(callback),
+      )
+
+    result = payload.fetch("result")
+    assert_equal true, result.fetch("error")
+    assert_equal "claw.memory.invalid_scope", result.dig("metadata", "code")
+  ensure
+    callback&.shutdown
+  end
+
+  test "tool.execute memory_get treats target default as the scoped default document" do
+    callback = TestSupport::CallbackHarness.new.start
+
+    store_payload =
+      tool_execute(
+        logical_tool_name: "memory_store",
+        implementation_ref: "claw:memory_store",
+        arguments: { "scope" => "conversation", "content" => "Remember beta", "target" => "default" },
+        callback_session: callback_session_payload(callback),
+      )
+    refute store_payload.dig("result", "error")
+
+    get_payload =
+      tool_execute(
+        logical_tool_name: "memory_get",
+        implementation_ref: "claw:memory_get",
+        arguments: { "scope" => "conversation", "target" => "default" },
+        callback_session: callback_session_payload(callback),
+      )
+
+    get_result = get_payload.fetch("result")
+    refute get_result.fetch("error")
+    assert_equal "Remember beta", JSON.parse(get_result.dig("content", 0, "text")).dig("document", "body")
+    assert_equal(
+      [
+        ["conversation.memory.get", "conversation", nil],
+        ["conversation.memory.append", "conversation", nil],
+        ["conversation.memory.get", "conversation", nil],
+      ],
+      callback.calls.map do |call|
+        [
+          call.fetch("method"),
+          call.dig("params", "scope"),
+          call.dig("params", "target"),
+        ]
+      end,
+    )
   ensure
     callback&.shutdown
   end
@@ -803,20 +959,30 @@ class RPCContractTest < ActiveSupport::TestCase
   end
 
   def session_context_payload(conversation_id:, workspace_root:)
+    conversation_path = File.join(workspace_root, "conversations", conversation_id)
+    lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+
     {
       "account_id" => "account:test-default",
       "user_id" => "user:test-default",
       "conversation_id" => conversation_id,
       "workspace" => {
         "conversation_id" => conversation_id,
+        "root_path" => workspace_root,
+        "conversation_path" => conversation_path,
+        "lane_path" => lane_path,
+        "cwd" => conversation_path,
         "logical_workspace_key" => "conversation-#{conversation_id.tr(':', '-')}",
-        "logical_workspace_root_path" => workspace_root,
+        "logical_workspace_root_path" => conversation_path,
         "logical_workspace_initialized_at" => Time.current.change(usec: 0).iso8601
       }
     }
   end
 
-  def execution_context_payload(conversation_id:, execution_scope:, subagent: nil)
+  def execution_context_payload(conversation_id:, execution_scope:, workspace_root:, subagent: nil)
+    conversation_path = File.join(workspace_root, "conversations", conversation_id)
+    lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+
     payload = {
       "account_id" => "account:test-default",
       "user_id" => "user:test-default",
@@ -825,7 +991,14 @@ class RPCContractTest < ActiveSupport::TestCase
       "lane_id" => "lane:test-default",
       "turn_id" => SecureRandom.uuid,
       "dag_node_id" => SecureRandom.uuid,
-      "execution_scope" => execution_scope
+      "execution_scope" => execution_scope,
+      "workspace" => {
+        "conversation_id" => conversation_id,
+        "root_path" => workspace_root,
+        "conversation_path" => conversation_path,
+        "lane_path" => lane_path,
+        "cwd" => conversation_path,
+      },
     }
     payload["subagent"] = subagent if subagent
     payload
@@ -865,6 +1038,15 @@ class RPCContractTest < ActiveSupport::TestCase
         deployment_fingerprint: "deployment:test-claw",
         required_bearer: "secret://agent"
       )
+  end
+
+  def workspace_application(workspace_root)
+    Cybros::Agents::Claw::Application.new(
+      source_root: claw_source_root,
+      workspace_root: workspace_root,
+      deployment_fingerprint: "deployment:test-claw",
+      required_bearer: "secret://agent",
+    )
   end
 
   def web_enabled_application(web_search_endpoint: nil)

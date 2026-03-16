@@ -11,10 +11,17 @@ module Cybros
   module Agents
     module Claw
       class Application
-        attr_reader :source_root, :required_bearer
+        WORKSPACE_PROMPT_FILES = {
+          "agent" => "AGENTS.md",
+          "soul" => "SOUL.md",
+          "user" => "USER.md",
+        }.freeze
+
+        attr_reader :source_root, :workspace_root, :required_bearer
 
         def initialize(
           source_root: Rails.root,
+          workspace_root: nil,
           deployment_key: ENV.fetch("CLAW_DEPLOYMENT_KEY", "claw"),
           deployment_fingerprint: ENV.fetch("CLAW_DEPLOYMENT_FINGERPRINT", "deployment:bundled-claw"),
           required_bearer: ENV.fetch("CLAW_REQUIRED_BEARER", "secret://agent"),
@@ -22,6 +29,7 @@ module Cybros
           web_search_endpoint: ENV["CLAW_WEB_SEARCH_ENDPOINT"]
         )
           @source_root = Pathname.new(source_root.to_s)
+          @workspace_root = workspace_root.present? ? Pathname.new(workspace_root.to_s) : nil
           @deployment_key = deployment_key.to_s
           @deployment_fingerprint = deployment_fingerprint.to_s
           @required_bearer = required_bearer
@@ -97,6 +105,9 @@ module Cybros
         end
 
         def prompt_text(prompt_key)
+          workspace_prompt_path = workspace_prompt_path_for(prompt_key)
+          return workspace_prompt_path.read if workspace_prompt_path&.file?
+
           relative = manifest.fetch("prompts").fetch(prompt_key.to_s)
           safe_join(relative).read
         end
@@ -131,6 +142,17 @@ module Cybros
           return candidate if candidate == root || candidate.to_s.start_with?(root.to_s + File::SEPARATOR)
 
           raise "prompt path escapes bundled claw source root"
+        end
+
+        def workspace_prompt_path_for(prompt_key)
+          filename = WORKSPACE_PROMPT_FILES[prompt_key.to_s]
+          return nil if filename.blank? || workspace_root.nil?
+
+          candidate = workspace_root.join(filename).expand_path
+          root = workspace_root.expand_path
+          return candidate if candidate == root || candidate.to_s.start_with?(root.to_s + File::SEPARATOR)
+
+          raise "prompt path escapes live workspace root"
         end
 
         def sanitize_attachment_filename(filename)

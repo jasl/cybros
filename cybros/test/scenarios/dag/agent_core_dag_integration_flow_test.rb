@@ -2200,6 +2200,112 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "context budget enqueue_compact still expands the tool loop when the model returns plain text without tool calls" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    first_turn_id = "0194f3c0-0000-7000-8000-00000000d113f"
+    second_turn_id = "0194f3c0-0000-7000-8000-00000000d1140"
+
+    first_agent = nil
+    agent = nil
+
+    graph.mutate!(turn_id: first_turn_id) do |m|
+      history_user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "History #{"x" * 40}",
+          metadata: {},
+        )
+      first_agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          metadata: {},
+          body_output: { "content" => "Earlier reply #{"y" * 40}" },
+        )
+      m.create_edge(from_node: history_user, to_node: first_agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    graph.mutate!(turn_id: second_turn_id) do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "Need action #{"z" * 40}",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          metadata: {},
+        )
+      m.create_edge(from_node: first_agent, to_node: user, edge_type: DAG::Edge::SEQUENCE)
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    provider =
+      StubProvider.new(
+        responses: [
+          AgentCore::Resources::Provider::Response.new(
+            message: AgentCore::Message.new(role: :assistant, content: "COMPACTION_DONE"),
+            stop_reason: :end_turn,
+          ),
+        ]
+      )
+
+    tools_registry = AgentCore::Resources::Tools::Registry.new
+    tools_registry.register_many(Cybros::ContextBudget::Tools.build)
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: provider,
+        model: "test-model",
+        tools_registry: tools_registry,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 100,
+        context_budget_policy: Cybros::ContextBudget::DefaultPolicy,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_registry = DAG.executor_registry
+
+    DAG.executor_registry = DAG::ExecutorRegistry.new
+    DAG.executor_registry.register(Messages::AgentMessage.node_type_key, AgentCore::DAG::Executors::AgentMessageExecutor.new)
+    DAG.executor_registry.register(Messages::Task.node_type_key, AgentCore::DAG::Executors::TaskExecutor.new)
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+
+    begin
+      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+      assert_equal [agent.id], claimed.map(&:id)
+      DAG::Runner.run_node!(agent.id)
+
+      agent.reload
+      assert_equal DAG::Node::FINISHED, agent.state
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).order(:created_at, :id).to_a
+      assert_equal ["compact_context"], tasks.map { |task| task.body_input["name"] }
+      assert_equal "context_budget_policy", tasks.first.body_input["source"]
+
+      next_agent =
+        graph.nodes.active
+          .where(turn_id: agent.turn_id, node_type: Messages::AgentMessage.node_type_key)
+          .where.not(id: agent.id)
+          .order(:created_at, :id)
+          .last
+      assert next_agent.present?, "expected a follow-up agent node after auto-enqueued compaction"
+      assert_equal DAG::Node::PENDING, next_agent.state
+    ensure
+      AgentCore::DAG.runtime_resolver = original_runtime_resolver
+      DAG.executor_registry = original_registry
+    end
+  end
+
   test "streaming: MessageComplete without TextDelta still persists final content" do
     conversation = create_conversation!
     graph = conversation.dag_graph

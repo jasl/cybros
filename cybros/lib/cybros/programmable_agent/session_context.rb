@@ -30,14 +30,9 @@ module Cybros
           private
 
             def workspace_payload_for(conversation)
-              return nil unless conversation&.logical_workspace_initialized?
+              return nil if conversation.nil?
 
-              {
-                "conversation_id" => conversation.id,
-                "logical_workspace_key" => conversation.logical_workspace_key,
-                "logical_workspace_root_path" => conversation.logical_workspace_root_path,
-                "logical_workspace_initialized_at" => conversation.logical_workspace_initialized_at&.iso8601,
-              }.compact
+              conversation.workspace_payload
             end
         end
       end

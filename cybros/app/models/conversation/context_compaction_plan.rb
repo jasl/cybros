@@ -12,22 +12,24 @@ class Conversation::ContextCompactionPlan
       end
     end
 
-  def self.plan(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil)
+  def self.plan(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil, estimated_tokens_offset: 0)
     new(
       conversation: conversation,
       content: content,
       lane: lane,
       runtime_surface_resolution: runtime_surface_resolution,
       runtime: runtime,
+      estimated_tokens_offset: estimated_tokens_offset,
     ).plan
   end
 
-  def initialize(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil)
+  def initialize(conversation:, content:, lane: nil, runtime_surface_resolution: nil, runtime: nil, estimated_tokens_offset: 0)
     @conversation = conversation
     @content = content.to_s
     @lane = lane || conversation.chat_lane
     @runtime_surface_resolution = runtime_surface_resolution
     @runtime = runtime
+    @estimated_tokens_offset = [estimated_tokens_offset.to_i, 0].max
   end
 
   def plan
@@ -336,7 +338,7 @@ class Conversation::ContextCompactionPlan
           token_counter.count_text(section.content.to_s)
         end
 
-      token_counter.count_text(adapted.system_prompt.to_s) + prompt_buffer_tokens + token_counter.count_messages(adapted.messages)
+      token_counter.count_text(adapted.system_prompt.to_s) + prompt_buffer_tokens + token_counter.count_messages(adapted.messages) + @estimated_tokens_offset
     end
 
     def lane

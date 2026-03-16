@@ -213,6 +213,81 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "full-access programmable runs still park protected root writes for approval" do
+    llm_server =
+      MockLLMServer.new do |_payload|
+        MockLLMServer.chat_response(
+          content: "Need protected write",
+          finish_reason: "tool_calls",
+          tool_calls: [
+            {
+              "id" => "tc_write_soul",
+              "type" => "function",
+              "function" => {
+                "name" => "write",
+                "arguments" => JSON.generate(
+                  {
+                    "path" => "../../SOUL.md",
+                    "content" => "rewritten soul\n",
+                  },
+                ),
+              },
+            },
+          ],
+        )
+      end.start
+    server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
+    program = create_program!
+    deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
+    Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+    deployment.reload
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+        with_default_agent_workspace_root(workspace_root) do
+          conversation = create_programmable_conversation!(program: program, llm_options: { "stream" => false })
+          conversation.update!(
+            permission_mode: "full_access",
+            agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
+          )
+          Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+
+          soul_path = conversation.agent.workspace_root_path.join("SOUL.md")
+          original_soul = soul_path.exist? ? File.read(soul_path) : nil
+
+          result = conversation.append_user_message!(content: "Rewrite your soul", model_ref: "dev/mock-model")
+          agent_node = result.fetch(:agent_node)
+          agent_node.update!(claim_after_at: nil)
+
+          claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+          assert_includes claimed, agent_node.id
+
+          DAG::Runner.run_node!(agent_node.id)
+
+          task =
+            conversation.root_graph.nodes
+              .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
+              .order(:id)
+              .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_write_soul" }
+
+          assert task,
+            "expected tool task for tc_write_soul, got=#{conversation.root_graph.nodes.where(turn_id: agent_node.turn_id).order(:id).map { |node| { id: node.id, type: node.node_type, state: node.state, idempotency_key: node.idempotency_key, body_input: node.body_input, body_output: node.body_output } }}"
+          assert_equal DAG::Node::AWAITING_APPROVAL, task.state
+          assert_equal "write", task.body_input.fetch("name")
+          assert_equal "../../SOUL.md", task.body_input.dig("arguments", "path")
+          if original_soul.nil?
+            refute soul_path.exist?
+          else
+            assert_equal original_soul, File.read(soul_path)
+          end
+        end
+      end
+    end
+  ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
   private
 
     def create_program!

@@ -30,6 +30,16 @@ class RuntimeSetting < ApplicationRecord
     validate_agent_workspace_root_path!(normalize_agent_workspace_root_path(configured_root))
   end
 
+  def self.agent_workspace_root_path_for(agent:)
+    agent = agent or raise ArgumentError, "agent is required"
+
+    prefix = agent.bundled_agent_key.to_s.strip
+    prefix = agent.agent_key.to_s.strip if prefix.blank?
+    prefix = "agent" if prefix.blank?
+
+    instance_agent_workspace_root_path.join("#{ActiveStorage::Filename.new(prefix).sanitized}-#{agent.id}")
+  end
+
   def self.conversation_workspace_root_path_for(logical_workspace_key:)
     key = logical_workspace_key.to_s.strip
     raise ArgumentError, "logical workspace key is required" if key.blank?

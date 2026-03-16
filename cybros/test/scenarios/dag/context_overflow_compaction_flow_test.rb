@@ -306,6 +306,102 @@ class DAG::ContextOverflowCompactionFlowTest < ActiveSupport::TestCase
     AgentCore::DAG.runtime_resolver = original_runtime_resolver
   end
 
+  test "compact_context uses context budget metadata as fixed overhead when transcript-only planning would noop" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+
+    task_node = nil
+    graph.mutate!(turn_id: SecureRandom.uuid) do |m|
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          lane_id: lane.id,
+          body_output: { "content" => "Compacting" },
+          metadata: {},
+        )
+      task_node =
+        m.create_node(
+          node_type: Messages::Task.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: lane.id,
+          metadata: {
+            "source" => "context_budget_policy",
+            "context_budget" => {
+              "budget_action" => "enqueue_compact",
+              "estimated_tokens" => 260,
+              "effective_prompt_budget_tokens" => 200,
+            },
+          },
+          body_input: {
+            "tool_call_id" => "tc_compact_budget",
+            "name" => "compact_context",
+            "requested_name" => "compact_context",
+            "arguments" => { "reason" => "forced_fit" },
+          },
+        )
+
+      m.create_edge(from_node: agent, to_node: task_node, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    runtime =
+      AgentCore::DAG::Runtime.new(
+        provider: NullProvider.new,
+        model: "test-model",
+        tools_registry: AgentCore::Resources::Tools::Registry.new,
+        tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        llm_options: { stream: false },
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+        context_window_tokens: 200,
+        reserved_output_tokens: 0,
+        token_counter: RoleAwareTokenCounter.new,
+      )
+
+    original_runtime_resolver = AgentCore::DAG.runtime_resolver
+    original_plan = Conversation::ContextCompactionPlan.method(:plan)
+    plan_calls = []
+
+    AgentCore::DAG.runtime_resolver = ->(node:) { _ = node; runtime }
+    Conversation::ContextCompactionPlan.define_singleton_method(:plan) do |**kwargs|
+      plan_calls << kwargs.fetch(:estimated_tokens_offset, 0).to_i
+
+      if kwargs.fetch(:estimated_tokens_offset, 0).to_i.positive?
+        Conversation::ContextCompactionPlan::Result.new(
+          required: true,
+          estimated_tokens: 260,
+          effective_prompt_budget_tokens: 200,
+          compacted_turn_ids: [],
+          summary_text: "[Compacted prior context]\nforced by metadata overhead",
+        )
+      else
+        Conversation::ContextCompactionPlan::Result.new(
+          required: false,
+          estimated_tokens: 140,
+          effective_prompt_budget_tokens: 200,
+          compacted_turn_ids: [],
+          summary_text: nil,
+        )
+      end
+    end
+
+    tool = Cybros::ContextBudget::Tools.build.find { |entry| entry.name == "compact_context" }
+    result =
+      tool.call(
+        { "reason" => "forced_fit", "target" => "older_turns" },
+        context: AgentCore::ExecutionContext.new(attributes: { dag: { node_id: task_node.id.to_s } }),
+      )
+
+    refute result.error?
+    assert_equal false, result.metadata.fetch("noop")
+    assert_equal [0, 120], plan_calls
+    assert_equal "[Compacted prior context]\nforced by metadata overhead",
+                 lane.lane_prompt_buffer_entries.where(buffer_name: "summaries").ordered.last.content
+  ensure
+    AgentCore::DAG.runtime_resolver = original_runtime_resolver
+    Conversation::ContextCompactionPlan.define_singleton_method(:plan, original_plan)
+  end
+
   test "compact_context plans against the current branch lane instead of the root lane" do
     root = create_conversation!(title: "Root")
     graph = root.root_graph

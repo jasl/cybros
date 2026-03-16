@@ -138,12 +138,17 @@ module Cybros
     def memory_search_tool
       tool(
         name: "memory_search",
-        description: "Search the conversation-owned memory document and return matching lines.",
+        description: "Search scoped workspace memory files and return matching lines.",
         permission_class: "read",
         parameters: {
           type: "object",
           properties: {
             query: { type: "string" },
+            scopes: {
+              type: "array",
+              items: { type: "string", enum: %w[root conversation lane] },
+            },
+            target: { type: "string" },
           },
           required: ["query"],
           additionalProperties: false,
@@ -154,11 +159,14 @@ module Cybros
     def memory_get_tool
       tool(
         name: "memory_get",
-        description: "Read the current conversation-owned memory document.",
+        description: "Read a scoped workspace memory document.",
         permission_class: "read",
         parameters: {
           type: "object",
-          properties: {},
+          properties: {
+            scope: { type: "string", enum: %w[root conversation lane] },
+            target: { type: "string" },
+          },
           additionalProperties: false,
         },
       )
@@ -167,12 +175,14 @@ module Cybros
     def memory_store_tool
       tool(
         name: "memory_store",
-        description: "Store durable notes in the conversation-owned memory document.",
+        description: "Store durable notes in a scoped workspace memory document.",
         permission_class: "mutate",
         parameters: {
           type: "object",
           properties: {
             content: { type: "string" },
+            scope: { type: "string", enum: %w[root conversation lane] },
+            target: { type: "string" },
             mode: { type: "string", enum: %w[append replace] },
           },
           required: ["content"],

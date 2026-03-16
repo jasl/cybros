@@ -19,6 +19,7 @@ Historical pre-cutover product docs were intentionally removed. Use git history 
 - `RunDraft` and `ConversationRun` bind to one `RecognizedDeployment` so historical turns stay pinned when an agent changes later.
 - The dashboard is the primary launcher: users start from an `Agent`, then create a `Conversation`.
 - Automations bind to `Agent`, not to a deployment or execution target inventory object.
-- Each conversation owns one persistent logical workspace that is lazy-initialized.
+- Each `Agent` owns one durable root workspace, and each `Conversation` gets a lightweight working directory beneath that root.
+- Lane-local state lives under `conversations/<conversation_id>/.lanes/<lane_id>/` and stays hidden from normal workspace browsing unless the lane actually uses it.
 - Attachments are stored through Active Storage and transferred into agents through `attachments.import` plus an explicit transfer task.
 - Breaking changes are allowed when they reduce product-path complexity and remove obsolete runtime surfaces.

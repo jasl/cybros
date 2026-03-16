@@ -17,9 +17,9 @@ module TestSupport
       end
     end
 
-    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries, :memory_document
+    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries
 
-    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil, memory_document: "")
+    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil, memory_document: "", memory_documents: nil)
       @required_bearer = required_bearer
       @proposal_decision = proposal_decision
       @targets =
@@ -30,7 +30,7 @@ module TestSupport
         Array(prompt_buffer_entries).map do |entry|
           deep_copy(entry)
         end
-      @memory_document = memory_document.to_s
+      @memory_documents = normalize_memory_documents(memory_document: memory_document, memory_documents: memory_documents)
       @calls = []
       @server = nil
       @thread = nil
@@ -100,13 +100,14 @@ module TestSupport
       when "conversation.settings.update", "conversation.config.update"
         { "status" => "staged", "operation_id" => params["operation_id"] }
       when "conversation.memory.get"
-        memory_result
+        memory_result(params)
       when "conversation.memory.put"
-        @memory_document = params.fetch("body", params["content"]).to_s
-        memory_result
+        @memory_documents[memory_key_for(params)] = params.fetch("body", params["content"]).to_s
+        memory_result(params)
       when "conversation.memory.append"
-        @memory_document += params.fetch("text", params["content"]).to_s
-        memory_result
+        key = memory_key_for(params)
+        @memory_documents[key] = @memory_documents.fetch(key, "") + params.fetch("text", params["content"]).to_s
+        memory_result(params)
       when "lane.kv.set", "lane.kv.delete"
         { "status" => "staged", "operation_id" => params["operation_id"] }
       when "lane.kv.get"
@@ -212,13 +213,34 @@ module TestSupport
       ]
     end
 
-    def memory_result
+    def memory_result(params)
+      scope, target = memory_key_for(params)
+
       {
         "document" => {
-          "kind" => "conversation_memory",
-          "body" => @memory_document
+          "kind" => "workspace_memory",
+          "scope" => scope,
+          "target" => target,
+          "path" => "/memory/#{scope}/#{target}",
+          "body" => @memory_documents.fetch([scope, target], ""),
+          "materialized" => @memory_documents.key?([scope, target]),
         }
       }
+    end
+
+    def memory_key_for(params)
+      [params["scope"].to_s.presence || "conversation", params["target"].to_s.presence || "MEMORY.md"]
+    end
+
+    def normalize_memory_documents(memory_document:, memory_documents:)
+      if memory_documents.is_a?(Hash)
+        return memory_documents.each_with_object({}) do |(key, value), out|
+          scope, target = Array(key)
+          out[[scope.to_s, target.to_s]] = value.to_s
+        end
+      end
+
+      { ["conversation", "MEMORY.md"] => memory_document.to_s }
     end
 
     def deep_copy(value)

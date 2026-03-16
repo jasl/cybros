@@ -28,13 +28,25 @@ module Cybros
           runtime = AgentCore::DAG.runtime_for(node: task_node)
 
           plan =
-            Conversation::ContextCompactionPlan.plan(
+            build_compaction_plan(
               conversation: conversation,
-              content: "",
               lane: lane,
-              runtime_surface_resolution: runtime_surface_resolution_for(runtime),
               runtime: runtime,
             )
+          estimated_tokens_offset =
+            context_budget_estimated_tokens_offset_for(
+              task_node: task_node,
+              plan: plan,
+            )
+          if !plan.required? && estimated_tokens_offset.positive?
+            plan =
+              build_compaction_plan(
+                conversation: conversation,
+                lane: lane,
+                runtime: runtime,
+                estimated_tokens_offset: estimated_tokens_offset,
+              )
+          end
 
           reason = args.fetch("reason", nil).to_s.presence || "manual"
           target = args.fetch("target", nil).to_s.presence || "older_turns"
@@ -103,6 +115,32 @@ module Cybros
         )
       end
       private_class_method :current_task_node!
+
+      def build_compaction_plan(conversation:, lane:, runtime:, estimated_tokens_offset: 0)
+        Conversation::ContextCompactionPlan.plan(
+          conversation: conversation,
+          content: "",
+          lane: lane,
+          runtime_surface_resolution: runtime_surface_resolution_for(runtime),
+          runtime: runtime,
+          estimated_tokens_offset: estimated_tokens_offset,
+        )
+      end
+      private_class_method :build_compaction_plan
+
+      def context_budget_estimated_tokens_offset_for(task_node:, plan:)
+        metadata = task_node.metadata.is_a?(Hash) ? task_node.metadata : {}
+        context_budget = metadata.fetch("context_budget", nil)
+        return 0 unless context_budget.is_a?(Hash)
+
+        budget_estimate = context_budget.fetch("estimated_tokens", context_budget.fetch(:estimated_tokens, nil)).to_i
+        return 0 unless budget_estimate.positive?
+
+        [budget_estimate - plan.estimated_tokens.to_i, 0].max
+      rescue StandardError
+        0
+      end
+      private_class_method :context_budget_estimated_tokens_offset_for
 
       def conversation_for!(task_node)
         conversation = task_node.graph.attachable

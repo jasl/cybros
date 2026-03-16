@@ -144,6 +144,49 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
     assert_equal "openai/gpt-5.4", runtime.model
   end
 
+  test "runtime_for exposes a soft context limit for openrouter gpt-5.4 so compaction can be advised before hard cap" do
+    LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-or-test")
+    Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4")
+
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+          },
+        },
+      )
+    node = build_pending_agent_node(conversation: conversation)
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+
+    assert_equal "openai/gpt-5.4", runtime.model
+    assert_equal 0.9, runtime.context_soft_limit_ratio
+  end
+
+  test "runtime_for supports a live-acceptance alias for openrouter gpt-5.4 with a smaller budget but the same upstream api model" do
+    LLMProviderCredential.delete_all
+    ensure_llm_provider!(provider_key: "openrouter", credential_type: "api_key", api_key: "sk-or-test")
+    Account.instance.update_llm_default_model_ref!("openrouter/openai-gpt-5.4-live-acceptance")
+
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => {
+            "agent_profile" => "coding",
+          },
+        },
+      )
+    node = build_pending_agent_node(conversation: conversation)
+
+    runtime = Cybros::AgentRuntimeResolver.runtime_for(node: node)
+
+    assert_equal "openai/gpt-5.4", runtime.model
+    assert_equal 28_000, runtime.context_window_tokens
+    assert_equal 0.9, runtime.context_soft_limit_ratio
+  end
+
   test "runtime_for falls back to catalog default when site default no longer exists" do
     LLMProviderCredential.delete_all
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "k1")

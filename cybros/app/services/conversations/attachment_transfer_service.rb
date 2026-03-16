@@ -32,7 +32,7 @@ module Conversations
     end
 
     def transfer!
-      workspace = Conversations::WorkspaceInitializer.initialize!(conversation: conversation).deep_stringify_keys
+      workspace = Conversations::WorkspaceInitializer.payload_for(conversation: conversation).deep_stringify_keys
       attachments = selected_attachments
 
       if bundled_claw_agent?
@@ -102,7 +102,7 @@ module Conversations
       end
 
       def materialize_workspace_files!(attachments, workspace:)
-        workspace_root = Pathname.new(workspace.fetch("logical_workspace_root_path"))
+        workspace_root = Conversations::WorkspaceInitializer.materialize_conversation_directory!(conversation: conversation)
         attachments_root = workspace_root.join("attachments")
         FileUtils.mkdir_p(attachments_root)
 
@@ -221,7 +221,14 @@ module Conversations
               "id" => conversation.id,
               "title" => conversation.title.to_s,
             },
-            "workspace" => workspace.slice("logical_workspace_key", "logical_workspace_root_path"),
+            "workspace" => workspace.slice(
+              "logical_workspace_key",
+              "logical_workspace_root_path",
+              "root_path",
+              "conversation_path",
+              "lane_path",
+              "cwd",
+            ),
           }
         end
       end

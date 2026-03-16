@@ -17,10 +17,11 @@ module Cybros
         def do_POST(req, res) = @host_application.handle(req, res)
       end
 
-      attr_reader :source_root, :host, :port
+      attr_reader :source_root, :workspace_root, :host, :port
 
       def initialize(
         source_root:,
+        workspace_root: nil,
         host: "127.0.0.1",
         port: 0,
         deployment_key: "claw",
@@ -28,6 +29,7 @@ module Cybros
         required_bearer: nil
       )
         @source_root = Pathname.new(source_root.to_s)
+        @workspace_root = workspace_root.present? ? Pathname.new(workspace_root.to_s) : nil
         @host = host
         @port = Integer(port)
         @deployment_key = deployment_key.to_s
@@ -107,6 +109,8 @@ module Cybros
         write_json(res, error_payload(-32601, e.message), status: 404)
       rescue JSON::ParserError => e
         write_json(res, error_payload(-32700, e.message), status: 400)
+      rescue SecurityError => e
+        write_json(res, error_payload(-32000, e.message), status: 500)
       rescue StandardError => e
         write_json(res, error_payload(-32000, e.message), status: 500)
       end
@@ -127,6 +131,7 @@ module Cybros
               require "cybros/agents/claw"
               Cybros::Agents::Claw::Application.new(
                 source_root: source_root,
+                workspace_root: workspace_root,
                 deployment_key: deployment_key,
                 deployment_fingerprint: deployment_fingerprint,
               )
@@ -174,6 +179,7 @@ module Cybros
           host: "127.0.0.1",
           port: 4321,
           source_root: Rails.root.join("agents", "claw").to_s,
+          workspace_root: nil,
           deployment_key: "claw",
           deployment_fingerprint: "bundled-claw-v1",
           required_bearer: nil,
@@ -183,6 +189,7 @@ module Cybros
           parser.on("--host HOST") { |value| options[:host] = value }
           parser.on("--port PORT") { |value| options[:port] = Integer(value) }
           parser.on("--source-root PATH") { |value| options[:source_root] = value }
+          parser.on("--workspace-root PATH") { |value| options[:workspace_root] = value }
           parser.on("--deployment-key KEY") { |value| options[:deployment_key] = value }
           parser.on("--deployment-fingerprint FINGERPRINT") { |value| options[:deployment_fingerprint] = value }
           parser.on("--bearer TOKEN") { |value| options[:required_bearer] = value }
@@ -191,6 +198,7 @@ module Cybros
         application =
           Application.new(
             source_root: options[:source_root],
+            workspace_root: options[:workspace_root],
             host: options[:host],
             port: options[:port],
             deployment_key: options[:deployment_key],

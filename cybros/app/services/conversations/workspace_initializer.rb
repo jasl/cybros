@@ -1,11 +1,31 @@
-require "fileutils"
-
 module Conversations
   class WorkspaceInitializer
-    SAFE_LOGICAL_WORKSPACE_KEY = /\A[a-zA-Z0-9._-]+\z/.freeze
-
     def self.initialize!(conversation:)
       new(conversation: conversation).initialize!
+    end
+
+    def self.payload_for(conversation:, lane_id: nil)
+      conversation.workspace_payload(lane_id: lane_id)
+    end
+
+    def self.conversation_path_for(conversation:)
+      conversation.workspace_root_path
+    end
+
+    def self.lane_path_for(conversation:, lane_id:)
+      conversation.lane_workspace_root_path(lane_id: lane_id).to_s
+    end
+
+    def self.materialize_conversation_directory!(conversation:)
+      conversation_path = conversation_path_for(conversation: conversation)
+      conversation_path.mkpath
+      conversation_path
+    end
+
+    def self.materialize_lane_directory!(conversation:, lane_id:)
+      lane_path = Pathname.new(lane_path_for(conversation: conversation, lane_id: lane_id))
+      lane_path.mkpath
+      lane_path
     end
 
     def initialize(conversation:)
@@ -13,25 +33,26 @@ module Conversations
     end
 
     def initialize!
-      conversation.with_lock do
-        conversation.reload
-        return workspace_snapshot if conversation.logical_workspace_initialized?
+        conversation.with_lock do
+          conversation.reload
 
-        logical_workspace_key = normalized_logical_workspace_key
-        conversations_root_path = RuntimeSetting.instance_agent_workspace_root_path.join("conversations").cleanpath
-        logical_workspace_directory_name = ActiveStorage::Filename.new(logical_workspace_key).sanitized
-        logical_workspace_root_path = conversations_root_path.join(logical_workspace_directory_name).cleanpath
+          agent_workspace = Agents::WorkspaceInitializer.initialize!(agent: conversation.agent)
+          conversation_path = self.class.materialize_conversation_directory!(conversation: conversation)
+          lane_path = self.class.materialize_lane_directory!(conversation: conversation, lane_id: conversation.chat_lane.id)
 
-        conversations_root_path.mkpath
-        logical_workspace_root_path.mkpath
-
-        conversation.update!(
-          logical_workspace_key: logical_workspace_key,
-          logical_workspace_root_path: logical_workspace_root_path.to_s,
-          logical_workspace_initialized_at: conversation.logical_workspace_initialized_at || Time.current.change(usec: 0),
+          conversation.update!(
+            logical_workspace_key: "conversation-#{conversation.id}",
+            logical_workspace_root_path: conversation_path.to_s,
+            logical_workspace_initialized_at: conversation.logical_workspace_initialized_at || Time.current.change(usec: 0),
         )
 
-        workspace_snapshot
+        workspace_snapshot.merge(
+          agent_root_path: agent_workspace.fetch(:root_path),
+          root_path: agent_workspace.fetch(:root_path),
+          conversation_path: conversation_path.to_s,
+          lane_path: lane_path.to_s,
+          cwd: conversation_path.to_s,
+        )
       end
     end
 
@@ -41,17 +62,15 @@ module Conversations
 
       def workspace_snapshot
         {
+          agent_root_path: Agents::WorkspaceInitializer.initialize!(agent: conversation.agent).fetch(:root_path),
+          root_path: Agents::WorkspaceInitializer.initialize!(agent: conversation.agent).fetch(:root_path),
+          conversation_path: self.class.conversation_path_for(conversation: conversation).to_s,
+          lane_path: self.class.lane_path_for(conversation: conversation, lane_id: conversation.chat_lane.id),
+          cwd: self.class.conversation_path_for(conversation: conversation).to_s,
           logical_workspace_key: conversation.logical_workspace_key,
           logical_workspace_root_path: conversation.logical_workspace_root_path,
           logical_workspace_initialized_at: conversation.logical_workspace_initialized_at,
         }
-      end
-
-      def normalized_logical_workspace_key
-        raw_key = conversation.logical_workspace_key.to_s.strip
-        return raw_key if raw_key.match?(SAFE_LOGICAL_WORKSPACE_KEY) && !%w[. ..].include?(raw_key)
-
-        "conversation-#{conversation.id}"
       end
   end
 end

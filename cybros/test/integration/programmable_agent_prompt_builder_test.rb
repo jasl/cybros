@@ -1,5 +1,6 @@
 require "test_helper"
 require_relative "../support/programmable_agent_runtime_test_support"
+require "tmpdir"
 
 class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
@@ -45,88 +46,143 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     llm_server&.shutdown
   end
 
-  test "bundled claw injects full bootstrap sections and conversation memory into the actual model request" do
-    llm_payloads = []
-    llm_server =
-      MockLLMServer.new do |payload|
-        llm_payloads << payload.deep_dup
-        MockLLMServer.chat_response(content: "llm draft answer")
-      end.start
+  test "bundled claw injects live root bootstrap scope inventory and merged skills without auto-injecting conversation memory" do
+    Dir.mktmpdir("cybros-prompt-builder-workspace-") do |workspace_root|
+      Dir.mktmpdir("cybros-platform-skills-") do |platform_skills_root|
+        llm_payloads = []
+        llm_server =
+          MockLLMServer.new do |payload|
+            llm_payloads << payload.deep_dup
+            MockLLMServer.chat_response(content: "llm draft answer")
+          end.start
 
-    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
-      conversation = create_conversation!(title: "Prompt Builder Full")
-      AgentRPC::KernelServices::ConversationMemory.put!(conversation: conversation, body: "Remember alpha")
+        with_default_agent_workspace_root(workspace_root) do
+          with_platform_skill_dirs([platform_skills_root]) do
+            with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+              agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+              conversation =
+                create_conversation!(
+                  title: "Prompt Builder Full",
+                  agent: agent,
+                  metadata: { "agent" => agent.conversation_metadata_fragment },
+                )
 
-      run_bundled_claw_turn!(
-        conversation: conversation,
-        user_content: "Inspect runtime context",
-        model_ref: "dev/mock-model",
-        llm_payloads: llm_payloads,
-      )
+              File.write(agent.workspace_root_path.join("SOUL.md"), "Live prompt soul\n")
+              File.write(agent.workspace_root_path.join("USER.md"), "Live prompt user\n")
+              write_skill!(platform_skills_root, name: "platform-skill", description: "Platform description")
+              write_skill!(agent.workspace_root_path.join("skills"), name: "agent-skill", description: "Agent description")
+              AgentRPC::KernelServices::ConversationMemory.put!(
+                conversation: conversation,
+                lane: conversation.chat_lane,
+                scope: "conversation",
+                body: "Conversation memory should stay out of the prompt",
+              )
+              AgentRPC::KernelServices::ConversationMemory.put!(
+                conversation: conversation,
+                lane: conversation.chat_lane,
+                scope: "lane",
+                body: "Lane memory should stay out of the prompt",
+              )
 
-      system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+              run_bundled_claw_turn!(
+                conversation: conversation,
+                user_content: "Inspect runtime context",
+                model_ref: "dev/mock-model",
+                llm_payloads: llm_payloads,
+              )
 
-      assert_includes system_prompt, "## Tooling"
-      assert_includes system_prompt, "## Safety"
-      assert_includes system_prompt, "## Workspace"
-      assert_includes system_prompt, "## Documentation"
-      assert_includes system_prompt, "## Current Date & Time"
-      assert_includes system_prompt, "## Runtime"
-      assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
-      assert_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
-      assert_includes system_prompt, "<bootstrap_source name=\"USER\">"
-      assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
-      assert_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
-      assert_includes system_prompt, "Remember alpha"
-      assert_includes system_prompt, "Execution scope: primary"
+              system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+
+              assert_includes system_prompt, "## Tooling"
+              assert_includes system_prompt, "## Safety"
+              assert_includes system_prompt, "## Workspace"
+              assert_includes system_prompt, "## Scope Inventory"
+              assert_includes system_prompt, "## Documentation"
+              assert_includes system_prompt, "## Current Date & Time"
+              assert_includes system_prompt, "## Runtime"
+              assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
+              assert_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
+              assert_includes system_prompt, "<bootstrap_source name=\"USER\">"
+              assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
+              assert_includes system_prompt, "Live prompt soul"
+              assert_includes system_prompt, "Live prompt user"
+              assert_includes system_prompt, "Agent root:"
+              assert_includes system_prompt, "Conversation path:"
+              assert_includes system_prompt, "Lane path:"
+              assert_includes system_prompt, "root MEMORY.md: present"
+              assert_includes system_prompt, "conversation MEMORY.md: present"
+              assert_includes system_prompt, "<available_skills>"
+              assert_includes system_prompt, "platform-skill"
+              assert_includes system_prompt, "agent-skill"
+              refute_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
+              refute_includes system_prompt, "Conversation memory should stay out of the prompt"
+              refute_includes system_prompt, "Lane memory should stay out of the prompt"
+              assert_includes system_prompt, "Execution scope: primary"
+            end
+          end
+        end
+      ensure
+        llm_server&.shutdown
+      end
     end
-  ensure
-    llm_server&.shutdown
   end
 
   test "bundled claw uses minimal bootstrap sections for delegated subagent model requests" do
-    llm_payloads = []
-    llm_server =
-      MockLLMServer.new do |payload|
-        llm_payloads << payload.deep_dup
-        MockLLMServer.chat_response(content: "llm draft answer")
-      end.start
+    Dir.mktmpdir("cybros-prompt-builder-subagent-workspace-") do |workspace_root|
+      llm_payloads = []
+      llm_server =
+        MockLLMServer.new do |payload|
+          llm_payloads << payload.deep_dup
+          MockLLMServer.chat_response(content: "llm draft answer")
+        end.start
 
-    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
-      conversation =
-        create_conversation!(
-          title: "Prompt Builder Subagent",
-          metadata: {
-            "agent" => { "agent_profile" => "subagent" },
-            "subagent" => {
-              "subagent_id" => SecureRandom.uuid,
-              "parent_turn_id" => SecureRandom.uuid,
-              "parent_dag_node_id" => SecureRandom.uuid,
-            },
-          },
-        )
-      AgentRPC::KernelServices::ConversationMemory.put!(conversation: conversation, body: "Do not inject full memory here")
+      with_default_agent_workspace_root(workspace_root) do
+        with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+          agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+          conversation =
+            create_conversation!(
+              title: "Prompt Builder Subagent",
+              agent: agent,
+              metadata: {
+                "agent" => agent.conversation_metadata_fragment.merge("agent_profile" => "subagent"),
+                "subagent" => {
+                  "subagent_id" => SecureRandom.uuid,
+                  "parent_turn_id" => SecureRandom.uuid,
+                  "parent_dag_node_id" => SecureRandom.uuid,
+                },
+              },
+            )
+          AgentRPC::KernelServices::ConversationMemory.put!(
+            conversation: conversation,
+            lane: conversation.chat_lane,
+            scope: "conversation",
+            body: "Do not inject full memory here",
+          )
 
-      run_bundled_claw_turn!(
-        conversation: conversation,
-        user_content: "Handle delegated work",
-        model_ref: "dev/mock-model",
-        llm_payloads: llm_payloads,
-      )
+          run_bundled_claw_turn!(
+            conversation: conversation,
+            user_content: "Handle delegated work",
+            model_ref: "dev/mock-model",
+            llm_payloads: llm_payloads,
+          )
 
-      system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+          system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
 
-      assert_includes system_prompt, "Execution scope: subagent"
-      assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
-      assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
-      refute_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
-      refute_includes system_prompt, "<bootstrap_source name=\"USER\">"
-      refute_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
-      refute_includes system_prompt, "Do not inject full memory here"
-      refute_includes system_prompt, "## Documentation"
+          assert_includes system_prompt, "Execution scope: subagent"
+          assert_includes system_prompt, "<bootstrap_source name=\"AGENTS\">"
+          assert_includes system_prompt, "<bootstrap_source name=\"TOOLS\">"
+          refute_includes system_prompt, "<bootstrap_source name=\"SOUL\">"
+          refute_includes system_prompt, "<bootstrap_source name=\"USER\">"
+          refute_includes system_prompt, "<bootstrap_source name=\"MEMORY\">"
+          refute_includes system_prompt, "<available_skills>"
+          refute_includes system_prompt, "Do not inject full memory here"
+          refute_includes system_prompt, "## Documentation"
+          refute_includes system_prompt, "## Scope Inventory"
+        end
+      end
+    ensure
+      llm_server&.shutdown
     end
-  ensure
-    llm_server&.shutdown
   end
 
   test "bundled claw drops working_notes from the model request before history when prompt budget is tight" do
@@ -248,5 +304,30 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
                   tools: { tool_calling: true }
                   protocol: "chat_completions"
       YAML
+    end
+
+    def write_skill!(root, name:, description:)
+      skill_dir = Pathname.new(root).join(name)
+      FileUtils.mkdir_p(skill_dir)
+      File.write(
+        skill_dir.join("SKILL.md"),
+        <<~MD,
+          ---
+          name: #{name}
+          description: #{description}
+          ---
+
+          # #{name}
+        MD
+      )
+    end
+
+    def with_platform_skill_dirs(dirs)
+      singleton = Agents::SkillsStoreBuilder.singleton_class
+      original_method = singleton.instance_method(:default_platform_skill_dirs)
+      singleton.send(:define_method, :default_platform_skill_dirs) { dirs }
+      yield
+    ensure
+      singleton.send(:define_method, :default_platform_skill_dirs, original_method)
     end
 end

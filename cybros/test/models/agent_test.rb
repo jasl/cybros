@@ -74,6 +74,18 @@ class AgentTest < ActiveSupport::TestCase
     assert_equal "configured", agent.runtime_surface_status
   end
 
+  test "workspace_root_path resolves under the configured agent workspace root" do
+    workspace_root = Dir.mktmpdir("cybros-agent-model-")
+    agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+
+    with_default_agent_workspace_root(workspace_root) do
+      assert_equal Pathname.new(workspace_root).join("claw-#{agent.id}").cleanpath, agent.workspace_root_path
+      assert_equal agent.workspace_root_path, Agents::WorkspacePathResolver.resolve(agent: agent)
+    end
+  ensure
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
+
   private
 
     def create_program!

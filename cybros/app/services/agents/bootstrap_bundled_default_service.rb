@@ -27,6 +27,7 @@ module Agents
 
     def ensure_agent!
       agent = Agents::Creator.create_from_bundled_source!(name: DEFAULT_AGENT_NAME, bundled_agent_key: DEFAULT_BUNDLED_AGENT_KEY)
+      Agents::WorkspaceInitializer.initialize!(agent: agent)
       activate_runtime!(agent: agent, fingerprint: deployment_fingerprint, bearer: deployment_bearer)
     end
 
@@ -77,7 +78,8 @@ module Agents
           if existing.present?
             same_source = existing.source_root.to_s == agent.absolute_local_path.to_s
             same_fingerprint = existing.identity.fetch("deployment_fingerprint", nil).to_s == fingerprint.to_s
-            return existing if same_source && same_fingerprint
+            same_workspace_root = existing.workspace_root.to_s == agent.workspace_root_path.to_s
+            return existing if same_source && same_fingerprint && same_workspace_root
 
             existing.shutdown
             hosts.delete(key)
@@ -86,6 +88,7 @@ module Agents
           host =
             Cybros::BundledAgentHost::Application.new(
               source_root: agent.absolute_local_path,
+              workspace_root: agent.workspace_root_path,
               deployment_key: agent.bundled_agent_key.to_s.presence || DEFAULT_BUNDLED_AGENT_KEY,
               deployment_fingerprint: fingerprint,
               required_bearer: bearer,

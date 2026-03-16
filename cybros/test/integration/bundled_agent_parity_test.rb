@@ -25,9 +25,15 @@ class BundledAgentParityTest < ActiveSupport::TestCase
     assert_equal Rails.root.join("agents/claw").to_s, agent.absolute_local_path.to_s
 
     product_doc = Rails.root.join("docs/product/agent_rpc.md").read
+    readme_doc = Rails.root.join("docs/product/README.md").read
+    vision_doc = Rails.root.join("docs/product/vision.md").read
     design_doc = Rails.root.join("docs/plans/2026-03-14-bundled-default-rails-agent-host-design.md").read
 
     assert_includes product_doc, "Current bundled implementation: `claw`"
     assert_includes design_doc, "Implemented result (2026-03-14): canonical bundled implementation is `cybros/agents/claw`"
+    assert_includes readme_doc, "Each `Agent` owns one durable root workspace"
+    assert_not_includes readme_doc, "Each conversation owns one persistent logical workspace that is lazy-initialized."
+    assert_includes vision_doc, "The bundled/default agent path now uses an agent-owned root workspace"
+    assert_not_includes vision_doc, "Conversation-owned logical workspaces are persistent and lazy-initialized instead of being exposed as standalone product inventory."
   end
 end

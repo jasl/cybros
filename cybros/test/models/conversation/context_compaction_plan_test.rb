@@ -70,6 +70,48 @@ class Conversation::ContextCompactionPlanTest < ActiveSupport::TestCase
     assert_equal "DEFAULT_SUMMARY", result.summary_text
   end
 
+  test "estimated token offsets make fixed prompt overhead count toward compaction" do
+    plan =
+      Conversation::ContextCompactionPlan.new(
+        conversation: create_conversation!,
+        content: "follow up",
+        runtime_surface_resolution: nil,
+        estimated_tokens_offset: 15,
+      )
+
+    nodes = [
+      transcript_node(turn_id: "t1", content: "history one"),
+      transcript_node(turn_id: "t2", content: "history two"),
+    ]
+    estimate_fn = lambda do |context_nodes:|
+      turn_count =
+        Array(context_nodes)
+          .filter_map { |node| node.fetch("turn_id").to_s.presence }
+          .uniq
+          .reject { |turn_id| turn_id == "synthetic-turn" }
+          .length
+
+      case turn_count
+      when 2 then 20
+      when 1 then 10
+      else 5
+      end
+    end
+
+    plan.define_singleton_method(:effective_prompt_budget_tokens) { 25 }
+    plan.define_singleton_method(:transcript_nodes) { nodes }
+    plan.define_singleton_method(:estimated_tokens_for) do |context_nodes:|
+      estimate_fn.call(context_nodes: context_nodes) + instance_variable_get(:@estimated_tokens_offset).to_i
+    end
+    plan.define_singleton_method(:summary_text_for) { |compacted_nodes:, budget:| "DEFAULT_SUMMARY" }
+
+    result = plan.plan
+
+    assert result.required?
+    assert_equal ["t1"], result.compacted_turn_ids
+    assert_equal "DEFAULT_SUMMARY", result.summary_text
+  end
+
   private
 
     def build_plan(runtime_surface_resolution:)

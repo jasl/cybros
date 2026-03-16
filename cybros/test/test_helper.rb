@@ -143,9 +143,20 @@ module ActiveSupport
     def with_default_agent_workspace_root(value)
       singleton = RuntimeSetting.singleton_class
       original_method = singleton.instance_method(:default_agent_workspace_root)
+      existing_runtime_setting = RuntimeSetting.find_by(scope_key: "instance")
+      original_runtime_attributes = existing_runtime_setting&.attributes&.slice("agent_workspace_root", "default_worker_concurrency", "queue_overrides", "alert_thresholds")
+
       singleton.send(:define_method, :default_agent_workspace_root) { value }
+      if existing_runtime_setting.present?
+        existing_runtime_setting.update_column(:agent_workspace_root, value)
+      end
       yield
     ensure
+      if original_runtime_attributes.present?
+        RuntimeSetting.find_by(scope_key: "instance")&.update_columns(original_runtime_attributes)
+      elsif existing_runtime_setting.nil?
+        RuntimeSetting.where(scope_key: "instance").delete_all
+      end
       singleton.send(:define_method, :default_agent_workspace_root, original_method)
     end
 

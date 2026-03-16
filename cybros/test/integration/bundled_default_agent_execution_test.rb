@@ -1,4 +1,5 @@
 require "test_helper"
+require "tmpdir"
 require_relative "../support/programmable_agent_runtime_test_support"
 
 class BundledDefaultAgentExecutionTest < ActiveSupport::TestCase
@@ -49,5 +50,107 @@ class BundledDefaultAgentExecutionTest < ActiveSupport::TestCase
     end
   ensure
     llm_server&.shutdown
+  end
+
+  test "bundled default bootstrap seeds the self-mutate skill into the live agent root" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+        skill_path = agent.workspace_root_path.join("skills/self-mutate/SKILL.md")
+
+        assert_predicate skill_path, :file?
+        skill_text = skill_path.read
+        assert_includes skill_text, "diff"
+        assert_includes skill_text, "confirm"
+        assert_includes skill_text, ".history"
+        assert_includes skill_text, "next top-level turn"
+        assert_includes skill_text, "../../SOUL.md"
+        assert_includes skill_text, "../../USER.md"
+        assert_includes skill_text, "../../skills/"
+      end
+    end
+  end
+
+  test "bundled default conversations expose split root conversation lane workspace semantics" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        conversation = create_conversation!(title: "Workspace semantics", metadata: { "agent" => {} })
+
+        payload = conversation.workspace_payload
+
+        assert_equal conversation.agent.workspace_root_path.to_s, payload.fetch("root_path")
+        assert_equal conversation.workspace_root_path.to_s, payload.fetch("conversation_path")
+        assert_equal conversation.workspace_root_path.to_s, payload.fetch("cwd")
+        assert_equal conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id).to_s, payload.fetch("lane_path")
+        refute_equal payload.fetch("root_path"), payload.fetch("conversation_path")
+        assert_equal File.join(payload.fetch("conversation_path"), ".lanes"), File.dirname(payload.fetch("lane_path"))
+        assert_includes payload.fetch("lane_path"), "/.lanes/"
+      end
+    end
+  end
+
+  test "bundled default runtime can read protected root prompts from the conversation cwd" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        conversation = create_conversation!(title: "Protected root read", metadata: { "agent" => {} })
+        workspace = Conversations::WorkspaceInitializer.initialize!(conversation: conversation).deep_stringify_keys
+        deployment = conversation.agent.active_runtime_binding
+
+        response =
+          Agents::RPCClient.new(deployment: deployment).call(
+            "tool.execute",
+            {
+              "implementation_ref" => "claw:read",
+              "logical_tool_name" => "read",
+              "arguments" => { "path" => "../../SOUL.md" },
+              "execution_context" => { "workspace" => workspace },
+              "session_context" => { "workspace" => workspace },
+            },
+          )
+
+        result = AgentCore::Resources::Tools::ToolResult.from_h(response.fetch("result"))
+
+        assert_equal conversation.agent.workspace_root_path.join("SOUL.md").read, result.text
+        assert_predicate Pathname.new(workspace.fetch("conversation_path")), :directory?
+        assert_predicate Pathname.new(workspace.fetch("lane_path")), :directory?
+        assert_not result.error?
+      end
+    end
+  end
+
+  test "bundled default runtime rejects conversation-local shadows of reserved root files and skills" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        conversation = create_conversation!(title: "Reserved shadow paths", metadata: { "agent" => {} })
+        workspace = Conversations::WorkspaceInitializer.initialize!(conversation: conversation).deep_stringify_keys
+        deployment = conversation.agent.active_runtime_binding
+        invoke_tool =
+          lambda do |logical_tool_name:, arguments:|
+            Agents::RPCClient.new(deployment: deployment).call(
+              "tool.execute",
+              {
+                "implementation_ref" => "claw:#{logical_tool_name}",
+                "logical_tool_name" => logical_tool_name,
+                "arguments" => arguments,
+                "execution_context" => { "workspace" => workspace },
+                "session_context" => { "workspace" => workspace },
+              },
+            )
+          end
+
+        read_result = AgentCore::Resources::Tools::ToolResult.from_h(invoke_tool.call(logical_tool_name: "read", arguments: { "path" => "SOUL.md" }).fetch("result"))
+        write_result = AgentCore::Resources::Tools::ToolResult.from_h(invoke_tool.call(logical_tool_name: "write", arguments: { "path" => "SOUL.md", "content" => "shadow\n" }).fetch("result"))
+        skill_result = AgentCore::Resources::Tools::ToolResult.from_h(invoke_tool.call(logical_tool_name: "write", arguments: { "path" => "skills/demo/SKILL.md", "content" => "shadow\n" }).fetch("result"))
+
+        assert read_result.error?
+        assert_includes read_result.text, "../../SOUL.md"
+        assert write_result.error?
+        assert_includes write_result.text, "../../SOUL.md"
+        assert skill_result.error?
+        assert_includes skill_result.text, "../../skills/demo/SKILL.md"
+        refute_predicate conversation.workspace_root_path.join("SOUL.md"), :exist?
+        refute_predicate conversation.workspace_root_path.join("skills/demo/SKILL.md"), :exist?
+      end
+    end
   end
 end

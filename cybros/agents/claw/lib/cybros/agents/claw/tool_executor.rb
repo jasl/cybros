@@ -13,6 +13,10 @@ module Cybros
         def call(params:)
           normalized_params = params.is_a?(Hash) ? Manifest.deep_stringify(params) : {}
           { "result" => execute(normalized_params) }
+        rescue SecurityError => e
+          {
+            "result" => error_result("tool.execute failed: #{e.class}: #{e.message}")
+          }
         rescue StandardError => e
           {
             "result" => error_result("tool.execute failed: #{e.class}: #{e.message}")
@@ -46,11 +50,16 @@ module Cybros
         end
 
         def workspace_tools(params)
-          @workspace_tools_by_root ||= {}
-          workspace_root = workspace_root_from(params)
-          return NullWorkspaceTools.instance if workspace_root.nil?
+          @workspace_tools_by_scope ||= {}
+          workspace_config = workspace_config_from(params)
+          return NullWorkspaceTools.instance if workspace_config.nil?
 
-          @workspace_tools_by_root[workspace_root] ||= Tools::WorkspaceTools.new(workspace_root: workspace_root)
+          cache_key = [workspace_config.fetch("root_path"), workspace_config.fetch("cwd")].join("\u0000")
+          @workspace_tools_by_scope[cache_key] ||=
+            Tools::WorkspaceTools.new(
+              workspace_root: workspace_config.fetch("root_path"),
+              cwd: workspace_config.fetch("cwd"),
+            )
         end
 
         def memory_tools(params)
@@ -64,12 +73,24 @@ module Cybros
           @web_tools ||= Tools::WebTools.new(provider: @application.web_provider)
         end
 
-        def workspace_root_from(params)
-          execution_workspace = params.dig("execution_context", "workspace", "logical_workspace_root_path").to_s.strip
-          return execution_workspace unless execution_workspace.empty?
+        def workspace_config_from(params)
+          [params.dig("execution_context", "workspace"), params.dig("session_context", "workspace")].each do |workspace|
+            next unless workspace.is_a?(Hash)
 
-          session_workspace = params.dig("session_context", "workspace", "logical_workspace_root_path").to_s.strip
-          return session_workspace unless session_workspace.empty?
+            root_path =
+              workspace.fetch("root_path", "").to_s.strip.presence ||
+                workspace.fetch("logical_workspace_root_path", "").to_s.strip.presence ||
+                workspace.fetch("conversation_path", "").to_s.strip.presence ||
+                workspace.fetch("cwd", "").to_s.strip.presence
+            next if root_path.blank?
+
+            cwd =
+              workspace.fetch("cwd", "").to_s.strip.presence ||
+                workspace.fetch("conversation_path", "").to_s.strip.presence ||
+                root_path
+
+            return { "root_path" => root_path, "cwd" => cwd }
+          end
 
           nil
         end

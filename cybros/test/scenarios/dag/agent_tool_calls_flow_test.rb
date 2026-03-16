@@ -84,8 +84,10 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   end
 
   class BundledClawToolProvider
-    def initialize(workspace_root:, callback_session: nil)
+    def initialize(workspace_root:, agent_root: nil, lane_root: nil, callback_session: nil)
       @workspace_root = workspace_root
+      @agent_root = agent_root || workspace_root
+      @lane_root = lane_root
       @callback_session = callback_session
       @application =
         Cybros::Agents::Claw::Application.new(
@@ -95,7 +97,7 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
         )
     end
 
-    attr_reader :workspace_root
+    attr_reader :workspace_root, :agent_root, :lane_root
 
     def name = "programmable_agent"
 
@@ -121,6 +123,10 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
           "conversation_id" => "conversation:test",
           "logical_workspace_key" => "conversation-test",
           "logical_workspace_root_path" => workspace_root.to_s,
+          "root_path" => agent_root.to_s,
+          "conversation_path" => workspace_root.to_s,
+          "lane_path" => lane_root&.to_s,
+          "cwd" => workspace_root.to_s,
         }
       end
   end
@@ -240,8 +246,10 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
   self.use_transactional_tests = false
 
   class BundledClawToolProvider
-    def initialize(workspace_root:, callback_session: nil)
+    def initialize(workspace_root:, agent_root: nil, lane_root: nil, callback_session: nil)
       @workspace_root = workspace_root
+      @agent_root = agent_root || workspace_root
+      @lane_root = lane_root
       @callback_session = callback_session
       @application =
         Cybros::Agents::Claw::Application.new(
@@ -251,7 +259,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
         )
     end
 
-    attr_reader :workspace_root
+    attr_reader :workspace_root, :agent_root, :lane_root
 
     def name = "programmable_agent"
 
@@ -274,6 +282,10 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
           "conversation_id" => "conversation:test",
           "logical_workspace_key" => "conversation-test",
           "logical_workspace_root_path" => workspace_root.to_s,
+          "root_path" => agent_root.to_s,
+          "conversation_path" => workspace_root.to_s,
+          "lane_path" => lane_root&.to_s,
+          "cwd" => workspace_root.to_s,
         }
       end
   end
@@ -361,13 +373,199 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       refute result.error?, exec_task.reload.body_output.inspect
 
       assert_includes exec_task.body_output_preview.fetch("activity_preview"), "\"exit_code\":0"
-      assert_includes exec_task.body_output_preview.fetch("activity_preview"), "\"stderr\":\"warn"
 
       tool_message = tool_result_messages_for(fixture.fetch(:graph), fixture.fetch(:final_node).id).sole
       assert_includes tool_message.text, "[tool: exec]"
       assert_includes tool_message.text, "\"exit_code\":0"
       assert_includes tool_message.text, "\"stderr\":\"warn"
+      raw_exec_output = JSON.parse(exec_task.reload.body_output.fetch("result").dig("content", 0, "text"))
+      assert_includes raw_exec_output.fetch("stderr"), "warn"
       assert_equal [], DAG::GraphAudit.scan(graph: fixture.fetch(:graph))
+    end
+  end
+
+  test "agent-owned exec uses the conversation cwd instead of the agent root or hidden lane path" do
+    with_agent_owned_task_runtime do |fixture|
+      workspace_root = fixture.fetch(:workspace_root)
+      agent_root = fixture.fetch(:agent_root)
+      lane_root = fixture.fetch(:lane_root)
+
+      FileUtils.mkdir_p(workspace_root.join("notes"))
+      FileUtils.mkdir_p(agent_root.join("notes"))
+      FileUtils.mkdir_p(lane_root.join("notes"))
+
+      File.write(workspace_root.join("notes", "todo.txt"), "conversation\n", mode: "w", encoding: Encoding::UTF_8)
+      File.write(agent_root.join("notes", "todo.txt"), "root\n", mode: "w", encoding: Encoding::UTF_8)
+      File.write(lane_root.join("notes", "todo.txt"), "lane\n", mode: "w", encoding: Encoding::UTF_8)
+
+      exec_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "exec",
+          tool_call_id: "tc_exec_cwd",
+          arguments: {
+            "command" => "pwd && cat notes/todo.txt",
+          },
+        )
+
+      run_task_nodes!(fixture: fixture, tasks: [exec_task])
+
+      result = AgentCore::Resources::Tools::ToolResult.from_h(exec_task.reload.body_output.fetch("result"))
+      refute result.error?, exec_task.reload.body_output.inspect
+
+      output = JSON.parse(exec_task.reload.body_output.fetch("result").dig("content", 0, "text"))
+      assert_includes output.fetch("stdout"), workspace_root.to_s
+      assert_includes output.fetch("stdout"), "conversation"
+      refute_includes output.fetch("stdout"), "root\n"
+      refute_includes output.fetch("stdout"), "lane\n"
+    end
+  end
+
+  test "agent-owned protected root paths deny AGENTS and history writes with host-level errors" do
+    with_agent_owned_task_runtime do |fixture|
+      agent_root = fixture.fetch(:agent_root)
+      original_agents = File.read(agent_root.join("AGENTS.md"))
+
+      agents_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "write",
+          tool_call_id: "tc_write_agents",
+          arguments: {
+            "path" => "../../AGENTS.md",
+            "content" => "hijack\n",
+          },
+        )
+      history_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "write",
+          tool_call_id: "tc_write_history",
+          arguments: {
+            "path" => "../../.history/SOUL.md",
+            "content" => "scratch\n",
+          },
+        )
+
+      run_task_nodes!(fixture: fixture, tasks: [agents_task, history_task])
+
+      agents_result = AgentCore::Resources::Tools::ToolResult.from_h(agents_task.reload.body_output.fetch("result"))
+      history_result = AgentCore::Resources::Tools::ToolResult.from_h(history_task.reload.body_output.fetch("result"))
+
+      assert agents_result.error?, agents_task.reload.body_output.inspect
+      assert history_result.error?, history_task.reload.body_output.inspect
+      assert_includes agents_result.text, "AGENTS.md"
+      assert_includes agents_result.text, "read-only"
+      assert_includes history_result.text, ".history"
+      assert_includes history_result.text, "runtime-managed"
+      assert_equal original_agents, File.read(agent_root.join("AGENTS.md"))
+      refute agent_root.join(".history", "SOUL.md").exist?
+    end
+  end
+
+  test "agent-owned exec denies protected root mutation attempts and leaves bootstrap files unchanged" do
+    with_agent_owned_task_runtime do |fixture|
+      agent_root = fixture.fetch(:agent_root)
+      soul_path = agent_root.join("SOUL.md")
+      original_soul = File.read(soul_path)
+
+      exec_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "exec",
+          tool_call_id: "tc_exec_protected_write",
+          arguments: {
+            "command" => "printf hacked > ../../SOUL.md",
+          },
+        )
+
+      run_task_nodes!(fixture: fixture, tasks: [exec_task])
+
+      result = AgentCore::Resources::Tools::ToolResult.from_h(exec_task.reload.body_output.fetch("result"))
+      assert result.error?, exec_task.reload.body_output.inspect
+      assert_includes result.text, "exec"
+      assert_includes result.text, "protected"
+      assert_equal original_soul, File.read(soul_path)
+    end
+  end
+
+  test "self-mutate skill edits snapshot history and refresh on the next top-level runtime only" do
+    with_agent_owned_task_runtime do |fixture|
+      conversation = fixture.fetch(:conversation)
+      conversation.update!(metadata: { "agent" => {} })
+      skill_path = fixture.fetch(:agent_root).join("skills/self-mutate/SKILL.md")
+      original_skill = File.read(skill_path)
+      updated_description = "Use when validating next-turn skill refresh after protected writes"
+      updated_skill = replace_skill_description(original_skill, updated_description)
+
+      first_node = conversation.append_user_message!(content: "First turn").fetch(:agent_node)
+      first_runtime = build_cybros_runtime_for(node: first_node)
+      original_description = skill_description_from_runtime(first_runtime, "self-mutate")
+
+      provider_result =
+        fixture.fetch(:runtime).provider.execute_programmable_tool!(
+          tool_call_id: "tc_self_mutate_skill_write",
+          logical_tool_name: "write",
+          implementation_ref: "claw:write",
+          arguments: {
+            "path" => "../../skills/self-mutate/SKILL.md",
+            "content" => updated_skill,
+          },
+        )
+
+      write_result = AgentCore::Resources::Tools::ToolResult.from_h(provider_result.fetch("result"))
+      refute write_result.error?, provider_result.inspect
+
+      history_snapshots = Dir.glob(fixture.fetch(:agent_root).join(".history", "**", "skills", "self-mutate", "SKILL.md").to_s).sort
+      assert history_snapshots.any?, "expected a skill snapshot under .history, got=#{Dir.glob(fixture.fetch(:agent_root).join('.history', '**', '*').to_s)}"
+      assert_equal original_skill, File.read(history_snapshots.last)
+
+      assert_equal original_description, skill_description_from_runtime(first_runtime, "self-mutate")
+
+      second_node = conversation.append_user_message!(content: "Second turn").fetch(:agent_node)
+      second_runtime = build_cybros_runtime_for(node: second_node)
+      assert_equal updated_description, skill_description_from_runtime(second_runtime, "self-mutate")
+    end
+  end
+
+  test "apply_patch deleting a protected skill file snapshots history before removal" do
+    with_agent_owned_task_runtime do |fixture|
+      skill_dir = fixture.fetch(:agent_root).join("skills/temporary-skill")
+      FileUtils.mkdir_p(skill_dir)
+      skill_path = skill_dir.join("SKILL.md")
+      original_skill = <<~MD
+        ---
+        name: temporary-skill
+        description: Temporary protected skill
+        ---
+
+        # Temporary Skill
+      MD
+      File.write(skill_path, original_skill, mode: "w", encoding: Encoding::UTF_8)
+
+      apply_patch_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "apply_patch",
+          tool_call_id: "tc_delete_skill_via_patch",
+          arguments: {
+            "patch" => <<~PATCH,
+              *** Begin Patch
+              *** Delete File: ../../skills/temporary-skill/SKILL.md
+              *** End Patch
+            PATCH
+          },
+        )
+
+      run_task_nodes!(fixture: fixture, tasks: [apply_patch_task])
+
+      result = AgentCore::Resources::Tools::ToolResult.from_h(apply_patch_task.reload.body_output.fetch("result"))
+      refute result.error?, apply_patch_task.reload.body_output.inspect
+      refute skill_path.exist?
+
+      history_snapshots = Dir.glob(fixture.fetch(:agent_root).join(".history", "**", "skills", "temporary-skill", "SKILL.md").to_s).sort
+      assert history_snapshots.any?, "expected a protected delete snapshot under .history"
+      assert_equal original_skill, File.read(history_snapshots.last)
     end
   end
 
@@ -387,7 +585,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
           fixture: fixture,
           logical_tool_name: "memory_get",
           tool_call_id: "tc_memory_get",
-          arguments: {},
+          arguments: { "scope" => "lane" },
         )
       search_task =
         create_agent_owned_task!(
@@ -408,8 +606,12 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       refute store_result.error?, store_task.reload.body_output.inspect
       refute get_result.error?, get_task.reload.body_output.inspect
       refute search_result.error?, search_task.reload.body_output.inspect
+      assert_equal "lane", JSON.parse(store_task.reload.body_output.fetch("result").dig("content", 0, "text")).dig("document", "scope")
+      assert_equal "lane", JSON.parse(get_task.reload.body_output.fetch("result").dig("content", 0, "text")).dig("document", "scope")
+      assert_equal "lane", JSON.parse(search_task.reload.body_output.fetch("result").dig("content", 0, "text")).fetch("matches").first.fetch("scope")
       assert_includes store_task.body_output_preview.fetch("activity_preview"), "Remember alpha"
       assert_includes get_task.body_output_preview.fetch("activity_preview"), "Remember alpha"
+      assert_includes search_task.body_output_preview.fetch("activity_preview"), "\"scope\":\"lane\""
       assert_includes search_task.body_output_preview.fetch("activity_preview"), "\"line\":1"
 
       tool_messages = tool_result_messages_for(fixture.fetch(:graph), fixture.fetch(:final_node).id)
@@ -425,6 +627,8 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
 
     def with_agent_owned_task_runtime
       workspace_root = nil
+      agent_root = nil
+      lane_root = nil
       callback = nil
       conversation = create_conversation!(title: "Agent-owned tools")
       conversation.update!(
@@ -432,9 +636,14 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
         agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
       )
 
-      workspace_root = Pathname.new(Conversations::WorkspaceInitializer.initialize!(conversation: conversation).fetch(:logical_workspace_root_path))
+      workspace_descriptor = Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+      workspace_root = Pathname.new(workspace_descriptor.fetch(:conversation_path))
+      agent_root = Pathname.new(workspace_descriptor.fetch(:agent_root_path))
+      lane_root = Pathname.new(Conversations::WorkspaceInitializer.lane_path_for(conversation: conversation, lane_id: conversation.chat_lane.id))
+      FileUtils.mkdir_p(workspace_root)
+      FileUtils.mkdir_p(lane_root)
       graph = conversation.root_graph
-      turn_id = "0194f3c0-0000-7000-8000-00000000c012"
+      turn_id = SecureRandom.uuid
       user = nil
       planner = nil
       final = nil
@@ -451,6 +660,8 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
           provider:
             BundledClawToolProvider.new(
               workspace_root: workspace_root,
+              agent_root: agent_root,
+              lane_root: lane_root,
               callback_session: callback_session_payload(callback = TestSupport::CallbackHarness.new.start),
             ),
           model: "dev/mock-model",
@@ -465,7 +676,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
           agent_key: "claw",
           agent_capabilities_version: "agent:v1",
           kernel_tools: [],
-          agent_tools: %w[edit apply_patch exec memory_search memory_get memory_store].map do |logical_tool_name|
+          agent_tools: %w[write edit apply_patch exec memory_search memory_get memory_store].map do |logical_tool_name|
             {
               logical_tool_name: logical_tool_name,
               implementation_ref: "claw:#{logical_tool_name}",
@@ -474,15 +685,22 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
         )
 
       yield(
+        conversation: conversation,
         graph: graph,
         runtime: runtime,
         planner_node: planner,
         final_node: final,
         workspace_root: workspace_root,
+        agent_root: agent_root,
+        lane_root: lane_root,
         snapshot: snapshot,
       )
     ensure
       if conversation
+        run_drafts = RunDraft.where(conversation_id: conversation.id)
+        run_drafts.update_all(materialized_conversation_run_id: nil)
+        run_drafts.delete_all
+        ConversationRun.where(conversation_id: conversation.id).delete_all
         sessions = AgentRPCSession.where(conversation_id: conversation.id)
         invocations = AgentRPCInvocation.where(conversation_id: conversation.id)
         sessions.update_all(agent_rpc_invocation_id: nil)
@@ -492,7 +710,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
         conversation.destroy!
       end
       callback&.shutdown
-      FileUtils.rm_rf(workspace_root) if workspace_root
+      FileUtils.rm_rf(agent_root) if agent_root
     end
 
     def create_agent_owned_task!(fixture:, logical_tool_name:, tool_call_id:, arguments:)
@@ -552,5 +770,22 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
         "endpoint" => callback.rpc_url,
         "bearer" => callback.required_bearer,
       }
+    end
+
+    def build_cybros_runtime_for(node:)
+      Cybros::AgentRuntimeResolver.runtime_for(
+        node: node,
+        provider: Struct.new(:name).new("stub"),
+        base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+        instrumenter: AgentCore::Observability::NullInstrumenter.new,
+      )
+    end
+
+    def replace_skill_description(source, description)
+      source.sub(/^description:\s.*$/, "description: #{description}")
+    end
+
+    def skill_description_from_runtime(runtime, skill_name)
+      runtime.skills_store.list_skills.find { |skill| skill.name == skill_name }.description
     end
 end

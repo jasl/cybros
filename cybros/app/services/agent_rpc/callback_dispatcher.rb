@@ -59,11 +59,19 @@ module AgentRPC
           end
         end
       when "conversation.memory.get"
-        AgentRPC::KernelServices::ConversationMemory.get(conversation: bound_conversation)
+        AgentRPC::KernelServices::ConversationMemory.get(
+          conversation: bound_conversation,
+          lane: bound_lane,
+          scope: payload["scope"],
+          target: payload["target"],
+        )
       when "conversation.memory.put"
         apply_mutation! do
           AgentRPC::KernelServices::ConversationMemory.put!(
             conversation: bound_conversation,
+            lane: bound_lane,
+            scope: payload["scope"],
+            target: payload["target"],
             body: payload.fetch("body", payload["content"]),
           )
         end
@@ -71,6 +79,9 @@ module AgentRPC
         apply_mutation! do
           AgentRPC::KernelServices::ConversationMemory.append!(
             conversation: bound_conversation,
+            lane: bound_lane,
+            scope: payload["scope"],
+            target: payload["target"],
             text: payload.fetch("text", payload["content"]),
           )
         end
@@ -266,6 +277,21 @@ module AgentRPC
                 code: "cybros.agent_rpc.callback_scope_unsupported",
                 details: { scope_type: session.scope_type, scope_id: session.scope_id },
               )
+            end
+          end
+      end
+
+      def bound_lane
+        @bound_lane ||=
+          begin
+            if session.scope_type == "run_draft"
+              draft.bound_lane
+            elsif session.scope_type == "conversation_run"
+              run = ConversationRun.find(session.scope_id)
+              node = bound_conversation.root_graph.nodes.find_by(id: run.dag_node_id)
+              node&.lane || bound_conversation.chat_lane
+            else
+              bound_conversation&.chat_lane
             end
           end
       end

@@ -18,7 +18,8 @@ The product model is intentionally small:
 - The dashboard launches new conversations from explicit agent rows; generic agent-less "new chat" entry points are retired.
 - Agent upgrades affect future turns only. Historical drafts and runs stay pinned to the recognized runtime identity captured when they were created.
 - Runtime policy belongs to `Agent`, especially execution capacity.
-- Conversation-owned logical workspaces are persistent and lazy-initialized instead of being exposed as standalone product inventory.
+- The bundled/default agent path now uses an agent-owned root workspace, with each conversation receiving a lightweight working directory under that root.
+- Lane-local state stays hidden under `.lanes/<lane_id>/` unless the current branch actually needs it.
 - Uploaded files are first-class conversation artifacts and move into agents through explicit import/transfer steps, not raw RPC byte payloads.
 - Product flows should hide obsolete runtime topology such as deployment activation inventories or execution-target switching.
 

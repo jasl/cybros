@@ -74,6 +74,7 @@ module Cybros
             sections << build_section("Tooling", tooling_lines(params))
             sections << build_section("Safety", safety_lines)
             sections << build_section("Workspace", workspace_lines(params))
+            sections << build_section("Scope Inventory", scope_inventory_lines(params)) if mode == FULL_PROMPT_MODE
             sections << build_section("Documentation", documentation_lines) if mode == FULL_PROMPT_MODE
             sections << build_section("Current Date & Time", current_date_time_lines)
             sections << build_section("Runtime", runtime_lines(params: params, mode: mode))
@@ -117,18 +118,24 @@ module Cybros
           end
 
           def workspace_lines(params)
-            workspace = params.dig("session_context", "workspace")
+            workspace = resolved_workspace(params)
             attachments = Array(params["attachment_manifest"]).select { |entry| entry.is_a?(Hash) }
 
             lines = []
-            if workspace.is_a?(Hash)
-              root_path = workspace["logical_workspace_root_path"].to_s.strip
+            if workspace.any?
+              root_path = workspace_root_path(workspace)
+              conversation_path = workspace["conversation_path"].to_s.strip
+              lane_path = workspace["lane_path"].to_s.strip
+              cwd = workspace["cwd"].to_s.strip
               workspace_key = workspace["logical_workspace_key"].to_s.strip
 
-              lines << "Conversation workspace: #{root_path}" unless root_path.empty?
+              lines << "Agent root: #{root_path}" unless root_path.empty?
+              lines << "Conversation path: #{conversation_path}" unless conversation_path.empty?
+              lines << "Lane path: #{lane_path}" unless lane_path.empty?
+              lines << "cwd: #{cwd}" unless cwd.empty?
               lines << "Workspace key: #{workspace_key}" unless workspace_key.empty?
             else
-              lines << "Conversation workspace: unavailable"
+              lines << "Agent root: unavailable"
             end
 
             attachments.each_with_index do |attachment, index|
@@ -139,6 +146,17 @@ module Cybros
             end
 
             lines
+          end
+
+          def scope_inventory_lines(params)
+            workspace = resolved_workspace(params)
+            return [] if workspace.empty?
+
+            [
+              *scope_state_lines(label: "root", path: workspace_root_path(workspace)),
+              *scope_state_lines(label: "conversation", path: workspace["conversation_path"]),
+              *scope_state_lines(label: "lane", path: workspace["lane_path"]),
+            ]
           end
 
           def documentation_lines
@@ -174,8 +192,6 @@ module Cybros
             if mode == FULL_PROMPT_MODE
               sources.insert(1, [ "SOUL", @application.prompt_text("soul") ])
               sources.insert(2, [ "USER", @application.prompt_text("user") ])
-              memory_body = conversation_memory_body(params)
-              sources << [ "MEMORY", memory_body ] if memory_body.present?
             end
 
             remaining_budget = BOOTSTRAP_TOTAL_CHAR_CAP
@@ -217,8 +233,6 @@ module Cybros
             case name
             when "AGENTS", "SOUL", "USER"
               excerpt_bootstrap_text(normalized, max_chars: 120)
-            when "MEMORY"
-              excerpt_bootstrap_text(normalized, max_chars: 220)
             else
               normalized
             end
@@ -237,17 +251,6 @@ module Cybros
             return "No agent-owned tools were surfaced for this step." if tool_names == [ "(none supplied)" ]
 
             "Logical tools: #{tool_names.join(', ')}"
-          end
-
-          def conversation_memory_body(params)
-            memory_service = "AgentRPC::KernelServices::ConversationMemory".safe_constantize
-            conversation = resolved_conversation(params)
-            return nil if memory_service.nil? || conversation.nil?
-
-            body = memory_service.get(conversation: conversation).dig("document", "body").to_s.strip
-            body.presence
-          rescue StandardError
-            nil
           end
 
           def resolved_agent_profile(params)
@@ -285,6 +288,31 @@ module Cybros
             return [ "(none supplied)" ] if tool_names.empty?
 
             tool_names.uniq
+          end
+
+          def resolved_workspace(params)
+            workspace = params.dig("execution_context", "workspace")
+            workspace = params.dig("session_context", "workspace") unless workspace.is_a?(Hash) && workspace.any?
+            workspace.is_a?(Hash) ? workspace : {}
+          rescue StandardError
+            {}
+          end
+
+          def workspace_root_path(workspace)
+            workspace["root_path"].to_s.strip.presence || workspace["logical_workspace_root_path"].to_s.strip
+          end
+
+          def scope_state_lines(label:, path:)
+            scope_path = path.to_s.strip
+            return ["#{label} MEMORY.md: unavailable", "#{label} today log: unavailable"] if scope_path.empty?
+
+            root = Pathname.new(scope_path)
+            [
+              "#{label} MEMORY.md: #{root.join("MEMORY.md").file? ? "present" : "absent"}",
+              "#{label} today log: #{root.join(Conversations::LaneMemoryPromotionService.daily_log_target).file? ? "present" : "absent"}",
+            ]
+          rescue StandardError
+            ["#{label} MEMORY.md: unavailable", "#{label} today log: unavailable"]
           end
 
           def build_section(title, lines)

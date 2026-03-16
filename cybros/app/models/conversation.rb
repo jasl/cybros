@@ -225,6 +225,30 @@ class Conversation < ApplicationRecord
     nil
   end
 
+  def workspace_root_path
+    agent.workspace_root_path.join("conversations", id.to_s).cleanpath
+  end
+
+  def lane_workspace_root_path(lane_id:)
+    workspace_root_path.join(".lanes", lane_id.to_s).cleanpath
+  end
+
+  def workspace_payload(lane_id: nil)
+    lane_id = lane_id.presence || chat_lane&.id
+    initialized = Conversations::WorkspaceInitializer.initialize!(conversation: self)
+
+    {
+      "conversation_id" => id,
+      "root_path" => agent.workspace_root_path.to_s,
+      "conversation_path" => workspace_root_path.to_s,
+      "lane_path" => lane_id.present? ? lane_workspace_root_path(lane_id: lane_id).to_s : nil,
+      "cwd" => workspace_root_path.to_s,
+      "logical_workspace_key" => initialized.fetch(:logical_workspace_key).to_s,
+      "logical_workspace_root_path" => initialized.fetch(:logical_workspace_root_path).to_s,
+      "logical_workspace_initialized_at" => initialized.fetch(:logical_workspace_initialized_at)&.iso8601,
+    }.compact
+  end
+
   def statistics_sample_origin
     self.class.normalize_statistics_sample_origin(metadata.is_a?(Hash) ? metadata.dig("statistics", "sample_origin") : nil)
   end
@@ -868,6 +892,8 @@ class Conversation < ApplicationRecord
 
         child_lane = root_node.lane
         child_lane.update!(attachable: child)
+        Conversations::LaneMemoryPromotionService.promote_for_branch!(conversation: self, lane: source_lane)
+        snapshot_child_conversation_memory!(parent: self, child: child)
         snapshot_lane_state!(source_lane: source_lane, target_lane: child_lane)
         if root_node.node_type.to_s == Messages::UserMessage.node_type_key && user_content.to_s.strip.present?
           child.bootstrap_lane_first_user_message_node_id = root_node.id
@@ -1367,6 +1393,10 @@ class Conversation < ApplicationRecord
 
     def snapshot_lane_state!(source_lane:, target_lane:)
       apply_lane_state_snapshot!(lane: target_lane, snapshot: lane_state_snapshot(lane: source_lane))
+    end
+
+    def snapshot_child_conversation_memory!(parent:, child:)
+      Conversations::BranchMemorySnapshot.snapshot!(parent: parent, child: child)
     end
 
     def lane_state_snapshot(lane: chat_lane)

@@ -26,7 +26,9 @@ module Cybros
                 "placement" => "prepend",
                 "input" => {
                   "content" => memory_flush_content(budget_state: budget_state, budget_action: budget_action),
-                  "mode" => "append"
+                  "mode" => "append",
+                  "scope" => "conversation",
+                  "target" => Conversations::LaneMemoryPromotionService.daily_log_target,
                 }
               }
             end

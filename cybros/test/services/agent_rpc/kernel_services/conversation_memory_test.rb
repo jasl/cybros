@@ -1,46 +1,97 @@
 require "test_helper"
 
 class AgentRPC::KernelServices::ConversationMemoryTest < ActiveSupport::TestCase
-  test "get put and append store a conversation-scoped document on the root conversation" do
+  test "conversation and lane path resolution stay separated while memory still resolves through the parent conversation" do
+    workspace_root = Dir.mktmpdir("cybros-conversation-memory-")
     root, branch = create_branch_pair!
 
-    assert_equal "", AgentRPC::KernelServices::ConversationMemory.get(conversation: root).dig("document", "body")
+    with_default_agent_workspace_root(workspace_root) do
+      root_workspace = Conversations::WorkspaceInitializer.initialize!(conversation: root)
+      branch_workspace = Conversations::WorkspaceInitializer.initialize!(conversation: branch)
 
-    put_result =
-      AgentRPC::KernelServices::ConversationMemory.put!(
-        conversation: root,
-        body: "Remember alpha",
+      assert_equal(
+        Pathname.new(root_workspace.fetch(:conversation_path)).join(".lanes", root.chat_lane.id).cleanpath.to_s,
+        Conversations::WorkspaceInitializer.lane_path_for(conversation: root, lane_id: root.chat_lane.id),
       )
-
-    assert_equal "conversation_memory", put_result.dig("document", "kind")
-    assert_equal "Remember alpha", put_result.dig("document", "body")
-    assert_equal "Remember alpha", AgentRPC::KernelServices::ConversationMemory.get(conversation: branch).dig("document", "body")
-
-    append_result =
-      AgentRPC::KernelServices::ConversationMemory.append!(
-        conversation: branch,
-        text: "\nRemember beta",
+      assert_equal(
+        Pathname.new(branch_workspace.fetch(:conversation_path)).join(".lanes", branch.chat_lane.id).cleanpath.to_s,
+        Conversations::WorkspaceInitializer.lane_path_for(conversation: branch, lane_id: branch.chat_lane.id),
       )
+      refute_equal root_workspace.fetch(:conversation_path), branch_workspace.fetch(:conversation_path)
+      assert_equal "", AgentRPC::KernelServices::ConversationMemory.get(conversation: branch).dig("document", "body")
+    end
+  ensure
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
 
-    assert_equal "Remember alpha\nRemember beta", append_result.dig("document", "body")
-    assert_nil branch.chat_lane.lane_kv_entries.find_by(key: AgentRPC::KernelServices::ConversationMemory::MEMORY_KEY)
-    assert_equal(
-      "Remember alpha\nRemember beta",
-      root.chat_lane.lane_kv_entries.find_by(key: AgentRPC::KernelServices::ConversationMemory::MEMORY_KEY).value.fetch("body"),
-    )
+  test "get put and append store a conversation-scoped document in the current conversation workspace" do
+    workspace_root = Dir.mktmpdir("cybros-conversation-memory-")
+    root, branch = create_branch_pair!
+
+    with_default_agent_workspace_root(workspace_root) do
+      assert_equal "", AgentRPC::KernelServices::ConversationMemory.get(conversation: root).dig("document", "body")
+
+      put_result =
+        AgentRPC::KernelServices::ConversationMemory.put!(
+          conversation: root,
+          body: "Remember alpha",
+        )
+
+      assert_equal "workspace_memory", put_result.dig("document", "kind")
+      assert_equal "Remember alpha", put_result.dig("document", "body")
+      assert_equal "Remember alpha", root.workspace_root_path.join("MEMORY.md").read
+      assert_equal "", AgentRPC::KernelServices::ConversationMemory.get(conversation: branch).dig("document", "body")
+
+      append_result =
+        AgentRPC::KernelServices::ConversationMemory.append!(
+          conversation: root,
+          text: "\nRemember beta",
+        )
+
+      assert_equal "Remember alpha\nRemember beta", append_result.dig("document", "body")
+      assert_equal "Remember alpha\nRemember beta", root.workspace_root_path.join("MEMORY.md").read
+      assert_equal "", AgentRPC::KernelServices::ConversationMemory.get(conversation: branch).dig("document", "body")
+    end
+  ensure
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
   end
 
   test "append initializes an empty conversation memory document" do
+    workspace_root = Dir.mktmpdir("cybros-conversation-memory-")
     conversation = create_conversation!(title: "Root")
 
-    appended =
-      AgentRPC::KernelServices::ConversationMemory.append!(
-        conversation: conversation,
-        text: "Remember alpha",
+    with_default_agent_workspace_root(workspace_root) do
+      appended =
+        AgentRPC::KernelServices::ConversationMemory.append!(
+          conversation: conversation,
+          text: "Remember alpha",
+        )
+
+      assert_equal "Remember alpha", appended.dig("document", "body")
+      assert_equal "Remember alpha", AgentRPC::KernelServices::ConversationMemory.get(conversation: conversation).dig("document", "body")
+      assert_equal "Remember alpha", conversation.workspace_root_path.join("MEMORY.md").read
+    end
+  ensure
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
+
+  test "root scoped memory is shared across conversations under the same agent" do
+    workspace_root = Dir.mktmpdir("cybros-conversation-memory-")
+    root, branch = create_branch_pair!
+
+    with_default_agent_workspace_root(workspace_root) do
+      AgentRPC::KernelServices::ConversationMemory.put!(
+        conversation: root,
+        scope: "root",
+        body: "Shared memory",
       )
 
-    assert_equal "Remember alpha", appended.dig("document", "body")
-    assert_equal "Remember alpha", AgentRPC::KernelServices::ConversationMemory.get(conversation: conversation).dig("document", "body")
+      assert_equal "Shared memory", AgentRPC::KernelServices::ConversationMemory.get(conversation: root, scope: "root").dig("document", "body")
+      assert_equal "Shared memory", AgentRPC::KernelServices::ConversationMemory.get(conversation: branch, scope: "root").dig("document", "body")
+      assert_equal "Shared memory", root.agent.workspace_root_path.join("MEMORY.md").read
+    end
+  ensure
+    FileUtils.rm_rf(workspace_root) if workspace_root.present?
   end
 
   test "callback dispatcher supports conversation_run scoped memory mutations with idempotent replay" do
