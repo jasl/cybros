@@ -1,5 +1,6 @@
 require "simplecov"
 require "fileutils"
+require_relative "support/bundled_claw_runtime_server"
 
 # Rails parallel tests can leave multiple named entries in `.resultset.json`.
 # Clearing at the start avoids merging stale results across separate `bin/rails test`
@@ -88,6 +89,71 @@ module RuntimeFixtureProfiles
   end
 end
 
+module TestSupport
+  module BundledClawTestRuntime
+    module_function
+
+    TEST_BEARER = "secret://bundled-claw:test".freeze
+    TEST_FINGERPRINT = "deployment:bundled-claw:test".freeze
+    BOOTSTRAP_ENVIRONMENT_VARIABLES = %w[
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT
+    ].freeze
+
+    def ensure!(workspace_root:, bearer: TEST_BEARER, fingerprint: TEST_FINGERPRINT)
+      runtime_server.reconfigure!(
+        workspace_root: workspace_root,
+        deployment_fingerprint: fingerprint,
+        required_bearer: bearer,
+      )
+
+      ENV["CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL"] = runtime_server.rpc_url
+      ENV["CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER"] = bearer
+      ENV["CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT"] = fingerprint
+
+      runtime_server
+    end
+
+    def snapshot
+      {
+        env: BOOTSTRAP_ENVIRONMENT_VARIABLES.to_h { |key| [key, ENV[key]] },
+        runtime: @runtime_server&.config_snapshot,
+      }
+    end
+
+    def restore(snapshot)
+      runtime_snapshot = snapshot.fetch(:runtime, nil)
+      if runtime_snapshot.present? && @runtime_server.present?
+        runtime_server.reconfigure!(**runtime_snapshot)
+      end
+
+      snapshot.fetch(:env).each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
+    end
+
+    def shutdown!
+      @runtime_server&.shutdown
+      @runtime_server = nil
+    end
+
+    def runtime_server
+      @runtime_server ||=
+        TestSupport::BundledClawRuntimeServer.new(
+          source_root: Agents::BundledSources.path_for("claw"),
+          workspace_root: RuntimeSetting.instance_agent_workspace_root_path,
+          deployment_fingerprint: TEST_FINGERPRINT,
+          required_bearer: TEST_BEARER,
+        ).start
+    end
+  end
+end
+
+at_exit do
+  TestSupport::BundledClawTestRuntime.shutdown!
+end
+
 module ActiveSupport
   class TestCase
     # Rails parallel tests use Kernel.fork (not Process.fork), so SimpleCov's
@@ -109,8 +175,9 @@ module ActiveSupport
     fixtures :all
 
     setup do
+      TestSupport::BundledClawTestRuntime.ensure!(workspace_root: RuntimeSetting.instance_agent_workspace_root_path)
       Account.instance.update_llm_default_model_ref!("dev/mock-model")
-      Agents::BootstrapBundledDefaultService.ensure_test_runtime!
+      Agents::BootstrapBundledDefaultService.ensure_agent!
       ensure_llm_provider!(
         provider_key: "dev",
         credential_type: "api_key",
@@ -145,11 +212,13 @@ module ActiveSupport
       original_method = singleton.instance_method(:default_agent_workspace_root)
       existing_runtime_setting = RuntimeSetting.find_by(scope_key: "instance")
       original_runtime_attributes = existing_runtime_setting&.attributes&.slice("agent_workspace_root", "default_worker_concurrency", "queue_overrides", "alert_thresholds")
+      runtime_snapshot = TestSupport::BundledClawTestRuntime.snapshot
 
       singleton.send(:define_method, :default_agent_workspace_root) { value }
       if existing_runtime_setting.present?
         existing_runtime_setting.update_column(:agent_workspace_root, value)
       end
+      TestSupport::BundledClawTestRuntime.ensure!(workspace_root: value)
       yield
     ensure
       if original_runtime_attributes.present?
@@ -157,6 +226,7 @@ module ActiveSupport
       elsif existing_runtime_setting.nil?
         RuntimeSetting.where(scope_key: "instance").delete_all
       end
+      TestSupport::BundledClawTestRuntime.restore(runtime_snapshot)
       singleton.send(:define_method, :default_agent_workspace_root, original_method)
     end
 

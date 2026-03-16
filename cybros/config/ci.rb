@@ -12,6 +12,7 @@ CI.run do
 
   step "Tests: JS", "bun run test:js"
   step "Tests: Rails", "bin/rails test"
+  step "Tests: Standalone claw runtime", "../agents/claw/bin/test"
   step "Tests: Bundled claw runtime",
        "bin/rails", "test",
        "test/integration/bundled_agent_parity_test.rb",

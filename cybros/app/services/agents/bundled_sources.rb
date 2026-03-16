@@ -1,17 +1,20 @@
 module Agents
   module BundledSources
-    SOURCES = {
-      "claw" => Rails.root.join("agents", "claw"),
+    SOURCE_DIRECTORIES = {
+      "claw" => "claw",
     }.freeze
 
     module_function
 
     def available_keys
-      SOURCES.keys.sort
+      SOURCE_DIRECTORIES.keys.sort
     end
 
     def path_for(key)
-      SOURCES[key.to_s]
+      relative_directory = SOURCE_DIRECTORIES[key.to_s]
+      return nil if relative_directory.nil?
+
+      root_path.join(relative_directory).cleanpath
     end
 
     def relative_path_for(key)
@@ -21,6 +24,10 @@ module Agents
       path.relative_path_from(Rails.root).to_s
     rescue ArgumentError
       nil
+    end
+
+    def root_path
+      Rails.root.parent.join("agents").expand_path
     end
   end
 end

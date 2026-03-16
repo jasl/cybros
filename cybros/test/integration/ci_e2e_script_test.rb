@@ -41,8 +41,11 @@ class CiE2EScriptTest < ActiveSupport::TestCase
           {
             "RAILS_ENV" => "development",
             "CI_E2E_DRY_RUN" => "1",
+            "CI_E2E_BOOT_BUNDLED_CLAW" => "0",
             "CI_E2E_PROGRAMMABLE_AGENT_FIXTURE" => "1",
             "PROGRAMMABLE_AGENT_FIXTURE_PORT" => "3912",
+            "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => nil,
+            "CYBROS_BUNDLED_CLAW_PORT" => nil,
           },
           script.to_s,
           chdir: Rails.root.to_s,
@@ -51,6 +54,7 @@ class CiE2EScriptTest < ActiveSupport::TestCase
 
     assert_predicate status, :success?
     output = [stdout, stderr].join("\n")
+    assert_includes output, "bundled claw rpc url: http://127.0.0.1:4242/rpc"
     assert_includes output, "programmable agent fixture enabled"
     assert_includes output, "http://127.0.0.1:3912/rpc"
     assert_includes output, "CI E2E dry run complete"
@@ -69,7 +73,10 @@ class CiE2EScriptTest < ActiveSupport::TestCase
           {
             "RAILS_ENV" => "development",
             "CI_E2E_DRY_RUN" => "1",
+            "CI_E2E_BOOT_BUNDLED_CLAW" => "0",
             "PROGRAMMABLE_AGENT_FIXTURE_PORT" => "3913",
+            "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => nil,
+            "CYBROS_BUNDLED_CLAW_PORT" => nil,
           },
           script.to_s,
           "test/e2e/programmable_agent_registration.spec.ts",
@@ -79,6 +86,7 @@ class CiE2EScriptTest < ActiveSupport::TestCase
 
     assert_predicate status, :success?
     output = [stdout, stderr].join("\n")
+    assert_includes output, "bundled claw rpc url: http://127.0.0.1:4242/rpc"
     assert_includes output, "programmable agent fixture enabled"
     assert_includes output, "http://127.0.0.1:3913/rpc"
     assert_includes output, "CI E2E dry run complete"

@@ -18,20 +18,96 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
     assert_equal :bootstrapped_agent, service.bootstrap!
   end
 
-  test "ensure_agent provisions the claw bundled source as the managed local default" do
+  test "runtime config requires explicit bundled claw bootstrap env" do
+    with_env(
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => nil,
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER" => nil,
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT" => nil,
+    ) do
+      error =
+        assert_raises(Agents::BundledDefaultRuntimeConfig::MissingBootstrapConfigError) do
+          Agents::BundledDefaultRuntimeConfig.resolve
+        end
+
+      assert_includes error.message, "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL"
+    end
+  end
+
+  test "ensure_agent fails fast before creating the bundled claw row when bootstrap env is missing" do
+    with_env(
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => nil,
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER" => nil,
+      "CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT" => nil,
+    ) do
+      assert_no_changes -> { Agent.where(source_kind: "bundled", bundled_agent_key: "claw").count } do
+        assert_raises(Agents::BundledDefaultRuntimeConfig::MissingBootstrapConfigError) do
+          Agents::BootstrapBundledDefaultService.ensure_agent!
+        end
+      end
+    end
+  end
+
+  test "ensure_agent provisions the claw bundled source as the external bundled default" do
     with_default_agent_workspace_root(@workspace_root) do
       agent = Agents::BootstrapBundledDefaultService.ensure_agent!
 
       assert_equal "claw", agent.bundled_agent_key
       assert_equal "bundled", agent.source_kind
-      assert_equal Rails.root.join("agents/claw").to_s, agent.absolute_local_path.to_s
+      assert_equal Agents::BundledSources.path_for("claw").to_s, agent.absolute_local_path.to_s
       assert_equal "http_jsonrpc", agent.transport_kind
-      assert_equal "deployment:bundled-claw:test", agent.deployment_fingerprint if Rails.env.test?
-      assert_equal Rails.root.join("agents/claw/prompts/AGENT.md").read, agent.workspace_root_path.join("AGENTS.md").read
+      assert_equal TestSupport::BundledClawTestRuntime::TEST_FINGERPRINT, agent.deployment_fingerprint
+      assert_equal Agents::BundledSources.path_for("claw").join("prompts/AGENT.md").read, agent.workspace_root_path.join("AGENTS.md").read
       assert_predicate agent.workspace_root_path.join("SOUL.md"), :file?
       assert_predicate agent.workspace_root_path.join("USER.md"), :file?
       assert_predicate agent.workspace_root_path.join("MEMORY.md"), :file?
       assert_predicate agent.workspace_root_path.join("memory"), :directory?
+    end
+  end
+
+  test "ensure_agent reconciles the bundled claw deployment from bootstrap env" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        identity_overrides: {
+          "agent_program_key" => "claw",
+          "agent_deployment_key" => "claw",
+          "deployment_fingerprint" => "deployment:bundled-claw:dev",
+        },
+        required_bearer: "secret://bundled-claw:dev",
+      ).start
+
+    with_default_agent_workspace_root(@workspace_root) do
+      with_env(
+        "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => server.rpc_url,
+        "CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER" => "secret://bundled-claw:dev",
+        "CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT" => "deployment:bundled-claw:dev",
+      ) do
+        agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+
+        assert_equal server.rpc_url, agent.endpoint_url
+        assert_equal "secret://bundled-claw:dev", agent.deployment_bearer_secret_ref
+        assert_equal "deployment:bundled-claw:dev", agent.deployment_fingerprint
+      end
+    end
+  ensure
+    server&.shutdown
+  end
+
+  test "ensure_agent re-activates an existing inactive bundled claw row before it is selectable" do
+    with_default_agent_workspace_root(@workspace_root) do
+      agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+      agent.update!(
+        status: "inactive",
+        health_status: "unknown",
+        activated_at: nil,
+        deactivated_at: Time.current.change(usec: 0),
+      )
+
+      refreshed = Agents::BootstrapBundledDefaultService.ensure_agent!
+
+      assert_equal agent.id, refreshed.id
+      assert_equal "active", refreshed.status
+      assert_equal "healthy", refreshed.health_status
+      assert_predicate refreshed, :selectable_for_conversation?
     end
   end
 
@@ -61,4 +137,18 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
 
     assert_equal "Live soul\n", destination_root.join("SOUL.md").read
   end
+
+  private
+
+    def with_env(values)
+      original = values.to_h { |key, _value| [key, ENV[key]] }
+      values.each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
+      yield
+    ensure
+      original.each do |key, value|
+        value.nil? ? ENV.delete(key) : ENV[key] = value
+      end
+    end
 end

@@ -18,7 +18,7 @@ class ConversationProgramSelectionTest < ActiveSupport::TestCase
     )
 
     with_default_agent_workspace_root(workspace_root) do
-      assert_equal Pathname.new(workspace_root).join("claw-#{conversation.agent_id}").cleanpath, conversation.agent.workspace_root_path
+      assert_equal Pathname.new(workspace_root).join("bundled/claw").cleanpath, conversation.agent.workspace_root_path
       assert_equal conversation.agent.workspace_root_path.join("conversations", conversation.id), conversation.workspace_root_path
       assert_equal conversation.workspace_root_path.join(".lanes", conversation.chat_lane.id), conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id)
       refute_equal Pathname.new("/tmp/legacy-logical-workspace"), conversation.workspace_root_path

@@ -7,12 +7,15 @@ services:
       dockerfile: .devcontainer/Dockerfile
 
     environment:
-      CYBROS_MANAGED_AGENT_AUTOLAUNCH: "1"
       CYBROS_AGENT_WORKSPACE_ROOT: /workspaces/agent-workspace
       CYBROS_DEFAULT_EXECUTION_WORKSPACE_ROOT: /workspaces/cybros/cybros
+      CYBROS_AGENT_RPC_CALLBACK_BASE_URL: http://rails-app:3000
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL: http://claw:3000/rpc
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER: secret://bundled-claw:devcontainer
+      CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT: deployment:bundled-claw:devcontainer
 
     volumes:
-    - ../../cybros:/workspaces/cybros:cached
+    - ../..:/workspaces/cybros:cached
     - agent-workspace:/workspaces/agent-workspace
 
     # Overrides default command so things don't shut down after the process ends.
@@ -26,6 +29,22 @@ services:
     depends_on:
     - selenium
     - postgres
+    - claw
+
+  claw:
+    build:
+      context: ../../agents/claw
+      dockerfile: Dockerfile
+    environment:
+      RAILS_ENV: development
+      CLAW_REQUIRED_BEARER: secret://bundled-claw:devcontainer
+      CLAW_DEPLOYMENT_FINGERPRINT: deployment:bundled-claw:devcontainer
+      CLAW_WORKSPACE_ROOT: /workspaces/agent-workspace/bundled/claw
+    volumes:
+    - ../..:/workspaces/cybros:cached
+    - agent-workspace:/workspaces/agent-workspace
+    working_dir: /workspaces/cybros/agents/claw
+    command: sleep infinity
 
   selenium:
     image: selenium/standalone-chromium

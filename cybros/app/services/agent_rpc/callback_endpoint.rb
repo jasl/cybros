@@ -22,7 +22,11 @@ module AgentRPC
       end
 
       def base_url
-        base = Current.base_url.presence || ENV["CYBROS_BASE_URL"].to_s.presence || mailer_base_url
+        base =
+          ENV["CYBROS_AGENT_RPC_CALLBACK_BASE_URL"].to_s.presence ||
+          Current.base_url.presence ||
+          ENV["CYBROS_BASE_URL"].to_s.presence ||
+          mailer_base_url
         return base.to_s.sub(%r{/+\z}, "") if base.present?
 
         AgentCore::ValidationError.raise!(

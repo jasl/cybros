@@ -1,7 +1,7 @@
 require "test_helper"
 require "fileutils"
 require "json"
-require Rails.root.join("agents/claw/test/support/callback_harness")
+require Agents::BundledSources.path_for("claw").join("test/support/callback_harness")
 
 class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
   include ActiveJob::TestHelper
@@ -91,7 +91,7 @@ class DAG::AgentToolCallsFlowTest < ActiveSupport::TestCase
       @callback_session = callback_session
       @application =
         Cybros::Agents::Claw::Application.new(
-          source_root: Rails.root.join("agents/claw"),
+          source_root: Agents::BundledSources.path_for("claw"),
           deployment_fingerprint: "deployment:test-claw",
           required_bearer: "secret://agent",
         )
@@ -253,7 +253,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       @callback_session = callback_session
       @application =
         Cybros::Agents::Claw::Application.new(
-          source_root: Rails.root.join("agents/claw"),
+          source_root: Agents::BundledSources.path_for("claw"),
           deployment_fingerprint: "deployment:test-claw",
           required_bearer: "secret://agent",
         )

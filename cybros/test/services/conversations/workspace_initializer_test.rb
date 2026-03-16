@@ -24,7 +24,7 @@ class Conversations::WorkspaceInitializerTest < ActiveSupport::TestCase
 
       assert_equal first.fetch(:agent_root_path), second.fetch(:agent_root_path)
       assert_equal first.fetch(:conversation_path), second.fetch(:conversation_path)
-      assert_equal Pathname.new(@workspace_root).join("claw-#{conversation.agent_id}").cleanpath.to_s, first.fetch(:agent_root_path)
+      assert_equal Pathname.new(@workspace_root).join("bundled", "claw").cleanpath.to_s, first.fetch(:agent_root_path)
       assert_equal Pathname.new(first.fetch(:agent_root_path)).join("conversations", conversation.id).cleanpath.to_s, first.fetch(:conversation_path)
       assert_equal Pathname.new(first.fetch(:conversation_path)).join(".lanes", conversation.chat_lane.id).cleanpath.to_s, lane_path
       assert_predicate conversation.logical_workspace_initialized_at, :present?
@@ -47,7 +47,7 @@ class Conversations::WorkspaceInitializerTest < ActiveSupport::TestCase
 
       conversation.reload
 
-      assert_equal Pathname.new(@workspace_root).join("claw-#{conversation.agent_id}", "conversations", conversation.id).cleanpath.to_s, workspace.fetch(:conversation_path)
+      assert_equal Pathname.new(@workspace_root).join("bundled", "claw", "conversations", conversation.id).cleanpath.to_s, workspace.fetch(:conversation_path)
       refute_equal "/tmp/legacy-logical-workspace", workspace.fetch(:conversation_path)
       assert Dir.exist?(workspace.fetch(:conversation_path))
     end

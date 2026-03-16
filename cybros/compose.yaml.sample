@@ -15,12 +15,17 @@ x-app: &default-app
     RAILS_ASSUME_SSL: "false"
     RAILS_FORCE_SSL: "false"
     CYBROS_AGENT_WORKSPACE_ROOT: /rails/agent-workspace
+    CYBROS_AGENT_RPC_CALLBACK_BASE_URL: http://app
+    CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL: http://claw/rpc
+    CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER: ${CYBROS_BUNDLED_CLAW_BEARER:-secret://bundled-claw:compose}
+    CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT: ${CYBROS_BUNDLED_CLAW_FINGERPRINT:-deployment:bundled-claw:compose}
     # Migrator specified
     SKIP_DEMO_DATA: 1
   entrypoint: []
   volumes:
     - app-storage:/rails/storage
     - agent-workspace:/rails/agent-workspace
+    - ../agents:/agents:ro
 
 services:
   db:
@@ -103,6 +108,34 @@ services:
         max-size: "10m"
         max-file: "3"
 
+  claw:
+    build:
+      context: ../agents/claw
+      dockerfile: Dockerfile
+    environment:
+      RAILS_ENV: production
+      SECRET_KEY_BASE: ${SECRET_KEY_BASE:-compose-local-secret-key-base}
+      RAILS_ASSUME_SSL: "false"
+      RAILS_FORCE_SSL: "false"
+      CLAW_REQUIRED_BEARER: ${CYBROS_BUNDLED_CLAW_BEARER:-secret://bundled-claw:compose}
+      CLAW_DEPLOYMENT_FINGERPRINT: ${CYBROS_BUNDLED_CLAW_FINGERPRINT:-deployment:bundled-claw:compose}
+      CLAW_WORKSPACE_ROOT: /rails/agent-workspace/bundled/claw
+    volumes:
+      - agent-workspace:/rails/agent-workspace
+      - claw-storage:/rails/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   jobs:
     <<: *default-app
     depends_on:
@@ -130,3 +163,4 @@ volumes:
   postgres-data:
   app-storage:
   agent-workspace:
+  claw-storage:

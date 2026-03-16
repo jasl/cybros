@@ -14,18 +14,11 @@ module Agents
     end
 
     def call(method_name, params = {})
-      attempts = 0
-
-      begin
-        perform_call(method_name, params)
-      rescue *RECOVERABLE_CONNECTION_ERRORS => e
-        raise TransportError, e.message unless attempts.zero? && retry_with_refreshed_managed_local_claw_runtime!
-
-        attempts += 1
-        retry
-      rescue URI::InvalidURIError, JSON::ParserError => e
+      perform_call(method_name, params)
+    rescue *RECOVERABLE_CONNECTION_ERRORS => e
+      raise TransportError, e.message
+    rescue URI::InvalidURIError, JSON::ParserError => e
         raise TransportError, e.message
-      end
     end
 
     private
@@ -71,27 +64,6 @@ module Agents
         end
 
         payload.fetch("result")
-      end
-
-      def retry_with_refreshed_managed_local_claw_runtime!
-        return false unless managed_local_claw_deployment?
-
-        refreshed_agent = Agents::BootstrapBundledDefaultService.ensure_agent!
-        @deployment =
-          if @deployment.respond_to?(:reload)
-            @deployment.reload
-          else
-            refreshed_agent.active_runtime_binding || refreshed_agent
-          end
-        true
-      rescue StandardError => e
-        raise TransportError, e.message
-      end
-
-      def managed_local_claw_deployment?
-        deployment.respond_to?(:bundled_source?) &&
-          deployment.bundled_source? &&
-          deployment.bundled_agent_key.to_s == Agents::BootstrapBundledDefaultService::DEFAULT_BUNDLED_AGENT_KEY
       end
   end
 end

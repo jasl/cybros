@@ -79,7 +79,7 @@ class AgentTest < ActiveSupport::TestCase
     agent = Agents::BootstrapBundledDefaultService.ensure_agent!
 
     with_default_agent_workspace_root(workspace_root) do
-      assert_equal Pathname.new(workspace_root).join("claw-#{agent.id}").cleanpath, agent.workspace_root_path
+      assert_equal Pathname.new(workspace_root).join("bundled/claw").cleanpath, agent.workspace_root_path
       assert_equal agent.workspace_root_path, Agents::WorkspacePathResolver.resolve(agent: agent)
     end
   ensure

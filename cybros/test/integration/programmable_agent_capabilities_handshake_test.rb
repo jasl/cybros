@@ -38,15 +38,15 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
 
   test "bundled claw inspection also materializes the capability snapshot through handshake" do
     program = Agents::Creator.create_from_bundled_source!(name: "Claw assistant", bundled_agent_key: "claw")
-    host =
-      Cybros::BundledAgentHost::Application.new(
-        source_root: Rails.root.join("agents/claw"),
+    server =
+      TestSupport::BundledClawRuntimeServer.new(
+        source_root: Agents::BundledSources.path_for("claw"),
         deployment_fingerprint: "bundled-claw-test",
         required_bearer: "secret://bundled",
       ).start
     deployment = create_registered_deployment!(
       program: program,
-      endpoint_url: host.rpc_url,
+      endpoint_url: server.rpc_url,
       deployment_fingerprint: "bundled-claw-test",
       deployment_bearer_secret_ref: "secret://bundled",
     )
@@ -56,7 +56,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     deployment.reload
     expected_application =
       Cybros::Agents::Claw::Application.new(
-        source_root: Rails.root.join("agents/claw"),
+        source_root: Agents::BundledSources.path_for("claw"),
         deployment_fingerprint: "bundled-claw-test",
         required_bearer: "secret://bundled",
       )
@@ -66,7 +66,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
     assert_equal expected_application.agent_capabilities_version, deployment.capability_snapshot.fetch("agent_capabilities_version")
     assert_match(/\Acsnap_/, deployment.capability_snapshot.fetch("capability_registry_snapshot_id"))
   ensure
-    host&.shutdown
+    server&.shutdown
   end
 
   test "inspection marks deployment unhealthy when handshake contract validation fails" do

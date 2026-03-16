@@ -4,7 +4,7 @@
 
 Approved design notes for replacing the current bundled default agent implementation with a Rails/Puma-hosted `claw` implementation while keeping `agent_rpc.v1` language-neutral and transport-neutral.
 
-Implemented result (2026-03-14): canonical bundled implementation is `cybros/agents/claw`, bundled identity is `claw`, and the legacy `cybros/agents/default` tree is retired.
+Implemented result (2026-03-14): canonical bundled implementation is `agents/claw`, bundled identity is `claw`, and the legacy `cybros/agents/default` tree is retired.
 
 ## Problem
 

@@ -4,9 +4,16 @@ ENV["PORT"] ||= "3000"
 VERBOSE = ARGV.include?("--verbose") || ARGV.include?("-v") || ENV["VERBOSE"]
 RAILS_ARGS = ARGV - %w[--verbose -v]
 PROCFILE = "Procfile.dev"
-MANAGED_AGENT_ENV = {
+CLAW_PORT = ENV.fetch("CYBROS_BUNDLED_CLAW_PORT", "4242")
+CLAW_BEARER = ENV.fetch("CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER", "secret://bundled-claw:dev")
+CLAW_FINGERPRINT = ENV.fetch("CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT", "deployment:bundled-claw:dev")
+DEV_STACK_ENV = {
   "RUBY_DEBUG_OPEN" => "true",
   "CYBROS_AGENT_WORKSPACE_ROOT" => File.expand_path("tmp/agent-workspace", Dir.pwd),
+  "CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL" => ENV.fetch("CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL", "http://127.0.0.1:#{CLAW_PORT}/rpc"),
+  "CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER" => CLAW_BEARER,
+  "CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT" => CLAW_FINGERPRINT,
+  "CYBROS_BUNDLED_CLAW_PORT" => CLAW_PORT,
 }.freeze
 Process.exec(*%w[bin/rails server], *RAILS_ARGS) unless File.exist?(PROCFILE)
 
@@ -20,7 +27,7 @@ end
 begin
   in_r, in_w = IO.pipe
   foreman_pid = Process.spawn(
-    MANAGED_AGENT_ENV,
+    DEV_STACK_ENV,
     *%w[foreman start -f Procfile.dev -m all=1,web=0 --env /dev/null],
     in: in_r,
     out: (VERBOSE ? STDOUT : "/dev/null"),
@@ -28,7 +35,7 @@ begin
     pgroup: true,
   )
   foreman_pgid = Process.getpgid(foreman_pid)
-  pid = Process.spawn(MANAGED_AGENT_ENV, *%w[bin/rails server], *RAILS_ARGS)
+  pid = Process.spawn(DEV_STACK_ENV, *%w[bin/rails server], *RAILS_ARGS)
 
   Process.wait(pid)
   pid = nil

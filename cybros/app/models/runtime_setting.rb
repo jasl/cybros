@@ -33,6 +33,14 @@ class RuntimeSetting < ApplicationRecord
   def self.agent_workspace_root_path_for(agent:)
     agent = agent or raise ArgumentError, "agent is required"
 
+    if agent.bundled_source?
+      key = agent.bundled_agent_key.to_s.strip
+      key = agent.agent_key.to_s.strip if key.blank?
+      key = "agent" if key.blank?
+
+      return instance_agent_workspace_root_path.join("bundled", ActiveStorage::Filename.new(key).sanitized).cleanpath
+    end
+
     prefix = agent.bundled_agent_key.to_s.strip
     prefix = agent.agent_key.to_s.strip if prefix.blank?
     prefix = "agent" if prefix.blank?

@@ -1,16 +1,18 @@
 require "test_helper"
 
 class Agents::RPCClientTest < ActiveSupport::TestCase
-  test "call self-heals a stale bundled claw endpoint and retries once" do
+  test "call does not self-heal a stale bundled claw endpoint on connection failure" do
     agent = Agents::BootstrapBundledDefaultService.ensure_agent!
     stale_endpoint = "http://127.0.0.1:1/rpc"
     agent.update!(endpoint_url: stale_endpoint)
 
-    result = Agents::RPCClient.new(agent: agent).call("initialize")
+    error =
+      assert_raises(Agents::RPCClient::TransportError) do
+        Agents::RPCClient.new(agent: agent).call("initialize")
+      end
 
-    assert result.fetch("identity").is_a?(Hash)
-    assert_match(%r{\Ahttp://127\.0\.0\.1:\d+/rpc\z}, agent.reload.endpoint_url)
-    refute_equal stale_endpoint, agent.endpoint_url
+    assert_match(/Connection refused|Failed to open TCP connection/, error.message)
+    assert_equal stale_endpoint, agent.reload.endpoint_url
   end
 
   test "call does not self-heal non-bundled runtimes on connection failure" do

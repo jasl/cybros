@@ -8,7 +8,7 @@ module Agents
 
       loaded = Loader.new(base_dir: source_dir).load
       manifest = loaded.manifest
-      manifest_key = manifest.fetch("agent_key", manifest.fetch(legacy_manifest_agent_key))
+      manifest_key = manifest["agent_key"].presence || manifest.fetch(legacy_manifest_agent_key)
       retries = 0
 
       begin

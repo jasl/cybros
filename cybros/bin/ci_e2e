@@ -12,10 +12,20 @@ if [[ "${RAILS_ENV}" != "development" ]]; then
 fi
 
 PORT="${E2E_PORT:-3000}"
+CLAW_PORT="${CYBROS_BUNDLED_CLAW_PORT:-4242}"
 export E2E_BASE_URL="${E2E_BASE_URL:-http://127.0.0.1:${PORT}}"
 export CYBROS_BASE_URL="${CYBROS_BASE_URL:-${E2E_BASE_URL}}"
 export CYBROS_AGENT_WORKSPACE_ROOT="${CYBROS_AGENT_WORKSPACE_ROOT:-$PWD/tmp/agent-workspace}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL:-http://127.0.0.1:${CLAW_PORT}/rpc}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER:-secret://bundled-claw:dev}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT:-deployment:bundled-claw:dev}"
+export CLAW_REQUIRED_BEARER="${CLAW_REQUIRED_BEARER:-${CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER}}"
+export CLAW_DEPLOYMENT_FINGERPRINT="${CLAW_DEPLOYMENT_FINGERPRINT:-${CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT}}"
+export CLAW_WORKSPACE_ROOT="${CLAW_WORKSPACE_ROOT:-${CYBROS_AGENT_WORKSPACE_ROOT}/bundled/claw}"
+CURRENT_RUBY_BIN="$(ruby -e 'print RbConfig.ruby')"
+BOOT_BUNDLED_CLAW="${CI_E2E_BOOT_BUNDLED_CLAW:-1}"
 DRY_RUN="${CI_E2E_DRY_RUN:-0}"
+CLAW_APP_ROOT="${CLAW_APP_ROOT:-$PWD/../agents/claw}"
 
 auto_enable_programmable_agent_fixture() {
   if [[ "$#" -eq 0 ]]; then
@@ -43,18 +53,19 @@ fi
 
 echo "CI E2E: starting server + jobs"
 echo "   base url: ${E2E_BASE_URL}"
+echo "   bundled claw rpc url: ${CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL}"
 
-mkdir -p tmp tmp/pids "${CYBROS_AGENT_WORKSPACE_ROOT}"
+mkdir -p tmp tmp/pids "${CYBROS_AGENT_WORKSPACE_ROOT}" "${CLAW_WORKSPACE_ROOT}"
 
 cleanup() {
   echo ""
   echo "CI E2E: stopping server + jobs"
-  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+  for pid in "${FIXTURE_PID:-}" "${CLAW_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
     [[ -n "${pid}" ]] || continue
     kill "${pid}" 2>/dev/null || true
   done
 
-  for pid in "${FIXTURE_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
+  for pid in "${FIXTURE_PID:-}" "${CLAW_PID:-}" "${JOBS_PID:-}" "${SERVER_PID:-}"; do
     [[ -n "${pid}" ]] || continue
     for _ in {1..40}; do
       kill -0 "${pid}" 2>/dev/null || break
@@ -64,6 +75,47 @@ cleanup() {
   done
 }
 trap cleanup EXIT INT TERM
+
+if [[ "${BOOT_BUNDLED_CLAW}" == "1" ]]; then
+  echo "starting bundled claw runtime"
+
+  (
+    cd "${CLAW_APP_ROOT}"
+    rm -f tmp/pids/server.pid
+    env -i \
+      PATH="${PATH}" \
+      HOME="${HOME}" \
+      TMPDIR="${TMPDIR:-/tmp}" \
+      RBENV_ROOT="${RBENV_ROOT:-${HOME}/.rbenv}" \
+      RBENV_VERSION="${RBENV_VERSION:-}" \
+      BUNDLE_GEMFILE="$PWD/Gemfile" \
+      PORT="${CLAW_PORT}" \
+      RAILS_ENV=development \
+      CLAW_REQUIRED_BEARER="${CLAW_REQUIRED_BEARER}" \
+      CLAW_DEPLOYMENT_FINGERPRINT="${CLAW_DEPLOYMENT_FINGERPRINT}" \
+      CLAW_WORKSPACE_ROOT="${CLAW_WORKSPACE_ROOT}" \
+      "${CURRENT_RUBY_BIN}" bin/rails server -b 127.0.0.1 -p "${CLAW_PORT}"
+  ) >tmp/ci_e2e_claw.log 2>&1 &
+  CLAW_PID="$!"
+
+  for _ in {1..60}; do
+    if curl -fsS "http://127.0.0.1:${CLAW_PORT}/health" >/dev/null 2>&1; then
+      echo "bundled claw is up"
+      break
+    fi
+    sleep 0.5
+  done
+
+  if ! curl -fsS "http://127.0.0.1:${CLAW_PORT}/health" >/dev/null 2>&1; then
+    echo "❌ bundled claw runtime did not become ready"
+    echo ""
+    echo "--- bundled claw log (tail) ---"
+    tail -n 200 tmp/ci_e2e_claw.log || true
+    exit 1
+  fi
+else
+  echo "bundled claw runtime boot skipped"
+fi
 
 if [[ "${FIXTURE_ENABLED}" == "1" ]]; then
   FIXTURE_HOST="${PROGRAMMABLE_AGENT_FIXTURE_HOST:-127.0.0.1}"

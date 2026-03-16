@@ -37,7 +37,7 @@ class Agents::WorkspaceInitializerTest < ActiveSupport::TestCase
       workspace = Agents::WorkspaceInitializer.initialize!(agent: agent)
 
       assert_equal Agents::WorkspacePathResolver.resolve(agent: agent).to_s, workspace.fetch(:root_path)
-      assert_equal Pathname.new(@workspace_root).join("claw-#{agent.id}").cleanpath.to_s, workspace.fetch(:root_path)
+      assert_equal Pathname.new(@workspace_root).join("bundled", "claw").cleanpath.to_s, workspace.fetch(:root_path)
     end
   end
 end

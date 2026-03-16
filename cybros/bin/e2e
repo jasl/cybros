@@ -3,8 +3,100 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+CLAW_PORT="${CYBROS_BUNDLED_CLAW_PORT:-4242}"
+FIXTURE_HOST="${PROGRAMMABLE_AGENT_FIXTURE_HOST:-127.0.0.1}"
+FIXTURE_PORT="${PROGRAMMABLE_AGENT_FIXTURE_PORT:-4319}"
+DRY_RUN="${E2E_DRY_RUN:-0}"
+FIXTURE_URL_FROM_ENV="${PROGRAMMABLE_AGENT_FIXTURE_URL:-}"
+FIXTURE_HEALTH_URL_FROM_ENV="${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL:-}"
+export CYBROS_AGENT_WORKSPACE_ROOT="${CYBROS_AGENT_WORKSPACE_ROOT:-$PWD/tmp/agent-workspace}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_ENDPOINT_URL:-http://127.0.0.1:${CLAW_PORT}/rpc}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_BEARER:-secret://bundled-claw:dev}"
+export CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT="${CYBROS_BOOTSTRAP_BUNDLED_CLAW_FINGERPRINT:-deployment:bundled-claw:dev}"
+export CYBROS_BUNDLED_CLAW_PORT="${CLAW_PORT}"
+
+auto_enable_programmable_agent_fixture() {
+  if [[ "$#" -eq 0 ]]; then
+    return 0
+  fi
+
+  for arg in "$@"; do
+    case "${arg}" in
+      *programmable_agent*.spec.ts)
+        return 0
+        ;;
+    esac
+  done
+
+  return 1
+}
+
+fixture_enabled() {
+  if [[ -n "${E2E_PROGRAMMABLE_AGENT_FIXTURE:-}" ]]; then
+    [[ "${E2E_PROGRAMMABLE_AGENT_FIXTURE}" == "1" ]]
+    return
+  fi
+
+  if [[ -n "${PROGRAMMABLE_AGENT_FIXTURE_URL:-}" ]]; then
+    return 0
+  fi
+
+  auto_enable_programmable_agent_fixture "$@"
+}
+
+cleanup() {
+  if [[ -n "${FIXTURE_PID:-}" ]]; then
+    kill "${FIXTURE_PID}" 2>/dev/null || true
+    for _ in {1..40}; do
+      kill -0 "${FIXTURE_PID}" 2>/dev/null || break
+      sleep 0.25
+    done
+    kill -9 "${FIXTURE_PID}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if fixture_enabled "$@"; then
+  export PROGRAMMABLE_AGENT_FIXTURE_HOST="${FIXTURE_HOST}"
+  export PROGRAMMABLE_AGENT_FIXTURE_PORT="${FIXTURE_PORT}"
+  export PROGRAMMABLE_AGENT_FIXTURE_URL="${FIXTURE_URL_FROM_ENV:-http://${FIXTURE_HOST}:${FIXTURE_PORT}/rpc}"
+  export PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL="${FIXTURE_HEALTH_URL_FROM_ENV:-http://${FIXTURE_HOST}:${FIXTURE_PORT}/health}"
+
+  if [[ -z "${FIXTURE_URL_FROM_ENV}" ]]; then
+    mkdir -p tmp
+    echo "programmable agent fixture enabled"
+    echo "   rpc url: ${PROGRAMMABLE_AGENT_FIXTURE_URL}"
+    echo "   health url: ${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}"
+    echo "starting programmable-agent fixture"
+
+    bin/programmable_agent_fixture --host "${FIXTURE_HOST}" --port "${FIXTURE_PORT}" >tmp/e2e_programmable_agent_fixture.log 2>&1 &
+    FIXTURE_PID="$!"
+
+    for _ in {1..40}; do
+      if curl -fsS "${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}" >/dev/null 2>&1; then
+        echo "programmable-agent fixture is up"
+        break
+      fi
+      sleep 0.25
+    done
+
+    if ! curl -fsS "${PROGRAMMABLE_AGENT_FIXTURE_HEALTH_URL}" >/dev/null 2>&1; then
+      echo "❌ programmable-agent fixture did not become ready"
+      echo ""
+      echo "--- programmable-agent fixture log (tail) ---"
+      tail -n 200 tmp/e2e_programmable_agent_fixture.log || true
+      exit 1
+    fi
+  fi
+fi
+
 echo "Running Playwright E2E tests"
 echo "   Make sure dev server is running at ${E2E_BASE_URL:-http://localhost:3000}"
 echo ""
+
+if [[ "${DRY_RUN}" == "1" ]]; then
+  echo "E2E dry run complete"
+  exit 0
+fi
 
 bunx playwright test "$@"
