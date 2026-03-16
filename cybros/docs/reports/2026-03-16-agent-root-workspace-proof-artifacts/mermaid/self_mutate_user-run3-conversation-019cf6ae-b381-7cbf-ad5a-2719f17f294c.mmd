@@ -1,0 +1,16 @@
+flowchart TD
+N_019cf6aeb3de7e3d9a637cfc7f63d912["user_message:finished Use the self-mutate skill to append the exact line \"USE..."]
+N_019cf6aeb3ea75c2976108296f94e468["agent_message:finished"]
+N_019cf6aebf477f708ee3a3af199f7c46["agent_message:finished"]
+N_019cf6aebf5775ac8c911f9e614a6291["task:finished skills_load"]
+N_019cf6aec8cf78dfaab8c650112466ad["agent_message:finished"]
+N_019cf6aec8de7f7ebbc5c4a3b35f28da["task:finished read"]
+N_019cf6aed29678b78b750071e5c65ebb["agent_message:finished Appended the exact line to `../../USER.md`."]
+N_019cf6aed2a57cc99b5a37daefc3e3a1["task:finished edit"]
+N_019cf6aeb3de7e3d9a637cfc7f63d912 -->|sequence| N_019cf6aeb3ea75c2976108296f94e468
+N_019cf6aeb3ea75c2976108296f94e468 -->|sequence| N_019cf6aebf5775ac8c911f9e614a6291
+N_019cf6aebf5775ac8c911f9e614a6291 -->|sequence| N_019cf6aebf477f708ee3a3af199f7c46
+N_019cf6aebf477f708ee3a3af199f7c46 -->|sequence| N_019cf6aec8de7f7ebbc5c4a3b35f28da
+N_019cf6aec8de7f7ebbc5c4a3b35f28da -->|sequence| N_019cf6aec8cf78dfaab8c650112466ad
+N_019cf6aec8cf78dfaab8c650112466ad -->|sequence| N_019cf6aed2a57cc99b5a37daefc3e3a1
+N_019cf6aed2a57cc99b5a37daefc3e3a1 -->|sequence| N_019cf6aed29678b78b750071e5c65ebb

@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6b549b07fbeb730d52dd2118c5c["user_message:finished Attempt a protected install that collides with a platfo..."]
+N_019cf6b549bb7cae88c2e08bcbd06a8f["agent_message:finished"]
+N_019cf6b552f777dd9ec96bda363834a3["agent_message:finished Attempted exactly via `skills_install`, and the runtim..."]
+N_019cf6b553077b25ab9be035d4e2d73b["task:finished skills_install"]
+N_019cf6b549b07fbeb730d52dd2118c5c -->|sequence| N_019cf6b549bb7cae88c2e08bcbd06a8f
+N_019cf6b549bb7cae88c2e08bcbd06a8f -->|sequence| N_019cf6b553077b25ab9be035d4e2d73b
+N_019cf6b553077b25ab9be035d4e2d73b -->|sequence| N_019cf6b552f777dd9ec96bda363834a3

@@ -1,0 +1,23 @@
+flowchart TD
+N_019cf6ab28a370459274af0b614b7124["user_message:finished Use the memory tool `memory_store` with these exact arg..."]
+N_019cf6ab28ae70ddae414b486ae5bd1f["agent_message:finished"]
+N_019cf6ab36f673a0bbe5bee9cb45d1e7["agent_message:finished"]
+N_019cf6ab370471588ee0f6aa25723ff4["task:finished memory_store"]
+N_019cf6ab3f4f7838a1721e868ea56370["agent_message:finished Done. Verified the conversation-scoped memory contains..."]
+N_019cf6ab3f5f7a7f9f3cd2442508436c["task:finished memory_get"]
+N_019cf6ab4b1e75ce9964d100db25c225["agent_message:finished Done. Verified the conversation-scoped memory contains..."]
+N_019cf6ab4b9c7271bac2e27496f549dc["user_message:finished Use the memory tool `memory_search` with these exact ar..."]
+N_019cf6ab4baf7322889666a78304a80e["agent_message:finished"]
+N_019cf6ab55dc71fbb5def2964004f75a["agent_message:finished BRANCH_SNAPSHOT_TOKEN_1_25921beb"]
+N_019cf6ab55ea7581964fe4023eebcdf2["task:finished memory_search"]
+N_019cf6ab28a370459274af0b614b7124 -->|sequence| N_019cf6ab28ae70ddae414b486ae5bd1f
+N_019cf6ab28ae70ddae414b486ae5bd1f -->|sequence| N_019cf6ab370471588ee0f6aa25723ff4
+N_019cf6ab370471588ee0f6aa25723ff4 -->|sequence| N_019cf6ab36f673a0bbe5bee9cb45d1e7
+N_019cf6ab36f673a0bbe5bee9cb45d1e7 -->|sequence| N_019cf6ab3f5f7a7f9f3cd2442508436c
+N_019cf6ab3f5f7a7f9f3cd2442508436c -->|sequence| N_019cf6ab3f4f7838a1721e868ea56370
+N_019cf6ab3f4f7838a1721e868ea56370 -->|sequence| N_019cf6ab4b1e75ce9964d100db25c225
+N_019cf6ab3f4f7838a1721e868ea56370 -->|branch:fork| N_019cf6ab4b1e75ce9964d100db25c225
+N_019cf6ab4b1e75ce9964d100db25c225 -->|sequence| N_019cf6ab4b9c7271bac2e27496f549dc
+N_019cf6ab4b9c7271bac2e27496f549dc -->|sequence| N_019cf6ab4baf7322889666a78304a80e
+N_019cf6ab4baf7322889666a78304a80e -->|sequence| N_019cf6ab55ea7581964fe4023eebcdf2
+N_019cf6ab55ea7581964fe4023eebcdf2 -->|sequence| N_019cf6ab55dc71fbb5def2964004f75a

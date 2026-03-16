@@ -1,0 +1,20 @@
+flowchart TD
+N_019cf6af175774e59188fa8b2caa4143["user_message:finished Use the self-mutate skill to create a new agent-local s..."]
+N_019cf6af176278d78e076728426bee4a["agent_message:finished"]
+N_019cf6af1fdf7c71a6e4feea8c054d2e["agent_message:finished"]
+N_019cf6af1fef781386cc98499417d69b["task:finished skills_load"]
+N_019cf6af2de873db95a4ee590fc4348e["agent_message:finished"]
+N_019cf6af2df37ed4b6b35876979d2a5e["task:finished exec"]
+N_019cf6af38f77d2e8e7ca413384ba16c["agent_message:finished Done. Created: `../../skills/live-acceptance-2-c0b97d/..."]
+N_019cf6af390774d0a99dc50d993436b6["task:finished write"]
+N_019cf6af4f967ddd9622285241596b62["user_message:finished Refresh skills inventory"]
+N_019cf6af4fa97ce3bcc9b20d5ecc0264["agent_message:pending"]
+N_019cf6af175774e59188fa8b2caa4143 -->|sequence| N_019cf6af176278d78e076728426bee4a
+N_019cf6af176278d78e076728426bee4a -->|sequence| N_019cf6af1fef781386cc98499417d69b
+N_019cf6af1fef781386cc98499417d69b -->|sequence| N_019cf6af1fdf7c71a6e4feea8c054d2e
+N_019cf6af1fdf7c71a6e4feea8c054d2e -->|sequence| N_019cf6af2df37ed4b6b35876979d2a5e
+N_019cf6af2df37ed4b6b35876979d2a5e -->|sequence| N_019cf6af2de873db95a4ee590fc4348e
+N_019cf6af2de873db95a4ee590fc4348e -->|sequence| N_019cf6af390774d0a99dc50d993436b6
+N_019cf6af390774d0a99dc50d993436b6 -->|sequence| N_019cf6af38f77d2e8e7ca413384ba16c
+N_019cf6af38f77d2e8e7ca413384ba16c -->|sequence| N_019cf6af4f967ddd9622285241596b62
+N_019cf6af4f967ddd9622285241596b62 -->|sequence| N_019cf6af4fa97ce3bcc9b20d5ecc0264

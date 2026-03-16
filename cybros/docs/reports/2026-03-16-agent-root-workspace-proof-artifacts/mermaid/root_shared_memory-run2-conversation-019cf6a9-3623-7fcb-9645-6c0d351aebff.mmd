@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6a9378a72d185599e68117149ce["user_message:finished Use the memory tool `memory_store` with these exact arg..."]
+N_019cf6a937927e5c853a7b4c7d26e21d["agent_message:finished"]
+N_019cf6a941867d209c7e38890e76c1d1["agent_message:finished"]
+N_019cf6a941967e9bae1c23fc6b534c22["task:finished memory_store"]
+N_019cf6a95517725c8370b6c4c64414d8["agent_message:finished Done — stored in durable root memory and verified. Ver..."]
+N_019cf6a95526767daa15ff997865844a["task:finished memory_get"]
+N_019cf6a9378a72d185599e68117149ce -->|sequence| N_019cf6a937927e5c853a7b4c7d26e21d
+N_019cf6a937927e5c853a7b4c7d26e21d -->|sequence| N_019cf6a941967e9bae1c23fc6b534c22
+N_019cf6a941967e9bae1c23fc6b534c22 -->|sequence| N_019cf6a941867d209c7e38890e76c1d1
+N_019cf6a941867d209c7e38890e76c1d1 -->|sequence| N_019cf6a95526767daa15ff997865844a
+N_019cf6a95526767daa15ff997865844a -->|sequence| N_019cf6a95517725c8370b6c4c64414d8

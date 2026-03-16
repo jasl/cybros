@@ -1,0 +1,16 @@
+flowchart TD
+N_019cf6b08e7f7e6cbbad5a8e25fbb403["user_message:finished Use `skills_catalog_list` with these exact arguments fi..."]
+N_019cf6b08e8a76389f880d5d5bea3949["agent_message:finished"]
+N_019cf6b0961a7279bc8aed8d650bb233["agent_message:finished"]
+N_019cf6b0962778c48102a93f1b254add["task:finished skills_catalog_list"]
+N_019cf6b09f75798c938f9ceb90983114["agent_message:finished Installed skill: `catalog-answer-1-7f76a3` Source hash..."]
+N_019cf6b09f8977d589d3692889e37ab5["task:finished skills_install"]
+N_019cf6b0b1ca74eaa249fe9f176d902e["user_message:finished Refresh skills inventory"]
+N_019cf6b0b1db729da3ecf218220af388["agent_message:pending"]
+N_019cf6b08e7f7e6cbbad5a8e25fbb403 -->|sequence| N_019cf6b08e8a76389f880d5d5bea3949
+N_019cf6b08e8a76389f880d5d5bea3949 -->|sequence| N_019cf6b0962778c48102a93f1b254add
+N_019cf6b0962778c48102a93f1b254add -->|sequence| N_019cf6b0961a7279bc8aed8d650bb233
+N_019cf6b0961a7279bc8aed8d650bb233 -->|sequence| N_019cf6b09f8977d589d3692889e37ab5
+N_019cf6b09f8977d589d3692889e37ab5 -->|sequence| N_019cf6b09f75798c938f9ceb90983114
+N_019cf6b09f75798c938f9ceb90983114 -->|sequence| N_019cf6b0b1ca74eaa249fe9f176d902e
+N_019cf6b0b1ca74eaa249fe9f176d902e -->|sequence| N_019cf6b0b1db729da3ecf218220af388

@@ -569,6 +569,81 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
     end
   end
 
+  test "generic write-based skill creation does not create installer provenance metadata" do
+    with_agent_owned_task_runtime do |fixture|
+      write_task =
+        create_agent_owned_task!(
+          fixture: fixture,
+          logical_tool_name: "write",
+          tool_call_id: "tc_manual_skill_write",
+          arguments: {
+            "path" => "../../skills/manual-skill/SKILL.md",
+            "content" => <<~MD,
+              ---
+              name: manual-skill
+              description: Hand-authored skill
+              ---
+
+              # manual-skill
+            MD
+          },
+        )
+
+      run_task_nodes!(fixture: fixture, tasks: [write_task])
+
+      result = AgentCore::Resources::Tools::ToolResult.from_h(write_task.reload.body_output.fetch("result"))
+      refute result.error?, write_task.reload.body_output.inspect
+      assert_predicate fixture.fetch(:agent_root).join("skills/manual-skill/SKILL.md"), :file?
+      refute_predicate fixture.fetch(:agent_root).join(".state/skills/manual-skill.json"), :exist?
+    end
+  end
+
+  test "repo-root skill installs refresh the runtime on the next top-level turn only" do
+    with_agent_owned_task_runtime(agent_tools: %w[write edit apply_patch exec memory_search memory_get memory_store skills_install]) do |fixture|
+      conversation = fixture.fetch(:conversation)
+      conversation.update!(metadata: { "agent" => {} })
+
+      Dir.mktmpdir("cybros-local-skill-repo-") do |repo_root|
+        write_skill_fixture!(Pathname.new(repo_root).join("skills"), name: "alpha-skill", description: "Alpha description")
+        write_skill_fixture!(Pathname.new(repo_root).join("skills"), name: "beta-skill", description: "Beta description")
+
+        first_node = conversation.append_user_message!(content: "First turn").fetch(:agent_node)
+        first_runtime = build_cybros_runtime_for(node: first_node)
+        first_skill_names = first_runtime.skills_store.list_skills.map(&:name)
+        refute_includes first_skill_names, "alpha-skill"
+        refute_includes first_skill_names, "beta-skill"
+
+        provider_result =
+          fixture.fetch(:runtime).provider.execute_programmable_tool!(
+            tool_call_id: "tc_repo_root_batch_install",
+            logical_tool_name: "skills_install",
+            implementation_ref: "claw:skills_install",
+            arguments: {
+              "source_kind" => "github",
+              "repo" => repo_root,
+            },
+          )
+
+        install_result = AgentCore::Resources::Tools::ToolResult.from_h(provider_result.fetch("result"))
+        refute install_result.error?, provider_result.inspect
+
+        install_payload = JSON.parse(install_result.text)
+        assert_equal "repo_root_batch", install_payload.fetch("mode")
+        assert_equal 2, install_payload.fetch("installed_count")
+        assert_equal true, install_payload.fetch("refresh_effective_on_next_top_level_turn")
+        assert_predicate Agents::SkillsStoreBuilder.dirty_marker_path_for(agent: conversation.agent), :exist?
+
+        assert_equal first_skill_names.sort, first_runtime.skills_store.list_skills.map(&:name).sort
+
+        second_node = conversation.append_user_message!(content: "Second turn").fetch(:agent_node)
+        second_runtime = build_cybros_runtime_for(node: second_node)
+        second_skill_names = second_runtime.skills_store.list_skills.map(&:name)
+        assert_includes second_skill_names, "alpha-skill"
+        assert_includes second_skill_names, "beta-skill"
+      end
+    end
+  end
+
   test "agent-owned memory tool results remain DAG-visible for follow-up agent steps" do
     with_agent_owned_task_runtime do |fixture|
       store_task =
@@ -625,7 +700,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
 
   private
 
-    def with_agent_owned_task_runtime
+    def with_agent_owned_task_runtime(agent_tools: %w[write edit apply_patch exec memory_search memory_get memory_store])
       workspace_root = nil
       agent_root = nil
       lane_root = nil
@@ -676,7 +751,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
           agent_key: "claw",
           agent_capabilities_version: "agent:v1",
           kernel_tools: [],
-          agent_tools: %w[write edit apply_patch exec memory_search memory_get memory_store].map do |logical_tool_name|
+          agent_tools: Array(agent_tools).map do |logical_tool_name|
             {
               logical_tool_name: logical_tool_name,
               implementation_ref: "claw:#{logical_tool_name}",
@@ -787,5 +862,21 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
 
     def skill_description_from_runtime(runtime, skill_name)
       runtime.skills_store.list_skills.find { |skill| skill.name == skill_name }.description
+    end
+
+    def write_skill_fixture!(root, name:, description:)
+      skill_dir = Pathname.new(root).join(name)
+      FileUtils.mkdir_p(skill_dir)
+      File.write(
+        skill_dir.join("SKILL.md"),
+        <<~MD,
+          ---
+          name: #{name}
+          description: #{description}
+          ---
+
+          # #{name}
+        MD
+      )
     end
 end

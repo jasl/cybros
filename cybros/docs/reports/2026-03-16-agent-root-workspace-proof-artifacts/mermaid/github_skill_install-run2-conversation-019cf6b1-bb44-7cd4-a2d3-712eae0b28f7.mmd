@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6b1bb99788d8d4cc10ccb224bb1["user_message:finished You must use the installed skill by calling `skills_loa..."]
+N_019cf6b1bba27e52acc954b1f25914fd["agent_message:finished"]
+N_019cf6b1c3b57bfab992c7d696b6ef14["agent_message:finished"]
+N_019cf6b1c3c47a34bee85bf762f6d9c5["task:finished skills_load"]
+N_019cf6b1d0f275729c15efd42821f4eb["agent_message:finished GITHUB_INSTALL_TOKEN_2_217deb49"]
+N_019cf6b1d0fa7e029da51afa5ac89db2["task:finished skills_read_file"]
+N_019cf6b1bb99788d8d4cc10ccb224bb1 -->|sequence| N_019cf6b1bba27e52acc954b1f25914fd
+N_019cf6b1bba27e52acc954b1f25914fd -->|sequence| N_019cf6b1c3c47a34bee85bf762f6d9c5
+N_019cf6b1c3c47a34bee85bf762f6d9c5 -->|sequence| N_019cf6b1c3b57bfab992c7d696b6ef14
+N_019cf6b1c3b57bfab992c7d696b6ef14 -->|sequence| N_019cf6b1d0fa7e029da51afa5ac89db2
+N_019cf6b1d0fa7e029da51afa5ac89db2 -->|sequence| N_019cf6b1d0f275729c15efd42821f4eb

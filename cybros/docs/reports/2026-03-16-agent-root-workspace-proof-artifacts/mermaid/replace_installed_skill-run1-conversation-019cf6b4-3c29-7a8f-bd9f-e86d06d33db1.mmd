@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6b43c8a7369a809c4e70b3bd342["user_message:finished Replace the existing agent-local skill \"replace-answer-..."]
+N_019cf6b43c95719ca2cb2a5efc4148ef["agent_message:finished"]
+N_019cf6b4485b7c688ee2382557cab6bd["agent_message:finished Installed: `replace-answer-1-f843fe` - Source hash: `3..."]
+N_019cf6b44871739c838fff590f786106["task:finished skills_install"]
+N_019cf6b45de879cd8fa14b5fc8b27bde["user_message:finished Refresh skills inventory"]
+N_019cf6b45dfc71d69360ac3f060b2fe3["agent_message:pending"]
+N_019cf6b43c8a7369a809c4e70b3bd342 -->|sequence| N_019cf6b43c95719ca2cb2a5efc4148ef
+N_019cf6b43c95719ca2cb2a5efc4148ef -->|sequence| N_019cf6b44871739c838fff590f786106
+N_019cf6b44871739c838fff590f786106 -->|sequence| N_019cf6b4485b7c688ee2382557cab6bd
+N_019cf6b4485b7c688ee2382557cab6bd -->|sequence| N_019cf6b45de879cd8fa14b5fc8b27bde
+N_019cf6b45de879cd8fa14b5fc8b27bde -->|sequence| N_019cf6b45dfc71d69360ac3f060b2fe3

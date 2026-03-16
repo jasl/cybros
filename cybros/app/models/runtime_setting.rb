@@ -40,6 +40,15 @@ class RuntimeSetting < ApplicationRecord
     instance_agent_workspace_root_path.join("#{ActiveStorage::Filename.new(prefix).sanitized}-#{agent.id}")
   end
 
+  def self.skill_catalog_sources
+    raw = ENV.fetch("CYBROS_SKILL_CATALOG_SOURCES", "").to_s.strip
+    return [] if raw.blank?
+
+    normalize_skill_catalog_sources(JSON.parse(raw))
+  rescue JSON::ParserError
+    []
+  end
+
   def self.conversation_workspace_root_path_for(logical_workspace_key:)
     key = logical_workspace_key.to_s.strip
     raise ArgumentError, "logical workspace key is required" if key.blank?
@@ -73,6 +82,22 @@ class RuntimeSetting < ApplicationRecord
   end
 
   private
+
+    def self.normalize_skill_catalog_sources(value)
+      Array(value).filter_map do |entry|
+        next unless entry.is_a?(Hash)
+
+        normalized = entry.deep_stringify_keys
+        catalog = normalized["catalog"].to_s.strip
+        root = normalized["root"].to_s.strip
+        next if catalog.blank? || root.blank?
+
+        {
+          "catalog" => catalog,
+          "root" => root,
+        }
+      end
+    end
 
     def apply_scope_key
       self.scope_key = "instance" if scope_key.blank?

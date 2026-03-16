@@ -1,0 +1,20 @@
+flowchart TD
+N_019cf6c0686a7d449e535c31fdfa69e9["user_message:finished Please read SPEC.md and write an implementation plan on..."]
+N_019cf6c0687676bbb7379e2a69a9c595["agent_message:finished"]
+N_019cf6c075ec77f3901af8e128304681["agent_message:finished"]
+N_019cf6c075fb7e9396f0954fa51ed64e["task:finished skills_load"]
+N_019cf6c080207ee4b5f35c60b4410e72["agent_message:finished"]
+N_019cf6c080327dd499b2c63383289b8a["task:finished skills_load"]
+N_019cf6c08a367f739d5022c54c081484["agent_message:finished"]
+N_019cf6c08a447289abdcd88cfe36fe06["task:finished skills_load"]
+N_019cf6c096ca7770907067dd8250330a["agent_message:finished I'm using the writing-plans skill to create the implem..."]
+N_019cf6c096da785194f48bbe58bcaa0f["task:finished read"]
+N_019cf6c0686a7d449e535c31fdfa69e9 -->|sequence| N_019cf6c0687676bbb7379e2a69a9c595
+N_019cf6c0687676bbb7379e2a69a9c595 -->|sequence| N_019cf6c075fb7e9396f0954fa51ed64e
+N_019cf6c075fb7e9396f0954fa51ed64e -->|sequence| N_019cf6c075ec77f3901af8e128304681
+N_019cf6c075ec77f3901af8e128304681 -->|sequence| N_019cf6c080327dd499b2c63383289b8a
+N_019cf6c080327dd499b2c63383289b8a -->|sequence| N_019cf6c080207ee4b5f35c60b4410e72
+N_019cf6c080207ee4b5f35c60b4410e72 -->|sequence| N_019cf6c08a447289abdcd88cfe36fe06
+N_019cf6c08a447289abdcd88cfe36fe06 -->|sequence| N_019cf6c08a367f739d5022c54c081484
+N_019cf6c08a367f739d5022c54c081484 -->|sequence| N_019cf6c096da785194f48bbe58bcaa0f
+N_019cf6c096da785194f48bbe58bcaa0f -->|sequence| N_019cf6c096ca7770907067dd8250330a

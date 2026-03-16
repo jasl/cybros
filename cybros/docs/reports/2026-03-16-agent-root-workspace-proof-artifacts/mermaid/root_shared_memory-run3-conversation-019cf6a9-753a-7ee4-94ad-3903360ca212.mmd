@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6a9951e7ec7a4581e3087ca3150["user_message:finished Use the memory tool `memory_get` with these exact argum..."]
+N_019cf6a9952a700793c5cc1f266107a1["agent_message:finished"]
+N_019cf6a99d47771296caa7431d835d34["agent_message:finished Yes — it contains the exact line `ROOT_SHARED_TOKEN_3_..."]
+N_019cf6a99d5878cab82fd88b512e5e06["task:finished memory_get"]
+N_019cf6a9951e7ec7a4581e3087ca3150 -->|sequence| N_019cf6a9952a700793c5cc1f266107a1
+N_019cf6a9952a700793c5cc1f266107a1 -->|sequence| N_019cf6a99d5878cab82fd88b512e5e06
+N_019cf6a99d5878cab82fd88b512e5e06 -->|sequence| N_019cf6a99d47771296caa7431d835d34

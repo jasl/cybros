@@ -29,6 +29,10 @@ class RPCContractTest < ActiveSupport::TestCase
     assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "memory_search"
     assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "memory_get"
     assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "memory_store"
+    assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "skills_load"
+    assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "skills_read_file"
+    assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "skills_catalog_list"
+    assert_includes handshake_payload.fetch("agent_tool_catalog").map { |tool| tool.fetch("logical_tool_name") }, "skills_install"
     assert_equal "manual", refresh_payload.dig("refresh_reason")
     assert_equal "read", refresh_payload.dig("agent_tool_catalog", 0, "logical_tool_name")
   end
@@ -676,6 +680,193 @@ class RPCContractTest < ActiveSupport::TestCase
     callback&.shutdown
   end
 
+  test "tool.execute skills_catalog_list returns structured catalog entries" do
+    with_workspace({}) do |workspace_root|
+      Dir.mktmpdir("claw-skill-catalog-") do |catalog_root|
+        FileUtils.mkdir_p(File.join(catalog_root, "example-skill"))
+        File.write(
+          File.join(catalog_root, "example-skill", "SKILL.md"),
+          <<~MD,
+            ---
+            name: example-skill
+            description: Example catalog skill
+            ---
+
+            # example-skill
+          MD
+        )
+
+        payload =
+          with_skill_catalog_sources([{ "catalog" => "curated", "root" => catalog_root }]) do
+            tool_execute(
+              logical_tool_name: "skills_catalog_list",
+              implementation_ref: "claw:skills_catalog_list",
+              arguments: { "catalog" => "curated" },
+              workspace_root: workspace_root,
+            )
+          end
+
+        result = payload.fetch("result")
+        refute result.fetch("error")
+        assert_equal ["example-skill"], JSON.parse(result.dig("content", 0, "text")).fetch("entries").map { |entry| entry.fetch("name") }
+      end
+    end
+  end
+
+  test "tool.execute skills_load returns the installed skill body and files index" do
+    with_workspace(
+      "skills/example-skill/SKILL.md" => <<~MD,
+        ---
+        name: example-skill
+        description: Example installed skill
+        ---
+
+        # example-skill
+
+        Use this skill when the user asks for the example token.
+      MD
+      "skills/example-skill/references/answer.txt" => "EXAMPLE_TOKEN\n",
+    ) do |workspace_root|
+      payload =
+        tool_execute(
+          logical_tool_name: "skills_load",
+          implementation_ref: "claw:skills_load",
+          arguments: { "name" => "example-skill" },
+          workspace_root: workspace_root,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+
+      parsed = JSON.parse(result.dig("content", 0, "text"))
+      assert_equal "example-skill", parsed.dig("meta", "name")
+      assert_equal "Example installed skill", parsed.dig("meta", "description")
+      assert_includes parsed.fetch("body_markdown"), "Use this skill when the user asks for the example token."
+      assert_equal ["references/answer.txt"], parsed.dig("files_index", "references")
+    end
+  end
+
+  test "tool.execute skills_read_file reads files from installed skills" do
+    with_workspace(
+      "skills/example-skill/SKILL.md" => <<~MD,
+        ---
+        name: example-skill
+        description: Example installed skill
+        ---
+
+        # example-skill
+      MD
+      "skills/example-skill/references/answer.txt" => "EXAMPLE_TOKEN\n",
+    ) do |workspace_root|
+      payload =
+        tool_execute(
+          logical_tool_name: "skills_read_file",
+          implementation_ref: "claw:skills_read_file",
+          arguments: { "name" => "example-skill", "rel_path" => "references/answer.txt" },
+          workspace_root: workspace_root,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+      assert_equal "EXAMPLE_TOKEN\n", result.dig("content", 0, "text")
+    end
+  end
+
+  test "tool.execute skills_install returns a stable validation error for platform collisions" do
+    with_workspace({}) do |workspace_root|
+      Dir.mktmpdir("claw-platform-skills-") do |platform_skills_root|
+        FileUtils.mkdir_p(File.join(platform_skills_root, "platform-skill"))
+        File.write(
+          File.join(platform_skills_root, "platform-skill", "SKILL.md"),
+          <<~MD,
+            ---
+            name: platform-skill
+            description: Platform collision
+            ---
+
+            # platform-skill
+          MD
+        )
+
+        payload =
+          with_platform_skill_dirs([platform_skills_root]) do
+            tool_execute(
+              logical_tool_name: "skills_install",
+              implementation_ref: "claw:skills_install",
+              arguments: {
+                "source_kind" => "github",
+                "repo" => "https://github.com/openai/skills",
+                "path" => "skills/example-skill",
+                "install_as" => "platform-skill",
+              },
+              workspace_root: workspace_root,
+            )
+          end
+
+        result = payload.fetch("result")
+        assert_equal true, result.fetch("error")
+        assert_equal "cybros.skills_install.destination_conflicts_with_platform_skill", result.dig("metadata", "code")
+      end
+    end
+  end
+
+  test "tool.execute skills_install returns the normalized batch result shape for repo-root installs" do
+    with_workspace({}) do |workspace_root|
+      Dir.mktmpdir("claw-local-skill-repo-") do |repo_root|
+        write_skill_fixture!(Pathname.new(repo_root).join("skills"), name: "alpha-skill", description: "Alpha description")
+        write_skill_fixture!(Pathname.new(repo_root).join("skills/.system"), name: "system-helper", description: "System helper")
+
+        payload =
+          tool_execute(
+            logical_tool_name: "skills_install",
+            implementation_ref: "claw:skills_install",
+            arguments: {
+              "source_kind" => "github",
+              "repo" => repo_root,
+            },
+            workspace_root: workspace_root,
+          )
+
+        result = payload.fetch("result")
+        refute result.fetch("error")
+
+        parsed = JSON.parse(result.dig("content", 0, "text"))
+        assert_equal "repo_root_batch", parsed.fetch("mode")
+        assert_equal 2, parsed.fetch("installed_count")
+        assert_equal true, parsed.fetch("refresh_effective_on_next_top_level_turn")
+        assert_equal ["skills/.system/system-helper", "skills/alpha-skill"], parsed.fetch("installed_skills").map { |entry| entry.fetch("source_path") }
+        parsed.fetch("installed_skills").each do |entry|
+          refute entry.key?("live_path")
+          refute entry.key?("provenance_path")
+          refute entry.key?("snapshot_path")
+        end
+      end
+    end
+  end
+
+  test "tool.execute skills_install returns a stable batch validation error when repo-root discovery finds no skills" do
+    with_workspace({}) do |workspace_root|
+      Dir.mktmpdir("claw-empty-skill-repo-") do |repo_root|
+        File.write(Pathname.new(repo_root).join("README.md"), "# not a skill repo\n")
+
+        payload =
+          tool_execute(
+            logical_tool_name: "skills_install",
+            implementation_ref: "claw:skills_install",
+            arguments: {
+              "source_kind" => "github",
+              "repo" => repo_root,
+            },
+            workspace_root: workspace_root,
+          )
+
+        result = payload.fetch("result")
+        assert_equal true, result.fetch("error")
+        assert_equal "cybros.skills_install.invalid_skill_root", result.dig("metadata", "code")
+      end
+    end
+  end
+
   test "tool.execute web_search returns structured search results when a backend is configured" do
     with_web_backend_server do |server|
       payload =
@@ -1029,6 +1220,40 @@ class RPCContractTest < ActiveSupport::TestCase
 
       yield dir
     end
+  end
+
+  def write_skill_fixture!(root, name:, description:)
+    skill_dir = Pathname.new(root).join(name)
+    FileUtils.mkdir_p(skill_dir)
+    File.write(
+      skill_dir.join("SKILL.md"),
+      <<~MD,
+        ---
+        name: #{name}
+        description: #{description}
+        ---
+
+        # #{name}
+      MD
+    )
+  end
+
+  def with_skill_catalog_sources(sources)
+    singleton = RuntimeSetting.singleton_class
+    original_method = singleton.instance_method(:skill_catalog_sources)
+    singleton.send(:define_method, :skill_catalog_sources) { sources }
+    yield
+  ensure
+    singleton.send(:define_method, :skill_catalog_sources, original_method)
+  end
+
+  def with_platform_skill_dirs(dirs)
+    singleton = Agents::SkillsStoreBuilder.singleton_class
+    original_method = singleton.instance_method(:default_platform_skill_dirs)
+    singleton.send(:define_method, :default_platform_skill_dirs) { dirs }
+    yield
+  ensure
+    singleton.send(:define_method, :default_platform_skill_dirs, original_method)
   end
 
   def application

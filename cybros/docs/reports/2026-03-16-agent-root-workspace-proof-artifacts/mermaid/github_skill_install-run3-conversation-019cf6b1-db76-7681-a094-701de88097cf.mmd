@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6b1dbcc77adbf25e48baf18df2b["user_message:finished Use `skills_install` with these exact arguments: {\"sour..."]
+N_019cf6b1dbd57827b32408b559ea8728["agent_message:finished"]
+N_019cf6b1e80f7cd6bcb63df010b14d0f["agent_message:finished Installed skill: `github-answer-3-46a06a` Hashes: - so..."]
+N_019cf6b1e82477368314453c2e3889fd["task:finished skills_install"]
+N_019cf6b1fa9a71e88c5630a931dcece5["user_message:finished Refresh skills inventory"]
+N_019cf6b1faaa7137aecd41926c31c10f["agent_message:pending"]
+N_019cf6b1dbcc77adbf25e48baf18df2b -->|sequence| N_019cf6b1dbd57827b32408b559ea8728
+N_019cf6b1dbd57827b32408b559ea8728 -->|sequence| N_019cf6b1e82477368314453c2e3889fd
+N_019cf6b1e82477368314453c2e3889fd -->|sequence| N_019cf6b1e80f7cd6bcb63df010b14d0f
+N_019cf6b1e80f7cd6bcb63df010b14d0f -->|sequence| N_019cf6b1fa9a71e88c5630a931dcece5
+N_019cf6b1fa9a71e88c5630a931dcece5 -->|sequence| N_019cf6b1faaa7137aecd41926c31c10f

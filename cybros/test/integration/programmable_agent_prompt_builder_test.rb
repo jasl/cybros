@@ -185,6 +185,43 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     end
   end
 
+  test "bundled claw advertises the system skill installer in the available skills inventory" do
+    Dir.mktmpdir("cybros-prompt-builder-installer-workspace-") do |workspace_root|
+      llm_payloads = []
+      llm_server =
+        MockLLMServer.new do |payload|
+          llm_payloads << payload.deep_dup
+          MockLLMServer.chat_response(content: "llm draft answer")
+        end.start
+
+      with_default_agent_workspace_root(workspace_root) do
+        with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+          agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+          conversation =
+            create_conversation!(
+              title: "Prompt Builder Installer",
+              agent: agent,
+              metadata: { "agent" => agent.conversation_metadata_fragment },
+            )
+
+          run_bundled_claw_turn!(
+            conversation: conversation,
+            user_content: "Install a published skill",
+            model_ref: "dev/mock-model",
+            llm_payloads: llm_payloads,
+          )
+
+          system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
+
+          assert_includes system_prompt, %(<skill name="skill-installer")
+          assert_includes system_prompt, %(description="Use when asked to install or replace a remote or catalog skill")
+        end
+      end
+    ensure
+      llm_server&.shutdown
+    end
+  end
+
   test "bundled claw drops working_notes from the model request before history when prompt budget is tight" do
     llm_payloads = []
     llm_server =
@@ -200,7 +237,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       )
 
     with_runtime_token_counter(counter) do
-      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 9_000)) do
+      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 9_500)) do
         conversation = create_conversation!(title: "Prompt Budget")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "summaries", kind: "summary", content: "Keep this compact summary.")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "handoff", kind: "handoff", content: "Keep this handoff note.")
@@ -235,8 +272,18 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       result = conversation.append_user_message!(content: user_content, model_ref: model_ref)
       agent_node = result.fetch(:agent_node)
 
-      conversation.root_graph.nodes.find(agent_node.id).update!(claim_after_at: nil)
+      live_agent_node = conversation.root_graph.nodes.find(agent_node.id)
+      live_agent_node.update!(claim_after_at: nil) if live_agent_node.pending?
+
       claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+      unless claimed.include?(agent_node.id)
+        live_agent_node = conversation.root_graph.nodes.find(agent_node.id)
+        if live_agent_node.pending?
+          claimed_node = DAG::Scheduler.claim_pending_node!(graph: conversation.root_graph, node: live_agent_node, claimed_by: "test")
+          claimed << claimed_node.id if claimed_node.present?
+        end
+      end
+
       assert_includes claimed, agent_node.id
 
       DAG::Runner.run_node!(agent_node.id)

@@ -1,0 +1,40 @@
+flowchart TD
+N_019cf6c5cf60746d94eb7bf533629b85["user_message:finished Please request code review for the completed change in ..."]
+N_019cf6c5cf6b7ded86794886d5039beb["agent_message:finished"]
+N_019cf6c5d86c7f968cdef2dff11d79c9["agent_message:finished"]
+N_019cf6c5d87972cf8505783404a2c47e["task:finished skills_load"]
+N_019cf6c5e3c77703b4985171496cfd44["agent_message:finished"]
+N_019cf6c5e3d57918adf1c98839ec30a9["task:finished skills_load"]
+N_019cf6c5eee979b2a1622b7ce3047422["agent_message:finished Using the review-request and verification skills: I’ll..."]
+N_019cf6c5eef87dbe89b16edf9fb62699["task:finished skills_load"]
+N_019cf6c5fc5b7c94bec1b4ed4796865d["agent_message:finished"]
+N_019cf6c5fc6e7bd19b1ded2b9b5a1e9f["task:finished exec"]
+N_019cf6c610b87f39937b9d9df192a2cc["agent_message:finished"]
+N_019cf6c610c6703e95f047175b9b5be0["task:finished exec"]
+N_019cf6c6244e73a28ddfa0ebfb81e9bc["agent_message:finished"]
+N_019cf6c62459723bbc924492d29c990a["task:finished exec"]
+N_019cf6c6376d7e1e980226647106f3f7["agent_message:finished"]
+N_019cf6c6377b77b592babdd54f7888d2["task:finished exec"]
+N_019cf6c64e527df9a5e65a63b93a6331["agent_message:finished"]
+N_019cf6c64e6376b6ba453009502297ac["task:finished exec"]
+N_019cf6c66ad57710a449eec2d3d75c0a["agent_message:finished Stopped: exceeded max_steps_per_turn."]
+N_019cf6c66adf7d2298659e3d88418c16["task:finished exec"]
+N_019cf6c5cf60746d94eb7bf533629b85 -->|sequence| N_019cf6c5cf6b7ded86794886d5039beb
+N_019cf6c5cf6b7ded86794886d5039beb -->|sequence| N_019cf6c5d87972cf8505783404a2c47e
+N_019cf6c5d87972cf8505783404a2c47e -->|sequence| N_019cf6c5d86c7f968cdef2dff11d79c9
+N_019cf6c5d86c7f968cdef2dff11d79c9 -->|sequence| N_019cf6c5e3d57918adf1c98839ec30a9
+N_019cf6c5e3d57918adf1c98839ec30a9 -->|sequence| N_019cf6c5e3c77703b4985171496cfd44
+N_019cf6c5e3c77703b4985171496cfd44 -->|sequence| N_019cf6c5eef87dbe89b16edf9fb62699
+N_019cf6c5eef87dbe89b16edf9fb62699 -->|sequence| N_019cf6c5eee979b2a1622b7ce3047422
+N_019cf6c5eee979b2a1622b7ce3047422 -->|sequence| N_019cf6c5fc6e7bd19b1ded2b9b5a1e9f
+N_019cf6c5fc6e7bd19b1ded2b9b5a1e9f -->|sequence| N_019cf6c5fc5b7c94bec1b4ed4796865d
+N_019cf6c5fc5b7c94bec1b4ed4796865d -->|sequence| N_019cf6c610c6703e95f047175b9b5be0
+N_019cf6c610c6703e95f047175b9b5be0 -->|sequence| N_019cf6c610b87f39937b9d9df192a2cc
+N_019cf6c610b87f39937b9d9df192a2cc -->|sequence| N_019cf6c62459723bbc924492d29c990a
+N_019cf6c62459723bbc924492d29c990a -->|sequence| N_019cf6c6244e73a28ddfa0ebfb81e9bc
+N_019cf6c6244e73a28ddfa0ebfb81e9bc -->|sequence| N_019cf6c6377b77b592babdd54f7888d2
+N_019cf6c6377b77b592babdd54f7888d2 -->|sequence| N_019cf6c6376d7e1e980226647106f3f7
+N_019cf6c6376d7e1e980226647106f3f7 -->|sequence| N_019cf6c64e6376b6ba453009502297ac
+N_019cf6c64e6376b6ba453009502297ac -->|sequence| N_019cf6c64e527df9a5e65a63b93a6331
+N_019cf6c64e527df9a5e65a63b93a6331 -->|sequence| N_019cf6c66adf7d2298659e3d88418c16
+N_019cf6c66adf7d2298659e3d88418c16 -->|sequence| N_019cf6c66ad57710a449eec2d3d75c0a

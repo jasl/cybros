@@ -1,4 +1,5 @@
 require_relative "tools/memory_tools"
+require_relative "tools/skill_tools"
 require_relative "tools/web_tools"
 require_relative "tools/workspace_tools"
 
@@ -38,6 +39,10 @@ module Cybros
             return memory_result
           end
 
+          if (skill_result = skill_tools(params).call(logical_tool_name: logical_tool_name, arguments: normalized_arguments(params)))
+            return skill_result
+          end
+
           if (workspace_result = workspace_tools(params).call(logical_tool_name: logical_tool_name, arguments: normalized_arguments(params)))
             return workspace_result
           end
@@ -60,6 +65,15 @@ module Cybros
               workspace_root: workspace_config.fetch("root_path"),
               cwd: workspace_config.fetch("cwd"),
             )
+        end
+
+        def skill_tools(params)
+          @skill_tools_by_root ||= {}
+          workspace_config = workspace_config_from(params)
+          return NullWorkspaceTools.instance if workspace_config.nil?
+
+          root_path = workspace_config.fetch("root_path")
+          @skill_tools_by_root[root_path] ||= Tools::SkillTools.new(workspace_root: root_path)
         end
 
         def memory_tools(params)

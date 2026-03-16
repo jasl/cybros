@@ -1,0 +1,16 @@
+flowchart TD
+N_019cf6acfe5a79c59e3691147ab9354e["user_message:finished Use the self-mutate skill to append the exact line \"SOU..."]
+N_019cf6acfe6476ee98019295fe5d11b8["agent_message:finished"]
+N_019cf6ad06ef78b08ef398e9f04f52cc["agent_message:finished"]
+N_019cf6ad06ff79bd99e5413989d59c7e["task:finished skills_load"]
+N_019cf6ad1098702598462a49d4e870c6["agent_message:finished"]
+N_019cf6ad10a57851b3e3774717182742["task:finished read"]
+N_019cf6ad1d80794c82aaad63f36ffaf1["agent_message:finished Done. Appended the exact line to `../../SOUL.md`."]
+N_019cf6ad1d9172ccbfd14fbaf737efe0["task:finished edit"]
+N_019cf6acfe5a79c59e3691147ab9354e -->|sequence| N_019cf6acfe6476ee98019295fe5d11b8
+N_019cf6acfe6476ee98019295fe5d11b8 -->|sequence| N_019cf6ad06ff79bd99e5413989d59c7e
+N_019cf6ad06ff79bd99e5413989d59c7e -->|sequence| N_019cf6ad06ef78b08ef398e9f04f52cc
+N_019cf6ad06ef78b08ef398e9f04f52cc -->|sequence| N_019cf6ad10a57851b3e3774717182742
+N_019cf6ad10a57851b3e3774717182742 -->|sequence| N_019cf6ad1098702598462a49d4e870c6
+N_019cf6ad1098702598462a49d4e870c6 -->|sequence| N_019cf6ad1d9172ccbfd14fbaf737efe0
+N_019cf6ad1d9172ccbfd14fbaf737efe0 -->|sequence| N_019cf6ad1d80794c82aaad63f36ffaf1

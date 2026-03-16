@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6c016a771e2ac2996399a58d095["user_message:finished 帮我安装 https://github.com/obra/superpowers 优先使用受保护的 `skil..."]
+N_019cf6c016cb78719f80f7edf940ddc0["agent_message:finished"]
+N_019cf6c022247ac6851768462b7cf5d5["agent_message:finished 已通过受保护的 `skills_install` 路径完成安装，按 repo root batch 方式从 ..."]
+N_019cf6c02e1972d8af0a9377aa5046a0["task:finished skills_install"]
+N_019cf6c0664c77b69fb15419d225a909["user_message:finished Refresh skills inventory"]
+N_019cf6c066617c15aa3e2853a0a5e7a5["agent_message:pending"]
+N_019cf6c016a771e2ac2996399a58d095 -->|sequence| N_019cf6c016cb78719f80f7edf940ddc0
+N_019cf6c016cb78719f80f7edf940ddc0 -->|sequence| N_019cf6c02e1972d8af0a9377aa5046a0
+N_019cf6c02e1972d8af0a9377aa5046a0 -->|sequence| N_019cf6c022247ac6851768462b7cf5d5
+N_019cf6c022247ac6851768462b7cf5d5 -->|sequence| N_019cf6c0664c77b69fb15419d225a909
+N_019cf6c0664c77b69fb15419d225a909 -->|sequence| N_019cf6c066617c15aa3e2853a0a5e7a5

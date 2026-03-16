@@ -66,6 +66,8 @@ module Cybros
         return { action: nil } unless workspace
 
         case name.to_s
+        when "skills_install"
+          { action: :confirm }
         when "write", "edit"
           classify_paths([resolve_relative_path(arguments["path"], workspace)].compact, workspace: workspace)
         when "apply_patch"
@@ -624,6 +626,7 @@ module Cybros
       agent_key = "main" if agent_key.empty?
 
       agent_attrs = { key: agent_key, agent_profile: profile_name }
+      agent_attrs[:id] = agent.id if agent.present?
       agent_attrs[:context_turns] = context_turns if context_turns
 
       workspace_dir =

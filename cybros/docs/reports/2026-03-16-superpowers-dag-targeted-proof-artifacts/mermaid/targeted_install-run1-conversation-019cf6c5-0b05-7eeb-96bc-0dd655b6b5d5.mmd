@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6c50bdf7cacb7bfe89bc5e0eb88["user_message:finished 帮我安装 https://github.com/obra/superpowers Use the protec..."]
+N_019cf6c50bf977c0a87374917bfa967b["agent_message:finished"]
+N_019cf6c51b677767b350cc4cc1d9154c["agent_message:finished 已通过受保护的 `skills_install` 路径完成安装。 结果： - 来源仓库：`obra/supe..."]
+N_019cf6c529f270c081342ab559d59a73["task:finished skills_install"]
+N_019cf6c50bdf7cacb7bfe89bc5e0eb88 -->|sequence| N_019cf6c50bf977c0a87374917bfa967b
+N_019cf6c50bf977c0a87374917bfa967b -->|sequence| N_019cf6c529f270c081342ab559d59a73
+N_019cf6c529f270c081342ab559d59a73 -->|sequence| N_019cf6c51b677767b350cc4cc1d9154c

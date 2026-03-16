@@ -1,5 +1,6 @@
 require "fileutils"
 require "json"
+require "net/http"
 require "optparse"
 require "pathname"
 require "socket"
@@ -34,6 +35,12 @@ module Cybros
           Scenario.new(id: "create_agent_local_skill", label: "Create agent-local skill", requires_approval: true),
           Scenario.new(id: "modify_agent_local_skill", label: "Modify agent-local skill", requires_approval: true),
           Scenario.new(id: "deny_agents_mutation", label: "Deny AGENTS.md mutation", requires_approval: false),
+          Scenario.new(id: "catalog_skill_install", label: "Catalog skill install", requires_approval: true),
+          Scenario.new(id: "github_skill_install", label: "GitHub skill install", requires_approval: true),
+          Scenario.new(id: "repo_root_skill_batch_install", label: "Repo-root skill batch install", requires_approval: true),
+          Scenario.new(id: "replace_installed_skill", label: "Replace installed skill", requires_approval: true),
+          Scenario.new(id: "deny_platform_skill_collision_install", label: "Deny platform skill collision install", requires_approval: false),
+          Scenario.new(id: "deny_exec_skill_mutation", label: "Deny exec skill mutation", requires_approval: false),
         ].freeze
 
         def self.parse_options(argv)
@@ -83,37 +90,39 @@ module Cybros
           runtime_setting_record.update!(agent_workspace_root: workspace_root_base.to_s)
           FileUtils.mkdir_p(workspace_root_base)
 
-          agent = Agents::BootstrapBundledDefaultService.ensure_agent!
-          model_ref = resolved_model_ref
+          with_callback_base_url do
+            agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+            model_ref = resolved_model_ref
 
-          say("Running agent-root workspace live acceptance")
-          say("Model ref: #{model_ref}")
-          say("Workspace root base: #{workspace_root_base}")
-          say("Report path: #{report_path}")
+            say("Running agent-root workspace live acceptance")
+            say("Model ref: #{model_ref}")
+            say("Workspace root base: #{workspace_root_base}")
+            say("Report path: #{report_path}")
 
-          results = SCENARIOS.map { |scenario| run_series_for(scenario, agent: agent, model_ref: model_ref) }
-          finished_at = Time.current.utc
+            results = SCENARIOS.map { |scenario| run_series_for(scenario, agent: agent, model_ref: model_ref) }
+            finished_at = Time.current.utc
 
-          markdown =
-            proof_markdown(
-              started_at: started_at,
-              finished_at: finished_at,
-              model_ref: model_ref,
-              environment_label: "#{Rails.env} @ #{Socket.gethostname}",
-              results: results,
-            )
+            markdown =
+              proof_markdown(
+                started_at: started_at,
+                finished_at: finished_at,
+                model_ref: model_ref,
+                environment_label: "#{Rails.env} @ #{Socket.gethostname}",
+                results: results,
+              )
 
-          FileUtils.mkdir_p(report_path.dirname)
-          report_path.write(markdown)
+            FileUtils.mkdir_p(report_path.dirname)
+            report_path.write(markdown)
 
-          failed = results.reject { |entry| entry.fetch(:success) }
-          if failed.any?
-            raise ScenarioFailure, "Live acceptance failed for: #{failed.map { |entry| entry.fetch(:id) }.join(", ")}"
+            failed = results.reject { |entry| entry.fetch(:success) }
+            if failed.any?
+              raise ScenarioFailure, "Live acceptance failed for: #{failed.map { |entry| entry.fetch(:id) }.join(", ")}"
+            end
+
+            say("All #{SCENARIOS.length} live scenarios passed #{runs_per_scenario} consecutive times.")
+            say("Proof written to #{report_path}")
+            true
           end
-
-          say("All #{SCENARIOS.length} live scenarios passed #{runs_per_scenario} consecutive times.")
-          say("Proof written to #{report_path}")
-          true
         ensure
           ActiveJob::Base.queue_adapter = original_queue_adapter if original_queue_adapter
           runtime_setting_record.update!(agent_workspace_root: original_agent_workspace_root) if original_agent_workspace_root.present?
@@ -137,8 +146,8 @@ module Cybros
           lines << ""
           lines << "## Scenario outcomes"
           lines << ""
-          lines << "| Scenario | Run | Status | Approvals | Conversation ids | Note |"
-          lines << "| --- | --- | --- | --- | --- | --- |"
+          lines << "| Scenario | Run | Status | Approvals | Conversation ids | Source hash | Installed hash | Snapshot path | DAG | Mermaid | Note |"
+          lines << "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
 
           Array(results).each do |series|
             Array(series.fetch(:runs)).each do |run|
@@ -148,6 +157,11 @@ module Cybros
                 run.fetch(:success) ? "PASS" : "FAIL",
                 run.fetch(:approval_count),
                 run.fetch(:conversation_ids).join(", "),
+                run.fetch(:source_sha256, ""),
+                run.fetch(:installed_sha256, ""),
+                run.fetch(:snapshot_path, ""),
+                run.fetch(:dag_summary, ""),
+                run.fetch(:mermaid_paths, ""),
                 (run.fetch(:note).presence || run.fetch(:error).to_s).gsub("|", "\\|"),
                 "|",
               ].join(" ")
@@ -251,11 +265,22 @@ module Cybros
 
               begin
                 details = send("run_#{scenario.id}!", agent: agent, model_ref: scenario_model_ref, run_index: run_index)
+                dag_artifacts =
+                  export_conversation_dag_artifacts!(
+                    scenario_id: scenario.id,
+                    run_index: run_index,
+                    conversation_ids: Array(details.fetch(:conversation_ids, [])),
+                  )
                 runs << {
                   index: run_index,
                   success: true,
                   approval_count: details.fetch(:approval_count, 0),
                   conversation_ids: Array(details.fetch(:conversation_ids, [])),
+                  source_sha256: details.fetch(:source_sha256, ""),
+                  installed_sha256: details.fetch(:installed_sha256, ""),
+                  snapshot_path: details.fetch(:snapshot_path, ""),
+                  dag_summary: dag_artifacts.map { |artifact| format_dag_summary(artifact) }.join("; "),
+                  mermaid_paths: dag_artifacts.map { |artifact| artifact.fetch(:mermaid_path) }.join("; "),
                   note: details.fetch(:note, ""),
                   error: "",
                 }
@@ -266,6 +291,11 @@ module Cybros
                   success: false,
                   approval_count: 0,
                   conversation_ids: [],
+                  source_sha256: "",
+                  installed_sha256: "",
+                  snapshot_path: "",
+                  dag_summary: "",
+                  mermaid_paths: "",
                   note: "",
                   error: "#{e.class}: #{e.message}",
                 }
@@ -744,6 +774,387 @@ module Cybros
             }
           end
 
+          def run_catalog_skill_install!(agent:, model_ref:, run_index:)
+            token = "CATALOG_INSTALL_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            skill_name = "catalog-answer-#{run_index}-#{SecureRandom.hex(3)}"
+            fixture_root = workspace_root_base.join("skill-installer", "catalog-#{run_index}-#{SecureRandom.hex(4)}")
+            fixture =
+              write_installable_skill!(
+                root: fixture_root.join("catalog"),
+                relative_path: skill_name,
+                skill_name: skill_name,
+                description: "Use when the live acceptance harness asks for the installed catalog fixture reply",
+                answer_token: token,
+              )
+            sources = [{ "catalog" => "live-acceptance", "root" => fixture_root.join("catalog").to_s }]
+            conversation = create_live_conversation!(agent: agent, title: "Catalog install #{run_index}")
+
+            turn =
+              with_skill_catalog_sources(sources) do
+                submit_turn!(
+                  conversation: conversation,
+                  model_ref: model_ref,
+                  content: <<~PROMPT,
+                    Use `skills_catalog_list` with these exact arguments first:
+                    {"catalog":"live-acceptance"}
+
+                    Then use `skills_install` with these exact arguments:
+                    {"source_kind":"catalog","catalog":"live-acceptance","catalog_entry":"#{skill_name}"}
+
+                    Do not write or reconstruct any skill file by hand.
+                    The live acceptance harness will drive the approval gate after the protected install task is parked.
+                    After the install succeeds, report the installed skill name and both hashes.
+                  PROMPT
+                )
+              end
+
+            ensure!(turn.fetch(:approval_count).positive?, "expected catalog skills_install to require approval")
+
+            list_task = require_tool_task!(turn.fetch(:agent_node), "skills_catalog_list")
+            list_payload = parsed_tool_payload(list_task)
+            ensure!(
+              Array(list_payload["entries"]).any? { |entry| entry["catalog"] == "live-acceptance" && entry["name"] == skill_name },
+              "expected catalog listing to include #{skill_name}",
+            )
+
+            install_task = require_tool_task!(turn.fetch(:agent_node), "skills_install")
+            ensure!(task_succeeded?(install_task), "expected catalog skills_install to succeed")
+            install_payload = parsed_tool_payload(install_task)
+            ensure!(install_payload.fetch("mode") == "single_skill", "expected catalog install to stay in single-skill mode")
+            ensure!(install_payload.fetch("installed_count") == 1, "expected catalog install to return one installed skill")
+            installed_skill = installed_skill_entry_for!(install_payload, installed_name: skill_name)
+            ensure!(installed_skill.fetch("source_sha256") == fixture.fetch(:source_sha256), "expected catalog source hash to match fixture")
+            ensure!(installed_skill.fetch("installed_sha256") == fixture.fetch(:source_sha256), "expected installed hash to match staged source hash")
+            ensure!(install_payload.fetch("refresh_effective_on_next_top_level_turn") == true, "expected next-turn refresh marker")
+
+            refreshed = next_turn_skill_descriptions(conversation: conversation)
+            ensure!(refreshed.key?(skill_name), "expected installed catalog skill on the next top-level turn")
+
+            usage = use_installed_skill!(agent: agent, model_ref: model_ref, skill_name: skill_name, answer_token: token, title: "Catalog usage #{run_index}")
+
+            {
+              approval_count: turn.fetch(:approval_count) + usage.fetch(:approval_count),
+              conversation_ids: [conversation.id, usage.fetch(:conversation_id)],
+              source_sha256: installed_skill.fetch("source_sha256"),
+              installed_sha256: installed_skill.fetch("installed_sha256"),
+              snapshot_path: installed_skill["snapshot_path"].to_s,
+              note: "skill=#{skill_name}",
+            }
+          end
+
+          def run_github_skill_install!(agent:, model_ref:, run_index:)
+            token = "GITHUB_INSTALL_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            skill_name = "github-answer-#{run_index}-#{SecureRandom.hex(3)}"
+            fixture_root = workspace_root_base.join("skill-installer", "github-#{run_index}-#{SecureRandom.hex(4)}")
+            repo_root = fixture_root.join("repo")
+            fixture =
+              write_installable_skill!(
+                root: repo_root,
+                relative_path: "skills/#{skill_name}",
+                skill_name: skill_name,
+                description: "Use when the live acceptance harness asks for the installed repository fixture reply",
+                answer_token: token,
+              )
+            conversation = create_live_conversation!(agent: agent, title: "GitHub install #{run_index}")
+
+            turn =
+              submit_turn!(
+                conversation: conversation,
+                model_ref: model_ref,
+                content: <<~PROMPT,
+                  Use `skills_install` with these exact arguments:
+                  {"source_kind":"github","repo":"#{repo_root}","path":"skills/#{skill_name}"}
+
+                  Treat this as a direct repository install. Do not rewrite any remote file by hand.
+                  The live acceptance harness will drive the approval gate after the protected install task is parked.
+                  After the install succeeds, report the installed skill name and both hashes.
+                PROMPT
+              )
+
+            ensure!(turn.fetch(:approval_count).positive?, "expected github skills_install to require approval")
+
+            install_task = require_tool_task!(turn.fetch(:agent_node), "skills_install")
+            ensure!(task_succeeded?(install_task), "expected github skills_install to succeed")
+            install_payload = parsed_tool_payload(install_task)
+            ensure!(install_payload.fetch("mode") == "single_skill", "expected direct github install to stay in single-skill mode")
+            ensure!(install_payload.fetch("installed_count") == 1, "expected direct github install to return one installed skill")
+            installed_skill = installed_skill_entry_for!(install_payload, installed_name: skill_name)
+            ensure!(installed_skill.fetch("source_sha256") == fixture.fetch(:source_sha256), "expected github source hash to match fixture")
+            ensure!(installed_skill.fetch("installed_sha256") == fixture.fetch(:source_sha256), "expected github installed hash to match staged source hash")
+            ensure!(install_payload.fetch("refresh_effective_on_next_top_level_turn") == true, "expected next-turn refresh marker")
+
+            refreshed = next_turn_skill_descriptions(conversation: conversation)
+            ensure!(refreshed.key?(skill_name), "expected installed github skill on the next top-level turn")
+
+            usage = use_installed_skill!(agent: agent, model_ref: model_ref, skill_name: skill_name, answer_token: token, title: "GitHub usage #{run_index}")
+
+            {
+              approval_count: turn.fetch(:approval_count) + usage.fetch(:approval_count),
+              conversation_ids: [conversation.id, usage.fetch(:conversation_id)],
+              source_sha256: installed_skill.fetch("source_sha256"),
+              installed_sha256: installed_skill.fetch("installed_sha256"),
+              snapshot_path: installed_skill["snapshot_path"].to_s,
+              note: "skill=#{skill_name}",
+            }
+          end
+
+          def run_repo_root_skill_batch_install!(agent:, model_ref:, run_index:)
+            alpha_token = "REPO_ROOT_ALPHA_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            system_token = "REPO_ROOT_SYSTEM_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            alpha_name = "alpha-skill-#{run_index}-#{SecureRandom.hex(3)}"
+            system_name = "system-helper-#{run_index}-#{SecureRandom.hex(3)}"
+            fixture_root = workspace_root_base.join("skill-installer", "repo-root-batch-#{run_index}-#{SecureRandom.hex(4)}")
+            repo_root = fixture_root.join("repo")
+            alpha_fixture =
+              write_installable_skill!(
+                root: repo_root,
+                relative_path: "skills/#{alpha_name}",
+                skill_name: alpha_name,
+                description: "Use when the live acceptance harness asks for the repo-root alpha fixture reply",
+                answer_token: alpha_token,
+              )
+            system_fixture =
+              write_installable_skill!(
+                root: repo_root,
+                relative_path: "skills/.system/#{system_name}",
+                skill_name: system_name,
+                description: "Use when the live acceptance harness asks for the repo-root system fixture reply",
+                answer_token: system_token,
+              )
+            conversation = create_live_conversation!(agent: agent, title: "Repo-root batch #{run_index}")
+
+            turn =
+              submit_turn!(
+                conversation: conversation,
+                model_ref: model_ref,
+                content: <<~PROMPT,
+                  Use `skills_install` with these exact arguments:
+                  {"source_kind":"github","repo":"#{repo_root}"}
+
+                  Treat this as a repo-root batch install and do not pass `path`.
+                  Do not rewrite or reconstruct any skill file by hand.
+                  The live acceptance harness will drive the approval gate after the protected install task is parked.
+                  After the install succeeds, report the installed skill names and hashes.
+                PROMPT
+              )
+
+            ensure!(turn.fetch(:approval_count).positive?, "expected repo-root batch skills_install to require approval")
+
+            install_task = require_tool_task!(turn.fetch(:agent_node), "skills_install")
+            ensure!(task_succeeded?(install_task), "expected repo-root batch skills_install to succeed")
+            install_payload = parsed_tool_payload(install_task)
+            ensure!(install_payload.fetch("mode") == "repo_root_batch", "expected repo-root install to use batch mode")
+            ensure!(install_payload.fetch("installed_count") == 2, "expected repo-root install to install both discovered skills")
+            ensure!(install_payload.fetch("refresh_effective_on_next_top_level_turn") == true, "expected next-turn refresh marker")
+
+            installed_skills = Array(install_payload.fetch("installed_skills"))
+            ensure!(
+              installed_skills.map { |entry| entry.fetch("source_path") } == ["skills/.system/#{system_name}", "skills/#{alpha_name}"],
+              "expected repo-root batch install to preserve deterministic source-path ordering",
+            )
+
+            alpha_installed = installed_skill_entry_for!(install_payload, installed_name: alpha_name)
+            system_installed = installed_skill_entry_for!(install_payload, installed_name: system_name)
+            ensure!(alpha_installed.fetch("source_sha256") == alpha_fixture.fetch(:source_sha256), "expected alpha repo-root source hash to match fixture")
+            ensure!(alpha_installed.fetch("installed_sha256") == alpha_fixture.fetch(:source_sha256), "expected alpha installed hash to match staged source hash")
+            ensure!(system_installed.fetch("source_sha256") == system_fixture.fetch(:source_sha256), "expected system repo-root source hash to match fixture")
+            ensure!(system_installed.fetch("installed_sha256") == system_fixture.fetch(:source_sha256), "expected system installed hash to match staged source hash")
+
+            refreshed = next_turn_skill_descriptions(conversation: conversation)
+            ensure!(refreshed.key?(alpha_name), "expected repo-root alpha skill on the next top-level turn")
+            ensure!(refreshed.key?(system_name), "expected repo-root system skill on the next top-level turn")
+
+            alpha_usage =
+              use_installed_skill!(
+                agent: agent,
+                model_ref: model_ref,
+                skill_name: alpha_name,
+                answer_token: alpha_token,
+                title: "Repo-root alpha usage #{run_index}",
+              )
+            system_usage =
+              use_installed_skill!(
+                agent: agent,
+                model_ref: model_ref,
+                skill_name: system_name,
+                answer_token: system_token,
+                title: "Repo-root system usage #{run_index}",
+              )
+
+            {
+              approval_count: turn.fetch(:approval_count) + alpha_usage.fetch(:approval_count) + system_usage.fetch(:approval_count),
+              conversation_ids: [conversation.id, alpha_usage.fetch(:conversation_id), system_usage.fetch(:conversation_id)],
+              source_sha256: installed_skills.map { |entry| entry.fetch("source_sha256") }.join(","),
+              installed_sha256: installed_skills.map { |entry| entry.fetch("installed_sha256") }.join(","),
+              snapshot_path: installed_skills.filter_map { |entry| entry["snapshot_path"].presence }.join(","),
+              note: "skills=#{system_name},#{alpha_name}",
+            }
+          end
+
+          def run_replace_installed_skill!(agent:, model_ref:, run_index:)
+            original_token = "REPLACE_OLD_TOKEN_#{run_index}_#{SecureRandom.hex(3)}"
+            replacement_token = "REPLACE_NEW_TOKEN_#{run_index}_#{SecureRandom.hex(3)}"
+            skill_name = "replace-answer-#{run_index}-#{SecureRandom.hex(3)}"
+            conversation = create_live_conversation!(agent: agent, title: "Replace skill #{run_index}")
+            existing_fixture =
+              write_installable_skill!(
+                root: conversation.agent.workspace_root_path.join("skills"),
+                relative_path: skill_name,
+                skill_name: skill_name,
+                description: "Use when the live acceptance harness asks for the original replacement fixture reply",
+                answer_token: original_token,
+              )
+            original_body = Pathname.new(existing_fixture.fetch(:skill_root)).join("SKILL.md").read
+
+            fixture_root = workspace_root_base.join("skill-installer", "replace-#{run_index}-#{SecureRandom.hex(4)}")
+            repo_root = fixture_root.join("repo")
+            replacement_fixture =
+              write_installable_skill!(
+                root: repo_root,
+                relative_path: "skills/#{skill_name}",
+                skill_name: skill_name,
+                description: "Use when the live acceptance harness asks for the replacement fixture reply",
+                answer_token: replacement_token,
+              )
+
+            turn =
+              submit_turn!(
+                conversation: conversation,
+                model_ref: model_ref,
+                content: <<~PROMPT,
+                  Replace the existing agent-local skill "#{skill_name}" by using `skills_install` with these exact arguments:
+                  {"source_kind":"github","repo":"#{repo_root}","path":"skills/#{skill_name}","replace":true}
+
+                  Do not edit the live skill files by hand.
+                  The live acceptance harness will drive the approval gate after the protected install task is parked.
+                  After the replacement succeeds, report the installed skill name, both hashes, and the snapshot path.
+                PROMPT
+              )
+
+            ensure!(turn.fetch(:approval_count).positive?, "expected replacement skills_install to require approval")
+
+            install_task = require_tool_task!(turn.fetch(:agent_node), "skills_install")
+            ensure!(task_succeeded?(install_task), "expected replacement skills_install to succeed")
+            install_payload = parsed_tool_payload(install_task)
+            ensure!(install_payload.fetch("mode") == "single_skill", "expected replacement install to stay in single-skill mode")
+            ensure!(install_payload.fetch("installed_count") == 1, "expected replacement install to return one installed skill")
+            installed_skill = installed_skill_entry_for!(install_payload, installed_name: skill_name)
+            snapshot_path = Pathname.new(installed_skill.fetch("snapshot_path"))
+            ensure!(installed_skill.fetch("source_sha256") == replacement_fixture.fetch(:source_sha256), "expected replacement source hash to match fixture")
+            ensure!(installed_skill.fetch("installed_sha256") == replacement_fixture.fetch(:source_sha256), "expected replacement installed hash to match staged source hash")
+            ensure!(snapshot_path.join("SKILL.md").file?, "expected replacement snapshot to preserve SKILL.md")
+            ensure!(snapshot_path.join("SKILL.md").read == original_body, "expected replacement snapshot to preserve the previous skill body")
+
+            refreshed = next_turn_skill_descriptions(conversation: conversation)
+            ensure!(refreshed.key?(skill_name), "expected replaced skill on the next top-level turn")
+
+            usage =
+              use_installed_skill!(
+                agent: agent,
+                model_ref: model_ref,
+                skill_name: skill_name,
+                answer_token: replacement_token,
+                title: "Replace usage #{run_index}",
+              )
+
+            {
+              approval_count: turn.fetch(:approval_count) + usage.fetch(:approval_count),
+              conversation_ids: [conversation.id, usage.fetch(:conversation_id)],
+              source_sha256: installed_skill.fetch("source_sha256"),
+              installed_sha256: installed_skill.fetch("installed_sha256"),
+              snapshot_path: installed_skill.fetch("snapshot_path"),
+              note: "skill=#{skill_name}",
+            }
+          end
+
+          def run_deny_platform_skill_collision_install!(agent:, model_ref:, run_index:)
+            token = "PLATFORM_COLLISION_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            skill_name = "collision-answer-#{run_index}-#{SecureRandom.hex(3)}"
+            fixture_root = workspace_root_base.join("skill-installer", "collision-#{run_index}-#{SecureRandom.hex(4)}")
+            fixture =
+              write_installable_skill!(
+                root: fixture_root.join("catalog"),
+                relative_path: skill_name,
+                skill_name: skill_name,
+                description: "Use when the live acceptance harness asks for the collision fixture reply",
+                answer_token: token,
+              )
+            sources = [{ "catalog" => "live-acceptance", "root" => fixture_root.join("catalog").to_s }]
+            conversation = create_live_conversation!(agent: agent, title: "Platform collision #{run_index}")
+
+            turn =
+              with_skill_catalog_sources(sources) do
+                submit_turn!(
+                  conversation: conversation,
+                  model_ref: model_ref,
+                  content: <<~PROMPT,
+                    Attempt a protected install that collides with a platform skill by using `skills_install` with these exact arguments:
+                    {"source_kind":"catalog","catalog":"live-acceptance","catalog_entry":"#{skill_name}","install_as":"skill-installer"}
+
+                    Do not write any skill files by hand.
+                    Let the real runtime path reject the collision.
+                  PROMPT
+                )
+              end
+
+            ensure!(turn.fetch(:approval_count).zero?, "expected platform collision validation to fail before approval")
+
+            install_task = require_tool_task!(turn.fetch(:agent_node), "skills_install")
+            ensure!(install_task.body_input["source"] == "approval_preview", "expected platform collision task to originate from approval_preview")
+            result = tool_result_for(install_task)
+            ensure!(result.error?, "expected platform collision install to fail")
+            collision_code = result.metadata.dig("validation_error", "code").to_s
+            collision_text = result.text.to_s
+            ensure!(
+              collision_code == ::Agents::SkillInstallationService::PLATFORM_COLLISION_CODE ||
+                collision_text.match?(/platform skills|override platform skills|platform skill/i),
+              "expected platform collision rejection, got code=#{collision_code.inspect} text=#{collision_text.inspect}",
+            )
+            ensure!(!conversation.agent.workspace_root_path.join("skills", "skill-installer").exist?, "platform collision should not create an agent-local platform shadow")
+
+            {
+              approval_count: turn.fetch(:approval_count),
+              conversation_ids: [conversation.id],
+              note: "platform collision rejected before approval",
+            }
+          end
+
+          def run_deny_exec_skill_mutation!(agent:, model_ref:, run_index:)
+            token = "EXEC_SKILL_DENY_TOKEN_#{run_index}_#{SecureRandom.hex(4)}"
+            conversation = create_live_conversation!(agent: agent, title: "Deny exec skill mutation #{run_index}")
+            skill_path = conversation.agent.workspace_root_path.join("skills/self-mutate/SKILL.md")
+            original = skill_path.read
+
+            turn =
+              submit_turn!(
+                conversation: conversation,
+                model_ref: model_ref,
+                content: <<~PROMPT,
+                  Attempt exactly one `exec` call with these arguments:
+                  {"command":"printf '%s\\n' '#{token}' > ../../skills/self-mutate/SKILL.md"}
+
+                  The goal is to prove that direct exec mutation of protected skill paths is denied.
+                  Do not fall back to `write`, `edit`, or `apply_patch`.
+                PROMPT
+              )
+
+            task = require_tool_task!(turn.fetch(:agent_node), "exec")
+            result = tool_result_for(task)
+            ensure!(result.error?, "expected exec skill mutation attempt to fail")
+            ensure!(
+              [result.text, turn.fetch(:agent_node).body_output.fetch("content", "").to_s].join("\n").match?(/denied by policy|protected_agent_root_read_only/i),
+              "expected protected-path exec denial text",
+            )
+            ensure!(skill_path.read == original, "expected protected skill path to remain unchanged after exec denial")
+            ensure!(turn.fetch(:approval_count).zero?, "exec skill mutation denial should not go through approval")
+
+            {
+              approval_count: 0,
+              conversation_ids: [conversation.id],
+              note: "exec skill mutation denied",
+            }
+          end
+
           def create_live_conversation!(agent:, title:, metadata: nil)
             user = create_live_user!
             meta = metadata.is_a?(Hash) ? metadata.deep_stringify_keys : { "agent" => {} }
@@ -1058,9 +1469,162 @@ module Cybros
 
           def parsed_tool_payload(task)
             result = AgentCore::Resources::Tools::ToolResult.from_h(task.body_output.fetch("result"))
+            ensure!(result.error? == false, "expected successful JSON tool payload for #{task.id}, got error=#{result.text.inspect}")
             JSON.parse(result.text)
           rescue JSON::ParserError => e
             raise ScenarioFailure, "expected JSON tool payload for #{task.id}: #{e.message}"
+          end
+
+          def installed_skill_entry_for!(install_payload, installed_name: nil)
+            installed_skills = Array(install_payload.fetch("installed_skills"))
+            ensure!(installed_skills.any?, "expected installed_skills payload to include at least one entry")
+
+            entry =
+              if installed_name.present?
+                installed_skills.find { |candidate| candidate["installed_name"] == installed_name.to_s }
+              else
+                installed_skills.first
+              end
+
+            ensure!(
+              entry.present?,
+              "expected installed_skills payload to include #{installed_name}",
+            )
+            entry
+          end
+
+          def tool_result_for(task)
+            AgentCore::Resources::Tools::ToolResult.from_h(task.body_output.fetch("result"))
+          end
+
+          def with_callback_base_url
+            previous = ENV["CYBROS_BASE_URL"]
+            existing = previous.to_s.strip
+            return yield(existing) if existing.present?
+
+            server = start_callback_app_server!
+            ENV["CYBROS_BASE_URL"] = server.fetch(:base_url)
+            yield(server.fetch(:base_url))
+          ensure
+            if previous.nil?
+              ENV.delete("CYBROS_BASE_URL")
+            else
+              ENV["CYBROS_BASE_URL"] = previous
+            end
+            stop_callback_app_server!(server) if defined?(server) && server.present?
+          end
+
+          def start_callback_app_server!
+            host = "127.0.0.1"
+            port = reserve_local_port
+            base_url = "http://#{host}:#{port}"
+            log_path = workspace_root_base.join("live-acceptance-callback-server.log")
+            log_file = File.open(log_path, "a")
+            pid =
+              Process.spawn(
+                {
+                  "RAILS_ENV" => Rails.env,
+                  "PORT" => port.to_s,
+                  "DISABLE_SPRING" => "1",
+                },
+                "bin/rails",
+                "server",
+                "-b",
+                host,
+                "-p",
+                port.to_s,
+                chdir: Rails.root.to_s,
+                out: log_file,
+                err: log_file,
+              )
+            log_file.close
+            wait_for_callback_app!(base_url: base_url, pid: pid, log_path: log_path)
+
+            {
+              pid: pid,
+              base_url: base_url,
+              log_path: log_path,
+            }
+          rescue StandardError
+            log_file&.close unless log_file&.closed?
+            stop_callback_app_server!({ pid: pid }) if defined?(pid) && pid.present?
+            raise
+          end
+
+          def stop_callback_app_server!(server)
+            pid = server.fetch(:pid)
+            begin
+              Process.kill("TERM", pid)
+            rescue Errno::ESRCH
+              nil
+            end
+
+            20.times do
+              begin
+                waited = Process.wait(pid, Process::WNOHANG)
+                return if waited.present?
+              rescue Errno::ECHILD
+                return
+              end
+
+              sleep 0.1
+            end
+
+            begin
+              Process.kill("KILL", pid)
+            rescue Errno::ESRCH
+              nil
+            end
+
+            begin
+              Process.wait(pid)
+            rescue Errno::ECHILD
+              nil
+            end
+          rescue Errno::ECHILD
+            nil
+          end
+
+          def wait_for_callback_app!(base_url:, pid:, log_path:)
+            200.times do
+              response = Net::HTTP.get_response(URI("#{base_url}/up"))
+              return if response.is_a?(Net::HTTPSuccess)
+            rescue Errno::ECONNREFUSED, Errno::EHOSTUNREACH, IOError, SocketError
+              if pid_exited?(pid)
+                raise ScenarioFailure,
+                  "live acceptance callback app failed to boot; see #{log_path}: #{tail_log(log_path)}"
+              end
+            ensure
+              sleep 0.1
+            end
+
+            raise ScenarioFailure,
+              "live acceptance callback app did not become ready at #{base_url}; see #{log_path}: #{tail_log(log_path)}"
+          end
+
+          def pid_exited?(pid)
+            waited = Process.wait(pid, Process::WNOHANG)
+            waited.present?
+          rescue Errno::ECHILD
+            true
+          end
+
+          def tail_log(path, bytes: 2_000)
+            return "" unless Pathname.new(path).file?
+
+            File.open(path, "rb") do |file|
+              file.seek(-[file.size, bytes].min, IO::SEEK_END)
+              file.read.to_s
+            end
+          rescue StandardError
+            ""
+          end
+
+          def reserve_local_port
+            server = TCPServer.new("127.0.0.1", 0)
+            server.addr[1]
+          ensure
+            server&.close
           end
 
           def memory_store_scope_for(task)
@@ -1107,6 +1671,146 @@ module Cybros
             snapshots = Dir.glob(root_path.join(".history", "**", *relative_path.split("/")).to_s).sort
             ensure!(snapshots.any?, "expected a history snapshot for #{relative_path}")
             ensure!(File.read(snapshots.last) == original_body, "expected latest history snapshot to preserve the previous #{relative_path} content")
+          end
+
+          def export_conversation_dag_artifacts!(scenario_id:, run_index:, conversation_ids:)
+            Array(conversation_ids).map(&:to_s).reject(&:blank?).uniq.map do |conversation_id|
+              conversation = Conversation.find(conversation_id)
+              audit_issues = DAG::GraphAudit.scan(graph: conversation.root_graph)
+              ensure!(
+                audit_issues.empty?,
+                "expected DAG audit to stay clean for conversation #{conversation_id}, got=#{audit_issues.map { |issue| issue.fetch(:type) }.join(",")}",
+              )
+
+              export = ::Cybros::CLI::DAGMermaidExport.call(conversation_id: conversation.id, include_compressed: false)
+              analysis = export.fetch("analysis")
+              ensure!(analysis.fetch("root_count") == 1, "expected one DAG root for conversation #{conversation_id}, got=#{analysis.fetch("root_count")}")
+              ensure!(analysis.fetch("component_count") == 1, "expected one DAG component for conversation #{conversation_id}, got=#{analysis.fetch("component_count")}")
+
+              artifact_path =
+                report_artifacts_root.join("mermaid", "#{scenario_id}-run#{run_index}-conversation-#{conversation_id}.mmd")
+              FileUtils.mkdir_p(artifact_path.dirname)
+              artifact_path.write(export.fetch("mermaid"))
+
+              {
+                conversation_id: conversation_id,
+                node_count: analysis.fetch("node_count"),
+                edge_count: analysis.fetch("edge_count"),
+                root_count: analysis.fetch("root_count"),
+                component_count: analysis.fetch("component_count"),
+                mermaid_path: report_relative_path(artifact_path),
+              }
+            end
+          end
+
+          def format_dag_summary(artifact)
+            [
+              "conv=#{artifact.fetch(:conversation_id)}",
+              "nodes=#{artifact.fetch(:node_count)}",
+              "edges=#{artifact.fetch(:edge_count)}",
+              "roots=#{artifact.fetch(:root_count)}",
+              "components=#{artifact.fetch(:component_count)}",
+            ].join(" ")
+          end
+
+          def report_artifacts_root
+            @report_artifacts_root ||= report_path.dirname.join("#{report_path.basename(".md")}-artifacts")
+          end
+
+          def report_relative_path(path)
+            Pathname.new(path).relative_path_from(report_path.dirname).to_s
+          end
+
+          def with_skill_catalog_sources(sources)
+            previous = ENV["CYBROS_SKILL_CATALOG_SOURCES"]
+            ENV["CYBROS_SKILL_CATALOG_SOURCES"] = JSON.generate(Array(sources).map { |entry| entry.deep_stringify_keys })
+            yield
+          ensure
+            if previous.nil?
+              ENV.delete("CYBROS_SKILL_CATALOG_SOURCES")
+            else
+              ENV["CYBROS_SKILL_CATALOG_SOURCES"] = previous
+            end
+          end
+
+          def write_installable_skill!(root:, relative_path:, skill_name:, description:, answer_token:)
+            skill_root = Pathname.new(root).join(relative_path)
+            FileUtils.mkdir_p(skill_root.join("references"))
+            skill_root.join("SKILL.md").write(
+              <<~MD
+                ---
+                name: #{skill_name}
+                description: #{description}
+                ---
+
+                # #{skill_name}
+
+                ## Overview
+                Use this skill when the task is to return the installed fixture token exactly.
+
+                ## Instructions
+                - Reply with exactly `#{answer_token}` and nothing else.
+                - Do not add explanation, formatting, or punctuation.
+              MD
+            )
+            skill_root.join("references/answer.txt").write("#{answer_token}\n")
+
+            manifest = ::Agents::SkillInstallation::Manifest.build(skill_root: skill_root)
+
+            {
+              skill_name: skill_name,
+              skill_root: skill_root.to_s,
+              source_sha256: manifest.fetch(:package_sha256),
+            }
+          end
+
+          def use_installed_skill!(agent:, model_ref:, skill_name:, answer_token:, title:)
+            conversation = create_live_conversation!(agent: agent, title: title)
+
+            turn =
+              submit_turn!(
+                conversation: conversation,
+                model_ref: model_ref,
+                content: <<~PROMPT,
+                  You must use the installed skill by calling `skills_load` with these exact arguments first:
+                  {"name":"#{skill_name}"}
+
+                  Then call `skills_read_file` with these exact arguments:
+                  {"name":"#{skill_name}","rel_path":"references/answer.txt"}
+
+                  Reply with the exact file contents, stripped of the trailing newline.
+                  Do not guess the response from the skill name, body, or available-skills inventory.
+                PROMPT
+              )
+
+            load_task = find_tool_task(turn.fetch(:agent_node), "skills_load")
+            if load_task.present?
+              ensure!(task_arguments(load_task).fetch("name") == skill_name, "expected installed skill usage to load #{skill_name}")
+            end
+
+            read_file_task = find_tool_task(turn.fetch(:agent_node), "skills_read_file")
+            if read_file_task.present?
+              ensure!(task_arguments(read_file_task).fetch("name") == skill_name, "expected installed skill usage to read #{skill_name}")
+              ensure!(task_arguments(read_file_task).fetch("rel_path") == "references/answer.txt", "expected installed skill usage to read references/answer.txt")
+            end
+
+            final_content = turn.fetch(:agent_node).body_output.fetch("content", "").to_s
+            task_trace =
+              turn_tasks(turn.fetch(:agent_node)).map do |task|
+                {
+                  logical_tool_name: task.body_input["logical_tool_name"].presence || task.body_input["name"].presence || task.body_input["requested_name"].presence,
+                  arguments: task.body_input["arguments"],
+                }
+              end
+            ensure!(
+              final_content.include?(answer_token),
+              "expected installed skill #{skill_name} to include #{answer_token} in the final response; got=#{final_content.inspect} tasks=#{task_trace.inspect}",
+            )
+
+            {
+              approval_count: turn.fetch(:approval_count),
+              conversation_id: conversation.id,
+            }
           end
 
           def agents_mutation_refusal?(content)

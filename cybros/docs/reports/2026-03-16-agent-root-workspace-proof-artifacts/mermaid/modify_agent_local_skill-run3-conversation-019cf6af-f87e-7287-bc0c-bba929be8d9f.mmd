@@ -1,0 +1,20 @@
+flowchart TD
+N_019cf6aff8d77fc69358b0d9b7e44e4c["user_message:finished Use the self-mutate skill to update the description fie..."]
+N_019cf6aff8e379ee9b6346e89a8258dc["agent_message:finished"]
+N_019cf6b0014c74b19428447576925e3e["agent_message:finished"]
+N_019cf6b0015b78758c22484fd9180bbd["task:finished skills_load"]
+N_019cf6b009d676bbb97c22ff9d96b467["agent_message:finished"]
+N_019cf6b009e47dd1a4fc559514aa287c["task:finished read"]
+N_019cf6b014dd750495895108e840ebec["agent_message:finished Updated `../../skills/self-mutate/SKILL.md` so the des..."]
+N_019cf6b014eb7515828ebcb1cce468cf["task:finished edit"]
+N_019cf6b029687609bd60155b181d30fe["user_message:finished Refresh skills inventory"]
+N_019cf6b0297c7a5eb39571914a7be657["agent_message:pending"]
+N_019cf6aff8d77fc69358b0d9b7e44e4c -->|sequence| N_019cf6aff8e379ee9b6346e89a8258dc
+N_019cf6aff8e379ee9b6346e89a8258dc -->|sequence| N_019cf6b0015b78758c22484fd9180bbd
+N_019cf6b0015b78758c22484fd9180bbd -->|sequence| N_019cf6b0014c74b19428447576925e3e
+N_019cf6b0014c74b19428447576925e3e -->|sequence| N_019cf6b009e47dd1a4fc559514aa287c
+N_019cf6b009e47dd1a4fc559514aa287c -->|sequence| N_019cf6b009d676bbb97c22ff9d96b467
+N_019cf6b009d676bbb97c22ff9d96b467 -->|sequence| N_019cf6b014eb7515828ebcb1cce468cf
+N_019cf6b014eb7515828ebcb1cce468cf -->|sequence| N_019cf6b014dd750495895108e840ebec
+N_019cf6b014dd750495895108e840ebec -->|sequence| N_019cf6b029687609bd60155b181d30fe
+N_019cf6b029687609bd60155b181d30fe -->|sequence| N_019cf6b0297c7a5eb39571914a7be657

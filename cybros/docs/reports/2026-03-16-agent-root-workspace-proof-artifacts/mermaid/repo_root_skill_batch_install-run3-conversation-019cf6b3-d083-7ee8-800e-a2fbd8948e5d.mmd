@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6b3d0de78d085754fe6d9382e86["user_message:finished Use `skills_install` with these exact arguments: {\"sour..."]
+N_019cf6b3d0eb7335a93f500a1e2b2308["agent_message:finished"]
+N_019cf6b3dd8b7818a94e748371efe456["agent_message:finished Installed 2 skills: - `system-helper-3-cfaaaa` — `ab28..."]
+N_019cf6b3dda278909ce4540e8a6ae334["task:finished skills_install"]
+N_019cf6b3f4347601b6144149e2378924["user_message:finished Refresh skills inventory"]
+N_019cf6b3f4457e46826748659cc2485d["agent_message:pending"]
+N_019cf6b3d0de78d085754fe6d9382e86 -->|sequence| N_019cf6b3d0eb7335a93f500a1e2b2308
+N_019cf6b3d0eb7335a93f500a1e2b2308 -->|sequence| N_019cf6b3dda278909ce4540e8a6ae334
+N_019cf6b3dda278909ce4540e8a6ae334 -->|sequence| N_019cf6b3dd8b7818a94e748371efe456
+N_019cf6b3dd8b7818a94e748371efe456 -->|sequence| N_019cf6b3f4347601b6144149e2378924
+N_019cf6b3f4347601b6144149e2378924 -->|sequence| N_019cf6b3f4457e46826748659cc2485d

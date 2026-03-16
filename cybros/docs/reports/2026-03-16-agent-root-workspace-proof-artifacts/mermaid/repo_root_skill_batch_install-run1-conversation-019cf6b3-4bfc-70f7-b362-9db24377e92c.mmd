@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6b34c4d7e7b9b5a3eb4c4540fae["user_message:finished You must use the installed skill by calling `skills_loa..."]
+N_019cf6b34c5775aa96e4f27185921847["agent_message:finished"]
+N_019cf6b3550d72dfb9c5b95c9ccb0712["agent_message:finished"]
+N_019cf6b3551c7e4c896ac50ace17394d["task:finished skills_load"]
+N_019cf6b35ece7aae854fe22ed4b2b91a["agent_message:finished REPO_ROOT_SYSTEM_TOKEN_1_e44d08cd"]
+N_019cf6b35edd7146b805f43de01c7ba0["task:finished skills_read_file"]
+N_019cf6b34c4d7e7b9b5a3eb4c4540fae -->|sequence| N_019cf6b34c5775aa96e4f27185921847
+N_019cf6b34c5775aa96e4f27185921847 -->|sequence| N_019cf6b3551c7e4c896ac50ace17394d
+N_019cf6b3551c7e4c896ac50ace17394d -->|sequence| N_019cf6b3550d72dfb9c5b95c9ccb0712
+N_019cf6b3550d72dfb9c5b95c9ccb0712 -->|sequence| N_019cf6b35edd7146b805f43de01c7ba0
+N_019cf6b35edd7146b805f43de01c7ba0 -->|sequence| N_019cf6b35ece7aae854fe22ed4b2b91a

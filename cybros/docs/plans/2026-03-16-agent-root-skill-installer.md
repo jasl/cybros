@@ -23,6 +23,8 @@
 ### Task 1: Lock The Layering And Installer Contract With Failing Tests
 
 **Files:**
+- Create: `cybros/app/services/agents/skill_catalog.rb`
+- Create: `cybros/app/services/agents/skill_installation_service.rb`
 - Create: `cybros/test/services/agents/skill_installation_service_test.rb`
 - Create: `cybros/test/services/agents/skill_catalog_test.rb`
 - Modify: `cybros/test/services/agents/skills_store_builder_test.rb`
@@ -63,7 +65,7 @@ git commit -m "test: lock protected skill installer contract"
 ### Task 2: Add Catalog Discovery Without Changing Runtime Skill Precedence
 
 **Files:**
-- Create: `cybros/app/services/agents/skill_catalog.rb`
+- Modify: `cybros/app/services/agents/skill_catalog.rb`
 - Modify: `cybros/app/models/runtime_setting.rb`
 - Modify: `cybros/lib/cybros/agent_owned_tools.rb`
 - Modify: `cybros/lib/cybros/agent_runtime_resolver.rb`
@@ -110,7 +112,7 @@ git commit -m "feat: add skill catalog discovery surface"
 ### Task 3: Build The Byte-Preserving Staging Pipeline
 
 **Files:**
-- Create: `cybros/app/services/agents/skill_installation_service.rb`
+- Modify: `cybros/app/services/agents/skill_installation_service.rb`
 - Create: `cybros/app/services/agents/skill_installation/source_fetcher.rb`
 - Create: `cybros/app/services/agents/skill_installation/manifest.rb`
 - Modify: `cybros/test/services/agents/skill_installation_service_test.rb`

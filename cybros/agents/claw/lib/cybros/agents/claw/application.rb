@@ -124,7 +124,22 @@ module Cybros
         private
 
         def build_agent_tool_catalog
-          tool_names = %w[read write edit apply_patch glob search exec memory_search memory_get memory_store]
+          tool_names = %w[
+            read
+            write
+            edit
+            apply_patch
+            glob
+            search
+            exec
+            memory_search
+            memory_get
+            memory_store
+            skills_load
+            skills_read_file
+            skills_catalog_list
+            skills_install
+          ]
           tool_names.concat(%w[web_search web_fetch]) if web_tools_enabled?
 
           tool_names.map do |tool_name|

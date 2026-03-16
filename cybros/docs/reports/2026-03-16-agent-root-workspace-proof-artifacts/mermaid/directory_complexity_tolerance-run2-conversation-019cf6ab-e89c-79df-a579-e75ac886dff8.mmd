@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6abe9087e408ec4cd10a95bc3d7["user_message:finished In the current conversation workspace, create the file ..."]
+N_019cf6abe9127727a95117e3e5968210["agent_message:finished"]
+N_019cf6abf28c796194ee1dbd4c76a58d["agent_message:finished Done."]
+N_019cf6abf29c7e9989b54a1b09f86cb3["task:finished write"]
+N_019cf6abe9087e408ec4cd10a95bc3d7 -->|sequence| N_019cf6abe9127727a95117e3e5968210
+N_019cf6abe9127727a95117e3e5968210 -->|sequence| N_019cf6abf29c7e9989b54a1b09f86cb3
+N_019cf6abf29c7e9989b54a1b09f86cb3 -->|sequence| N_019cf6abf28c796194ee1dbd4c76a58d

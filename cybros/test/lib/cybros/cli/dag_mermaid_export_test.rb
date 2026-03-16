@@ -46,4 +46,41 @@ class Cybros::CLI::DAGMermaidExportTest < ActiveSupport::TestCase
     assert_equal [1, 1], result.dig("analysis", "component_sizes").sort
     assert_equal [first.id, second.id].sort, result.dig("analysis", "root_node_ids").sort
   end
+
+  test "exports mermaid for branch conversations against the shared root graph" do
+    conversation = create_conversation!
+    graph = conversation.root_graph
+
+    user = graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: conversation.chat_lane.id,
+      body_input: { "content" => "Hello" },
+      metadata: {},
+    )
+    agent = graph.nodes.create!(
+      node_type: Messages::AgentMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      lane_id: conversation.chat_lane.id,
+      body_output: { "content" => "World" },
+      metadata: {},
+    )
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+
+    child =
+      conversation.create_child!(
+        from_node_id: agent.id,
+        kind: "branch",
+        title: "Child",
+        user_content: "",
+      )
+
+    result = Cybros::CLI::DAGMermaidExport.call(conversation_id: child.id)
+
+    assert_equal child.id, result.dig("conversation", "id")
+    assert_equal graph.id, result.dig("graph", "id")
+    assert_includes result.fetch("mermaid"), "Hello"
+    assert_includes result.fetch("mermaid"), "World"
+    assert_equal 1, result.dig("analysis", "component_count")
+  end
 end

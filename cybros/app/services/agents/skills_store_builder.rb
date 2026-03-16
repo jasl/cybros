@@ -129,8 +129,25 @@ module Agents
       new(agent:, platform_skill_dirs: platform_skill_dirs).build
     end
 
+    def self.dirty_marker_path_for(agent:)
+      agent.workspace_root_path.join(".state", "skills", "inventory-dirty")
+    end
+
+    def self.mark_dirty!(agent:)
+      path = dirty_marker_path_for(agent:)
+      FileUtils.mkdir_p(path.dirname)
+      File.write(path, Time.current.utc.iso8601 + "\n", mode: "w", encoding: Encoding::UTF_8)
+      path
+    end
+
+    def self.clear_dirty!(agent:)
+      path = dirty_marker_path_for(agent:)
+      File.delete(path) if path.exist?
+      path
+    end
+
     def self.default_platform_skill_dirs
-      [Rails.root.join("skills").to_s]
+      [Rails.root.join("skills/.system").to_s]
     end
 
     def initialize(agent:, platform_skill_dirs: self.class.default_platform_skill_dirs)
@@ -140,10 +157,15 @@ module Agents
 
     def build
       dirs = resolved_dirs
-      return nil if dirs.empty?
+      if dirs.empty?
+        self.class.clear_dirty!(agent: agent) if agent.present?
+        return nil
+      end
 
       store = AgentCore::Resources::Skills::FileSystemStore.new(dirs: dirs, strict: true)
-      SnapshotStore.build_from(store)
+      SnapshotStore.build_from(store).tap do
+        self.class.clear_dirty!(agent: agent) if agent.present?
+      end
     rescue AgentCore::ValidationError => e
       raise_duplicate_collision!(e) if e.code == "agent_core.skills.file_system_store.duplicate_skill_name"
       raise

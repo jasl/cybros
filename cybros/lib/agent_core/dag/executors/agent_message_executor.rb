@@ -1852,6 +1852,98 @@ module AgentCore
                     end
                   end
 
+                  begin
+                    approval_preview =
+                      approval_preview_for(
+                        tools_registry: runtime.tools_registry,
+                        name: resolved_name,
+                        arguments: arguments,
+                        context: execution_context,
+                      )
+                  rescue AgentCore::ValidationError => e
+                    invalid += 1
+
+                    tool_error = validation_error_tool_result(name: resolved_name, error: e)
+                    task =
+                      m.create_node(
+                        node_type: "task",
+                        state: ::DAG::Node::FINISHED,
+                        idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
+                        lane_id: node.lane_id,
+                        metadata: { "generated_by" => "agent_core", "source" => "approval_preview" },
+                        body_input: task_input_hash(
+                          tool_call_id: tool_call_id,
+                          requested_name: requested_name,
+                          name: resolved_name,
+                          name_resolution: name_resolution,
+                          arguments: arguments,
+                          arguments_resolution: arguments_resolution,
+                          repair: repair,
+                          source: "approval_preview",
+                          tool_route: tool_route,
+                          tool_surface_manifest: tool_surface_manifest,
+                        ),
+                        body_output: { "result" => tool_error.to_h },
+                      )
+
+                    m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                    m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                    emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                    emit_failed_activity!(
+                      task: task,
+                      phase: planned_phase_for(task),
+                      diagnostic_level: diagnostic_level,
+                      data: {
+                        "reason" => "approval_preview_validation",
+                        "error" => tool_error.text.to_s,
+                      },
+                    )
+                    next
+                  rescue StandardError => e
+                    tool_error =
+                      AgentCore::Resources::Tools::ToolResult.error_with_tool_execution(
+                        text: "Tool '#{resolved_name}' failed (#{e.class}).",
+                        error: e,
+                        source: :native,
+                      )
+
+                    task =
+                      m.create_node(
+                        node_type: "task",
+                        state: ::DAG::Node::FINISHED,
+                        idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
+                        lane_id: node.lane_id,
+                        metadata: { "generated_by" => "agent_core", "source" => "approval_preview" },
+                        body_input: task_input_hash(
+                          tool_call_id: tool_call_id,
+                          requested_name: requested_name,
+                          name: resolved_name,
+                          name_resolution: name_resolution,
+                          arguments: arguments,
+                          arguments_resolution: arguments_resolution,
+                          repair: repair,
+                          source: "approval_preview",
+                          tool_route: tool_route,
+                          tool_surface_manifest: tool_surface_manifest,
+                        ),
+                        body_output: { "result" => tool_error.to_h },
+                      )
+
+                    m.create_edge(from_node: node, to_node: task, edge_type: ::DAG::Edge::SEQUENCE)
+                    m.create_edge(from_node: task, to_node: next_node, edge_type: ::DAG::Edge::SEQUENCE)
+                    emit_planned_activity!(task: task, diagnostic_level: diagnostic_level)
+                    emit_failed_activity!(
+                      task: task,
+                      phase: planned_phase_for(task),
+                      diagnostic_level: diagnostic_level,
+                      data: {
+                        "reason" => "approval_preview_failed",
+                        "error" => tool_error.text.to_s,
+                      },
+                    )
+                    next
+                  end
+
                   awaiting_approval = true
 
                   approval = {
@@ -1859,6 +1951,7 @@ module AgentCore
                     "deny_effect" => decision.deny_effect.to_s,
                     "reason" => decision.reason.to_s,
                   }.compact
+                  approval["payload"] = AgentCore::Utils.deep_stringify_keys(approval_preview) if approval_preview.present?
 
                   required_approvals += 1 if decision.required == true
 
@@ -1878,6 +1971,7 @@ module AgentCore
                         arguments_resolution: arguments_resolution,
                         repair: repair,
                         source: task_source,
+                        approval_preview: approval_preview,
                         tool_route: tool_route,
                         tool_surface_manifest: tool_surface_manifest,
                       ),
@@ -2307,6 +2401,7 @@ module AgentCore
             source:,
             arguments_resolution: "original",
             repair: nil,
+            approval_preview: nil,
             tool_route: nil,
             tool_surface_manifest: nil
           )
@@ -2324,6 +2419,7 @@ module AgentCore
               "source" => source.to_s,
             }.tap do |input|
               input["repair"] = repair if repair.present?
+              input["approval_preview"] = AgentCore::Utils.deep_stringify_keys(approval_preview) if approval_preview.present?
               if tool_route
                 input["logical_tool_name"] = tool_route.logical_tool_name
                 input["effective_tool_id"] = tool_route.effective_tool_id
@@ -2335,6 +2431,34 @@ module AgentCore
                 input["tool_surface_id"] = tool_surface_manifest.tool_surface_id
               end
             end
+          end
+
+          def approval_preview_for(tools_registry:, name:, arguments:, context:)
+            tool = tools_registry.find(name)
+            metadata = tool&.metadata
+            preview = metadata&.fetch(:approval_preview, nil) || metadata&.fetch("approval_preview", nil)
+            return nil unless preview.respond_to?(:call)
+
+            preview.call(arguments: arguments, context: context)
+          end
+
+          def validation_error_tool_result(name:, error:)
+            AgentCore::Resources::Tools::ToolResult.error(
+              text: "Tool '#{name}' validation failed: #{error.message}",
+              metadata:
+                AgentCore::Resources::Tools::ToolResult.with_tool_execution_metadata(
+                  {
+                    validation_error: {
+                      class: error.class.name,
+                      code: error.code,
+                      details: error.details,
+                    }.compact,
+                  },
+                  failure_class: "validation_error",
+                  failure_code: error.code.to_s.presence,
+                  retryable: false,
+                ),
+            )
           end
 
           def compact_context_task_source(name:, source:)

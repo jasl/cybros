@@ -1,0 +1,32 @@
+flowchart TD
+N_019cf6c17980722ea0eee13601f0c9a1["user_message:finished Read INPUT.md and STATUS.md. Execute the approved plan ..."]
+N_019cf6c1798c7621af40d3ef1ac27e03["agent_message:finished"]
+N_019cf6c1848a76e9b322fdec1514c537["agent_message:finished"]
+N_019cf6c1849875c3b877116ea36b3d81["task:finished skills_load"]
+N_019cf6c18e8b7358a22ec3d89f206b4b["agent_message:finished"]
+N_019cf6c18e9472d48ee9f4124c942534["task:finished read"]
+N_019cf6c198c47f28947df93a11f3d025["agent_message:finished"]
+N_019cf6c198d3747495e6d99cd8405ab1["task:finished read"]
+N_019cf6c1a43e7120a274e86ff8335acf["agent_message:finished"]
+N_019cf6c1a44a7fe7907949bbd05c8896["task:finished write"]
+N_019cf6c1b9707f07a27f80d678c0dd69["agent_message:finished"]
+N_019cf6c1b97f761c84dde8de75ad6bb8["task:finished write"]
+N_019cf6c1c2ec77a583e66bd9bc973aa2["agent_message:finished"]
+N_019cf6c1c2fa7c62a56f7efa85757bb6["task:finished read"]
+N_019cf6c1cf0d752092be79455030d554["agent_message:finished Done. Verified: `SUMMARY.md` ```md # Summary - alpha -..."]
+N_019cf6c1cf1d75a28aa7936622bd30e7["task:finished read"]
+N_019cf6c17980722ea0eee13601f0c9a1 -->|sequence| N_019cf6c1798c7621af40d3ef1ac27e03
+N_019cf6c1798c7621af40d3ef1ac27e03 -->|sequence| N_019cf6c1849875c3b877116ea36b3d81
+N_019cf6c1849875c3b877116ea36b3d81 -->|sequence| N_019cf6c1848a76e9b322fdec1514c537
+N_019cf6c1848a76e9b322fdec1514c537 -->|sequence| N_019cf6c18e9472d48ee9f4124c942534
+N_019cf6c18e9472d48ee9f4124c942534 -->|sequence| N_019cf6c18e8b7358a22ec3d89f206b4b
+N_019cf6c18e8b7358a22ec3d89f206b4b -->|sequence| N_019cf6c198d3747495e6d99cd8405ab1
+N_019cf6c198d3747495e6d99cd8405ab1 -->|sequence| N_019cf6c198c47f28947df93a11f3d025
+N_019cf6c198c47f28947df93a11f3d025 -->|sequence| N_019cf6c1a44a7fe7907949bbd05c8896
+N_019cf6c1a44a7fe7907949bbd05c8896 -->|sequence| N_019cf6c1a43e7120a274e86ff8335acf
+N_019cf6c1a43e7120a274e86ff8335acf -->|sequence| N_019cf6c1b97f761c84dde8de75ad6bb8
+N_019cf6c1b97f761c84dde8de75ad6bb8 -->|sequence| N_019cf6c1b9707f07a27f80d678c0dd69
+N_019cf6c1b9707f07a27f80d678c0dd69 -->|sequence| N_019cf6c1c2fa7c62a56f7efa85757bb6
+N_019cf6c1c2fa7c62a56f7efa85757bb6 -->|sequence| N_019cf6c1c2ec77a583e66bd9bc973aa2
+N_019cf6c1c2ec77a583e66bd9bc973aa2 -->|sequence| N_019cf6c1cf1d75a28aa7936622bd30e7
+N_019cf6c1cf1d75a28aa7936622bd30e7 -->|sequence| N_019cf6c1cf0d752092be79455030d554

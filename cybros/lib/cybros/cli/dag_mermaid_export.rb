@@ -4,7 +4,7 @@ module Cybros
       class << self
         def call(conversation_id:, include_compressed: false, max_label_chars: 80)
           conversation = Conversation.find(conversation_id)
-          graph = conversation.dag_graph
+          graph = conversation.root_graph
 
           {
             "conversation" => conversation_summary(conversation),

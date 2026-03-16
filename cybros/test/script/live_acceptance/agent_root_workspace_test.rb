@@ -1,4 +1,5 @@
 require "test_helper"
+require "net/http"
 require "stringio"
 require "tmpdir"
 require_relative "../../support/programmable_agent_runtime_test_support"
@@ -9,11 +10,11 @@ require Rails.root.join("script/live_acceptance/agent_root_workspace")
 class AgentRootWorkspaceLiveAcceptanceTest < ActiveSupport::TestCase
   include ProgrammableAgentRuntimeTestSupport
 
-  test "harness enumerates the required eleven live scenarios and requires three consecutive passes each" do
+  test "harness enumerates the required seventeen live scenarios and requires three consecutive passes each" do
     scenario_ids = Cybros::LiveAcceptance::AgentRootWorkspace::Runner::SCENARIOS.map(&:id)
 
-    assert_equal 11, scenario_ids.length
-    assert_equal 11, scenario_ids.uniq.length
+    assert_equal 17, scenario_ids.length
+    assert_equal 17, scenario_ids.uniq.length
     assert_equal [
       "root_shared_memory",
       "conversation_isolation",
@@ -26,6 +27,12 @@ class AgentRootWorkspaceLiveAcceptanceTest < ActiveSupport::TestCase
       "create_agent_local_skill",
       "modify_agent_local_skill",
       "deny_agents_mutation",
+      "catalog_skill_install",
+      "github_skill_install",
+      "repo_root_skill_batch_install",
+      "replace_installed_skill",
+      "deny_platform_skill_collision_install",
+      "deny_exec_skill_mutation",
     ], scenario_ids
     assert_equal 3, Cybros::LiveAcceptance::AgentRootWorkspace::Runner::RUNS_PER_SCENARIO
   end
@@ -34,7 +41,19 @@ class AgentRootWorkspaceLiveAcceptanceTest < ActiveSupport::TestCase
     protected_scenarios =
       Cybros::LiveAcceptance::AgentRootWorkspace::Runner::SCENARIOS.select(&:requires_approval?).map(&:id)
 
-    assert_equal %w[self_mutate_soul self_mutate_user create_agent_local_skill modify_agent_local_skill], protected_scenarios
+    assert_equal(
+      %w[
+        self_mutate_soul
+        self_mutate_user
+        create_agent_local_skill
+        modify_agent_local_skill
+        catalog_skill_install
+        github_skill_install
+        repo_root_skill_batch_install
+        replace_installed_skill
+      ],
+      protected_scenarios,
+    )
     assert_equal(
       :approve_awaiting_nodes,
       Cybros::LiveAcceptance::AgentRootWorkspace::Runner::APPROVAL_DRIVER
@@ -58,6 +77,107 @@ class AgentRootWorkspaceLiveAcceptanceTest < ActiveSupport::TestCase
     assert_includes markdown, "Model ref"
     assert_includes markdown, "Environment"
     assert_includes markdown, "Scenario outcomes"
+    assert_includes markdown, "Source hash"
+    assert_includes markdown, "Installed hash"
+    assert_includes markdown, "Snapshot path"
+    assert_includes markdown, "DAG"
+    assert_includes markdown, "Mermaid"
+  end
+
+  test "installed_skill_entry_for! selects batch entries by installed name and defaults to the first entry" do
+    runner = Cybros::LiveAcceptance::AgentRootWorkspace::Runner.new(io: StringIO.new)
+    payload = {
+      "installed_skills" => [
+        {
+          "installed_name" => "alpha-skill",
+          "source_sha256" => "sha-alpha",
+          "installed_sha256" => "sha-alpha",
+          "snapshot_path" => "",
+        },
+        {
+          "installed_name" => "system-helper",
+          "source_sha256" => "sha-system",
+          "installed_sha256" => "sha-system",
+          "snapshot_path" => "/tmp/snapshot",
+        },
+      ],
+    }
+
+    assert_equal "alpha-skill", runner.send(:installed_skill_entry_for!, payload).fetch("installed_name")
+    assert_equal "system-helper", runner.send(:installed_skill_entry_for!, payload, installed_name: "system-helper").fetch("installed_name")
+
+    error =
+      assert_raises(Cybros::LiveAcceptance::AgentRootWorkspace::ScenarioFailure) do
+        runner.send(:installed_skill_entry_for!, payload, installed_name: "missing-skill")
+      end
+    assert_match(/missing-skill/, error.message)
+  end
+
+  test "with_callback_base_url serves the local app and restores CYBROS_BASE_URL" do
+    runner = Cybros::LiveAcceptance::AgentRootWorkspace::Runner.new(io: StringIO.new)
+    previous = ENV["CYBROS_BASE_URL"]
+    ENV.delete("CYBROS_BASE_URL")
+    yielded_base_url = nil
+
+    runner.send(:with_callback_base_url) do |base_url|
+      yielded_base_url = base_url
+      assert_equal base_url, ENV["CYBROS_BASE_URL"]
+
+      response = Net::HTTP.get_response(URI("#{base_url}/up"))
+      assert response.is_a?(Net::HTTPSuccess), response.inspect
+    end
+
+    assert yielded_base_url.present?
+    assert_nil ENV["CYBROS_BASE_URL"]
+  ensure
+    if previous.nil?
+      ENV.delete("CYBROS_BASE_URL")
+    else
+      ENV["CYBROS_BASE_URL"] = previous
+    end
+  end
+
+  test "export_conversation_dag_artifacts! validates DAG structure and writes mermaid artifacts" do
+    runner = Cybros::LiveAcceptance::AgentRootWorkspace::Runner.new(
+      io: StringIO.new,
+      report_path: Rails.root.join("tmp/live-acceptance-proof.md"),
+    )
+    conversation = create_conversation!(title: "Mermaid proof")
+    graph = conversation.dag_graph
+
+    user = graph.nodes.create!(
+      node_type: Messages::UserMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      body_input: { "content" => "Hello" },
+      metadata: {},
+    )
+    agent = graph.nodes.create!(
+      node_type: Messages::AgentMessage.node_type_key,
+      state: DAG::Node::FINISHED,
+      body_output: { "content" => "World" },
+      metadata: {},
+    )
+    graph.edges.create!(from_node_id: user.id, to_node_id: agent.id, edge_type: DAG::Edge::SEQUENCE)
+
+    artifacts =
+      runner.send(
+        :export_conversation_dag_artifacts!,
+        scenario_id: "probe",
+        run_index: 1,
+        conversation_ids: [conversation.id],
+      )
+
+    assert_equal 1, artifacts.length
+    artifact = artifacts.first
+    assert_equal conversation.id.to_s, artifact.fetch(:conversation_id)
+    assert_equal 1, artifact.fetch(:root_count)
+    assert_equal 1, artifact.fetch(:component_count)
+
+    mermaid_path = Rails.root.join("tmp", artifact.fetch(:mermaid_path))
+    assert_predicate mermaid_path, :file?
+    assert_includes mermaid_path.read, "flowchart TD"
+  ensure
+    FileUtils.rm_rf(Rails.root.join("tmp/live-acceptance-proof-artifacts"))
   end
 
   test "run_series_for can invoke private scenario handlers when the standalone harness executes" do
@@ -66,6 +186,10 @@ class AgentRootWorkspaceLiveAcceptanceTest < ActiveSupport::TestCase
         private
 
           def reset_agent_root!(_agent)
+          end
+
+          def export_conversation_dag_artifacts!(**)
+            []
           end
 
           def run_probe!(agent:, model_ref:, run_index:)

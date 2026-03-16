@@ -1,0 +1,12 @@
+flowchart TD
+N_019cf6aa26447613b449e2560de556f9["user_message:finished Use the memory tool `memory_store` with these exact arg..."]
+N_019cf6aa264e7b84b4d3120aaf87115e["agent_message:finished"]
+N_019cf6aa30c1785e80ff4a5b8c034547["agent_message:finished"]
+N_019cf6aa30d17660905b8e7d856ecbf7["task:finished memory_store"]
+N_019cf6aa396c783992de46e48e207a9e["agent_message:finished Done — stored in conversation-scoped memory and verifi..."]
+N_019cf6aa397b7dda9cffc835cc209822["task:finished memory_get"]
+N_019cf6aa26447613b449e2560de556f9 -->|sequence| N_019cf6aa264e7b84b4d3120aaf87115e
+N_019cf6aa264e7b84b4d3120aaf87115e -->|sequence| N_019cf6aa30d17660905b8e7d856ecbf7
+N_019cf6aa30d17660905b8e7d856ecbf7 -->|sequence| N_019cf6aa30c1785e80ff4a5b8c034547
+N_019cf6aa30c1785e80ff4a5b8c034547 -->|sequence| N_019cf6aa397b7dda9cffc835cc209822
+N_019cf6aa397b7dda9cffc835cc209822 -->|sequence| N_019cf6aa396c783992de46e48e207a9e

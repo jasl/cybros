@@ -288,7 +288,170 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "full-access programmable runs park skills_install for approval before execution" do
+    Dir.mktmpdir("cybros-local-skill-repo-") do |repo_root|
+      write_skill!(Pathname.new(repo_root).join("skills"), name: "example-skill", description: "Example description")
+
+      llm_server =
+        MockLLMServer.new do |_payload|
+          MockLLMServer.chat_response(
+            content: "Need installer approval",
+            finish_reason: "tool_calls",
+            tool_calls: [
+              {
+                "id" => "tc_install_skill",
+                "type" => "function",
+                "function" => {
+                  "name" => "skills_install",
+                  "arguments" => JSON.generate(
+                    {
+                      "source_kind" => "github",
+                      "repo" => repo_root,
+                      "path" => "skills/example-skill",
+                    },
+                  ),
+                },
+              },
+            ],
+          )
+        end.start
+      server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
+      program = create_program!
+      deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
+      Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+      deployment.reload
+
+      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+        Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+          with_default_agent_workspace_root(workspace_root) do
+            conversation = create_programmable_conversation!(program: program, llm_options: { "stream" => false })
+            conversation.update!(
+              permission_mode: "full_access",
+              agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
+            )
+            Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+
+            result = conversation.append_user_message!(content: "Install a skill", model_ref: "dev/mock-model")
+            agent_node = result.fetch(:agent_node)
+            agent_node.update!(claim_after_at: nil)
+
+            claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+            assert_includes claimed, agent_node.id
+
+            DAG::Runner.run_node!(agent_node.id)
+
+            task =
+              conversation.root_graph.nodes
+                .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
+                .order(:id)
+                .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_install_skill" }
+
+            assert task
+            assert_equal DAG::Node::AWAITING_APPROVAL, task.state
+            assert_equal "skills_install", task.body_input.fetch("name")
+            assert_equal "github", task.body_input.dig("arguments", "source_kind")
+          end
+        end
+      end
+    ensure
+      llm_server&.shutdown
+      server&.shutdown
+    end
+  end
+
+  test "repo-root skills_install approval includes the batch preview payload before execution" do
+    Dir.mktmpdir("cybros-local-skill-repo-") do |repo_root|
+      write_skill!(Pathname.new(repo_root).join("skills"), name: "alpha-skill", description: "Alpha description")
+      write_skill!(Pathname.new(repo_root).join("skills/.system"), name: "system-helper", description: "System helper")
+
+      llm_server =
+        MockLLMServer.new do |_payload|
+          MockLLMServer.chat_response(
+            content: "Need installer approval",
+            finish_reason: "tool_calls",
+            tool_calls: [
+              {
+                "id" => "tc_install_repo_batch",
+                "type" => "function",
+                "function" => {
+                  "name" => "skills_install",
+                  "arguments" => JSON.generate(
+                    {
+                      "source_kind" => "github",
+                      "repo" => repo_root,
+                    },
+                  ),
+                },
+              },
+            ],
+          )
+        end.start
+      server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
+      program = create_program!
+      deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
+      Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+      deployment.reload
+
+      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+        Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+          with_default_agent_workspace_root(workspace_root) do
+            conversation = create_programmable_conversation!(program: program, llm_options: { "stream" => false })
+            conversation.update!(
+              permission_mode: "full_access",
+              agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
+            )
+            Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+
+            result = conversation.append_user_message!(content: "Install the repo skills", model_ref: "dev/mock-model")
+            agent_node = result.fetch(:agent_node)
+            agent_node.update!(claim_after_at: nil)
+
+            claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
+            assert_includes claimed, agent_node.id
+
+            DAG::Runner.run_node!(agent_node.id)
+
+            task =
+              conversation.root_graph.nodes
+                .where(node_type: Messages::Task.node_type_key, turn_id: agent_node.turn_id)
+                .order(:id)
+                .find { |node| node.idempotency_key == "agent_core.tool:#{agent_node.id}:tc_install_repo_batch" }
+
+            assert task
+            assert_equal DAG::Node::AWAITING_APPROVAL, task.state
+            assert_equal "repo_root_batch", task.metadata.dig("approval", "payload", "mode")
+            assert_equal repo_root, task.metadata.dig("approval", "payload", "repo")
+            assert_equal 2, task.metadata.dig("approval", "payload", "candidate_count")
+            assert_equal(
+              ["skills/.system/system-helper", "skills/alpha-skill"],
+              task.metadata.dig("approval", "payload", "candidates").map { |candidate| candidate.fetch("source_path") },
+            )
+          end
+        end
+      end
+    ensure
+      llm_server&.shutdown
+      server&.shutdown
+    end
+  end
+
   private
+
+    def write_skill!(root, name:, description:)
+      skill_dir = Pathname.new(root).join(name)
+      FileUtils.mkdir_p(skill_dir)
+      File.write(
+        skill_dir.join("SKILL.md"),
+        <<~MD,
+          ---
+          name: #{name}
+          description: #{description}
+          ---
+
+          # #{name}
+        MD
+      )
+    end
 
     def create_program!
       create_agent_record!(

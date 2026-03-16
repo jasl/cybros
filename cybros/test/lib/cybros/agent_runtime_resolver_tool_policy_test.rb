@@ -237,6 +237,181 @@ class Cybros::AgentRuntimeResolverToolPolicyTest < ActiveSupport::TestCase
     end
   end
 
+  test "skills_install always requires confirmation while skills_catalog_list remains readable" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        conversation = create_conversation!(title: "Skill installer policy", metadata: { "agent" => {} })
+        node = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+        runtime = build_runtime(node: node)
+        context = runtime_execution_context(runtime)
+
+        catalog_list =
+          runtime.tool_policy.authorize(
+            name: "skills_catalog_list",
+            arguments: { "catalog" => "curated" },
+            context: context,
+          )
+        install =
+          runtime.tool_policy.authorize(
+            name: "skills_install",
+            arguments: {
+              "source_kind" => "github",
+              "repo" => "https://github.com/openai/skills",
+            },
+            context: context,
+          )
+
+        assert_equal :allow, catalog_list.outcome
+        assert_equal :confirm, install.outcome
+      end
+    end
+  end
+
+  test "skills_install surfaces platform collisions through the runtime tools registry" do
+    Dir.mktmpdir("cybros-platform-skills-") do |platform_skills_root|
+      Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+        write_skill!(platform_skills_root, name: "platform-skill", description: "Platform description")
+
+        with_default_agent_workspace_root(workspace_root) do
+          with_platform_skill_dirs([platform_skills_root]) do
+            conversation = create_conversation!(title: "Skill install collision", metadata: { "agent" => {} })
+            node = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+            runtime = build_runtime(node: node)
+            context = runtime_execution_context(runtime)
+
+            result =
+              runtime.tools_registry.execute(
+                name: "skills_install",
+                arguments: {
+                  "source_kind" => "github",
+                  "repo" => "openai/skills",
+                  "path" => "skills/example-skill",
+                  "install_as" => "platform-skill",
+                },
+                context: context,
+              )
+
+            assert_equal true, result.error
+            assert_equal "cybros.skills_install.destination_conflicts_with_platform_skill", result.metadata.dig("validation_error", "code")
+          end
+        end
+      end
+    end
+  end
+
+  test "skills installed mid-turn become visible on the next runtime build and clear the dirty marker" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      Dir.mktmpdir("cybros-local-skill-repo-") do |repo_root|
+        skill_dir = Pathname.new(repo_root).join("skills/fresh-skill")
+        FileUtils.mkdir_p(skill_dir)
+        File.write(
+          skill_dir.join("SKILL.md"),
+          <<~MD,
+            ---
+            name: fresh-skill
+            description: Fresh description
+            ---
+
+            # fresh-skill
+          MD
+        )
+
+        with_default_agent_workspace_root(workspace_root) do
+          first_conversation = create_conversation!(title: "First turn", metadata: { "agent" => {} })
+          second_conversation = create_conversation!(title: "Second turn", metadata: { "agent" => {} }, agent: first_conversation.agent)
+
+          first_node = first_conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+          first_runtime = build_runtime(node: first_node)
+          context = runtime_execution_context(first_runtime)
+
+          install_result =
+            first_runtime.tools_registry.execute(
+              name: "skills_install",
+              arguments: {
+                "source_kind" => "github",
+                "repo" => repo_root,
+                "path" => "skills/fresh-skill",
+              },
+              context: context,
+            )
+          refute install_result.error
+
+          payload = JSON.parse(install_result.text)
+          assert_equal "single_skill", payload.fetch("mode")
+          assert_equal 1, payload.fetch("installed_count")
+          assert_equal true, payload.fetch("refresh_effective_on_next_top_level_turn")
+          assert_equal "skills/fresh-skill", payload.fetch("installed_skills").first.fetch("source_path")
+          assert_equal "fresh-skill", payload.fetch("installed_skills").first.fetch("installed_name")
+
+          first_payload = JSON.parse(first_runtime.tools_registry.execute(name: "skills_list", arguments: {}).text)
+          refute_includes first_payload.fetch("skills").map { |skill| skill.fetch("name") }, "fresh-skill"
+          assert_predicate Agents::SkillsStoreBuilder.dirty_marker_path_for(agent: first_conversation.agent), :exist?
+
+          second_node = second_conversation.append_user_message!(content: "Hello again").fetch(:agent_node)
+          second_runtime = build_runtime(node: second_node)
+          second_payload = JSON.parse(second_runtime.tools_registry.execute(name: "skills_list", arguments: {}).text)
+
+          assert_includes second_payload.fetch("skills").map { |skill| skill.fetch("name") }, "fresh-skill"
+          refute_predicate Agents::SkillsStoreBuilder.dirty_marker_path_for(agent: first_conversation.agent), :exist?
+        end
+      end
+    end
+  end
+
+  test "runtime returns compact repo-root skills_install payloads without long local paths" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      Dir.mktmpdir("cybros-local-skill-repo-") do |repo_root|
+        write_skill!(Pathname.new(repo_root).join("skills"), name: "alpha-skill", description: "Alpha description")
+        write_skill!(Pathname.new(repo_root).join("skills"), name: "beta-skill", description: "Beta description")
+
+        with_default_agent_workspace_root(workspace_root) do
+          conversation = create_conversation!(title: "Compact install payload", metadata: { "agent" => {} })
+          node = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+          runtime = build_runtime(node: node)
+          context = runtime_execution_context(runtime)
+
+          install_result =
+            runtime.tools_registry.execute(
+              name: "skills_install",
+              arguments: {
+                "source_kind" => "github",
+                "repo" => repo_root,
+              },
+              context: context,
+            )
+          refute install_result.error
+
+          payload = JSON.parse(install_result.text)
+          assert_equal "repo_root_batch", payload.fetch("mode")
+          assert_equal 2, payload.fetch("installed_count")
+          payload.fetch("installed_skills").each do |entry|
+            refute entry.key?("live_path")
+            refute entry.key?("provenance_path")
+            refute entry.key?("snapshot_path")
+          end
+        end
+      end
+    end
+  end
+
+  test "runtime exposes the system skill installer with installer-specific guidance while leaving agent-local skills separate" do
+    Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+      with_default_agent_workspace_root(workspace_root) do
+        conversation = create_conversation!(title: "System skill installer", metadata: { "agent" => {} })
+        node = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
+        runtime = build_runtime(node: node)
+
+        assert_includes runtime.skills_store.list_skills.map(&:name), "skill-installer"
+        refute_predicate conversation.agent.workspace_root_path.join("skills/skill-installer"), :exist?
+
+        payload = JSON.parse(runtime.tools_registry.execute(name: "skills_load", arguments: { "name" => "skill-installer" }).text)
+
+        assert_includes payload.fetch("body_markdown"), "Use `skills_catalog_list` to discover installable skills"
+        assert_includes payload.fetch("body_markdown"), "Do not fetch upstream skill files and reconstruct them with `write`, `edit`, or `apply_patch`."
+      end
+    end
+  end
+
   test "protected agent-root paths deny AGENTS history writes and exec mutation attempts" do
     Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
       with_default_agent_workspace_root(workspace_root) do

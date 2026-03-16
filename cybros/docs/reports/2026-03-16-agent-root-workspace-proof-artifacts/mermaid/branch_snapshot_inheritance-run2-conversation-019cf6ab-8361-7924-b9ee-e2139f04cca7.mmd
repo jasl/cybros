@@ -1,0 +1,23 @@
+flowchart TD
+N_019cf6ab60c9730b82244defa0ab47c2["user_message:finished Use the memory tool `memory_store` with these exact arg..."]
+N_019cf6ab60d474519fcd768454f2cb85["agent_message:finished"]
+N_019cf6ab696a7b44b244901e40aab6da["agent_message:finished"]
+N_019cf6ab69757870b2b84ba16b78842a["task:finished memory_store"]
+N_019cf6ab730973179e5bb5418d5cf047["agent_message:finished Done. Stored the exact line in conversation-scoped mem..."]
+N_019cf6ab731577abbb1e331115b19c0e["task:finished memory_search"]
+N_019cf6ab83697d408c82faee360bd10e["agent_message:finished Done. Stored the exact line in conversation-scoped mem..."]
+N_019cf6ab83d973919d3236fb4355b246["user_message:finished Use the memory tool `memory_search` with these exact ar..."]
+N_019cf6ab83e979b1821e5db4d28c135e["agent_message:finished"]
+N_019cf6ab8c717e119f5fe6639625f05c["agent_message:finished BRANCH_SNAPSHOT_TOKEN_2_3a40529b"]
+N_019cf6ab8c81784dbed01d291d354b0f["task:finished memory_search"]
+N_019cf6ab60c9730b82244defa0ab47c2 -->|sequence| N_019cf6ab60d474519fcd768454f2cb85
+N_019cf6ab60d474519fcd768454f2cb85 -->|sequence| N_019cf6ab69757870b2b84ba16b78842a
+N_019cf6ab69757870b2b84ba16b78842a -->|sequence| N_019cf6ab696a7b44b244901e40aab6da
+N_019cf6ab696a7b44b244901e40aab6da -->|sequence| N_019cf6ab731577abbb1e331115b19c0e
+N_019cf6ab731577abbb1e331115b19c0e -->|sequence| N_019cf6ab730973179e5bb5418d5cf047
+N_019cf6ab730973179e5bb5418d5cf047 -->|sequence| N_019cf6ab83697d408c82faee360bd10e
+N_019cf6ab730973179e5bb5418d5cf047 -->|branch:fork| N_019cf6ab83697d408c82faee360bd10e
+N_019cf6ab83697d408c82faee360bd10e -->|sequence| N_019cf6ab83d973919d3236fb4355b246
+N_019cf6ab83d973919d3236fb4355b246 -->|sequence| N_019cf6ab83e979b1821e5db4d28c135e
+N_019cf6ab83e979b1821e5db4d28c135e -->|sequence| N_019cf6ab8c81784dbed01d291d354b0f
+N_019cf6ab8c81784dbed01d291d354b0f -->|sequence| N_019cf6ab8c717e119f5fe6639625f05c

@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6a9d1517dcb803e7dc2ae6bc9eb["user_message:finished Use the memory tool `memory_search` with these exact ar..."]
+N_019cf6a9d15d7341b17b305baf88433f["agent_message:finished"]
+N_019cf6a9de417dd9aa216e16d7a9fbc1["agent_message:finished Absent in conversation-scoped memory."]
+N_019cf6a9de517893a3738992a63ed5e2["task:finished memory_search"]
+N_019cf6a9d1517dcb803e7dc2ae6bc9eb -->|sequence| N_019cf6a9d15d7341b17b305baf88433f
+N_019cf6a9d15d7341b17b305baf88433f -->|sequence| N_019cf6a9de517893a3738992a63ed5e2
+N_019cf6a9de517893a3738992a63ed5e2 -->|sequence| N_019cf6a9de417dd9aa216e16d7a9fbc1

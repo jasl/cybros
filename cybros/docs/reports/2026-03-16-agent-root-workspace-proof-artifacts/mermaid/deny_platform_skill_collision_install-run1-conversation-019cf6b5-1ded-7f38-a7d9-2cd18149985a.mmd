@@ -1,0 +1,8 @@
+flowchart TD
+N_019cf6b51e447d048021155ddf39cf9a["user_message:finished Attempt a protected install that collides with a platfo..."]
+N_019cf6b51e4f7c59832756aa7a926be3["agent_message:finished"]
+N_019cf6b528b67862a1d6761d7d3598ac["agent_message:finished The protected install was rejected by the runtime as e..."]
+N_019cf6b528c773d59f9c6e271f93ec2f["task:finished skills_install"]
+N_019cf6b51e447d048021155ddf39cf9a -->|sequence| N_019cf6b51e4f7c59832756aa7a926be3
+N_019cf6b51e4f7c59832756aa7a926be3 -->|sequence| N_019cf6b528c773d59f9c6e271f93ec2f
+N_019cf6b528c773d59f9c6e271f93ec2f -->|sequence| N_019cf6b528b67862a1d6761d7d3598ac
