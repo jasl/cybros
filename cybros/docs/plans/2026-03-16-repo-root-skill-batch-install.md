@@ -34,6 +34,7 @@
 Cover:
 
 - `skills_install` with `source_kind=github` and `repo` but no `path` enters repo-root batch mode
+- GitHub repo inputs normalize both `owner/name` and full `https://github.com/owner/name` URLs
 - phase-1 discovery finds `skills/*/SKILL.md` and `skills/.system/*/SKILL.md`
 - fallback discovery only runs when phase 1 finds no candidates
 - repo-root candidate ordering is deterministic
@@ -50,6 +51,7 @@ Expected: FAIL because repo-root batch discovery is not implemented and the tool
 Implement only enough discovery and contract plumbing to make the tests pass:
 
 - repo-root batch mode detection
+- GitHub repo URL normalization
 - preferred-layout discovery
 - fallback limited-depth discovery
 - deterministic candidate ordering
@@ -85,6 +87,7 @@ Cover:
 - duplicate candidate names fail the full batch
 - platform collisions fail the full batch
 - existing installed skill collisions fail the full batch when `replace=false`
+- existing installed skill collisions become explicit replacements when `replace=true`
 - invalid candidate entries fail the full batch
 
 **Step 2: Run test to verify it fails**
@@ -101,6 +104,7 @@ Implement:
 - batch-wide install-name validation
 - batch-wide duplicate detection
 - platform and existing-destination collision checks across the whole batch
+- explicit `replace=true` semantics for repo-root batches
 - declared-name-vs-directory-name validation
 
 **Step 4: Run test to verify it passes**
@@ -133,6 +137,7 @@ Cover:
 - repo-root installs still require confirmation
 - batch approval payload includes mode, repo/ref, candidate count, and per-candidate summaries
 - success output normalizes around `mode`, `installed_count`, and `installed_skills[]`
+- existing single-skill callers are updated to consume the normalized batch result shape
 
 **Step 2: Run test to verify it fails**
 
@@ -147,6 +152,7 @@ Implement:
 - repo-root batch language in the `skills_install` tool schema/description
 - unified batch-shaped success payload
 - approval payload enrichment for repo-root installs
+- migration of existing single-skill callers/tests to `installed_skills[]`
 - no relaxation of confirmation rules
 
 **Step 4: Run test to verify it passes**
@@ -179,6 +185,7 @@ Cover:
 - a failure during promotion rolls back the full batch
 - provenance is written per installed skill and includes batch context
 - next-top-level-turn refresh still occurs once after the batch succeeds
+- `replace=true` repo-root reruns stay idempotent from the harness point of view
 
 **Step 2: Run test to verify it fails**
 
@@ -195,6 +202,7 @@ Implement:
 - deterministic batch promotion order
 - rollback to the pre-install state on any failure
 - per-skill provenance with batch metadata
+- batch replace behavior that cleanly supports reruns
 
 **Step 4: Run test to verify it passes**
 
@@ -224,6 +232,7 @@ Cover:
 - `claw` executes repo-root batch installs through the same protected installer path
 - repo-root batch failures surface stable error codes
 - repo-root batch successes return the normalized batch result shape
+- full GitHub URL inputs work through the same `claw` path as `owner/name`
 
 **Step 2: Run test to verify it fails**
 
@@ -266,6 +275,7 @@ Cover:
 - the built-in installer guidance tells the agent to use `skills_install` for GitHub repo roots
 - repo-root GitHub input is described as "install all discovered skills"
 - the prompt surface still preserves progressive disclosure instead of encouraging model-authored byte reconstruction
+- full GitHub URLs are described as valid installer inputs
 
 **Step 2: Run test to verify it fails**
 
@@ -311,6 +321,7 @@ Cover:
 - invalid candidate in a repo-root batch causes full failure
 - colliding candidate in a repo-root batch causes full failure
 - no partial live install remains after a failed repo-root batch
+- a repo-root batch rerun with explicit replace support succeeds without manual cleanup
 
 **Step 2: Run test to verify it fails**
 
@@ -378,13 +389,12 @@ Expected: PASS, including the repo-root batch scenarios.
 
 **Step 4: Run real `development` repo-root proof**
 
-Before the run, manually remove already-installed proof skills if they would invalidate the scenario.
-
 Then verify in a real conversation flow that:
 
-- `skills_install` with `repo=obra/superpowers` triggers repo-root batch mode
+- `skills_install` with `repo=obra/superpowers` or the full GitHub URL triggers repo-root batch mode
 - the batch uses one approval
 - discovered skills install atomically
+- reruns can be driven automatically through explicit replace semantics or scripted cleanup
 - a later conversation uses at least one installed skill successfully
 
 Write the proof to:

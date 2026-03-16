@@ -90,10 +90,19 @@ GitHub mode is extended as follows:
 - if `path` is present, the call is a single-skill install
 - if `path` is absent, the call is a repo-root batch install
 
+For GitHub inputs, `repo` should accept either:
+
+- `owner/name`
+- `https://github.com/owner/name`
+- `https://github.com/owner/name.git`
+
+The installer should normalize these forms to one canonical repo identity before fetching, validation, approval, provenance, and hashing decisions are made.
+
 For repo-root batch installs:
 
 - `install_as` is not accepted
 - `replace` defaults to `false`
+- `replace=true` means "allow replacement of any already-installed agent-local skill whose name collides with a discovered batch candidate"
 - the tool installs all discovered skills from the repo
 - one approval covers the full batch
 - one atomic promotion covers the full batch
@@ -121,6 +130,8 @@ Each `installed_skills[]` entry should contain:
 - `installed_sha256`
 - `snapshot_path` when replacing an existing agent-local skill
 - `provenance_path`
+
+This is an intentionally breaking contract update. Existing single-skill callers should migrate to `installed_skills[]` rather than depending on legacy top-level single-skill fields.
 
 ### Failure Shape
 
@@ -228,6 +239,8 @@ Each candidate summary should include:
 - canonical package hash
 - whether it would replace an existing installed skill
 
+If `replace=true`, the approval payload should make the replacement set explicit so the one approval still communicates the full blast radius of the batch.
+
 Approval is still mandatory even when ordinary workspace writes are broadly allowed.
 
 ## Atomic Snapshot And Promotion
@@ -244,6 +257,8 @@ This preserves the invariant:
 
 - either none of the batch becomes live
 - or the full batch becomes live
+
+When `replace=true`, non-colliding discovered skills still install as new entries in the same atomic batch, while colliding discovered skills are treated as replacements and therefore require snapshots.
 
 ## Provenance
 
@@ -330,6 +345,7 @@ Real-environment validation may use `development` directly. If prior installed s
 The final proof should include a real repo-root install against `https://github.com/obra/superpowers` and verify:
 
 - the repo root call uses `skills_install`
+- the repo root may be passed as a full GitHub URL and still normalizes correctly
 - the discovered batch installs successfully
 - the installed bytes match upstream for at least one sampled installed skill
 - a later conversation successfully uses at least one installed skill
