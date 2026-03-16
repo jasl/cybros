@@ -57,6 +57,8 @@ class BootstrapLifecycleTest < ActiveSupport::TestCase
     )
     assert_equal "What if we split the runtime hooks", child.reload.title
     assert_equal ["cybros_generate_title", "cybros_enqueue_lane_summary"], child.turn_internal_tasks.ordered.pluck(:logical_tool_name)
+    assert_equal ["on_lane_first_user_message", "on_lane_first_user_message"], child.turn_internal_tasks.ordered.pluck(:source_hook_name)
+    assert_equal [10, 20], child.turn_internal_tasks.ordered.pluck(:queue_position)
     assert_equal %w[serial serial], child.turn_internal_tasks.ordered.pluck(:execution_mode)
     assert_equal %w[finished finished], child.turn_internal_tasks.ordered.pluck(:status)
   end
@@ -78,6 +80,8 @@ class BootstrapLifecycleTest < ActiveSupport::TestCase
     queue_rows = child.turn_internal_tasks.ordered.to_a
 
     assert_equal ["cybros_generate_title", "cybros_enqueue_lane_summary"], queue_rows.map(&:logical_tool_name)
+    assert_equal ["on_lane_first_user_message", "on_lane_first_user_message"], queue_rows.map(&:source_hook_name)
+    assert_equal [10, 20], queue_rows.map(&:queue_position)
     assert_equal %w[serial serial], queue_rows.map(&:execution_mode)
     assert_equal %w[finished finished], queue_rows.map(&:status)
     assert queue_rows.all? { |row| row.materialized_task_node_id.present? }

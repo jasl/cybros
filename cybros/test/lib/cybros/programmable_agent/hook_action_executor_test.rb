@@ -24,6 +24,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     assert_equal "cybros_seed_message", task_node.body_input.fetch("requested_name")
     assert_operator task_node.body_input.fetch("tool_call_id").length, :<=, 64
+    assert_empty conversation.turn_internal_tasks
   end
 
   test "create_task append does not materialize a routed follow-up task chain immediately from the pinned conversation run snapshot" do
