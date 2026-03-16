@@ -109,7 +109,6 @@ module TestSupport
                   method: "before_agent_step",
                   params: {
                     "conversation_id" => "conversation:test-default",
-                    "execution_target_id" => "target-primary",
                     "capability_snapshot" => {
                       "capability_registry_snapshot_id" => "csnap_fixture",
                       "effective_tools" => [
@@ -127,7 +126,7 @@ module TestSupport
                         }
                       ]
                     },
-                    "user_input" => "[fixture:stage-state] [fixture:replay-kv] [fixture:switch-target] Verify the workspace status",
+                    "user_input" => "Verify the workspace status",
                     "callback_session" => {
                       "endpoint" => callback.rpc_url,
                       "bearer" => callback.required_bearer
@@ -594,7 +593,7 @@ module TestSupport
         host&.shutdown
       end
 
-      def test_before_agent_step_returns_typed_planning_with_staged_mutations_and_cutover_fields
+      def test_before_agent_step_returns_typed_planning_with_prompt_replacement_and_tool_surface
         callback = TestSupport::CallbackHarness.new.start
         host = build_host.start
         capability_snapshot = {
@@ -622,9 +621,8 @@ module TestSupport
             method: "before_agent_step",
             params: {
               "conversation_id" => "conversation:test-default",
-              "execution_target_id" => "target-primary",
               "capability_snapshot" => capability_snapshot,
-              "user_input" => "[fixture:stage-state] [fixture:replay-kv] [fixture:switch-target] Verify the workspace status",
+              "user_input" => "Verify the workspace status",
               "callback_session" => {
                 "endpoint" => callback.rpc_url,
                 "bearer" => callback.required_bearer
@@ -634,29 +632,24 @@ module TestSupport
 
         result = payload.fetch("result")
 
-        assert_equal(
-          %w[stage-state replay-kv switch-target],
-          result.dig("planning", "step_plan", "fixture_scenarios")
-        )
         assert_match("Verify the workspace status", result.dig("planning", "step_plan", "summary"))
         assert_equal "clear", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 0, "op")
         assert_equal "system", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 0, "buffer_name")
         assert_equal "put", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 1, "op")
         assert_equal "system", result.dig("planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "buffer_name")
-        assert_equal({ "tone" => "concise" }, result.dig("planning", "staged_mutations", "public_settings_patch"))
-        assert_equal({ "mode" => "review" }, result.dig("planning", "staged_mutations", "agent_config_patch"))
-        assert_equal 2, result.dig("planning", "staged_mutations", "kv_ops").size
+        assert_nil result.dig("planning", "step_plan", "fixture_scenarios")
+        assert_nil result.dig("planning", "staged_mutations", "public_settings_patch")
+        assert_nil result.dig("planning", "staged_mutations", "agent_config_patch")
+        assert_nil result.dig("planning", "staged_mutations", "kv_ops")
+        assert_nil result.dig("planning", "approval_request")
         assert_equal "csnap_fixture", result.dig("planning", "tool_surface", "capability_registry_snapshot_id")
         assert_equal %w[etool_compact etool_subagent_spawn], result.dig("planning", "tool_surface", "selected_tool_ids")
         assert_equal "surface_callback_harness", result.dig("planning", "tool_surface", "tool_surface_id")
         assert_nil result.dig("planning", "tool_surface", "tool_surface_label")
-        assert_equal "target-alternate", result.dig("planning", "execution_target_proposal", "execution_target_id")
+        assert_nil result.dig("planning", "execution_target_proposal")
 
         assert_equal(
-          [
-            "tool_surface.manifest",
-            "execution_target.list"
-          ],
+          [ "tool_surface.manifest" ],
           callback.calls.map { |call| call.fetch("method") }
         )
       ensure
@@ -729,7 +722,6 @@ module TestSupport
             method: "before_agent_step",
             params: {
               "conversation_id" => "conversation:test-default",
-              "execution_target_id" => "target-primary",
               "user_input" => "Allocate the next seq",
               "callback_session" => {
                 "endpoint" => callback.rpc_url,

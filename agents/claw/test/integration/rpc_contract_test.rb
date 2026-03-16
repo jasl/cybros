@@ -91,7 +91,7 @@ class RPCContractTest < ActiveSupport::TestCase
     end
   end
 
-  test "before_agent_step returns typed planning with staged mutations and cutover fields" do
+  test "before_agent_step returns typed planning with a prompt replacement and tool surface" do
     callback = TestSupport::CallbackHarness.new.start
     capability_snapshot = {
       "capability_registry_snapshot_id" => "csnap_fixture",
@@ -116,9 +116,8 @@ class RPCContractTest < ActiveSupport::TestCase
         method_name: "before_agent_step",
         params: {
           "conversation_id" => "conversation:test-default",
-          "execution_target_id" => "target-primary",
           "capability_snapshot" => capability_snapshot,
-          "user_input" => "[fixture:stage-state] [fixture:replay-kv] [fixture:switch-target] Verify the workspace status",
+          "user_input" => "Verify the workspace status",
           "callback_session" => {
             "endpoint" => callback.rpc_url,
             "bearer" => callback.required_bearer
@@ -126,18 +125,16 @@ class RPCContractTest < ActiveSupport::TestCase
         }
       )
 
-    assert_equal(
-      %w[stage-state replay-kv switch-target],
-      payload.dig("planning", "step_plan", "fixture_scenarios")
-    )
     assert_match("Verify the workspace status", payload.dig("planning", "step_plan", "summary"))
     assert_equal "clear", payload.dig("planning", "staged_mutations", "prompt_buffer_ops", 0, "op")
-    assert_equal({ "tone" => "concise" }, payload.dig("planning", "staged_mutations", "public_settings_patch"))
-    assert_equal({ "mode" => "review" }, payload.dig("planning", "staged_mutations", "agent_config_patch"))
-    assert_equal 2, payload.dig("planning", "staged_mutations", "kv_ops").size
+    assert_nil payload.dig("planning", "step_plan", "fixture_scenarios")
+    assert_nil payload.dig("planning", "staged_mutations", "public_settings_patch")
+    assert_nil payload.dig("planning", "staged_mutations", "agent_config_patch")
+    assert_nil payload.dig("planning", "staged_mutations", "kv_ops")
+    assert_nil payload.dig("planning", "approval_request")
     assert_equal "surface_callback_harness", payload.dig("planning", "tool_surface", "tool_surface_id")
-    assert_equal "target-alternate", payload.dig("planning", "execution_target_proposal", "execution_target_id")
-    assert_equal [ "tool_surface.manifest", "execution_target.list" ], callback.calls.map { |call| call.fetch("method") }
+    assert_nil payload.dig("planning", "execution_target_proposal")
+    assert_equal [ "tool_surface.manifest" ], callback.calls.map { |call| call.fetch("method") }
   ensure
     callback&.shutdown
   end

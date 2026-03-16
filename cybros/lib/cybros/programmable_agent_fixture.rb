@@ -269,7 +269,6 @@ module Cybros
 
     def apply_before_agent_step_scenarios!(params, result)
       tokens = scenario_tokens(params["user_input"])
-      callback_session = params["callback_session"].is_a?(Hash) ? params["callback_session"] : {}
       result.dig("planning", "step_plan")["fixture_scenarios"] = tokens if tokens.any?
 
       if tokens.include?("stage-state")

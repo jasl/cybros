@@ -230,31 +230,6 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
     end
   end
 
-  test "before_agent_step switch-target token no longer authors legacy target proposals" do
-    fixture = Cybros::ProgrammableAgentFixture
-    eigenclass = class << fixture; self end
-    original_callback_rpc = fixture.method(:callback_rpc)
-    eigenclass.send(:define_method, :callback_rpc) do |*args|
-      raise "unexpected callback #{args[1]}"
-    end
-
-    begin
-      prepare =
-        fixture.rpc_result(
-          "before_agent_step",
-          {
-            "conversation_id" => "conv_switch",
-            "user_input" => "[fixture:switch-target]",
-            "callback_session" => { "endpoint" => "http://fixture.test/rpc", "bearer" => "secret" },
-          },
-        )
-
-      assert_nil prepare.dig("planning", "execution_target_proposal")
-    ensure
-      eigenclass.send(:define_method, :callback_rpc, original_callback_rpc)
-    end
-  end
-
   private
 
     def get_json(url)

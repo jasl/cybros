@@ -61,7 +61,7 @@ class AgentRPCSessionTest < ActiveSupport::TestCase
         deployment_fingerprint: invocation.binding_fingerprint,
         deployment_activated_at: invocation.deployment_activated_at,
         session_token_digest: SecureRandom.hex(16),
-        allowed_methods: %w[conversation.settings.get execution_target.list],
+        allowed_methods: %w[conversation.settings.get tool_surface.manifest],
         expires_at: 15.minutes.from_now.change(usec: 0),
         status: "open",
       }.merge(attributes),
