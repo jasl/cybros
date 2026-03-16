@@ -14,6 +14,7 @@ module Cybros
 
     class CapabilitySnapshot
       RESERVED_LOGICAL_NAME_PREFIX = "cybros_".freeze
+      KERNEL_OWNED_LOGICAL_NAMES = %w[subagent_spawn subagent_run].freeze
       EFFECTIVE_TOOL_ID_PREFIX = "etool_".freeze
       SNAPSHOT_ID_PREFIX = "csnap_".freeze
       EXECUTION_MODES = %w[serial parallel_safe].freeze
@@ -156,6 +157,8 @@ module Cybros
           end
 
           agent_catalog.each do |tool|
+            next if kernel_owned_logical_name?(tool.logical_tool_name)
+
             merged[tool.logical_tool_name] =
               if reserved_namespace?(tool.logical_tool_name)
                 merged.fetch(tool.logical_tool_name, tool)
@@ -203,6 +206,10 @@ module Cybros
 
         def reserved_namespace?(logical_tool_name)
           logical_tool_name.start_with?(RESERVED_LOGICAL_NAME_PREFIX)
+        end
+
+        def kernel_owned_logical_name?(logical_tool_name)
+          reserved_namespace?(logical_tool_name) || KERNEL_OWNED_LOGICAL_NAMES.include?(logical_tool_name.to_s)
         end
     end
   end

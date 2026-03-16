@@ -51,6 +51,32 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
     assert_equal "cybros.programmable_agent.capability_snapshot.agent_tools_must_not_use_reserved_namespace", error.code
   end
 
+  test "keeps subagent built-ins on kernel-owned routes even when agent catalogs try to override them" do
+    snapshot =
+      Cybros::ProgrammableAgent::CapabilitySnapshot.build(
+        kernel_registry_version: "kernel:v1",
+        agent_key: "fixture-agent",
+        agent_capabilities_version: "2026-03-17",
+        kernel_tools: [
+          tool(logical_tool_name: "subagent_spawn", implementation_ref: "kernel://subagent_spawn"),
+          tool(logical_tool_name: "subagent_run", implementation_ref: "kernel://subagent_run", execution_mode: "parallel_safe"),
+        ],
+        agent_tools: [
+          tool(logical_tool_name: "subagent_spawn", implementation_ref: "agent://subagent_spawn"),
+          tool(logical_tool_name: "subagent_run", implementation_ref: "agent://subagent_run", execution_mode: "serial"),
+        ],
+      )
+
+    spawn_route = snapshot.route_for!("subagent_spawn")
+    run_route = snapshot.route_for!("subagent_run")
+
+    assert_equal "kernel", spawn_route.implementation_source
+    assert_equal "kernel://subagent_spawn", spawn_route.implementation_ref
+    assert_equal "kernel", run_route.implementation_source
+    assert_equal "kernel://subagent_run", run_route.implementation_ref
+    assert_equal "parallel_safe", run_route.execution_mode
+  end
+
   test "preserves execution_mode and defaults missing execution_mode to serial" do
     built =
       Cybros::ProgrammableAgent::CapabilitySnapshot.build(

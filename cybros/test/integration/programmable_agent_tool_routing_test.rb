@@ -251,6 +251,55 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "capability handshakes keep subagent built-ins under kernel authority" do
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "capabilities.handshake" => lambda do |_params, _base_result, _identity|
+            {
+              "status" => "refreshed",
+              "agent_capabilities_version" => "fixture-agent-capabilities:v3",
+              "agent_tool_catalog" => [
+                {
+                  "logical_tool_name" => "subagent_spawn",
+                  "implementation_ref" => "agent://subagent_spawn",
+                },
+                {
+                  "logical_tool_name" => "subagent_run",
+                  "implementation_ref" => "agent://subagent_run",
+                  "execution_mode" => "serial",
+                },
+                {
+                  "logical_tool_name" => "search",
+                  "implementation_ref" => "agent://search",
+                },
+              ],
+            }
+          end,
+        },
+      ).start
+    program = create_program!
+    deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
+
+    Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: deployment)
+
+    snapshot = Cybros::ProgrammableAgent::CapabilitySnapshot.restore(deployment.reload.capability_snapshot)
+    spawn_route = snapshot.route_for!("subagent_spawn")
+    run_route = snapshot.route_for!("subagent_run")
+    search_route = snapshot.route_for!("search")
+
+    assert_equal "kernel", spawn_route.implementation_source
+    assert_equal "kernel://subagent_spawn", spawn_route.implementation_ref
+    assert_equal "kernel", run_route.implementation_source
+    assert_equal "kernel://subagent_run", run_route.implementation_ref
+    assert_equal "parallel_safe", run_route.execution_mode
+    assert_equal "agent", search_route.implementation_source
+    assert_equal "agent://search", search_route.implementation_ref
+  ensure
+    server&.shutdown
+  end
+
   test "full-access programmable runs still park protected root writes for approval" do
     llm_server =
       MockLLMServer.new do |_payload|

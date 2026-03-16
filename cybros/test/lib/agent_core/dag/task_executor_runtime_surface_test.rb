@@ -958,6 +958,20 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "build_capability_snapshot keeps subagent built-ins on kernel-owned routes" do
+    program = create_program!
+    snapshot = build_capability_snapshot(program_id: program.id)
+
+    spawn_route = snapshot.route_for!("subagent_spawn")
+    run_route = snapshot.route_for!("subagent_run")
+
+    assert_equal "kernel", spawn_route.implementation_source
+    assert_equal "kernel://subagent_spawn", spawn_route.implementation_ref
+    assert_equal "kernel", run_route.implementation_source
+    assert_equal "kernel://subagent_run", run_route.implementation_ref
+    assert_equal "parallel_safe", run_route.execution_mode
+  end
+
   private
 
     def execute_task(runtime:, tool_name:)
@@ -1065,11 +1079,25 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
             logical_tool_name: "compact_context",
             implementation_ref: "kernel://compact_context",
           },
+          {
+            logical_tool_name: "subagent_spawn",
+            implementation_ref: "kernel://subagent_spawn",
+          },
+          {
+            logical_tool_name: "subagent_run",
+            implementation_ref: "kernel://subagent_run",
+            execution_mode: "parallel_safe",
+          },
         ],
         agent_tools: [
           {
             logical_tool_name: "subagent_spawn",
             implementation_ref: "agent://subagent_spawn",
+          },
+          {
+            logical_tool_name: "subagent_run",
+            implementation_ref: "agent://subagent_run",
+            execution_mode: "serial",
           },
         ],
       )
