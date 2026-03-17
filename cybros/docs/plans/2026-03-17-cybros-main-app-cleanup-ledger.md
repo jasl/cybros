@@ -507,6 +507,17 @@ Old nouns/removal targets for this cleanup:
   - active doc hits are limited to current cleanup/design materials and intentional current design docs that still discuss removal targets
   - the unrelated untracked audit report remains outside tracked cleanup scope
 
+### Round 17 (P2 Simplify Batch 1)
+
+- Narrowed the conversation/workspace ownership boundary without changing workspace payload semantics:
+  - `Conversation#workspace_payload` now derives its exported `root_path` from `agent_root_path`
+  - `Conversations::WorkspaceInitializer.initialize!` no longer returns a duplicate `root_path` key alongside `agent_root_path`
+- This removes one thin compatibility-shaped layer from the workspace contract while keeping the externally consumed payload shape (`root_path`, `conversation_path`, `lane_path`, `cwd`) unchanged.
+- Verification commands for this round:
+  - red check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb` -> 1 failure proving the duplicate `root_path` key was still exposed
+  - green check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb test/integration/default_agent_attachment_transfer_test.rb`
+- Remaining P2 simplification opportunities after this batch are lower priority and should be treated as follow-up cleanup, not blockers for the current destructive cutover.
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

@@ -302,7 +302,7 @@ class Conversation < ApplicationRecord
 
     {
       "conversation_id" => id,
-      "root_path" => initialized.fetch(:root_path).to_s,
+      "root_path" => initialized.fetch(:agent_root_path).to_s,
       "conversation_path" => initialized.fetch(:conversation_path).to_s,
       "lane_path" => lane_path,
       "cwd" => initialized.fetch(:cwd).to_s,

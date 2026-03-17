@@ -43,7 +43,6 @@ module Conversations
 
         {
           agent_root_path: agent_workspace.fetch(:root_path),
-          root_path: agent_workspace.fetch(:root_path),
           conversation_path: conversation_path.to_s,
           lane_path: lane_path.to_s,
           cwd: conversation_path.to_s,
