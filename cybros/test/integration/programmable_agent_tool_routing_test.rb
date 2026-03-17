@@ -110,6 +110,7 @@ class ProgrammableAgentToolRoutingTest < ActiveSupport::TestCase
       assert_equal "search", queued.logical_tool_name
       assert_equal(
         {
+          "source" => "agent",
           "tool_call_id" => "tc_1",
           "arguments" => { "query" => "TODO" },
           "requested_name" => "search",

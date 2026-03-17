@@ -1,5 +1,6 @@
 require "digest"
 require "json"
+require "securerandom"
 
 module AgentCore
   module DAG
@@ -1763,8 +1764,8 @@ module AgentCore
                   enqueue_direct_tool_call!(
                     graph: graph,
                     source_node: node,
-                    tool_call:
-                      Cybros::ProgrammableAgent::OperationCall.tool(
+                    operation_payload:
+                      build_direct_tool_operation_payload(
                         logical_tool_name: resolved_name,
                         arguments: arguments,
                         reason: "llm_tool_call",
@@ -1773,6 +1774,8 @@ module AgentCore
                         idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       ),
                     requested_name: requested_name,
+                    task_source: task_source,
+                    task_metadata: task_metadata,
                     name_resolution: name_resolution,
                     arguments_resolution: arguments_resolution,
                     repair: repair,
@@ -1968,8 +1971,8 @@ module AgentCore
                   enqueue_direct_tool_call!(
                     graph: graph,
                     source_node: node,
-                    tool_call:
-                      Cybros::ProgrammableAgent::OperationCall.tool(
+                    operation_payload:
+                      build_direct_tool_operation_payload(
                         logical_tool_name: resolved_name,
                         arguments: arguments,
                         reason: "llm_tool_call",
@@ -1979,6 +1982,8 @@ module AgentCore
                         idempotency_key: "agent_core.tool:#{node.id}:#{tool_call_id}",
                       ),
                     requested_name: requested_name,
+                    task_source: task_source,
+                    task_metadata: task_metadata,
                     name_resolution: name_resolution,
                     arguments_resolution: arguments_resolution,
                     repair: repair,
@@ -2384,7 +2389,7 @@ module AgentCore
                 execution_context.attributes.dig("cybros", "capability_snapshot")
             return nil unless payload.is_a?(Hash) && payload.any?
 
-            Cybros::ProgrammableAgent::CapabilitySnapshot.restore(payload)
+            AgentCore::RuntimeSurface::ToolRoutingSnapshot.restore(payload)
           end
 
           def programmable_tool_surface_manifest(execution_context:)
@@ -2418,8 +2423,10 @@ module AgentCore
           def enqueue_direct_tool_call!(
             graph:,
             source_node:,
-            tool_call:,
+            operation_payload:,
             requested_name:,
+            task_source:,
+            task_metadata:,
             name_resolution:,
             arguments_resolution:,
             repair:,
@@ -2432,14 +2439,14 @@ module AgentCore
           )
             routing =
               direct_tool_routing_metadata(
-                logical_tool_name: tool_call.logical_tool_name,
+                logical_tool_name: operation_payload.fetch("logical_tool_name"),
                 tool_route: tool_route,
                 tool_surface_manifest: tool_surface_manifest,
                 capability_snapshot: capability_snapshot,
                 runtime: runtime,
               )
-            payload = tool_call.to_queue_payload
-            source_fingerprint = "direct_tool:#{source_node.id}:#{tool_call.tool_call_id}"
+            payload = AgentCore::Utils.deep_stringify_keys(operation_payload)
+            source_fingerprint = "direct_tool:#{source_node.id}:#{payload.fetch("tool_call_id")}"
 
             TurnInternalTask.find_by(turn_id: source_node.turn_id, source_fingerprint: source_fingerprint) ||
               TurnInternalTask.create!(
@@ -2451,17 +2458,23 @@ module AgentCore
                 source_node: source_node,
                 source_hook_name: "agent_message_tool_loop",
                 source_fingerprint: source_fingerprint,
-                logical_tool_name: tool_call.logical_tool_name,
+                logical_tool_name: payload.fetch("logical_tool_name"),
                 input:
                   direct_tool_queue_input(
                     payload: payload,
                     requested_name: requested_name,
+                    source: task_source,
                     name_resolution: name_resolution,
                     arguments_resolution: arguments_resolution,
                     repair: repair,
                     approval_preview: approval_preview,
                   ),
-                authored_metadata: direct_tool_queue_metadata(payload: payload, approval: approval),
+                authored_metadata:
+                  direct_tool_queue_metadata(
+                    payload: payload,
+                    approval: approval,
+                    task_metadata: task_metadata,
+                  ),
                 tool_surface_id: routing[:tool_surface_id],
                 capability_registry_snapshot_id: routing[:capability_registry_snapshot_id],
                 effective_tool_id: routing[:effective_tool_id],
@@ -2473,11 +2486,24 @@ module AgentCore
               )
           end
 
-          def direct_tool_queue_input(payload:, requested_name:, name_resolution:, arguments_resolution:, repair:, approval_preview:)
+          def build_direct_tool_operation_payload(logical_tool_name:, arguments:, reason:, origin:, tool_call_id:, approval_hint: nil, idempotency_key: nil)
+            {
+              "tool_call_id" => tool_call_id.to_s.presence || "opcall_#{SecureRandom.hex(12)}",
+              "logical_tool_name" => logical_tool_name.to_s,
+              "arguments" => AgentCore::Utils.deep_stringify_keys(arguments.is_a?(Hash) ? arguments : {}),
+              "reason" => reason.to_s,
+              "origin" => origin.to_s.presence,
+              "approval_hint" => approval_hint.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(approval_hint) : nil,
+              "idempotency_key" => idempotency_key.to_s.presence,
+            }.compact
+          end
+
+          def direct_tool_queue_input(payload:, requested_name:, source:, name_resolution:, arguments_resolution:, repair:, approval_preview:)
             input = {
               "tool_call_id" => payload.fetch("tool_call_id"),
               "arguments" => payload.fetch("arguments"),
               "requested_name" => requested_name.to_s,
+              "source" => source.to_s,
               "name_resolution" => name_resolution.to_s,
               "arguments_resolution" => arguments_resolution.to_s,
             }
@@ -2486,9 +2512,10 @@ module AgentCore
             input
           end
 
-          def direct_tool_queue_metadata(payload:, approval:)
+          def direct_tool_queue_metadata(payload:, approval:, task_metadata:)
             payload.except("tool_call_id", "logical_tool_name", "arguments").compact.tap do |metadata|
               metadata["approval"] = AgentCore::Utils.deep_stringify_keys(approval) if approval.present?
+              metadata["task_metadata"] = AgentCore::Utils.deep_stringify_keys(task_metadata) if task_metadata.present?
             end
           end
 

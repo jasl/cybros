@@ -66,7 +66,7 @@ module Cybros
 
             sections = []
             sections << build_section("Tooling", tooling_lines(params))
-            sections << build_section("Safety", safety_lines)
+            sections << build_section("Safety", safety_lines(params))
             sections << build_section("Workspace", workspace_lines(params))
             sections << build_section("Scope Inventory", scope_inventory_lines(params)) if mode == FULL_PROMPT_MODE
             sections << build_section("Documentation", documentation_lines) if mode == FULL_PROMPT_MODE
@@ -107,8 +107,8 @@ module Cybros
             ]
           end
 
-          def safety_lines
-            @application.prompt_text("system").to_s.strip.lines.map(&:chomp)
+          def safety_lines(params)
+            @application.prompt_text("system", params: params).to_s.strip.lines.map(&:chomp)
           end
 
           def workspace_lines(params)
@@ -178,12 +178,12 @@ module Cybros
 
           def build_bootstrap_sources(params:, mode:, truncated_sources:)
             sources = [
-              [ "AGENTS", @application.prompt_text("agent") ],
+              [ "AGENTS", @application.prompt_text("agent", params: params) ],
               [ "TOOLS", synthesized_tools_source(params) ]
             ]
             if mode == FULL_PROMPT_MODE
-              sources.insert(1, [ "SOUL", @application.prompt_text("soul") ])
-              sources.insert(2, [ "USER", @application.prompt_text("user") ])
+              sources.insert(1, [ "SOUL", @application.prompt_text("soul", params: params) ])
+              sources.insert(2, [ "USER", @application.prompt_text("user", params: params) ])
             end
 
             remaining_budget = BOOTSTRAP_TOTAL_CHAR_CAP

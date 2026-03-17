@@ -1,4 +1,6 @@
 require "test_helper"
+require "open3"
+require "timeout"
 
 class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
   setup do
@@ -140,6 +142,84 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
     assert_equal "Live soul\n", destination_root.join("SOUL.md").read
   end
 
+  test "workspace bootstrap works from a fresh rails runner process" do
+    FileUtils.mkdir_p(File.join(@fixture_source_root, "prompts"))
+    File.write(File.join(@fixture_source_root, "prompts", "AGENT.md"), "Seed agent\n")
+    File.write(File.join(@fixture_source_root, "prompts", "SOUL.md"), "Seed soul\n")
+    File.write(File.join(@fixture_source_root, "prompts", "USER.md"), "Seed user\n")
+
+    destination_root = Pathname.new(@workspace_root).join("fresh-runner")
+    runner_script = <<~RUBY
+      Agents::WorkspaceBootstrap.seed!(
+        source_root: Pathname.new(ENV.fetch("WORKSPACE_BOOTSTRAP_SOURCE_ROOT")),
+        destination_root: Pathname.new(ENV.fetch("WORKSPACE_BOOTSTRAP_DESTINATION_ROOT")),
+      )
+    RUBY
+
+    stdout = nil
+    stderr = nil
+    status = nil
+
+    Timeout.timeout(20) do
+      stdout, stderr, status =
+        Open3.capture3(
+          {
+            "WORKSPACE_BOOTSTRAP_SOURCE_ROOT" => @fixture_source_root,
+            "WORKSPACE_BOOTSTRAP_DESTINATION_ROOT" => destination_root.to_s,
+          },
+          "bin/rails",
+          "runner",
+          runner_script,
+          chdir: Rails.root.to_s,
+        )
+    end
+
+    assert_predicate status, :success?, [stdout, stderr].join("\n")
+    assert_equal "Seed agent\n", destination_root.join("AGENTS.md").read
+    assert_equal "Seed soul\n", destination_root.join("SOUL.md").read
+    assert_equal "Seed user\n", destination_root.join("USER.md").read
+  end
+
+  test "workspace bootstrap reloads claw bootstrap constants when nested files were unloaded" do
+    FileUtils.mkdir_p(File.join(@fixture_source_root, "prompts"))
+    File.write(File.join(@fixture_source_root, "prompts", "AGENT.md"), "Seed agent\n")
+    File.write(File.join(@fixture_source_root, "prompts", "SOUL.md"), "Seed soul\n")
+    File.write(File.join(@fixture_source_root, "prompts", "USER.md"), "Seed user\n")
+
+    destination_root = Pathname.new(@workspace_root).join("reloaded-constants")
+
+    remove_claw_bootstrap_constant!(:WorkspaceBootstrap)
+    remove_claw_bootstrap_constant!(:DailyMemoryTarget)
+
+    Agents::WorkspaceBootstrap.seed!(source_root: Pathname.new(@fixture_source_root), destination_root: destination_root)
+
+    assert_equal "Seed agent\n", destination_root.join("AGENTS.md").read
+    assert_equal "Seed soul\n", destination_root.join("SOUL.md").read
+    assert_equal "Seed user\n", destination_root.join("USER.md").read
+    assert_predicate destination_root.join("memory", Date.current.strftime("%Y-%m-%d.md")), :file?
+  ensure
+    restore_claw_bootstrap_constants!
+  end
+
+  test "main app autoloads bundled claw workspace bootstrap in a fresh rails runner process" do
+    stdout = nil
+    stderr = nil
+    status = nil
+
+    Timeout.timeout(20) do
+      stdout, stderr, status =
+        Open3.capture3(
+          "bin/rails",
+          "runner",
+          "puts defined?(Cybros::Agents::Claw::WorkspaceBootstrap).inspect",
+          chdir: Rails.root.to_s,
+        )
+    end
+
+    assert_predicate status, :success?, [stdout, stderr].join("\n")
+    assert_equal "\"constant\"", stdout.strip
+  end
+
   private
 
     def with_env(values)
@@ -152,5 +232,21 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
       original.each do |key, value|
         value.nil? ? ENV.delete(key) : ENV[key] = value
       end
+    end
+
+    def remove_claw_bootstrap_constant!(name)
+      return unless defined?(Cybros::Agents::Claw)
+      return unless Cybros::Agents::Claw.const_defined?(name, false)
+
+      Cybros::Agents::Claw.send(:remove_const, name)
+    end
+
+    def restore_claw_bootstrap_constants!
+      load_claw_support_file!("daily_memory_target") unless defined?(Cybros::Agents::Claw::DailyMemoryTarget)
+      load_claw_support_file!("workspace_bootstrap") unless defined?(Cybros::Agents::Claw::WorkspaceBootstrap)
+    end
+
+    def load_claw_support_file!(basename)
+      load Rails.root.join("../agents/claw/lib/cybros/agents/claw/#{basename}.rb").expand_path.to_s
     end
 end

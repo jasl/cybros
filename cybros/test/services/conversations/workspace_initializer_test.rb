@@ -29,30 +29,19 @@ class Conversations::WorkspaceInitializerTest < ActiveSupport::TestCase
       assert_equal Pathname.new(first.fetch(:conversation_path)).join(".lanes", conversation.chat_lane.id).cleanpath.to_s, lane_path
       assert_equal first.fetch(:root_path), first.fetch(:agent_root_path)
       assert_equal first.fetch(:cwd), first.fetch(:conversation_path)
-      assert_nil conversation.logical_workspace_key
-      assert_nil conversation.logical_workspace_root_path
-      assert_nil conversation.logical_workspace_initialized_at
       assert Dir.exist?(first.fetch(:agent_root_path))
       assert Dir.exist?(first.fetch(:conversation_path))
       assert Dir.exist?(lane_path)
     end
   end
 
-  test "initialize! ignores legacy logical workspace metadata when deriving conversation paths" do
+  test "initialize! derives conversation paths from the agent root" do
     conversation = create_conversation!
-    conversation.update_columns(
-      logical_workspace_key: "..",
-      logical_workspace_root_path: "/tmp/legacy-logical-workspace",
-      logical_workspace_initialized_at: 1.day.ago.change(usec: 0),
-    )
 
     with_default_agent_workspace_root(@workspace_root) do
       workspace = Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
 
-      conversation.reload
-
       assert_equal Pathname.new(@workspace_root).join("bundled", "claw", "conversations", conversation.id).cleanpath.to_s, workspace.fetch(:conversation_path)
-      refute_equal "/tmp/legacy-logical-workspace", workspace.fetch(:conversation_path)
       assert Dir.exist?(workspace.fetch(:conversation_path))
     end
   end

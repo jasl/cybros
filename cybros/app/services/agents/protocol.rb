@@ -92,7 +92,7 @@ module Agents
         "byte_size" => Integer(normalized["byte_size"]),
         "digest" => normalized["digest"].to_s,
         "signed_download_url" => signed_download_url,
-        "workspace" => stringify_hash(normalized["workspace"]),
+        "workspace" => normalize_attachment_workspace(normalized["workspace"]),
         "conversation" => stringify_hash(normalized["conversation"]),
         "metadata" => stringify_hash(normalized["metadata"]),
       }.reject { |_key, value| value == {} }
@@ -124,6 +124,10 @@ module Agents
             child
           end
       end
+    end
+
+    private_class_method def normalize_attachment_workspace(value)
+      stringify_hash(value).except(*stringify_hash(value).keys.grep(/\Alogical_workspace_/))
     end
   end
 end

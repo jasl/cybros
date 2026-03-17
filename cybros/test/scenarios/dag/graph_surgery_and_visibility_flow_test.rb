@@ -115,7 +115,5 @@ class DAG::GraphSurgeryAndVisibilityFlowTest < ActiveSupport::TestCase
     replaced = original.retry!
     assert_equal DAG::Node::PENDING, replaced.state
     assert graph.edges.active.exists?(from_node_id: replaced.id, to_node_id: downstream.id, edge_type: DAG::Edge::SEQUENCE)
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 end

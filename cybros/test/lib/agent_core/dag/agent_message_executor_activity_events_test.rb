@@ -177,6 +177,7 @@ class AgentCore::DAG::AgentMessageExecutorActivityEventsTest < ActiveSupport::Te
         claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
         assert_equal [agent.id], claimed.map(&:id)
         DAG::Runner.run_node!(agent.id)
+        TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
       end
 
       graph

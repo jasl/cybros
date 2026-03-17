@@ -3,7 +3,6 @@
 require "pathname"
 
 app_root = Pathname.new(__dir__).join("..").expand_path
-ENV["BUNDLE_GEMFILE"] ||= app_root.join("Gemfile").to_s
 Dir.chdir(app_root)
 
 default_test_files = %w[
@@ -13,4 +12,11 @@ default_test_files = %w[
   test/requests/http_boundary_test.rb
 ].freeze
 
-exec "bundle", "exec", "rails", "test", *(ARGV.empty? ? default_test_files : ARGV)
+exec(
+  { "BUNDLE_GEMFILE" => app_root.join("Gemfile").to_s },
+  "bundle",
+  "exec",
+  "rails",
+  "test",
+  *(ARGV.empty? ? default_test_files : ARGV)
+)

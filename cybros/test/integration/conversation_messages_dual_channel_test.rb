@@ -91,6 +91,75 @@ class ConversationMessagesDualChannelTest < ActionDispatch::IntegrationTest
     assert_includes response.body, %(data-role="agent-bubble")
   end
 
+  test "create promotes composer draft settings for the next turn and clears the draft" do
+    user = create_user!
+    sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+    conversation.update!(permission_mode: "default")
+    conversation.update_composer_draft!(
+      content: "Use the saved draft",
+      model_ref: "dev/mock-model",
+      permission_mode: "conservative",
+    )
+
+    post conversation_messages_path(conversation),
+         params: { content: "Use the saved draft" },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+
+    conversation.reload
+    agent = conversation.chat_head_leaf(node_type: Messages::AgentMessage.node_type_key)
+
+    assert_equal "conservative", conversation.permission_mode
+    assert_equal "dev/mock-model", conversation.metadata.dig("llm", "model_ref")
+    assert_equal({}, conversation.composer_draft)
+    assert_equal "dev/mock-model", agent.metadata.dig("llm", "model_ref")
+  end
+
+  test "create applies the submitted permission mode even when the composer draft has not persisted yet" do
+    user = create_user!
+    sign_in!(user)
+    ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")
+
+    conversation =
+      create_conversation!(
+        user: user,
+        title: "Chat",
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+    conversation.update!(permission_mode: "default", composer_draft: {})
+
+    post conversation_messages_path(conversation),
+         params: {
+           content: "Send right after changing permissions",
+           conversation: { permission_mode: "conservative" },
+         },
+         headers: { "Accept" => "text/vnd.turbo-stream.html" }
+
+    assert_response :success
+
+    conversation.reload
+    run_draft = RunDraft.order(:created_at).last
+
+    assert_not_nil run_draft
+    assert_equal "conservative", conversation.permission_mode
+    assert_equal "conservative", run_draft.permission_mode
+  end
+
   test "create honors nested input policy override params from the composer form" do
     user = create_user!
     sign_in!(user)

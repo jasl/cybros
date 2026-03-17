@@ -1,20 +1,22 @@
 module RunDrafts
   class ConversationTurnOrchestrator
-    def self.enqueue!(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:, debug: {}, error: {})
+    def self.enqueue!(conversation:, initiated_by_user:, selected_model_ref:, permission_mode: nil, trigger_snapshot:, debug: {}, error: {})
       new(
         conversation: conversation,
         initiated_by_user: initiated_by_user,
         selected_model_ref: selected_model_ref,
+        permission_mode: permission_mode,
         trigger_snapshot: trigger_snapshot,
         debug: debug,
         error: error,
       ).enqueue!
     end
 
-    def initialize(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:, debug:, error:)
+    def initialize(conversation:, initiated_by_user:, selected_model_ref:, permission_mode:, trigger_snapshot:, debug:, error:)
       @conversation = conversation
       @initiated_by_user = initiated_by_user
       @selected_model_ref = selected_model_ref
+      @permission_mode = permission_mode.to_s
       @trigger_snapshot = trigger_snapshot
       @debug = debug
       @error = error
@@ -26,6 +28,7 @@ module RunDrafts
           conversation: conversation,
           initiated_by_user: initiated_by_user,
           selected_model_ref: selected_model_ref,
+          permission_mode: permission_mode,
           trigger_snapshot: trigger_snapshot,
         )
 
@@ -44,7 +47,7 @@ module RunDrafts
 
     private
 
-      attr_reader :conversation, :initiated_by_user, :selected_model_ref, :trigger_snapshot, :debug, :error
+      attr_reader :conversation, :initiated_by_user, :selected_model_ref, :permission_mode, :trigger_snapshot, :debug, :error
 
       def park_agent_node_for_approval!(draft)
         agent_node_for(draft)&.park_for_approval!

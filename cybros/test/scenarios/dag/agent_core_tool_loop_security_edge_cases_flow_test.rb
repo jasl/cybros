@@ -150,6 +150,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
       assert_equal [agent.id], claimed.map(&:id)
 
       DAG::Runner.run_node!(agent.id)
+      TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).last
       assert task, "expected a task node"
@@ -288,6 +289,7 @@ class DAG::AgentCoreToolLoopSecurityEdgeCasesFlowTest < ActiveSupport::TestCase
       assert_equal [agent.id], claimed.map(&:id)
 
       DAG::Runner.run_node!(agent.id)
+      TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).last
       assert task, "expected a task node"

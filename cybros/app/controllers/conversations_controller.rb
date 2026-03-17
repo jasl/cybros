@@ -77,6 +77,10 @@ class ConversationsController < AgentController
 
     @has_more = @conversation.has_more_messages_before?(before_message_id: @before_cursor)
     @composer_state = @conversation.composer_state
+    @resolved_composer_draft = @conversation.resolved_composer_draft
+    @composer_draft_content = @resolved_composer_draft.fetch("content", "").to_s
+    @composer_draft_updated_at = @conversation.composer_draft_updated_at.to_s
+    @selected_permission_mode = @resolved_composer_draft.fetch("permission_mode", @conversation.permission_mode).to_s
     @permission_mode_options = Conversation::PERMISSION_MODE_LABELS
     @selected_agent_stale = @conversation.agent.present? && !@conversation.agent.selectable_for_conversation?
 
@@ -84,7 +88,7 @@ class ConversationsController < AgentController
       @llm_model_options = Cybros::AgentRuntimeResolver.usable_model_options
       @llm_model_option_groups = build_model_option_groups(@llm_model_options)
 
-      requested_model_ref = @conversation.metadata.dig("llm", "model_ref").to_s.presence
+      requested_model_ref = @resolved_composer_draft.fetch("model_ref", nil).to_s.presence || @conversation.metadata.dig("llm", "model_ref").to_s.presence
       resolved_default_model_ref = nil
       @model_picker_alert_message = nil
       if requested_model_ref.blank?

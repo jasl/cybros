@@ -665,7 +665,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "staged_public_settings_patch" => { "tone" => "concise" },
               "staged_agent_config_patch" => { "mode" => "review" },
               "staged_kv_ops" => [{ "op" => "set", "key" => "shared.stage", "value" => { "status" => "planned" } }],

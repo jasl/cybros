@@ -9,6 +9,7 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
       _ = stream
 
       graph = node.graph
+      parent_ids = graph.edges.active.where(to_node_id: node.id).pluck(:from_node_id)
 
       graph.mutate!(turn_id: node.turn_id) do |m|
         task = m.create_node(
@@ -20,6 +21,10 @@ class DAG::LaneBranchAndMergeFlowTest < ActiveSupport::TestCase
           metadata: {}
         )
 
+        parent_ids.each do |parent_id|
+          parent = graph.nodes.active.find(parent_id)
+          m.create_edge(from_node: parent, to_node: task, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
+        end
         m.create_edge(from_node: task, to_node: node, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
       end
 

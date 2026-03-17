@@ -2,13 +2,20 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import MessageFormController from "../../app/javascript/controllers/message_form_controller"
 
 class FakeFormElement {
-  constructor(action, textarea) {
+  constructor(action, textarea, modelSelect, permissionSelect, composerDraftUpdatedAtInput) {
     this.action = action
     this._textarea = textarea
+    this._modelSelect = modelSelect
+    this._permissionSelect = permissionSelect
+    this._composerDraftUpdatedAtInput = composerDraftUpdatedAtInput
   }
 
   querySelector(selector) {
-    return selector === "textarea" ? this._textarea : null
+    if (selector === "textarea") return this._textarea
+    if (selector === 'select[name="model_ref"]') return this._modelSelect
+    if (selector === 'select[name="conversation[permission_mode]"]') return this._permissionSelect
+    if (selector === 'input[name="composer_draft_updated_at"]') return this._composerDraftUpdatedAtInput
+    return null
   }
 
   requestSubmit() {}
@@ -55,12 +62,28 @@ class FakeFileInput {
   }
 }
 
+class FakeSelectElement {
+  constructor(value = "") {
+    this.value = value
+  }
+}
+
+class FakeHiddenInput {
+  constructor(value = "") {
+    this.value = value
+  }
+}
+
 class FakeFormData {
   constructor(form) {
     this._entries = []
     const content = form?.querySelector?.("textarea")?.value
     if (typeof content === "string") {
       this._entries.push(["content", content])
+    }
+    const composerDraftUpdatedAt = form?.querySelector?.('input[name="composer_draft_updated_at"]')?.value
+    if (typeof composerDraftUpdatedAt === "string" && composerDraftUpdatedAt.length > 0) {
+      this._entries.push(["composer_draft_updated_at", composerDraftUpdatedAt])
     }
   }
 
@@ -89,6 +112,7 @@ const originalDocument = globalThis.document
 const originalHTMLFormElement = globalThis.HTMLFormElement
 const originalFormData = globalThis.FormData
 const originalDataTransfer = globalThis.DataTransfer
+const originalFetch = globalThis.fetch
 
 describe("MessageFormController", () => {
   beforeEach(() => {
@@ -99,6 +123,8 @@ describe("MessageFormController", () => {
       dispatchEvent() {},
       addEventListener() {},
       removeEventListener() {},
+      setTimeout,
+      clearTimeout,
     }
     globalThis.document = {
       querySelector() {
@@ -113,6 +139,69 @@ describe("MessageFormController", () => {
     globalThis.HTMLFormElement = originalHTMLFormElement
     globalThis.FormData = originalFormData
     globalThis.DataTransfer = originalDataTransfer
+    globalThis.fetch = originalFetch
+  })
+
+  test("draftChanged autosaves content and runtime settings to the composer draft endpoint", async () => {
+    const requests = []
+    const { controller } = buildController({
+      textareaValue: "Draft in progress",
+      files: [],
+      modelValue: "dev/mock-model",
+      permissionValue: "conservative",
+    })
+
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url, options })
+      return { ok: true }
+    }
+
+    defineValue(controller, "draftSaveDelayMs", 0)
+
+    controller.draftChanged()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(requests).toHaveLength(1)
+    expect(requests[0].url).toBe("/conversations/1/composer_draft")
+    expect(requests[0].options.method).toBe("PATCH")
+    const payload = JSON.parse(requests[0].options.body)
+    expect(payload.composer_draft.updated_at).toEqual(expect.any(String))
+    expect(payload).toEqual({
+      composer_draft: {
+        content: "Draft in progress",
+        model_ref: "dev/mock-model",
+        permission_mode: "conservative",
+        updated_at: payload.composer_draft.updated_at,
+      },
+    })
+  })
+
+  test("submit clears a pending composer draft autosave before the send begins", async () => {
+    const requests = []
+    const { controller, form } = buildController({
+      textareaValue: "Send immediately",
+      files: [],
+      modelValue: "dev/mock-model",
+      permissionValue: "conservative",
+    })
+
+    globalThis.fetch = async (url, options) => {
+      requests.push({ url, options })
+      return { ok: true }
+    }
+
+    defineValue(controller, "draftSaveDelayMs", 0)
+
+    controller.runtimeSettingChanged()
+    controller.submit({
+      target: form,
+      preventDefault() {},
+    })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(requests).toEqual([])
+    expect(controller.submitInFlight).toBe(true)
+    expect(controller.submittedDraft).toBe("Send immediately")
   })
 
   test("submit blocks attachment sends while another request is in flight", () => {
@@ -273,10 +362,13 @@ describe("MessageFormController", () => {
   })
 })
 
-function buildController({ textareaValue, files }) {
+function buildController({ textareaValue, files, modelValue = "openai/gpt-5.4", permissionValue = "default" }) {
   const textarea = new FakeTextAreaElement(textareaValue)
   const attachmentInput = new FakeFileInput(files)
-  const form = new FakeFormElement("/conversations/1/messages", textarea)
+  const modelSelect = new FakeSelectElement(modelValue)
+  const permissionSelect = new FakeSelectElement(permissionValue)
+  const composerDraftUpdatedAtInput = new FakeHiddenInput("")
+  const form = new FakeFormElement("/conversations/1/messages", textarea, modelSelect, permissionSelect, composerDraftUpdatedAtInput)
   const controller =
     new MessageFormController({
       application: {},
@@ -301,6 +393,8 @@ function buildController({ textareaValue, files }) {
   defineValue(controller, "textareaTarget", textarea)
   defineValue(controller, "hasAttachmentInputTarget", true)
   defineValue(controller, "attachmentInputTarget", attachmentInput)
+  defineValue(controller, "hasComposerDraftUpdatedAtInputTarget", true)
+  defineValue(controller, "composerDraftUpdatedAtInputTarget", composerDraftUpdatedAtInput)
   defineValue(controller, "hasStatusRailTarget", false)
   defineValue(controller, "hasEditNodeIdInputTarget", false)
   defineValue(controller, "hasEditModeTarget", false)
@@ -308,8 +402,11 @@ function buildController({ textareaValue, files }) {
   defineValue(controller, "hasQueueAlertExpandedTarget", false)
   defineValue(controller, "hasQueueToggleButtonTarget", false)
   defineValue(controller, "hasQueueToggleIconTarget", false)
+  defineValue(controller, "hasComposerDraftUrlValue", true)
+  defineValue(controller, "composerDraftUrlValue", "/conversations/1/composer_draft")
+  defineValue(controller, "draftSaveDelayMs", 250)
 
-  return { controller, textarea, attachmentInput, form }
+  return { controller, textarea, attachmentInput, form, modelSelect, permissionSelect, composerDraftUpdatedAtInput }
 }
 
 function fakeFile(name, size) {

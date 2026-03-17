@@ -515,25 +515,27 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
 
     with_env("SIMPLE_INFERENCE_BASE_URL" => nil, "SIMPLE_INFERENCE_API_KEY" => nil) do
-      with_rails_env("development") do
-        runtime =
-          Cybros::AgentRuntimeResolver.runtime_for(
-            node: node,
-            provider: Struct.new(:name).new("stub"),
-            base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
-            instrumenter: AgentCore::Observability::NullInstrumenter.new,
-          )
+      with_default_agent_workspace_root(RuntimeSetting::TEST_AGENT_WORKSPACE_ROOT) do
+        with_rails_env("development") do
+          runtime =
+            Cybros::AgentRuntimeResolver.runtime_for(
+              node: node,
+              provider: Struct.new(:name).new("stub"),
+              base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+              instrumenter: AgentCore::Observability::NullInstrumenter.new,
+            )
 
-        assert runtime.tools_registry.include?("memory_search")
-        assert runtime.tools_registry.include?("memory_get")
-        assert runtime.tools_registry.include?("memory_store")
-        assert runtime.tools_registry.include?("web_search")
-        assert runtime.tools_registry.include?("web_fetch")
-        refute runtime.tools_registry.include?("memory_forget")
-        assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
+          assert runtime.tools_registry.include?("memory_search")
+          assert runtime.tools_registry.include?("memory_get")
+          assert runtime.tools_registry.include?("memory_store")
+          assert runtime.tools_registry.include?("web_search")
+          assert runtime.tools_registry.include?("web_fetch")
+          refute runtime.tools_registry.include?("memory_forget")
+          assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
+        end
       end
     end
   end
@@ -542,25 +544,27 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     node = build_pending_agent_node(metadata: { "agent" => { "agent_profile" => "coding" } })
 
     with_env("SIMPLE_INFERENCE_BASE_URL" => "http://memory.example", "SIMPLE_INFERENCE_API_KEY" => nil) do
-      with_rails_env("development") do
-        runtime =
-          Cybros::AgentRuntimeResolver.runtime_for(
-            node: node,
-            provider: Struct.new(:name).new("stub"),
-            base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
-            instrumenter: AgentCore::Observability::NullInstrumenter.new,
-          )
+      with_default_agent_workspace_root(RuntimeSetting::TEST_AGENT_WORKSPACE_ROOT) do
+        with_rails_env("development") do
+          runtime =
+            Cybros::AgentRuntimeResolver.runtime_for(
+              node: node,
+              provider: Struct.new(:name).new("stub"),
+              base_tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+              instrumenter: AgentCore::Observability::NullInstrumenter.new,
+            )
 
-        assert runtime.tools_registry.include?("memory_search")
-        assert runtime.tools_registry.include?("memory_get")
-        assert runtime.tools_registry.include?("memory_store")
-        assert runtime.tools_registry.include?("web_search")
-        assert runtime.tools_registry.include?("web_fetch")
-        refute runtime.tools_registry.include?("memory_forget")
-        assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
-        assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
+          assert runtime.tools_registry.include?("memory_search")
+          assert runtime.tools_registry.include?("memory_get")
+          assert runtime.tools_registry.include?("memory_store")
+          assert runtime.tools_registry.include?("web_search")
+          assert runtime.tools_registry.include?("web_fetch")
+          refute runtime.tools_registry.include?("memory_forget")
+          assert_equal :agent_owned, runtime.tools_registry.find("memory_search").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("memory_store").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("web_search").metadata[:source]
+          assert_equal :agent_owned, runtime.tools_registry.find("web_fetch").metadata[:source]
+        end
       end
     end
   end

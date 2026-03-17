@@ -433,6 +433,15 @@ module Cybros
       models = provider_spec.fetch("models", {})
       return nil unless models.is_a?(Hash)
 
+      canonical_model_key = model_key.tr("/", "-")
+      canonical_model_spec = models[canonical_model_key]
+      if canonical_model_spec.is_a?(Hash)
+        canonical_api_model = canonical_model_spec.fetch("api_model", "").to_s
+        if canonical_api_model == model_key
+          return { model_ref: "#{provider_key}/#{canonical_model_key}", api_model: canonical_api_model }
+        end
+      end
+
       matches =
         models.filter_map do |candidate_model_key, model_spec|
           next unless model_spec.is_a?(Hash)
@@ -442,6 +451,11 @@ module Cybros
 
           { model_ref: "#{provider_key}/#{candidate_model_key}", api_model: api_model }
         end
+
+      if matches.many?
+        preferred = matches.reject { |match| match.fetch(:model_ref).include?("-live-acceptance") }
+        matches = preferred if preferred.any?
+      end
 
       return nil unless matches.one?
 
@@ -1050,9 +1064,7 @@ module Cybros
       AgentCore::Resources::Tools::Policy::Profiled.new(
         allowed: ["*"],
         hidden: ["compact_context", "merge_lane_state"],
-        context_allowed: lambda { |context|
-          %w[advise_compact enqueue_compact].include?(context_budget_action(context)) ? ["compact_context"] : []
-        },
+        context_allowed: ->(context) { context_budget_action(context) == "advise_compact" ? ["compact_context"] : [] },
         delegate: delegate,
         tool_groups: nil,
       )

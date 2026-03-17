@@ -453,7 +453,7 @@ class Cybros::AgentRuntimeResolverToolPolicyTest < ActiveSupport::TestCase
     end
   end
 
-  test "compact_context becomes visible when context pressure escalates to enqueue_compact" do
+  test "compact_context stays hidden when context pressure escalates to enqueue_compact" do
     conversation = create_conversation!(metadata: { "agent" => { "agent_profile" => "coding" } })
     node = conversation.append_user_message!(content: "Hello").fetch(:agent_node)
     runtime = build_runtime(node: node)
@@ -469,7 +469,7 @@ class Cybros::AgentRuntimeResolverToolPolicyTest < ActiveSupport::TestCase
 
     visible_tools = runtime.tool_policy.filter(tools: runtime.tools_registry.definitions(format: :generic), context: context)
 
-    assert_includes visible_tools.map { |tool| tool[:name] || tool["name"] }, "compact_context"
+    refute_includes visible_tools.map { |tool| tool[:name] || tool["name"] }, "compact_context"
   end
 
   private

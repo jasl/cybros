@@ -17,15 +17,10 @@ module TestSupport
       end
     end
 
-    attr_reader :calls, :required_bearer, :targets, :prompt_buffer_entries
+    attr_reader :calls, :required_bearer, :prompt_buffer_entries
 
-    def initialize(required_bearer: "secret://callback", proposal_decision: "confirm", targets: nil, prompt_buffer_entries: nil, memory_document: "", memory_documents: nil)
+    def initialize(required_bearer: "secret://callback", prompt_buffer_entries: nil, memory_document: "", memory_documents: nil)
       @required_bearer = required_bearer
-      @proposal_decision = proposal_decision
-      @targets =
-        Array(targets || default_targets).map do |target|
-          deep_copy(target)
-        end
       @prompt_buffer_entries =
         Array(prompt_buffer_entries).map do |entry|
           deep_copy(entry)
@@ -121,17 +116,6 @@ module TestSupport
           entries.select! { |entry| entry["buffer_name"].to_s == buffer_name }
         end
         { "entries" => entries }
-      when "execution_target.list"
-        { "targets" => deep_copy(targets) }
-      when "execution_target.get"
-        { "target" => deep_copy(targets.find { |target| target["id"] == params["execution_target_id"] }) }
-      when "execution_target.propose"
-        {
-          "switch_decision" => {
-            "decision" => @proposal_decision,
-            "execution_target_id" => params["execution_target_id"]
-          }
-        }
       when "tool_surface.manifest"
         {
           "capability_registry_snapshot_id" => params["capability_registry_snapshot_id"],
@@ -194,23 +178,6 @@ module TestSupport
 
     def bound_port
       @server&.config&.fetch(:Port)
-    end
-
-    def default_targets
-      [
-        {
-          "id" => "target-primary",
-          "name" => "Project Primary",
-          "status" => "active",
-          "sandboxed" => true
-        },
-        {
-          "id" => "target-alternate",
-          "name" => "Project Alternate",
-          "status" => "active",
-          "sandboxed" => true
-        }
-      ]
     end
 
     def memory_result(params)

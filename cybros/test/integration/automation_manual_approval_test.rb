@@ -13,7 +13,7 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "planning" => {
                 "approval_request" => {
                   "status" => "pending_confirmation",
@@ -50,7 +50,7 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "planning" => {
                 "approval_request" => {
                   "status" => "pending_confirmation",
@@ -93,7 +93,7 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "planning" => {
                 "approval_request" => {
                   "status" => "pending_confirmation",
@@ -136,7 +136,7 @@ class AutomationManualApprovalTest < ActiveSupport::TestCase
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "planning" => {
                 "approval_request" => {
                   "status" => "pending_confirmation",

@@ -27,9 +27,6 @@ class ConversationBootstrapDispatchTest < ActiveSupport::TestCase
       assert_predicate conversation.workspace_root_path, :directory?
       assert_predicate conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id), :directory?
       assert_equal Pathname.new(@workspace_root).join("bundled", "claw", "conversations", conversation.id).cleanpath, conversation.workspace_root_path
-      assert_nil conversation.logical_workspace_key
-      assert_nil conversation.logical_workspace_root_path
-      assert_nil conversation.logical_workspace_initialized_at
 
       first_path = conversation.workspace_root_path
       first_lane_path = conversation.lane_workspace_root_path(lane_id: conversation.chat_lane.id)

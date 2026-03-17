@@ -1,7 +1,7 @@
 module Cybros
   module Agents
     module Claw
-      class RpcDispatcher
+      class RPCDispatcher
         def initialize(application:)
           @application = application
         end

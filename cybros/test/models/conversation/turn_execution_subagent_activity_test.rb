@@ -1,7 +1,7 @@
 require "test_helper"
 
 class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
-  test "projects parent-side subagent run and wait tasks as subagent activities with runtime-owned subagent links" do
+  test "projects the latest parent-side subagent state with runtime-owned subagent links" do
     conversation = create_conversation!(title: "Chat")
     graph = conversation.root_graph
 
@@ -11,22 +11,21 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
 
     child = create_subagent_runtime_conversation!(user: conversation.user, hidden_task_name: "child_internal_task")
 
-    run_task =
-      create_subagent_task!(
-        graph: graph,
-        lane_id: conversation.chat_lane.id,
-        turn_id: agent.turn_id,
-        state: DAG::Node::FINISHED,
-        name: "subagent_run",
-        tool_call_id: "tc_run",
-        arguments: { "name" => "Research Agent" },
-        payload: subagent_payload(
-          child: child,
-          status: "running",
-          counts: { "pending" => 0, "running" => 1, "awaiting_approval" => 0 },
-          transcript_lines: ["U:child: hello", "A:child: investigating"],
-        ),
-      )
+    create_subagent_task!(
+      graph: graph,
+      lane_id: conversation.chat_lane.id,
+      turn_id: agent.turn_id,
+      state: DAG::Node::FINISHED,
+      name: "subagent_run",
+      tool_call_id: "tc_run",
+      arguments: { "name" => "Research Agent" },
+      payload: subagent_payload(
+        child: child,
+        status: "running",
+        counts: { "pending" => 0, "running" => 1, "awaiting_approval" => 0 },
+        transcript_lines: ["U:child: hello", "A:child: investigating"],
+      ),
+    )
     wait_task =
       create_subagent_task!(
         graph: graph,
@@ -51,22 +50,14 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     execution = conversation.turn_execution_for_turn_id(agent.turn_id)
 
     assert_equal "running", execution.fetch("status")
-    assert_equal ["subagent", "subagent"], execution.fetch("activities").map { |activity| activity.fetch("kind") }
+    assert_equal ["subagent"], execution.fetch("activities").map { |activity| activity.fetch("kind") }
 
-    run_activity, wait_activity = execution.fetch("activities")
-
-    assert_equal run_task.id, run_activity.fetch("source_node_id")
-    assert_equal "Research Agent", run_activity.fetch("title")
-    assert_equal "running", run_activity.fetch("status")
-    assert_equal "execution", run_activity.fetch("phase")
-    assert_equal child.metadata.dig("subagent", "subagent_id"), run_activity.dig("links", "subagent_id")
-    assert_equal "running", run_activity.dig("snapshot", "status")
-    assert_equal 1, run_activity.dig("snapshot", "counts", "running")
-    assert_equal ["U:child: hello", "A:child: investigating"], run_activity.dig("snapshot", "transcript_lines")
+    wait_activity = execution.fetch("activities").sole
 
     assert_equal wait_task.id, wait_activity.fetch("source_node_id")
     assert_equal "completed", wait_activity.fetch("status")
     assert_equal "terminal", wait_activity.fetch("phase")
+    assert_equal child.metadata.dig("subagent", "subagent_id"), wait_activity.dig("links", "subagent_id")
     assert_equal "idle", wait_activity.dig("snapshot", "status")
     assert_equal "settled", wait_activity.dig("snapshot", "wait_status")
     assert_equal false, wait_activity.dig("snapshot", "timed_out")
@@ -129,6 +120,62 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     assert_equal "timeout", debug_activity.dig("diagnostics", "subagent", "wait_status")
     assert_equal true, debug_activity.dig("diagnostics", "subagent", "timed_out")
     assert_equal ["U:child: hello", "A:child: partial"], debug_activity.dig("diagnostics", "subagent", "transcript_lines")
+  end
+
+  test "collapses settled subagent wait over the initial run snapshot once the parent turn finishes" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    child = create_subagent_runtime_conversation!(user: conversation.user)
+
+    create_subagent_task!(
+      graph: graph,
+      lane_id: conversation.chat_lane.id,
+      turn_id: agent.turn_id,
+      state: DAG::Node::FINISHED,
+      name: "subagent_run",
+      tool_call_id: "tc_run",
+      arguments: { "name" => "Research Agent" },
+      payload: subagent_payload(
+        child: child,
+        status: "pending",
+        counts: { "pending" => 1, "running" => 0, "awaiting_approval" => 0 },
+        transcript_lines: ["U:child: hello", "A:"],
+      ),
+    )
+    wait_task =
+      create_subagent_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::FINISHED,
+        name: "subagent_wait",
+        tool_call_id: "tc_wait",
+        arguments: { "subagent_id" => child.metadata.dig("subagent", "subagent_id") },
+        payload: subagent_payload(
+          child: child,
+          status: "idle",
+          counts: { "pending" => 0, "running" => 0, "awaiting_approval" => 0 },
+          transcript_lines: ["U:child: hello", "A:child: done"],
+          wait_status: "settled",
+          timed_out: false,
+          timeout_ms: 5,
+          elapsed_ms: 1,
+        ),
+      )
+    agent.mark_finished!(content: "done")
+
+    execution = conversation.turn_execution_for_turn_id(agent.turn_id)
+
+    assert_equal "completed", execution.fetch("status")
+    assert_equal "terminal", execution.fetch("phase")
+    assert_equal [wait_task.id], execution.fetch("activities").map { |activity| activity.fetch("source_node_id") }
+    assert_equal "completed", execution.fetch("activities").sole.fetch("status")
+    assert_equal "settled", execution.fetch("activities").sole.dig("snapshot", "wait_status")
   end
 
   private

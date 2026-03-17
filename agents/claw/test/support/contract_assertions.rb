@@ -91,8 +91,7 @@ module TestSupport
                         "digest" => "sha256:abc123",
                         "signed_download_url" => "https://example.test/rails/active_storage/blobs/redirect/signed/error.png",
                         "workspace" => {
-                          "conversation_id" => "conversation:test-default",
-                          "logical_workspace_id" => "workspace:test-default"
+                          "conversation_id" => "conversation:test-default"
                         }
                       }
                     ]
@@ -275,7 +274,6 @@ module TestSupport
                     id: 17,
                     method: "before_finalize_output",
                     params: {
-                      "execution_target_id" => "target-primary",
                       "capability_registry_snapshot_id" => "csnap_fixture",
                       "execution_context" => {
                         "conversation_id" => "conversation:test-default"
@@ -571,13 +569,12 @@ module TestSupport
                   "content_type" => "image/png",
                   "byte_size" => 128,
                   "digest" => "sha256:abc123",
-                  "signed_download_url" => "https://example.test/rails/active_storage/blobs/redirect/signed/error.png",
-                  "workspace" => {
-                    "conversation_id" => "conversation:test-default",
-                    "logical_workspace_id" => "workspace:test-default"
+                    "signed_download_url" => "https://example.test/rails/active_storage/blobs/redirect/signed/error.png",
+                    "workspace" => {
+                      "conversation_id" => "conversation:test-default"
+                    }
                   }
-                }
-              ]
+                ]
             }
           )
 
@@ -836,7 +833,6 @@ module TestSupport
             id: 17,
             method: "before_finalize_output",
             params: {
-              "execution_target_id" => "target-primary",
               "capability_registry_snapshot_id" => "csnap_fixture",
               "execution_context" => {
                 "conversation_id" => "conversation:test-default"

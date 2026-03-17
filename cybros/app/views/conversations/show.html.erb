@@ -94,13 +94,15 @@
       </div>
 
       <% message_form_id = dom_id(@conversation, :message_form) %>
-      <% permission_form_id = dom_id(@conversation, :permission_mode_form) %>
-
 	      <%= form_with url: conversation_messages_path(@conversation),
 	        method: :post,
 	        multipart: true,
 	        html: { id: message_form_id },
-	        data: { controller: "message-form", action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd" } do %>
+	        data: {
+            controller: "message-form",
+            action: "submit->message-form#submit turbo:submit-end->message-form#submitEnd",
+            message_form_composer_draft_url_value: conversation_composer_draft_path(@conversation),
+          } do %>
         <% needs_model_reselection = @model_picker_alert_message.present? && @selected_model_ref.blank? %>
         <% if @model_picker_alert_message.present? %>
           <div role="alert" class="alert alert-warning alert-soft text-sm">
@@ -165,6 +167,11 @@
           value=""
           disabled
           data-message-form-target="editNodeIdInput">
+        <input
+          type="hidden"
+          name="composer_draft_updated_at"
+          value="<%= @composer_draft_updated_at %>"
+          data-message-form-target="composerDraftUpdatedAtInput">
 
         <div
           data-testid="conversation-composer-input"
@@ -187,7 +194,7 @@
             aria-label="Message"
             data-message-form-target="textarea"
             data-chat-hotkeys-target="textarea"
-            data-action="keydown->message-form#keydown input->message-form#autoResize"></textarea>
+            data-action="keydown->message-form#keydown input->message-form#draftChanged"><%= @composer_draft_content %></textarea>
           <button type="submit" class="btn btn-neutral btn-circle btn-sm shrink-0 mb-0.5" aria-label="Send">
             <span class="icon-[lucide--arrow-up] size-4"></span>
           </button>
@@ -206,6 +213,7 @@
                   data-testid="conversation-composer-model-picker"
                   aria-label="Model"
                   form="<%= message_form_id %>"
+                  data-action="change->message-form#runtimeSettingChanged"
                   <%= needs_model_reselection ? "required" : nil %>
                   class="select select-bordered select-xs w-full min-w-0">
                   <% if needs_model_reselection %>
@@ -238,13 +246,12 @@
             </div>
             <select
               name="conversation[permission_mode]"
-              form="<%= permission_form_id %>"
               data-testid="conversation-composer-permission-picker"
               aria-label="Permissions"
-              onchange="this.form.requestSubmit()"
+              data-action="change->message-form#runtimeSettingChanged"
               class="select select-bordered select-xs w-full">
               <% @permission_mode_options.each do |value, label| %>
-                <option value="<%= value %>" <%= @conversation.permission_mode == value ? "selected" : nil %>>
+                <option value="<%= value %>" <%= @selected_permission_mode == value ? "selected" : nil %>>
                   <%= label %>
                 </option>
               <% end %>
@@ -263,9 +270,6 @@
             </button>
           </div>
         </div>
-      <% end %>
-
-      <%= form_with model: @conversation, url: conversation_path(@conversation), method: :patch, html: { id: permission_form_id, class: "hidden" } do %>
       <% end %>
 
       <% if @selected_agent_stale %>

@@ -33,6 +33,7 @@ Rails.application.routes.draw do
   post "agent_rpc/callbacks/:scope_type/:scope_id", to: "agent_rpc/callbacks#create", as: :agent_rpc_callback
 
   resources :conversations, only: %i[index show create update] do
+    resource :composer_draft, only: :update, controller: "conversation_composer_drafts"
     get :composer_status, on: :member
     post :branch, on: :member
     post :regenerate, on: :member

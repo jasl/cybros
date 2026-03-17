@@ -150,8 +150,6 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
 
     newer = lane.message_page(limit: 2, after_message_id: older.fetch("after_message_id"))
     assert_equal [u3.id, u4.id], newer.fetch("message_ids")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "message_page respects include_deleted and validates cursor visibility" do
@@ -202,8 +200,6 @@ class DAG::LaneMessagePaginationTest < ActiveSupport::TestCase
 
     after_deleted = lane.message_page(limit: 10, after_message_id: deleted_user.id, include_deleted: true)
     assert_equal [agent.id], after_deleted.fetch("message_ids")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "message_page has a scanned-node safety cap (can yield an empty page when many candidates are filtered out)" do

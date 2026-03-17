@@ -17,19 +17,21 @@ module RunDrafts
       tool_surface.manifest
     ].freeze
 
-    def self.open_and_prepare!(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:)
+    def self.open_and_prepare!(conversation:, initiated_by_user:, selected_model_ref:, permission_mode: nil, trigger_snapshot:)
       new(
         conversation: conversation,
         initiated_by_user: initiated_by_user,
         selected_model_ref: selected_model_ref,
+        permission_mode: permission_mode,
         trigger_snapshot: trigger_snapshot,
       ).open_and_prepare!
     end
 
-    def initialize(conversation:, initiated_by_user:, selected_model_ref:, trigger_snapshot:)
+    def initialize(conversation:, initiated_by_user:, selected_model_ref:, permission_mode: nil, trigger_snapshot:)
       @conversation = conversation
       @initiated_by_user = initiated_by_user
       @selected_model_ref = selected_model_ref.to_s
+      @permission_mode = permission_mode.to_s
       @trigger_snapshot = trigger_snapshot.is_a?(Hash) ? trigger_snapshot.deep_stringify_keys : {}
     end
 
@@ -80,7 +82,7 @@ module RunDrafts
 
     private
 
-      attr_reader :conversation, :initiated_by_user, :selected_model_ref, :trigger_snapshot
+      attr_reader :conversation, :initiated_by_user, :selected_model_ref, :permission_mode, :trigger_snapshot
 
       def create_draft!
         agent = conversation.agent
@@ -92,7 +94,12 @@ module RunDrafts
             deployment: runtime_binding,
             agent: agent,
           ).fetch(:recognized_deployment)
-        resolved = RuntimeGovernance::DraftGovernorResolver.resolve!(entrypoint: conversation, selected_model_ref: selected_model_ref)
+        resolved =
+          RuntimeGovernance::DraftGovernorResolver.resolve!(
+            entrypoint: conversation,
+            selected_model_ref: selected_model_ref,
+            permission_mode: permission_mode,
+          )
 
         RunDraft.create!(
           conversation: conversation,

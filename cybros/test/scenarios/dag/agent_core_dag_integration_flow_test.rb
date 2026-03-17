@@ -164,7 +164,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -238,7 +238,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -315,7 +315,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -391,7 +391,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -470,7 +470,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -575,7 +575,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
         assert_equal [agent.id], claimed.map(&:id)
-        DAG::Runner.run_node!(agent.id)
+        run_node_and_materialize!(graph: graph, node_id: agent.id)
 
         agent.reload
         resolutions = agent.metadata.dig("tool_loop", "tool_name_resolution")
@@ -590,24 +590,29 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
           Array(resolutions).first
         )
 
-        tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
-      assert_equal 2, tasks.length
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
+      assert_equal 1, tasks.length
+      assert_equal "echo", tasks.first.body_input.fetch("name")
+      assert_equal "original", tasks.first.body_input.fetch("arguments_resolution")
+      assert_nil tasks.first.body_input["repair"]
 
-      names = tasks.map { |task| task.body_input.fetch("name") }.sort
-      assert_equal ["echo", "math_add"], names
+      next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
+
+      edge_types = graph.edges.active.where(to_node_id: next_agent.id).pluck(:edge_type).sort
+      assert_equal [DAG::Edge::SEQUENCE], edge_types
+
+      drain_serial_task_queue!(graph: graph, task_count: 2, claimed_by: "test")
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
+      assert_equal 2, tasks.length
+      assert_equal ["echo", "math_add"], tasks.map { |task| task.body_input.fetch("name") }.sort
       tasks.each do |task|
         assert_equal "original", task.body_input.fetch("arguments_resolution")
         assert_nil task.body_input["repair"]
       end
 
-      next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
-
       edge_types = graph.edges.active.where(to_node_id: next_agent.id).pluck(:edge_type).sort
       assert_equal [DAG::Edge::SEQUENCE, DAG::Edge::SEQUENCE], edge_types
-
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal tasks.map(&:id), claimed.map(&:id)
-      tasks.each { |task| DAG::Runner.run_node!(task.id) }
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [next_agent.id], claimed.map(&:id)
@@ -734,7 +739,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       name_repair = agent.metadata.dig("tool_loop", "tool_name_repair")
@@ -845,7 +850,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -859,13 +864,14 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       assert_equal 3, stored_message.fetch("tool_calls").length
 
       tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
-      assert_equal 3, tasks.length
+      assert_equal 1, tasks.length
 
       next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
 
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal tasks.map(&:id), claimed.map(&:id)
-      tasks.each { |task| DAG::Runner.run_node!(task.id) }
+      drain_serial_task_queue!(graph: graph, task_count: 3, claimed_by: "test")
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
+      assert_equal 3, tasks.length
 
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [next_agent.id], claimed.map(&:id)
@@ -978,7 +984,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal "echo_unsafe", task.body_input.fetch("requested_name")
@@ -1056,7 +1062,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal DAG::Node::AWAITING_APPROVAL, task.state
@@ -1156,7 +1162,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal DAG::Node::AWAITING_APPROVAL, task.state
@@ -1264,7 +1270,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       next_agent = graph.nodes.active.where(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING).where.not(id: agent.id).sole
@@ -1359,7 +1365,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal "mcp", task.metadata.fetch("source")
@@ -1461,17 +1467,18 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       system_prompt = provider.calls.fetch(0).fetch(:messages).first.text
       assert_includes system_prompt, "<available_skills>"
 
       tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
-      assert_equal 2, tasks.length
+      assert_equal 1, tasks.length
 
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
-      assert_equal tasks.map(&:id), claimed.map(&:id)
-      tasks.each { |task| DAG::Runner.run_node!(task.id) }
+      drain_serial_task_queue!(graph: graph, task_count: 2, claimed_by: "test")
+
+      tasks = graph.nodes.active.where(node_type: Messages::Task.node_type_key).order(:id).to_a
+      assert_equal 2, tasks.length
 
       good = tasks.first.reload.body_output.dig("result")
       bad = tasks.last.reload.body_output.dig("result")
@@ -1545,7 +1552,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       system_prompt = provider.calls.fetch(0).fetch(:messages).first.text
       assert_includes system_prompt, "<relevant_context>"
@@ -1644,7 +1651,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       compact_task = graph.nodes.active.where(node_type: Messages::Task.node_type_key, turn_id: agent.turn_id).sole
       assert_equal "compact_context", compact_task.body_input["name"]
@@ -1774,7 +1781,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       first_call = provider.calls.fetch(0)
       tool_names = Array(first_call.fetch(:tools)).map { |tool| tool.dig(:function, :name) || tool.dig("function", "name") || tool[:name] || tool["name"] }
@@ -1899,7 +1906,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal "soft_limit_reached", agent.metadata.dig("context_budget", "budget_state")
@@ -2043,7 +2050,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal "near_hard_cap", agent.metadata.dig("context_budget", "budget_state")
@@ -2182,7 +2189,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal "forced_fit", agent.metadata.dig("context_budget", "budget_state")
@@ -2283,7 +2290,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -2352,7 +2359,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -2419,7 +2426,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -2509,7 +2516,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal DAG::Node::FINISHED, task.state
@@ -2587,7 +2594,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -2658,7 +2665,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -2722,7 +2729,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -2788,7 +2795,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -2853,7 +2860,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -2954,7 +2961,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       repair = agent.metadata.dig("tool_loop", "repair")
@@ -3072,7 +3079,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       repair = agent.metadata.dig("tool_loop", "repair")
@@ -3186,7 +3193,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal 0, executed
@@ -3278,7 +3285,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
 
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::ERRORED, agent.state
@@ -3345,7 +3352,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       task = graph.nodes.active.where(node_type: Messages::Task.node_type_key).sole
       assert_equal DAG::Node::FINISHED, task.state
@@ -3432,7 +3439,7 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
     begin
       claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
       assert_equal [agent.id], claimed.map(&:id)
-      DAG::Runner.run_node!(agent.id)
+      run_node_and_materialize!(graph: graph, node_id: agent.id)
 
       agent.reload
       assert_equal DAG::Node::FINISHED, agent.state
@@ -3448,4 +3455,21 @@ class DAG::AgentCoreDAGIntegrationFlowTest < ActiveSupport::TestCase
       DAG.executor_registry = original_registry
     end
   end
+
+  private
+
+    def run_node_and_materialize!(graph:, node_id:)
+      DAG::Runner.run_node!(node_id)
+      TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+    end
+
+    def drain_serial_task_queue!(graph:, task_count:, claimed_by:)
+      task_count.times do
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: claimed_by)
+        assert_equal 1, claimed.length
+        task = claimed.sole
+        assert_equal Messages::Task.node_type_key, task.node_type
+        DAG::Runner.run_node!(task.id)
+      end
+    end
 end

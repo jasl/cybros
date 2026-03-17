@@ -8,13 +8,14 @@ test.describe("Conversation mock LLM: error recovery flow", () => {
 
   test("mock error is surfaced in the transcript and the app remains usable without reload", async ({ page }) => {
     test.setTimeout(150_000)
+    const transcript = page.locator("[id^='messages_list_conversation_']")
 
     await openConversationWithMockRuntime(page, `E2E Error Retry ${Date.now()}`)
 
     await page.getByPlaceholder("Message…").fill('!mock error=500 message="boom" -- hello')
     await page.getByRole("button", { name: "Send" }).click()
 
-    await expect(page.getByText('!mock error=500 message="boom" -- hello')).toBeVisible({ timeout: 10_000 })
+    await expect(transcript.getByText('!mock error=500 message="boom" -- hello')).toBeVisible({ timeout: 10_000 })
 
     const errorWrapper = page.locator('div[id^="message_"]:has-text("Task notice: provider_error")')
     await expect(errorWrapper).toBeVisible({ timeout: 90_000 })
@@ -27,7 +28,7 @@ test.describe("Conversation mock LLM: error recovery flow", () => {
 
     await page.getByPlaceholder("Message…").fill("!md after retry")
     await page.getByRole("button", { name: "Send" }).click()
-    await expect(page.getByText("!md after retry")).toBeVisible({ timeout: 10_000 })
+    await expect(transcript.getByText("!md after retry")).toBeVisible({ timeout: 10_000 })
 
     const finalAgentWrapper = page.locator('div[id^="message_"]:has([data-role="agent-bubble"])').last()
     await expect(finalAgentWrapper).toBeVisible()

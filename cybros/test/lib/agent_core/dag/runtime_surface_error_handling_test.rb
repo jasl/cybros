@@ -674,7 +674,21 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
         kernel_registry_version: "kernel:v1",
         agent_key: program_id,
         agent_capabilities_version: "agent:v1",
-        kernel_tools: [],
+        kernel_tools: [
+          {
+            logical_tool_name: "compact_context",
+            implementation_ref: "kernel://compact_context",
+          },
+          {
+            logical_tool_name: "subagent_spawn",
+            implementation_ref: "kernel://subagent_spawn",
+          },
+          {
+            logical_tool_name: "subagent_run",
+            implementation_ref: "kernel://subagent_run",
+            execution_mode: "parallel_safe",
+          },
+        ],
         agent_tools: [
           {
             logical_tool_name: "subagent_spawn",

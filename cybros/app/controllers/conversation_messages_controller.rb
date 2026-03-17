@@ -95,7 +95,11 @@ class ConversationMessagesController < ApplicationController
     content = content.strip
     attachments = Array(params[:attachments]).flatten.compact
     edit_node_id = params.fetch(:edit_node_id, "").to_s.strip.presence
-    model_ref = params.fetch(:model_ref, "").to_s.strip.presence
+    submitted_permission_mode = params.dig(:conversation, :permission_mode).to_s.strip.presence
+    submitted_composer_draft_updated_at = params.fetch(:composer_draft_updated_at, "").to_s.strip.presence
+    composer_draft = @conversation.resolved_composer_draft
+    model_ref = params.fetch(:model_ref, "").to_s.strip.presence || composer_draft["model_ref"].to_s.strip.presence
+    permission_mode = submitted_permission_mode || composer_draft["permission_mode"].to_s.strip.presence || @conversation.permission_mode
     input_policy_override = params[:input_policy_override]
 
     if attachments.any? && edit_node_id.present?
@@ -115,6 +119,7 @@ class ConversationMessagesController < ApplicationController
         node_id: edit_node_id,
         content: content,
         model_ref: model_ref,
+        permission_mode: permission_mode,
         input_policy_override: input_policy_override,
       )
     else
@@ -123,9 +128,22 @@ class ConversationMessagesController < ApplicationController
         attachments: attachments,
         mode: :preview,
         model_ref: model_ref,
+        permission_mode: permission_mode,
         input_policy_override: input_policy_override,
       )
     end
+
+    update_attributes = {}
+    if permission_mode != @conversation.permission_mode
+      update_attributes[:permission_mode] = permission_mode
+    end
+    update_attributes[:composer_draft] =
+      if submitted_composer_draft_updated_at.present?
+        { "updated_at" => submitted_composer_draft_updated_at }
+      else
+        {}
+      end
+    @conversation.update!(update_attributes)
 
     respond_to do |format|
       format.turbo_stream { render_conversation_update_streams }

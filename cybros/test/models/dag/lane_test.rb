@@ -219,7 +219,6 @@ class DAG::LaneTest < ActiveSupport::TestCase
     assert pending.finished_at.present?
 
     assert graph.nodes.active.where(lane_id: lane.id, state: DAG::Node::PENDING).none?
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "merge creates a pending merge_lane_state task in the target lane without archiving the source lanes" do

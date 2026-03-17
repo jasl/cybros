@@ -6,9 +6,14 @@ import {
 } from "../lib/conversation_composer_state"
 
 export default class extends Controller {
+  static values = {
+    composerDraftUrl: String,
+  }
+
   static targets = [
     "textarea",
     "attachmentInput",
+    "composerDraftUpdatedAtInput",
     "statusRail",
     "editMode",
     "editModeLabel",
@@ -23,11 +28,15 @@ export default class extends Controller {
     this.defaultAction = this.element.action
     this.queueExpanded = false
     this.submitInFlight = false
+    this.draftSaveDelayMs = 250
+    this.pendingDraftSaveTimer = null
     this.submittedDraft = null
+    this.submittedComposerDraftUpdatedAt = null
     this.attachmentSelectionToken = 0
     this.submittedAttachmentSelectionToken = null
     this.pendingAttachmentRestoreFiles = null
     this.pendingSubmissions = []
+    this.currentComposerDraftUpdatedAt = this.#currentComposerDraftUpdatedAt()
     this.handleMessageEdit = this.handleMessageEdit.bind(this)
     window.addEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.autoResize()
@@ -35,6 +44,7 @@ export default class extends Controller {
   }
 
   disconnect() {
+    this.#clearDraftSaveTimer()
     window.removeEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.submittedAttachmentSelectionToken = null
     this.pendingAttachmentRestoreFiles = null
@@ -59,6 +69,7 @@ export default class extends Controller {
       return
     }
 
+    this.#clearDraftSaveTimer()
     this.#syncComposerState()
 
     if (this.submitInFlight && hasAttachments) {
@@ -79,6 +90,7 @@ export default class extends Controller {
     }
 
     this.submittedDraft = value
+    this.submittedComposerDraftUpdatedAt = this.#currentComposerDraftUpdatedAt()
     this.submittedAttachmentSelectionToken = this.#currentAttachmentSelectionToken()
     this.submitInFlight = true
   }
@@ -86,6 +98,15 @@ export default class extends Controller {
   attachmentInputChanged() {
     this.attachmentSelectionToken += 1
     this.pendingAttachmentRestoreFiles = null
+  }
+
+  draftChanged() {
+    this.autoResize()
+    this.#scheduleComposerDraftSave()
+  }
+
+  runtimeSettingChanged() {
+    this.#scheduleComposerDraftSave()
   }
 
   prepareAttachmentSelection(event) {
@@ -110,14 +131,17 @@ export default class extends Controller {
   async submitEnd(event) {
     const success = event.detail?.success === true
     const submittedDraft = this.submittedDraft
+    const submittedComposerDraftUpdatedAt = this.submittedComposerDraftUpdatedAt
     const submittedAttachmentSelectionToken = this.submittedAttachmentSelectionToken
     this.submittedDraft = null
+    this.submittedComposerDraftUpdatedAt = null
     this.submittedAttachmentSelectionToken = null
     this.submitInFlight = false
 
     if (success) {
       this.pendingAttachmentRestoreFiles = null
       this.#clearComposerDraftIfUnchanged(submittedDraft, submittedAttachmentSelectionToken)
+      this.#setComposerDraftUpdatedAt(submittedComposerDraftUpdatedAt)
       await this.#flushPendingSubmissions()
       return
     }
@@ -167,12 +191,15 @@ export default class extends Controller {
     if (this.hasEditModeLabelTarget) {
       this.editModeLabelTarget.textContent = "Editing your last message. Sending will regenerate the latest assistant reply."
     }
+
+    this.#scheduleComposerDraftSave()
   }
 
   cancelEdit(event) {
     event.preventDefault()
     this.#clearEditState()
     this.hasTextareaTarget && this.textareaTarget.focus()
+    this.#scheduleComposerDraftSave()
   }
 
   async editQueuedItem(event) {
@@ -194,6 +221,8 @@ export default class extends Controller {
       this.autoResize()
       this.textareaTarget.focus()
     }
+
+    this.#scheduleComposerDraftSave()
   }
 
   async steerQueuedItem(event) {
@@ -317,6 +346,24 @@ export default class extends Controller {
     return String(modelSelect?.value || "").trim()
   }
 
+  #currentPermissionMode() {
+    const permissionSelect = this.element.querySelector('select[name="conversation[permission_mode]"]')
+    return String(permissionSelect?.value || "").trim()
+  }
+
+  #currentComposerDraftUpdatedAt() {
+    const inputValue = this.hasComposerDraftUpdatedAtInputTarget ? this.composerDraftUpdatedAtInputTarget.value : ""
+    return String(this.currentComposerDraftUpdatedAt || inputValue || "").trim()
+  }
+
+  #setComposerDraftUpdatedAt(value) {
+    const normalizedValue = String(value || "").trim()
+    this.currentComposerDraftUpdatedAt = normalizedValue
+    if (this.hasComposerDraftUpdatedAtInputTarget) {
+      this.composerDraftUpdatedAtInputTarget.value = normalizedValue
+    }
+  }
+
   #interruptedOutputPolicyOverride() {
     const input = this.element.querySelector('input[name="interrupted_output_policy_override"]')
     return String(input?.value || "").trim()
@@ -334,6 +381,41 @@ export default class extends Controller {
 
   #csrfToken() {
     return document.querySelector("meta[name='csrf-token']")?.getAttribute("content")
+  }
+
+  #scheduleComposerDraftSave() {
+    if (!this.hasComposerDraftUrlValue) return
+
+    this.#setComposerDraftUpdatedAt(new Date().toISOString())
+    this.#clearDraftSaveTimer()
+    this.pendingDraftSaveTimer = window.setTimeout(() => {
+      this.pendingDraftSaveTimer = null
+      void this.#saveComposerDraft()
+    }, this.draftSaveDelayMs)
+  }
+
+  #clearDraftSaveTimer() {
+    if (!this.pendingDraftSaveTimer) return
+    window.clearTimeout(this.pendingDraftSaveTimer)
+    this.pendingDraftSaveTimer = null
+  }
+
+  async #saveComposerDraft() {
+    const response = await this.#fetchJson(this.composerDraftUrlValue, {
+      method: "PATCH",
+      body: {
+        composer_draft: {
+          content: this.hasTextareaTarget ? this.textareaTarget.value : "",
+          model_ref: this.#currentModelRef(),
+          permission_mode: this.#currentPermissionMode(),
+          updated_at: this.#currentComposerDraftUpdatedAt(),
+        },
+      },
+    })
+
+    if (!response?.ok) {
+      // Best-effort persistence. Keep the UI usable even if autosave fails.
+    }
   }
 
   #captureSubmission(form) {

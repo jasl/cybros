@@ -160,6 +160,7 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
         metadata: {}
       )
     graph.edges.create!(from_node_id: user_2.id, to_node_id: agent_2.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: agent_1.id, to_node_id: user_2.id, edge_type: DAG::Edge::SEQUENCE)
 
     user_3 =
       graph.nodes.create!(
@@ -180,6 +181,7 @@ class DAG::LaneTurnsTest < ActiveSupport::TestCase
         metadata: {}
       )
     graph.edges.create!(from_node_id: user_3.id, to_node_id: agent_3.id, edge_type: DAG::Edge::SEQUENCE)
+    graph.edges.create!(from_node_id: agent_2.id, to_node_id: user_3.id, edge_type: DAG::Edge::SEQUENCE)
 
     page = lane.lane_turn_page(limit: 2, include_deleted: true)
     assert_equal [turn_2, turn_3], page.fetch("turns").map { |row| row.fetch("turn_id") }

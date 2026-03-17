@@ -22,10 +22,10 @@ class Cybros::ProgrammableAgent::OperationCallTest < ActiveSupport::TestCase
 
     assert_equal "tc_1", call.tool_call_id
     assert_equal "search", call.logical_tool_name
-    assert_equal({"query" => "TODO", "filters" => {"path" => "app/models"}}, call.arguments)
+    assert_equal({ "query" => "TODO", "filters" => { "path" => "app/models" } }, call.arguments)
     assert_equal "inspect repo state", call.reason
     assert_equal "direct_tool_loop", call.origin
-    assert_equal({"mode" => "confirm"}, call.approval_hint)
+    assert_equal({ "mode" => "confirm" }, call.approval_hint)
     assert_equal "direct.search.tc_1", call.idempotency_key
   end
 
@@ -52,7 +52,7 @@ class Cybros::ProgrammableAgent::OperationCallTest < ActiveSupport::TestCase
 
     assert_equal "tc_spawn", call.tool_call_id
     assert_equal "subagent_spawn", call.logical_tool_name
-    assert_equal({"name" => "helper", "prompt" => "Summarize this"}, call.arguments)
+    assert_equal({ "name" => "helper", "prompt" => "Summarize this" }, call.arguments)
     assert_equal "delegate repo inspection", call.reason
     assert_equal "bootstrap_proposal", call.origin
   end

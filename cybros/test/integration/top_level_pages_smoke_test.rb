@@ -14,6 +14,7 @@ class TopLevelPagesSmokeTest < ActionDispatch::IntegrationTest
     AgentRPCInvocation.delete_all
     ConversationRun.delete_all
     Event.delete_all
+    TurnInternalTask.delete_all
     Conversation.delete_all
     Session.delete_all
     User.delete_all

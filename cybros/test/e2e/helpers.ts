@@ -176,6 +176,11 @@ export function programmableConversationState(conversationId: string) {
     selectedModelRef: string | null
     agentName: string | null
     permissionMode: string
+    composerDraft: {
+      content: string
+      modelRef: string | null
+      permissionMode: string | null
+    }
     publicSettings: Record<string, unknown>
     selectedAgentConfig: Record<string, unknown>
     kv: Record<string, unknown>
@@ -223,6 +228,7 @@ export function programmableConversationState(conversationId: string) {
       out[entry.key] = entry.value
     end
     kv_entry_counts = conversation.chat_lane.lane_kv_entries.group(:key).count
+    composer_draft = conversation.resolved_composer_draft
 
     puts JSON.generate({
       conversationId: conversation.id,
@@ -230,6 +236,11 @@ export function programmableConversationState(conversationId: string) {
       selectedModelRef: conversation.metadata.dig("llm", "model_ref").to_s.presence,
       agentName: conversation.agent&.name,
       permissionMode: conversation.permission_mode,
+      composerDraft: {
+        content: composer_draft["content"].to_s,
+        modelRef: composer_draft["model_ref"].to_s.presence,
+        permissionMode: composer_draft["permission_mode"].to_s.presence,
+      },
       publicSettings: conversation.public_settings,
       selectedAgentConfig: conversation.selected_agent_config,
       kv: kv,
@@ -321,9 +332,9 @@ function conversationRuntimeOptionPersisted({
 
   switch (testId) {
     case "conversation-composer-model-picker":
-      return state.selectedModelRef === expectedValue
+      return state.composerDraft.modelRef === expectedValue
     case "conversation-composer-permission-picker":
-      return state.permissionMode === expectedValue
+      return state.composerDraft.permissionMode === expectedValue
     default:
       throw new Error(`unsupported runtime option picker: ${testId}`)
   }
@@ -347,10 +358,7 @@ export async function selectConversationRuntimeOption(page: Page, testId: string
 
   await locator.selectOption({ label })
 
-  if (testId === "conversation-composer-model-picker") {
-    await expect(locator).toHaveValue(expectedValue)
-    return
-  }
+  await expect(locator).toHaveValue(expectedValue)
 
   const deadline = Date.now() + 15_000
   while (Date.now() < deadline) {

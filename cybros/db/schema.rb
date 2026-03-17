@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_13_200000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_17_120000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -241,12 +241,10 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_13_200000) do
     t.string "automation_dispatch_key"
     t.uuid "automation_id"
     t.datetime "automation_triggered_at"
+    t.jsonb "composer_draft", default: {}, null: false
     t.datetime "created_at", null: false
     t.uuid "forked_from_node_id"
     t.string "kind", default: "root", null: false
-    t.datetime "logical_workspace_initialized_at"
-    t.string "logical_workspace_key"
-    t.string "logical_workspace_root_path"
     t.jsonb "metadata", default: {}, null: false
     t.uuid "parent_conversation_id"
     t.string "permission_mode", default: "default", null: false
@@ -261,7 +259,6 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_13_200000) do
     t.index ["automation_id"], name: "index_conversations_on_automation_id"
     t.index ["forked_from_node_id"], name: "index_conversations_on_forked_from_node_id"
     t.index ["kind"], name: "index_conversations_on_kind"
-    t.index ["logical_workspace_key"], name: "index_conversations_on_logical_workspace_key", unique: true
     t.index ["parent_conversation_id"], name: "index_conversations_on_parent_conversation_id"
     t.index ["root_conversation_id"], name: "index_conversations_on_root_conversation_id"
     t.index ["user_id"], name: "index_conversations_on_user_id"

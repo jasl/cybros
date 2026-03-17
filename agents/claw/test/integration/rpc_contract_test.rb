@@ -57,8 +57,7 @@ class RPCContractTest < ActiveSupport::TestCase
               "digest" => "sha256:abc123",
               "signed_download_url" => "https://example.test/rails/active_storage/blobs/redirect/signed/error.png",
               "workspace" => {
-                "conversation_id" => "conversation:test-default",
-                "logical_workspace_id" => "workspace:test-default"
+                "conversation_id" => "conversation:test-default"
               }
             }
           ]
@@ -87,6 +86,37 @@ class RPCContractTest < ActiveSupport::TestCase
 
         assert_equal Pathname.new(workspace_root), env_application.workspace_root
         assert_equal "Env AGENTS\n", env_application.prompt_text("agent")
+      end
+    end
+  end
+
+  test "before_agent_step prefers the request workspace root over the application fallback root" do
+    with_workspace({}) do |fallback_root|
+      with_workspace(
+        {
+          "AGENTS.md" => "Request AGENTS\n",
+          "SOUL.md" => "Request SOUL\n",
+          "USER.md" => "Request USER\n",
+        },
+      ) do |request_root|
+        payload =
+          workspace_application(fallback_root).call(
+            method_name: "before_agent_step",
+            params: {
+              "user_input" => "Use the request workspace",
+              "session_context" => session_context_payload(conversation_id: "conversation:test-request-root", workspace_root: request_root),
+              "execution_context" => execution_context_payload(
+                conversation_id: "conversation:test-request-root",
+                execution_scope: "primary",
+                workspace_root: request_root,
+              ),
+            },
+          )
+
+        system_entry = payload.dig("planning", "staged_mutations", "prompt_buffer_ops", 1, "entry", "content")
+
+        assert_includes system_entry, "Request SOUL"
+        assert_includes system_entry, "Request USER"
       end
     end
   end

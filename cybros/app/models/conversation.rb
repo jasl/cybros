@@ -6,6 +6,8 @@ class Conversation < ApplicationRecord
   IN_FLIGHT_NODE_STATES = %w[pending awaiting_approval running].freeze
   STATISTICS_SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
   DEFAULT_STATISTICS_SAMPLE_ORIGIN = "runtime"
+  COMPOSER_DRAFT_KEYS = %w[content model_ref permission_mode updated_at].freeze
+  COMPOSER_DRAFT_KEEP = Object.new
   PERMISSION_MODES = Cybros::Permissions::MODES
   PERMISSION_MODE_LABELS = Cybros::Permissions::LABELS.freeze
 
@@ -210,6 +212,78 @@ class Conversation < ApplicationRecord
     {}
   end
 
+  def resolved_composer_draft
+    draft = normalized_composer_draft_payload(self[:composer_draft])
+
+    {
+      "content" => draft.fetch("content", ""),
+      "model_ref" => draft["model_ref"].presence || metadata_model_ref,
+      "permission_mode" => draft["permission_mode"].presence || permission_mode,
+    }.compact
+  end
+
+  def composer_draft_updated_at
+    normalized_composer_draft_payload(self[:composer_draft])["updated_at"].to_s.presence
+  end
+
+  def update_composer_draft!(
+    content: COMPOSER_DRAFT_KEEP,
+    model_ref: COMPOSER_DRAFT_KEEP,
+    permission_mode: COMPOSER_DRAFT_KEEP,
+    updated_at: COMPOSER_DRAFT_KEEP
+  )
+    draft = normalized_composer_draft_payload(self[:composer_draft])
+    current_updated_at = parse_composer_draft_timestamp(draft["updated_at"])
+    requested_updated_at = updated_at == COMPOSER_DRAFT_KEEP ? nil : parse_composer_draft_timestamp(updated_at)
+
+    if requested_updated_at.present? && current_updated_at.present? && requested_updated_at <= current_updated_at
+      return self
+    end
+
+    if content != COMPOSER_DRAFT_KEEP
+      next_content = content.to_s
+      next_content.present? ? draft["content"] = next_content : draft.delete("content")
+    end
+
+    if model_ref != COMPOSER_DRAFT_KEEP
+      next_model_ref = model_ref.to_s.strip
+      if next_model_ref.present?
+        Cybros::AgentRuntimeResolver.validate_model_ref!(model_ref: next_model_ref)
+        draft["model_ref"] = next_model_ref
+      else
+        draft.delete("model_ref")
+      end
+    end
+
+    if permission_mode != COMPOSER_DRAFT_KEEP
+      next_permission_mode = permission_mode.to_s.strip
+      if next_permission_mode.present?
+        unless PERMISSION_MODES.include?(next_permission_mode)
+          AgentCore::ValidationError.raise!(
+            "Permission mode is invalid.",
+            code: "cybros.conversations.invalid_permission_mode",
+            details: { permission_mode: next_permission_mode },
+          )
+        end
+
+        draft["permission_mode"] = next_permission_mode
+      else
+        draft.delete("permission_mode")
+      end
+    end
+
+    normalized_updated_at = requested_updated_at&.utc&.iso8601(6)
+    if draft.except("updated_at").any?
+      draft["updated_at"] = normalized_updated_at || Time.current.utc.iso8601(6)
+    elsif updated_at != COMPOSER_DRAFT_KEEP
+      draft = { "updated_at" => normalized_updated_at || Time.current.utc.iso8601(6) }
+    else
+      draft = {}
+    end
+
+    update!(composer_draft: draft)
+  end
+
   def workspace_root_path
     agent.workspace_root_path.join("conversations", id.to_s).cleanpath
   end
@@ -247,12 +321,13 @@ class Conversation < ApplicationRecord
     DEFAULT_STATISTICS_SAMPLE_ORIGIN
   end
 
-  def append_user_message_and_project!(content:, attachments: nil, mode: :preview, model_ref: nil, input_policy_override: nil, diagnostic_level: nil)
+  def append_user_message_and_project!(content:, attachments: nil, mode: :preview, model_ref: nil, permission_mode: nil, input_policy_override: nil, diagnostic_level: nil)
     result =
       append_user_message!(
         content: content,
         attachments: attachments,
         model_ref: model_ref,
+        permission_mode: permission_mode,
         input_policy_override: input_policy_override,
         diagnostic_level: diagnostic_level,
       )
@@ -273,7 +348,7 @@ class Conversation < ApplicationRecord
     }
   end
 
-  def edit_user_message!(node_id:, content:, model_ref: nil, input_policy_override: nil)
+  def edit_user_message!(node_id:, content:, model_ref: nil, permission_mode: nil, input_policy_override: nil)
     content = content.to_s.strip
     return nil if content.blank?
 
@@ -336,6 +411,7 @@ class Conversation < ApplicationRecord
         if enqueue_conversation_run!(
              agent_node: agent_node,
              selected_model_ref: model_ref,
+             permission_mode: permission_mode,
              user_input: content,
              debug: {},
              error: {},
@@ -718,7 +794,7 @@ class Conversation < ApplicationRecord
       end
   end
 
-  def append_user_message!(content:, attachments: nil, model_ref: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
+  def append_user_message!(content:, attachments: nil, model_ref: nil, permission_mode: nil, input_policy_override: nil, repair_pending_tail: true, diagnostic_level: nil)
     uploaded_attachments = normalize_uploaded_attachments(attachments)
     content = content.to_s.strip
     return nil if content.blank? && uploaded_attachments.empty?
@@ -811,6 +887,7 @@ class Conversation < ApplicationRecord
         if enqueue_conversation_run!(
              agent_node: agent_node,
              selected_model_ref: model_ref,
+             permission_mode: permission_mode,
              user_input: content,
              debug: turn_execution_debug_payload(diagnostic_level),
              error: {},
@@ -1247,6 +1324,42 @@ class Conversation < ApplicationRecord
     def normalize_runtime_settings
       self.permission_mode = permission_mode.to_s.strip.presence || "default"
       self.agent_config = self[:agent_config].is_a?(Hash) ? self[:agent_config].deep_stringify_keys : {}
+      self.composer_draft = normalized_composer_draft_payload(self[:composer_draft])
+    end
+
+    def metadata_model_ref
+      value = metadata.dig("llm", "model_ref").to_s.strip
+      value.presence
+    rescue StandardError
+      nil
+    end
+
+    def normalized_composer_draft_payload(value)
+      raw = value.is_a?(Hash) ? value.deep_stringify_keys : {}
+      draft = {}
+
+      content = raw["content"]
+      draft["content"] = content.to_s if content.is_a?(String) || content.is_a?(Numeric)
+
+      model_ref = raw["model_ref"].to_s.strip
+      draft["model_ref"] = model_ref if model_ref.present?
+
+      draft_permission_mode = raw["permission_mode"].to_s.strip
+      draft["permission_mode"] = draft_permission_mode if draft_permission_mode.present?
+
+      updated_at = raw["updated_at"].to_s.strip
+      draft["updated_at"] = updated_at if updated_at.present?
+
+      draft
+    end
+
+    def parse_composer_draft_timestamp(value)
+      raw = value.to_s.strip
+      return nil if raw.blank?
+
+      Time.iso8601(raw)
+    rescue ArgumentError
+      nil
     end
 
     def dispatch_bootstrap_hooks_after_commit
@@ -1272,12 +1385,13 @@ class Conversation < ApplicationRecord
       self.agent_config_schema_fingerprint ||= selected_agent.config_schema_fingerprint
     end
 
-    def enqueue_conversation_run!(agent_node:, selected_model_ref:, user_input:, debug:, error:)
+    def enqueue_conversation_run!(agent_node:, selected_model_ref:, permission_mode: nil, user_input:, debug:, error:)
       result =
         RunDrafts::ConversationTurnOrchestrator.enqueue!(
           conversation: self,
           initiated_by_user: user,
           selected_model_ref: selected_model_ref.to_s,
+          permission_mode: permission_mode.to_s,
           trigger_snapshot: {
             "kind" => "user_turn",
             "dag_node_id" => agent_node.id,

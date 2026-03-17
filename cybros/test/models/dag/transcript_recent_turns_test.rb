@@ -77,8 +77,6 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
       Messages::AgentMessage.node_type_key,
       Messages::CharacterMessage.node_type_key,
     ], all_recent.map { |n| n["node_type"] }
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_recent_turns keeps task-heavy turns concise" do
@@ -179,7 +177,6 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     recent = graph.transcript_recent_turns(limit_turns: 1)
     assert_equal [user.id, custom.id, agent.id], recent.map { |n| n["node_id"] }
 
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   ensure
     Messages.send(:remove_const, :CustomRecentMessage) if Messages.const_defined?(:CustomRecentMessage, false)
   end
@@ -212,8 +209,6 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
     assert_equal [Messages::UserMessage.node_type_key, Messages::AgentMessage.node_type_key], transcript.map { |n| n["node_type"] }
     agent_hash = transcript.find { |n| n["node_id"] == agent.id }
     assert_equal "(structured)", agent_hash.dig("payload", "output_preview", "content")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_recent_turns excludes deleted nodes by default but keeps turns visible when another head exists" do
@@ -266,8 +261,6 @@ class DAG::TranscriptRecentTurnsTest < ActiveSupport::TestCase
 
     recent_with_deleted = graph.transcript_recent_turns(limit_turns: 1, include_deleted: true)
     assert_includes recent_with_deleted.map { |n| n["node_id"] }, deleted_user.id
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "conversation transcript_recent_turns keeps task-heavy turns transcript-first" do

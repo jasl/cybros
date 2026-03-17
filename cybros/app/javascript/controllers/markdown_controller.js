@@ -97,17 +97,43 @@ export default class extends Controller {
   connect() {
     configureMarkedOnce()
     this.lastRenderedRaw = null
-    this.renderNow()
+    this.rerenderAnimationFrame = null
+    document.addEventListener("turbo:render", this.#rerenderAfterTurbo)
+    document.addEventListener("turbo:load", this.#rerenderAfterTurbo)
+    this.renderNow({ force: true })
   }
 
-  renderNow() {
+  disconnect() {
+    document.removeEventListener("turbo:render", this.#rerenderAfterTurbo)
+    document.removeEventListener("turbo:load", this.#rerenderAfterTurbo)
+    this.#cancelScheduledRerender()
+  }
+
+  renderNow({ force = false } = {}) {
+    if (!this.hasOutputTarget) return
+
     const raw = this.#getRawContent()
     if (!raw) return
-    if (this.lastRenderedRaw === raw) return
+    if (!force && this.lastRenderedRaw === raw) return
 
     const html = parseMarkdown(raw)
     this.outputTarget.innerHTML = html
     this.lastRenderedRaw = raw
+  }
+
+  #rerenderAfterTurbo = () => {
+    this.#cancelScheduledRerender()
+    this.rerenderAnimationFrame = window.requestAnimationFrame(() => {
+      this.rerenderAnimationFrame = null
+      if (!this.element.isConnected) return
+      this.renderNow({ force: true })
+    })
+  }
+
+  #cancelScheduledRerender() {
+    if (this.rerenderAnimationFrame === null) return
+    window.cancelAnimationFrame(this.rerenderAnimationFrame)
+    this.rerenderAnimationFrame = null
   }
 
   #getRawContent() {

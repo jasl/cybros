@@ -118,6 +118,7 @@ module TurnInternalTasks
             mutations.executable_pending_nodes_created? || graph.validate_leaf_invariant!
 
           row.update!(status: "materialized", materialized_task_node: task)
+          emit_direct_tool_activity_events!(task:, row:)
         end
 
         graph.kick! if executable_pending_nodes_created
@@ -129,7 +130,7 @@ module TurnInternalTasks
       end
 
       def task_metadata(row)
-        metadata = {
+        base_metadata = {
           "generated_by" => "turn_internal_task_queue",
           "hook_name" => row.source_hook_name,
           "placement" => "append",
@@ -138,6 +139,7 @@ module TurnInternalTasks
           "queue_position" => row.queue_position,
           "authored_metadata" => row.authored_metadata,
         }.compact
+        metadata = base_metadata.merge(materialized_task_metadata(row))
         metadata["approval"] = task_approval(row) if task_approval(row).present?
         metadata
       end
@@ -154,7 +156,7 @@ module TurnInternalTasks
           "arguments_resolution" => row_input["arguments_resolution"].presence || "original",
           "arguments" => arguments,
           "arguments_summary" => summarize_arguments(arguments),
-          "source" => "turn_internal_task_queue",
+          "source" => row_input["source"].presence || "turn_internal_task_queue",
           "logical_tool_name" => row.logical_tool_name,
         }
         payload["repair"] = row_input["repair"] if row_input["repair"].is_a?(Hash)
@@ -258,6 +260,12 @@ module TurnInternalTasks
         approval.is_a?(Hash) ? approval : nil
       end
 
+      def materialized_task_metadata(row)
+        metadata = row.authored_metadata.is_a?(Hash) ? row.authored_metadata : {}
+        task_metadata = metadata["task_metadata"]
+        task_metadata.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(task_metadata) : {}
+      end
+
       def archive_sequence_edge!(from_node:, to_node:)
         now = Time.current
         graph.edges.active
@@ -274,6 +282,55 @@ module TurnInternalTasks
         return if ids.empty?
 
         TurnInternalTask.where(id: ids, status: "materializing").update_all(status: "queued", updated_at: Time.current)
+      end
+
+      def emit_direct_tool_activity_events!(task:, row:)
+        return unless row.source_hook_name.to_s == "agent_message_tool_loop"
+        return unless row.source_node.node_type.to_s == Messages::AgentMessage.node_type_key
+
+        stream = DAG::NodeEventStream.new(node: task)
+        activity_kind = direct_tool_activity_kind_for(task)
+        diagnostic_level = direct_tool_diagnostic_level_for(row)
+
+        stream.activity_planned!(
+          activity_id: "task:#{task.id}",
+          activity_kind: activity_kind,
+          phase: activity_kind == "preflight_task" ? "preflight" : "planning",
+          source_node_id: task.id,
+          diagnostic_level: diagnostic_level,
+        )
+
+        approval = task_approval(row)
+        return unless approval.present?
+
+        stream.activity_waiting!(
+          activity_id: "task:#{task.id}",
+          activity_kind: activity_kind,
+          phase: "authorization",
+          source_node_id: task.id,
+          diagnostic_level: diagnostic_level,
+          data: AgentCore::Utils.deep_stringify_keys(approval),
+        )
+      end
+
+      def direct_tool_activity_kind_for(task)
+        input = task.body_input.is_a?(Hash) ? task.body_input : {}
+        tool_name =
+          input.fetch("name", input.fetch("requested_name", input.fetch("logical_tool_name", ""))).to_s
+        tool_name == "compress_input" ? "preflight_task" : "tool_call"
+      rescue StandardError
+        "tool_call"
+      end
+
+      def direct_tool_diagnostic_level_for(row)
+        level =
+          if row.source_node.metadata.is_a?(Hash)
+            row.source_node.metadata.dig("turn_execution", "diagnostic_level")
+          end
+
+        level.to_s == "debug" ? "debug" : "standard"
+      rescue StandardError
+        "standard"
       end
   end
 end

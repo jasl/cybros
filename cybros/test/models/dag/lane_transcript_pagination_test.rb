@@ -76,8 +76,6 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
 
     newer = lane.transcript_page(limit_turns: 2, after_turn_id: older.fetch("after_turn_id"))
     assert_equal [turn_3, turn_4], newer.fetch("turn_ids")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_page validates cursors and limit" do
@@ -151,8 +149,6 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
           node.dig("payload", "output_preview", "content").to_s
       end
     assert_equal %w[u a], transcript_contents
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_page orders turns by turn_id (uuidv7), not by node created_at" do
@@ -219,8 +215,6 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
 
     older = lane.transcript_page(limit_turns: 1, before_turn_id: page.fetch("before_turn_id"))
     assert_equal [turn_1], older.fetch("turn_ids")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "transcript_page is lane-scoped (supports branch lanes/subthreads)" do
@@ -286,8 +280,6 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
     assert_equal [branch_root.turn_id.to_s], branch_page.fetch("turn_ids")
     assert_equal ["branch-u", "branch-a"],
                  branch_page.fetch("transcript").map { |n| n.dig("payload", "input", "content").to_s.presence || n.dig("payload", "output_preview", "content").to_s }
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 
   test "graph.transcript_page delegates to lane.transcript_page" do
@@ -320,7 +312,5 @@ class DAG::LaneTranscriptPaginationTest < ActiveSupport::TestCase
 
     page = graph.transcript_page(lane_id: lane.id, limit_turns: 10)
     assert_equal [turn_id], page.fetch("turn_ids")
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 end

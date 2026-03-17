@@ -29,6 +29,13 @@ test.describe("Connectivity health banner", () => {
       const el = document.querySelector("[data-conversation-channel-conversation-id-value]")
       el?.setAttribute("data-conversation-channel-connected", "true")
     })
+
+    await page.waitForFunction(() => {
+      const el = document.querySelector("[data-conversation-channel-conversation-id-value]")
+      const app = window.Stimulus
+      const controller = app?.getControllerForElementAndIdentifier?.(el, "connectivity-health")
+      return controller?.everConnected === true
+    })
     await expect(alert).toHaveClass(/hidden/)
 
     await page.evaluate(() => {
@@ -36,7 +43,26 @@ test.describe("Connectivity health banner", () => {
       el?.setAttribute("data-conversation-channel-connected", "false")
     })
 
-    await expect(page.getByText("Realtime disconnected. Trying to reconnect…")).toBeVisible()
-    await expect(page.getByText("(server reachable)")).toBeVisible()
+    await expect(alert).toBeVisible()
+    await expect(alert).toContainText("Realtime disconnected. Trying to reconnect…")
+    await expect(alert).toContainText("(server reachable)")
+  })
+
+  test("changing permission mode does not surface a false reconnect banner", async ({ page }) => {
+    await signIn(page)
+    await createHighPriorityMockProvider(page)
+    await openNewConversation(page, `E2E Permission Connectivity ${Date.now()}`)
+
+    const alert = page.locator('[data-connectivity-health-target="disconnectedAlert"]')
+    const permissionPicker = page.getByTestId("conversation-composer-permission-picker")
+
+    await expect(alert).toBeHidden()
+    await permissionPicker.selectOption({ label: "Full access" })
+
+    await expect(permissionPicker).toHaveValue("full_access")
+    await expect(alert).toBeHidden()
+
+    await page.waitForTimeout(1500)
+    await expect(alert).toBeHidden()
   })
 })

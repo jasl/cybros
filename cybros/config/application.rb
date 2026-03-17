@@ -20,6 +20,8 @@ Bundler.require(*Rails.groups)
 
 module Cybros
   class Application < Rails::Application
+    CLAW_LIB_PATH = root.join("../agents/claw/lib").expand_path.to_s
+
     # Initialize configuration defaults for originally generated Rails version.
     config.load_defaults 8.2
 
@@ -27,6 +29,8 @@ module Cybros
     # not contain `.rb` files, or that should not be reloaded or eager loaded.
     # Common ones are `templates`, `generators`, or `middleware`, for example.
     config.autoload_lib(ignore: %w[assets tasks])
+    config.autoload_paths << CLAW_LIB_PATH
+    config.eager_load_paths << CLAW_LIB_PATH
 
     # Configuration for the application, engines, and railties goes here.
     #

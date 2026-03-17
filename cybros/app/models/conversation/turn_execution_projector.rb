@@ -17,7 +17,7 @@ class Conversation::TurnExecutionProjector
     raise ArgumentError, "lane_id is required" if @lane_id.blank?
   end
 
-  def turn_execution_for_turn_id(turn_id)
+    def turn_execution_for_turn_id(turn_id)
     turn_id = turn_id.to_s
     return nil if turn_id.blank?
 
@@ -143,7 +143,9 @@ class Conversation::TurnExecutionProjector
           project_activity(task, sequence_fallback: index + 1, diagnostic_level: diagnostic_level)
         end
 
-      projected.sort_by { |activity| [activity.fetch("sequence"), activity.fetch("source_node_id").to_s] }
+      collapse_subagent_activity_history(
+        projected.sort_by { |activity| [activity.fetch("sequence"), activity.fetch("source_node_id").to_s] },
+      )
     end
 
     def project_activity(task, sequence_fallback:, diagnostic_level:)
@@ -434,7 +436,6 @@ class Conversation::TurnExecutionProjector
       return "running" if statuses.include?("running")
       return "awaiting_approval" if statuses.include?("awaiting_approval")
       return "failed" if statuses.include?("failed")
-      return "completed" if statuses.present? && statuses.all? { |status| terminal_activity_status?(status) }
       return "pending" if statuses.any? { |status| pending_activity_status?(status) }
 
       case execution_state
@@ -451,6 +452,8 @@ class Conversation::TurnExecutionProjector
       when DAG::Node::FINISHED
         "completed"
       else
+        return "completed" if statuses.present? && statuses.all? { |status| terminal_activity_status?(status) }
+
         "pending"
       end
     end
@@ -465,8 +468,6 @@ class Conversation::TurnExecutionProjector
 
       return earliest_known_phase_for(active) if active.any?
 
-      return "terminal" if Array(activities).any? && Array(activities).all? { |activity| terminal_activity_status?(activity.fetch("status")) }
-
       case execution_node&.state.to_s
       when DAG::Node::AWAITING_APPROVAL
         "authorization"
@@ -474,8 +475,36 @@ class Conversation::TurnExecutionProjector
         "execution"
       when DAG::Node::PENDING
         "planning"
-      else
+      when DAG::Node::FINISHED, DAG::Node::ERRORED, DAG::Node::STOPPED, DAG::Node::REJECTED, DAG::Node::SKIPPED
         "terminal"
+      else
+        return "terminal" if Array(activities).any? && Array(activities).all? { |activity| terminal_activity_status?(activity.fetch("status")) }
+
+        "terminal"
+      end
+    end
+
+    def collapse_subagent_activity_history(activities)
+      latest_indices_by_subagent_id = {}
+
+      Array(activities).each_with_index do |activity, index|
+        next unless activity.is_a?(Hash) && activity["kind"] == "subagent"
+
+        subagent_id = activity.dig("links", "subagent_id").to_s.presence
+        next if subagent_id.blank?
+
+        latest_indices_by_subagent_id[subagent_id] = index
+      end
+
+      Array(activities).each_with_index.filter_map do |activity, index|
+        next unless activity.is_a?(Hash)
+        next activity unless activity["kind"] == "subagent"
+
+        subagent_id = activity.dig("links", "subagent_id").to_s.presence
+        next activity if subagent_id.blank?
+        next activity if latest_indices_by_subagent_id[subagent_id] == index
+
+        nil
       end
     end
 

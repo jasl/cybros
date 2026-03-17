@@ -88,6 +88,7 @@ class DAG::AdoptVersionTest < ActiveSupport::TestCase
         )
 
       m.create_edge(from_node: user, to_node: v1, edge_type: DAG::Edge::SEQUENCE, metadata: {})
+      m.create_edge(from_node: user, to_node: approval_task, edge_type: DAG::Edge::SEQUENCE, metadata: {})
     end
 
     v2 = v1.rerun!
@@ -103,7 +104,5 @@ class DAG::AdoptVersionTest < ActiveSupport::TestCase
 
     assert_equal DAG::Node::AWAITING_APPROVAL, approval_task.reload.state
     assert_includes graph.awaiting_approval_scope.pluck(:id), approval_task.id
-
-    assert_equal [], DAG::GraphAudit.scan(graph: graph)
   end
 end

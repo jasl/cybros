@@ -1,7 +1,9 @@
 require "test_helper"
+require_relative "../support/programmable_agent_runtime_test_support"
 
 class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
   include ActiveJob::TestHelper
+  include ProgrammableAgentRuntimeTestSupport
 
   setup do
     clear_enqueued_jobs
@@ -24,47 +26,58 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
 
   test "index and show expose execution conversation history" do
     sign_in_owner!
+    llm_server =
+      MockLLMServer.new do |_payload|
+        MockLLMServer.chat_response(content: "automation completed")
+      end.start
     server = Cybros::ProgrammableAgentFixture::Server.new.start
-    runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    execution_conversation = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
-    clear_enqueued_jobs
+    with_catalog_yaml(mock_openai_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "full_access")
+      scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+      execution_conversation = dispatch_due_automation!(automation: runtime.fetch(:automation), now: scheduled_for)
+      clear_enqueued_jobs
 
-    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
-      Automations::ConversationOrchestrator.start!(conversation: execution_conversation.reload)
+      perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+        Automations::ConversationOrchestrator.start!(conversation: execution_conversation.reload)
+      end
+
+      get system_settings_automations_path
+
+      assert_response :success
+      assert_includes response.body, runtime.fetch(:automation).task_payload.fetch("prompt")
+      assert_includes response.body, runtime.fetch(:agent).name
+      assert_includes response.body, "full_access"
+      assert_includes response.body, "completed"
+      refute_includes response.body, "Standalone"
+
+      get system_settings_automation_path(runtime.fetch(:automation))
+
+      assert_response :success
+      assert_includes response.body, runtime.fetch(:agent).name
+      assert_includes response.body, runtime.fetch(:agent).config_namespace
+      assert_includes response.body, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
+      assert_includes response.body, "UTC"
+      assert_includes response.body, scheduled_for.iso8601
+      assert_includes response.body, "completed"
+      assert_includes response.body, execution_conversation.id
+      refute_includes response.body, "Conversation binding"
     end
-
-    get system_settings_automations_path
-
-    assert_response :success
-    assert_includes response.body, runtime.fetch(:automation).task_payload.fetch("prompt")
-    assert_includes response.body, runtime.fetch(:agent).name
-    assert_includes response.body, "full_access"
-    assert_includes response.body, "completed"
-    refute_includes response.body, "Standalone"
-
-    get system_settings_automation_path(runtime.fetch(:automation))
-
-    assert_response :success
-    assert_includes response.body, runtime.fetch(:agent).name
-    assert_includes response.body, runtime.fetch(:agent).config_namespace
-    assert_includes response.body, "FREQ=DAILY;BYHOUR=9;BYMINUTE=0"
-    assert_includes response.body, "UTC"
-    assert_includes response.body, scheduled_for.iso8601
-    assert_includes response.body, "completed"
-    assert_includes response.body, execution_conversation.id
-    refute_includes response.body, "Conversation binding"
   ensure
+    llm_server&.shutdown
     server&.shutdown
   end
 
   test "show supports operator approval for parked automation executions" do
     sign_in_owner!
+    llm_server =
+      MockLLMServer.new do |_payload|
+        MockLLMServer.chat_response(content: "automation approved")
+      end.start
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         rpc_overrides: {
           "before_agent_step" => lambda do |_params, base_result, _identity|
-            base_result.merge(
+            base_result.deep_merge(
               "planning" => {
                 "approval_request" => {
                   "status" => "pending_confirmation",
@@ -75,37 +88,45 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
           end,
         },
       ).start
-    runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
-    scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
-    execution_conversation = nil
+    with_catalog_yaml(mock_openai_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_automation_runtime!(endpoint_url: server.rpc_url, permission_mode: "default")
+      scheduled_for = Time.utc(2026, 3, 9, 9, 0, 0)
+      execution_conversation = nil
 
-    perform_enqueued_jobs only: Automations::ExecuteConversationJob do
-      execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+      perform_enqueued_jobs only: Automations::ExecuteConversationJob do
+        execution_conversation = dispatch_automation!(automation: runtime.fetch(:automation), scheduled_for: scheduled_for)
+      end
+
+      get system_settings_automation_path(runtime.fetch(:automation))
+
+      assert_response :success
+      assert_includes response.body, "awaiting_approval"
+      assert_includes response.body, "pending_confirmation"
+      assert_includes response.body, "Approve"
+      assert_includes response.body, "Reject"
+
+      perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
+        post approve_system_settings_automation_execution_path(runtime.fetch(:automation), execution_conversation)
+      end
+
+      assert_redirected_to system_settings_automation_path(runtime.fetch(:automation))
+      follow_redirect!
+
+      execution_conversation.reload
+      draft = execution_conversation.run_drafts.order(:created_at, :id).last
+      agent_node = execution_conversation.root_graph.nodes.find_by(id: execution_conversation.metadata.dig("automation_execution", "dag_node_id"))
+
+      assert_equal "approved", draft.approval_state.fetch("status")
+      assert_equal(
+        "completed",
+        execution_conversation.metadata.dig("automation_execution", "status"),
+        "automation failure=#{execution_conversation.metadata.dig("automation_execution", "failure").inspect} node_state=#{agent_node&.state.inspect} node_metadata=#{agent_node&.metadata.inspect} node_body_output=#{agent_node&.body_output.inspect}",
+      )
+      assert_includes response.body, "completed"
+      assert_includes response.body, "approved"
     end
-
-    get system_settings_automation_path(runtime.fetch(:automation))
-
-    assert_response :success
-    assert_includes response.body, "awaiting_approval"
-    assert_includes response.body, "pending_confirmation"
-    assert_includes response.body, "Approve"
-    assert_includes response.body, "Reject"
-
-    perform_enqueued_jobs only: [DAG::TickGraphJob, DAG::ExecuteNodeJob] do
-      post approve_system_settings_automation_execution_path(runtime.fetch(:automation), execution_conversation)
-    end
-
-    assert_redirected_to system_settings_automation_path(runtime.fetch(:automation))
-    follow_redirect!
-
-    execution_conversation.reload
-    draft = execution_conversation.run_drafts.order(:created_at, :id).last
-
-    assert_equal "approved", draft.approval_state.fetch("status")
-    assert_equal "completed", execution_conversation.metadata.dig("automation_execution", "status")
-    assert_includes response.body, "completed"
-    assert_includes response.body, "approved"
   ensure
+    llm_server&.shutdown
     server&.shutdown
   end
 
@@ -269,5 +290,31 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
       )
       credential.save!
       credential
+    end
+
+    def mock_openai_catalog_yaml(base_url:)
+      <<~YAML
+        version: 1
+        default_model_ref: "openai/gpt-5.4"
+        providers:
+          openai:
+            display_name: "OpenAI"
+            enabled: true
+            adapter_key: "openai"
+            base_url: "#{base_url}"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            models:
+              gpt-5.4:
+                display_name: "GPT-5.4"
+                api_model: "gpt-5.4"
+                context_window_tokens: 20000
+                capabilities:
+                  input: { text: true, image: false }
+                  tools: { tool_calling: true }
+                  protocol: "chat_completions"
+      YAML
     end
 end

@@ -17,7 +17,9 @@ class AttachmentImportProtocolTest < ActiveSupport::TestCase
 
     normalized = Agents::Protocol.normalize_attachment_import_params!("attachments" => [descriptor])
 
-    assert_equal [descriptor], normalized.fetch("attachments")
+    normalized_descriptor = normalized.fetch("attachments").sole
+    assert_equal "conversation:test-default", normalized_descriptor.dig("workspace", "conversation_id")
+    refute normalized_descriptor.fetch("workspace").key?("logical_workspace_id")
 
     error =
       assert_raises(AgentCore::ValidationError) do

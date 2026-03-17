@@ -237,15 +237,117 @@ class TurnInternalTasks::MaterializerTest < ActiveSupport::TestCase
 
     assert_equal "tc_env", task.body_input.fetch("tool_call_id")
     assert_equal "search", task.body_input.fetch("logical_tool_name")
-    assert_equal({"query" => "TODO"}, task.body_input.fetch("arguments"))
+    assert_equal({ "query" => "TODO" }, task.body_input.fetch("arguments"))
     assert_equal "inspect repo state", task.body_input.fetch("reason")
     assert_equal "bootstrap_proposal", task.body_input.fetch("origin")
-    assert_equal({"mode" => "confirm"}, task.body_input.fetch("approval_hint"))
+    assert_equal({ "mode" => "confirm" }, task.body_input.fetch("approval_hint"))
     assert_equal "bootstrap.search", task.body_input.fetch("idempotency_key")
     assert_equal "opseq_fixture", task.body_input.fetch("sequence_id")
     assert_equal 0, task.body_input.fetch("step_index")
     assert_equal 2, task.body_input.fetch("step_count")
     assert_equal "bootstrap_proposal", task.metadata.dig("authored_metadata", "origin")
+  end
+
+  test "materialize_ready! restores direct-tool task source and metadata when provided" do
+    conversation = create_conversation!(title: "Materializer direct tool metadata")
+    graph = conversation.dag_graph
+    row =
+      create_queue_row!(
+        conversation: conversation,
+        queue_position: 10,
+        execution_mode: "serial",
+        source_fingerprint: "direct-tool-metadata-10",
+        source_hook_name: "agent_message_tool_loop",
+        logical_tool_name: "compact_context",
+        input: {
+          "tool_call_id" => "tc_compact",
+          "requested_name" => "compact_context",
+          "source" => "model_choice",
+          "arguments" => {
+            "reason" => "soft_limit_reached",
+          },
+        },
+        authored_metadata: {
+          "reason" => "llm_tool_call",
+          "origin" => "agent_message_tool_loop",
+          "task_metadata" => {
+            "generated_by" => "agent_core",
+            "source" => "model_choice",
+            "context_budget" => {
+              "budget_state" => "soft_limit_reached",
+              "budget_action" => "advise_compact",
+              "budget_fingerprint" => "fp_123",
+            },
+          },
+        },
+      )
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+
+    task = graph.nodes.find(row.reload.materialized_task_node_id)
+
+    assert_equal "model_choice", task.body_input.fetch("source")
+    assert_equal "agent_core", task.metadata.fetch("generated_by")
+    assert_equal "model_choice", task.metadata.fetch("source")
+    assert_equal "soft_limit_reached", task.metadata.dig("context_budget", "budget_state")
+    assert_equal "advise_compact", task.metadata.dig("context_budget", "budget_action")
+    assert_equal "fp_123", task.metadata.dig("context_budget", "budget_fingerprint")
+  end
+
+  test "materialize_ready! emits planned and waiting activity events for approval-gated direct tools" do
+    conversation = create_conversation!(title: "Materializer direct tool activity")
+    graph = conversation.dag_graph
+    turn = graph.turns.create!(lane: conversation.chat_lane, metadata: {})
+    source_node =
+      graph.nodes.create!(
+        node_type: Messages::AgentMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane: conversation.chat_lane,
+        turn: turn,
+        metadata: {
+          "turn_execution" => {
+            "diagnostic_level" => "debug",
+          },
+        },
+      )
+    row =
+      create_queue_row!(
+        conversation: conversation,
+        queue_position: 10,
+        execution_mode: "serial",
+        turn: turn,
+        source_node: source_node,
+        source_fingerprint: "direct-tool-activity-10",
+        source_hook_name: "agent_message_tool_loop",
+        logical_tool_name: "danger",
+        input: {
+          "tool_call_id" => "tc_wait",
+          "requested_name" => "danger",
+          "arguments" => {},
+          "source" => "agent",
+        },
+        authored_metadata: {
+          "origin" => "agent_message_tool_loop",
+          "reason" => "llm_tool_call",
+          "approval" => {
+            "required" => true,
+            "deny_effect" => "block",
+            "reason" => "danger_requires_review",
+          },
+        },
+      )
+
+    TurnInternalTasks::Materializer.materialize_ready!(graph: graph)
+
+    task = graph.nodes.find(row.reload.materialized_task_node_id)
+    events = graph.node_event_page_for(task.id, limit: 10, kinds: DAG::NodeEvent::ACTIVITY_EVENT_KINDS)
+
+    assert_equal [DAG::NodeEvent::ACTIVITY_PLANNED, DAG::NodeEvent::ACTIVITY_WAITING], events.map { |event| event.fetch("kind") }
+    assert_equal %w[planned awaiting_approval], events.map { |event| event.fetch("payload").fetch("status") }
+    assert_equal ["planning", "authorization"], events.map { |event| event.fetch("payload").fetch("phase") }
+    assert_equal %w[debug debug], events.map { |event| event.fetch("payload").fetch("diagnostic_level") }
+    assert_equal true, events.last.fetch("payload").dig("data", "required")
+    assert_equal "block", events.last.fetch("payload").dig("data", "deny_effect")
   end
 
   private

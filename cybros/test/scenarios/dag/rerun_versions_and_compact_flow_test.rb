@@ -10,6 +10,7 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
 
       intent = node.metadata["rerun_intent"].to_s
       graph = node.graph
+      parent_ids = graph.edges.active.where(to_node_id: node.id).pluck(:from_node_id)
 
       graph.mutate!(turn_id: node.turn_id) do |m|
         tool_1 =
@@ -22,6 +23,12 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
             metadata: {}
           )
 
+        parent_ids.each do |parent_id|
+          next if parent_id == tool_1.id
+
+          parent = graph.nodes.active.find(parent_id)
+          m.create_edge(from_node: parent, to_node: tool_1, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
+        end
         m.create_edge(from_node: tool_1, to_node: node, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
 
         if intent == "rerun"
@@ -35,6 +42,12 @@ class DAG::RerunVersionsAndCompactFlowTest < ActiveSupport::TestCase
               metadata: {}
             )
 
+          parent_ids.each do |parent_id|
+            next if parent_id == tool_2.id
+
+            parent = graph.nodes.active.find(parent_id)
+            m.create_edge(from_node: parent, to_node: tool_2, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
+          end
           m.create_edge(from_node: tool_2, to_node: node, edge_type: DAG::Edge::SEQUENCE, metadata: { "generated_by" => "executor" })
         end
       end

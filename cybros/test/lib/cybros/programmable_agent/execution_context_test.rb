@@ -32,12 +32,15 @@ class Cybros::ProgrammableAgent::ExecutionContextTest < ActiveSupport::TestCase
         conversation: conversation,
         node: agent_node,
       )
+    session_workspace = conversation.workspace_payload
+    execution_workspace = conversation.workspace_payload(lane_id: agent_node.lane_id)
 
     assert_equal(
       {
         "account_id" => Account.instance.id,
         "user_id" => conversation.user_id,
         "conversation_id" => conversation.id,
+        "workspace" => session_workspace,
       },
       session_context.to_h,
     )
@@ -52,6 +55,7 @@ class Cybros::ProgrammableAgent::ExecutionContextTest < ActiveSupport::TestCase
         "turn_id" => agent_node.turn_id,
         "dag_node_id" => agent_node.id,
         "execution_scope" => "primary",
+        "workspace" => execution_workspace,
       },
       execution_context.to_h,
     )
@@ -127,6 +131,7 @@ class Cybros::ProgrammableAgent::ExecutionContextTest < ActiveSupport::TestCase
         conversation: child,
         node: child_agent,
       )
+    execution_workspace = child.workspace_payload(lane_id: child_agent.lane_id)
 
     assert_equal(
       {
@@ -143,6 +148,7 @@ class Cybros::ProgrammableAgent::ExecutionContextTest < ActiveSupport::TestCase
           "parent_turn_id" => parent_agent.turn_id,
           "parent_dag_node_id" => parent_agent.id,
         },
+        "workspace" => execution_workspace,
       },
       execution_context.to_h,
     )

@@ -513,7 +513,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       refute write_result.error?, provider_result.inspect
 
       history_snapshots = Dir.glob(fixture.fetch(:agent_root).join(".history", "**", "skills", "self-mutate", "SKILL.md").to_s).sort
-      assert history_snapshots.any?, "expected a skill snapshot under .history, got=#{Dir.glob(fixture.fetch(:agent_root).join('.history', '**', '*').to_s)}"
+      assert history_snapshots.any?, "expected a skill snapshot under .history, got=#{Dir.glob(fixture.fetch(:agent_root).join(".history", "**", "*").to_s)}"
       assert_equal original_skill, File.read(history_snapshots.last)
 
       assert_equal original_description, skill_description_from_runtime(first_runtime, "self-mutate")
@@ -697,75 +697,81 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
   private
 
     def with_agent_owned_task_runtime(agent_tools: %w[write edit apply_patch exec memory_search memory_get memory_store])
+      isolated_workspace_root = nil
       workspace_root = nil
       agent_root = nil
       lane_root = nil
       callback = nil
-      conversation = create_conversation!(title: "Agent-owned tools")
-      conversation.update!(
-        permission_mode: "default",
-        agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
-      )
+      conversation = nil
+      isolated_workspace_root = Dir.mktmpdir("agent-owned-tools-root-")
 
-      workspace_descriptor = Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
-      workspace_root = Pathname.new(workspace_descriptor.fetch(:conversation_path))
-      agent_root = Pathname.new(workspace_descriptor.fetch(:agent_root_path))
-      lane_root = Pathname.new(Conversations::WorkspaceInitializer.lane_path_for(conversation: conversation, lane_id: conversation.chat_lane.id))
-      FileUtils.mkdir_p(workspace_root)
-      FileUtils.mkdir_p(lane_root)
-      graph = conversation.root_graph
-      turn_id = SecureRandom.uuid
-      user = nil
-      planner = nil
-      final = nil
+      with_default_agent_workspace_root(isolated_workspace_root) do
+        conversation = create_conversation!(title: "Agent-owned tools")
+        conversation.update!(
+          permission_mode: "default",
+          agent_config_schema_fingerprint: conversation.agent.config_schema_fingerprint,
+        )
 
-      graph.mutate!(turn_id: turn_id) do |m|
-        user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Use coding tools", metadata: {})
-        planner = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, content: "Working", metadata: {})
-        final = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "phase" => "final" })
-        m.create_edge(from_node: user, to_node: planner, edge_type: DAG::Edge::SEQUENCE)
+        workspace_descriptor = Conversations::WorkspaceInitializer.initialize!(conversation: conversation)
+        workspace_root = Pathname.new(workspace_descriptor.fetch(:conversation_path))
+        agent_root = Pathname.new(workspace_descriptor.fetch(:agent_root_path))
+        lane_root = Pathname.new(Conversations::WorkspaceInitializer.lane_path_for(conversation: conversation, lane_id: conversation.chat_lane.id))
+        FileUtils.mkdir_p(workspace_root)
+        FileUtils.mkdir_p(lane_root)
+        graph = conversation.root_graph
+        turn_id = SecureRandom.uuid
+        user = nil
+        planner = nil
+        final = nil
+
+        graph.mutate!(turn_id: turn_id) do |m|
+          user = m.create_node(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, content: "Use coding tools", metadata: {})
+          planner = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::FINISHED, content: "Working", metadata: {})
+          final = m.create_node(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: { "phase" => "final" })
+          m.create_edge(from_node: user, to_node: planner, edge_type: DAG::Edge::SEQUENCE)
+        end
+
+        runtime =
+          AgentCore::DAG::Runtime.new(
+            provider:
+              BundledClawToolProvider.new(
+                workspace_root: workspace_root,
+                agent_root: agent_root,
+                lane_root: lane_root,
+                callback_session: callback_session_payload(callback = TestSupport::CallbackHarness.new.start),
+              ),
+            model: "dev/mock-model",
+            tools_registry: AgentCore::Resources::Tools::Registry.new,
+            tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
+            llm_options: {},
+            instrumenter: AgentCore::Observability::NullInstrumenter.new,
+          )
+        snapshot =
+          Cybros::ProgrammableAgent::CapabilitySnapshot.build(
+            kernel_registry_version: "kernel:v1",
+            agent_key: "claw",
+            agent_capabilities_version: "agent:v1",
+            kernel_tools: [],
+            agent_tools: Array(agent_tools).map do |logical_tool_name|
+              {
+                logical_tool_name: logical_tool_name,
+                implementation_ref: "claw:#{logical_tool_name}",
+              }
+            end,
+          )
+
+        yield(
+          conversation: conversation,
+          graph: graph,
+          runtime: runtime,
+          planner_node: planner,
+          final_node: final,
+          workspace_root: workspace_root,
+          agent_root: agent_root,
+          lane_root: lane_root,
+          snapshot: snapshot,
+        )
       end
-
-      runtime =
-        AgentCore::DAG::Runtime.new(
-          provider:
-            BundledClawToolProvider.new(
-              workspace_root: workspace_root,
-              agent_root: agent_root,
-              lane_root: lane_root,
-              callback_session: callback_session_payload(callback = TestSupport::CallbackHarness.new.start),
-            ),
-          model: "dev/mock-model",
-          tools_registry: AgentCore::Resources::Tools::Registry.new,
-          tool_policy: AgentCore::Resources::Tools::Policy::AllowAll.new,
-          llm_options: {},
-          instrumenter: AgentCore::Observability::NullInstrumenter.new,
-        )
-      snapshot =
-        Cybros::ProgrammableAgent::CapabilitySnapshot.build(
-          kernel_registry_version: "kernel:v1",
-          agent_key: "claw",
-          agent_capabilities_version: "agent:v1",
-          kernel_tools: [],
-          agent_tools: Array(agent_tools).map do |logical_tool_name|
-            {
-              logical_tool_name: logical_tool_name,
-              implementation_ref: "claw:#{logical_tool_name}",
-            }
-          end,
-        )
-
-      yield(
-        conversation: conversation,
-        graph: graph,
-        runtime: runtime,
-        planner_node: planner,
-        final_node: final,
-        workspace_root: workspace_root,
-        agent_root: agent_root,
-        lane_root: lane_root,
-        snapshot: snapshot,
-      )
     ensure
       if conversation
         run_drafts = RunDraft.where(conversation_id: conversation.id)
@@ -782,6 +788,7 @@ class DAG::AgentOwnedToolCallsFlowTest < ActiveSupport::TestCase
       end
       callback&.shutdown
       FileUtils.rm_rf(agent_root) if agent_root
+      FileUtils.rm_rf(isolated_workspace_root) if isolated_workspace_root
     end
 
     def create_agent_owned_task!(fixture:, logical_tool_name:, tool_call_id:, arguments:)

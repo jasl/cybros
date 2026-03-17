@@ -11,6 +11,7 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     ConversationRun.delete_all
     RunDraft.delete_all
     Event.delete_all
+    TurnInternalTask.delete_all
     Conversation.delete_all
     RecognizedDeployment.delete_all
     Agent.delete_all
@@ -23,6 +24,41 @@ class SetupAndSessionsTest < ActionDispatch::IntegrationTest
     DAG::Node.delete_all
     DAG::NodeBody.delete_all
     DAG::Graph.delete_all
+  end
+
+  test "reset_install_state! clears queued turn internal tasks before deleting conversations" do
+    conversation = create_conversation!(title: "Fresh install cleanup")
+    graph = conversation.dag_graph
+    lane = conversation.chat_lane
+    turn = graph.turns.create!(lane: lane, metadata: {})
+    source_node =
+      graph.nodes.create!(
+        node_type: Messages::Task.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane: lane,
+        turn: turn,
+        metadata: {},
+      )
+
+    TurnInternalTask.create!(
+      conversation: conversation,
+      graph: graph,
+      lane: lane,
+      turn: turn,
+      source_node: source_node,
+      source_hook_name: "after_task_notice",
+      source_fingerprint: "fresh-install-cleanup",
+      logical_tool_name: "subagent_spawn",
+      input: { "name" => "cleanup-check" },
+      authored_metadata: { "source" => "test" },
+      execution_mode: "serial",
+      queue_position: 10,
+      status: "queued",
+    )
+
+    assert_nothing_raised { reset_install_state! }
+    assert_equal 0, TurnInternalTask.count
+    assert_equal 0, Conversation.count
   end
 
   test "root redirects to setup when no identities exist" do

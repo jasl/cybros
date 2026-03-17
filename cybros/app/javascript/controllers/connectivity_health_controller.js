@@ -23,7 +23,17 @@ export default class extends Controller {
   }
 
   #reconcile() {
-    const connected = String(this.element.getAttribute("data-conversation-channel-connected") || "false") === "true"
+    const connectedAttribute = this.element.getAttribute("data-conversation-channel-connected")
+    if (connectedAttribute === null) {
+      // Turbo morph can temporarily remove this client-only attribute while the
+      // existing Stimulus controllers stay connected on the preserved element.
+      // Treat that as "unknown", not a real disconnect.
+      this.#hideDisconnected()
+      this.#clearDisconnectHealthTimer()
+      return
+    }
+
+    const connected = connectedAttribute === "true"
     if (connected) {
       this.everConnected = true
       this.#hideDisconnected()

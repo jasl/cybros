@@ -23,6 +23,7 @@ module Conversations
     end
 
     def self.materialize_lane_directory!(conversation:, lane_id:)
+      materialize_conversation_directory!(conversation: conversation)
       lane_path = Pathname.new(lane_path_for(conversation: conversation, lane_id: lane_id))
       lane_path.mkpath
       lane_path
