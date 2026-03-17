@@ -83,7 +83,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -134,7 +134,7 @@ class DAG::ProgrammableAgentStepStatusPlaceholderTest < ActiveSupport::TestCase
         )
 
       conversation = create_conversation!(user: user, title: "Chat")
-      agent = create_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, execution_profile: target)
       conversation.update!(
         agent: agent,
         permission_mode: "default",

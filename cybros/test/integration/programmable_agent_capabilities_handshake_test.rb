@@ -118,7 +118,7 @@ class ProgrammableAgentCapabilitiesHandshakeTest < ActiveSupport::TestCase
 
     def create_registered_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1", deployment_bearer_secret_ref: "secret://fixture")
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: deployment_bearer_secret_ref,

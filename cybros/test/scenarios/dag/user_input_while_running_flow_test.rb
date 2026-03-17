@@ -272,7 +272,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
     def create_conversation_run!(conversation:, dag_node_id:)
       program = create_program!
       deployment = create_deployment!(program)
-      agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
       recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
 
       ConversationRun.create!(
@@ -309,7 +309,7 @@ class DAG::UserInputWhileRunningFlowTest < ActiveSupport::TestCase
 
     def create_deployment!(program)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

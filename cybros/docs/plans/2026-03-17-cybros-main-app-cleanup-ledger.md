@@ -439,6 +439,31 @@ Old nouns/removal targets for this cleanup:
   - system and live-acceptance surfaces
   - a few model/integration helpers that still keep local execution-target builders for capacity setup
 
+### Round 14
+
+- Cleaned the programmable scenario / conversation runtime residue batch across:
+  - `test/scenarios/dag/programmable_agent_step_status_placeholder_test.rb`
+  - `test/scenarios/dag/user_input_while_running_flow_test.rb`
+  - `test/integration/programmable_agent_hooks_test.rb`
+  - `test/integration/programmable_agent_execution_context_test.rb`
+  - `test/integration/programmable_agent_capabilities_handshake_test.rb`
+  - `test/integration/conversations_test.rb`
+  - `test/lib/dag/running_lease_reclaimer_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_agent_runtime!(program:, execution_target:)`
+  - `create_conversation!(..., agent_program:, default_execution_target:)`
+- Verification commands for this round:
+  - red check: `bin/rails test test/scenarios/dag/programmable_agent_step_status_placeholder_test.rb test/scenarios/dag/user_input_while_running_flow_test.rb test/integration/programmable_agent_hooks_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb test/integration/conversations_test.rb test/lib/dag/running_lease_reclaimer_test.rb` -> 17 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/scenarios/dag/programmable_agent_step_status_placeholder_test.rb test/scenarios/dag/user_input_while_running_flow_test.rb test/integration/programmable_agent_hooks_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb test/integration/conversations_test.rb test/lib/dag/running_lease_reclaimer_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - `task_executor_runtime_surface_test`
+  - `agent_runtime_resolver_llm_provider_test`
+  - a small pair of subagent tool tests
+  - explicit negative coverage in `agent_test`
+  - possible legacy-node fixture semantics in `agent_runtime_resolver_test`
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

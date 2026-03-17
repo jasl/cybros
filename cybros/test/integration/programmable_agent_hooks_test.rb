@@ -371,7 +371,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -399,7 +399,7 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
         backoff_policy: { "kind" => "exponential", "base_delay_ms" => 250, "max_delay_ms" => 10_000 },
       )
       credential.save!
-      agent = materialize_agent_runtime!(program: program)
+      agent = materialize_agent_runtime!(agent: program)
 
       conversation = create_conversation!(user: user, title: "Chat", agent: agent)
       conversation.update!(

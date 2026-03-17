@@ -564,9 +564,9 @@ class ConversationsTest < ActionDispatch::IntegrationTest
           config_schema_fingerprint: "config:v1",
         )
       target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment = create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

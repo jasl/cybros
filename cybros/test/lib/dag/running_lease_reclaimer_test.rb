@@ -53,7 +53,7 @@ class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "websocket",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
@@ -108,14 +108,9 @@ class DAG::RunningLeaseReclaimerTest < ActiveSupport::TestCase
           status: "active",
           sandboxed: true,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: nil,
-        )
+      conversation = create_conversation!(agent: agent)
       graph = conversation.dag_graph
       node =
         graph.nodes.create!(
