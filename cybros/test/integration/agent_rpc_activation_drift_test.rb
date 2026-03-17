@@ -93,11 +93,9 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: deployment_bearer_secret_ref,
@@ -114,19 +112,15 @@ class AgentRPCActivationDriftTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: target,
-        )
+      agent = deployment
+      conversation = create_conversation!(agent: agent)
 
-      { agent: agent, conversation: conversation, program: program, deployment: deployment, target: target }
+      { agent: agent, conversation: conversation, program: program, deployment: deployment }
     end
 
     def replacement_deployment!(program:, endpoint_url:, deployment_bearer_secret_ref:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: deployment_bearer_secret_ref,

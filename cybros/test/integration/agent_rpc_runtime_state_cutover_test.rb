@@ -135,11 +135,9 @@ class AgentRPCRuntimeStateCutoverTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server&.rpc_url || "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
@@ -156,6 +154,7 @@ class AgentRPCRuntimeStateCutoverTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent = deployment
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
       ensure_llm_provider!(
@@ -181,7 +180,6 @@ class AgentRPCRuntimeStateCutoverTest < ActiveSupport::TestCase
         deployment: deployment,
         program: program,
         recognized_deployment: recognized_deployment,
-        target: target,
       }
     end
 end

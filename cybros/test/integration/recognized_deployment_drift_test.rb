@@ -206,11 +206,9 @@ class RecognizedDeploymentDriftTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -227,14 +225,10 @@ class RecognizedDeploymentDriftTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent = deployment
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: target,
-        )
+      conversation = create_conversation!(agent: agent)
 
       {
         agent: agent,
@@ -242,7 +236,6 @@ class RecognizedDeploymentDriftTest < ActiveSupport::TestCase
         deployment: deployment,
         program: program,
         recognized_deployment: recognized_deployment,
-        target: target,
       }
     end
 

@@ -89,11 +89,9 @@ class Cybros::ProgrammableAgent::RecognizedDeploymentResolverTest < ActiveSuppor
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
@@ -110,6 +108,7 @@ class Cybros::ProgrammableAgent::RecognizedDeploymentResolverTest < ActiveSuppor
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent = deployment
       capability_snapshot = {
         "agent_capabilities_version" => "2026-03-13",
         "hostname" => "fixture-host",

@@ -227,11 +227,9 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -248,20 +246,16 @@ class AgentRPCInvocationReplayTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent = deployment
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: target,
-        )
+      conversation = create_conversation!(agent: agent)
 
-      { agent: agent, conversation: conversation, program: program, deployment: deployment, recognized_deployment: recognized_deployment, target: target }
+      { agent: agent, conversation: conversation, program: program, deployment: deployment, recognized_deployment: recognized_deployment }
     end
 
     def replacement_deployment!(program:, deployment_fingerprint:, activated_at: Time.current.change(usec: 0))
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

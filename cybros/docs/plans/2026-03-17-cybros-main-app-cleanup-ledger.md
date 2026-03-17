@@ -333,6 +333,28 @@ Old nouns/removal targets for this cleanup:
   - programmable-agent runtime fixture tests
   - attachment and system/live-acceptance surfaces
 
+### Round 9
+
+- Cleaned the next agent RPC / recognized deployment residue batch across:
+  - `test/integration/agent_rpc_activation_drift_test.rb`
+  - `test/integration/agent_rpc_invocation_replay_test.rb`
+  - `test/integration/agent_rpc_runtime_state_cutover_test.rb`
+  - `test/integration/recognized_deployment_drift_test.rb`
+  - `test/lib/cybros/programmable_agent/recognized_deployment_resolver_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `create_conversation!(..., agent_program:, default_execution_target:)`
+- Simplified the runtime fixtures in those files so the deployment handle is the same live `Agent` record the tests already exercise, instead of synthesizing a separate target-backed layer.
+- Verification commands for this round:
+  - red check: `bin/rails test test/integration/agent_rpc_activation_drift_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/agent_rpc_runtime_state_cutover_test.rb test/integration/recognized_deployment_drift_test.rb test/lib/cybros/programmable_agent/recognized_deployment_resolver_test.rb` -> 16 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/integration/agent_rpc_activation_drift_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/agent_rpc_runtime_state_cutover_test.rb test/integration/recognized_deployment_drift_test.rb test/lib/cybros/programmable_agent/recognized_deployment_resolver_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - programmable-agent tool/runtime-surface tests
+  - attachment transfer and conversation attachment integration tests
+  - system and live-acceptance surfaces
+  - a smaller set of dashboard/bootstrap/conversation bootstrap runtime helpers
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.
