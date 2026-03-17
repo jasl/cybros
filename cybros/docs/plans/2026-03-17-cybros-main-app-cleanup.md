@@ -437,7 +437,7 @@ git commit -m "test: remove execution target fixture scaffolding"
 Run:
 
 ```bash
-rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|agent_program|default_execution_target|logical_workspace" cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/docs/product.old/**' --glob '!cybros/docs/execution.old/**'
+rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|agent_program|default_execution_target|logical_workspace" cybros/docs --glob '!cybros/docs/archive/**'
 ```
 
 Expected: a smaller active-doc hit list than the initial inventory.
@@ -550,8 +550,9 @@ git commit -m "refactor: simplify workspace ownership boundary"
 **Files:**
 - Review and act on files recorded in the ledger under:
   - `cybros/docs/reports/`
-  - `cybros/docs/product.old/`
-  - `cybros/docs/execution.old/`
+  - `cybros/docs/archive/product/`
+  - `cybros/docs/archive/execution/`
+  - `cybros/docs/archive/audits/`
   - `cybros/tmp/`
 - Modify: `cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md`
 
@@ -560,7 +561,7 @@ git commit -m "refactor: simplify workspace ownership boundary"
 Run:
 
 ```bash
-git ls-files cybros/docs/reports cybros/docs/product.old cybros/docs/execution.old cybros/tmp
+git ls-files cybros/docs/reports cybros/docs/archive/product cybros/docs/archive/execution cybros/docs/archive/audits cybros/tmp
 ```
 
 Expected: a concrete list of tracked historical files and temp artifacts.
@@ -580,7 +581,7 @@ Process these in explicit small batches if the candidate set is large.
 Run:
 
 ```bash
-rg -n "docs/reports|product\\.old|execution\\.old|cybros/tmp" cybros/docs cybros/README.md cybros/AGENTS.md
+rg -n "docs/reports|docs/archive/product|docs/archive/execution|docs/archive/audits|cybros/tmp" cybros/docs cybros/README.md cybros/AGENTS.md
 ```
 
 Expected: no broken active references.

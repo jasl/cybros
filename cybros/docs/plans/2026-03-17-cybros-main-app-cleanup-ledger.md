@@ -486,9 +486,9 @@ Old nouns/removal targets for this cleanup:
 ### Round 16 (Retrospective Re-Audit)
 
 - Re-audited the full live code/test/doc surface with:
-  - `rg -n "agent_program_key|agent_program:|default_execution_target|execution_target:" cybros/app cybros/lib cybros/test cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/docs/product.old/**' --glob '!cybros/docs/execution.old/**'`
+  - `rg -n "agent_program_key|agent_program:|default_execution_target|execution_target:" cybros/app cybros/lib cybros/test cybros/docs --glob '!cybros/docs/archive/**'`
   - `rg -n "materialize_agent_runtime!\\(program:|create_agent_runtime!\\(program:|create_runtime_binding_record!\\([^\\n]*agent_program:" cybros/test`
-  - `rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|agent_program|default_execution_target|logical_workspace" cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/docs/product.old/**' --glob '!cybros/docs/execution.old/**'`
+  - `rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|agent_program|default_execution_target|logical_workspace" cybros/docs --glob '!cybros/docs/archive/**'`
 - Resolved the last verified code residue by simplifying `test/lib/cybros/agent_runtime_resolver_test.rb` to the current conversation helper contract.
 - Also cleaned the remaining mechanical but unverified helper residue in:
   - `test/system/system_settings_runtime_governance_test.rb`
@@ -517,6 +517,27 @@ Old nouns/removal targets for this cleanup:
   - red check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb` -> 1 failure proving the duplicate `root_path` key was still exposed
   - green check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb test/integration/default_agent_attachment_transfer_test.rb`
 - Remaining P2 simplification opportunities after this batch are lower priority and should be treated as follow-up cleanup, not blockers for the current destructive cutover.
+
+### Round 18 (Tracked Clutter Review)
+
+- Archived the remaining top-level historical docs instead of leaving them in ambiguous `.old` namespaces:
+  - moved `cybros/docs/product.old/**` to `cybros/docs/archive/product/**`
+  - moved `cybros/docs/execution.old/execution_subsystem_design.md` to `cybros/docs/archive/execution/execution_subsystem_design.md`
+  - moved `cybros/docs/reports/2026-02-19-dag-engine-audit.md` to `cybros/docs/archive/audits/2026-02-19-dag-engine-audit.md`
+- Updated the live doc index and active cleanup plan to point at the archived locations so the top-level docs surface no longer advertises obsolete product/runtime paths.
+- Kept the remaining files under `cybros/docs/reports/` with a written reason:
+  - recent proof and parity reports are still referenced by active or near-active docs
+  - their sibling `*-artifacts/mermaid/` trees are linked directly from those proof reports, so deleting the artifacts would break the evidence chain
+- Kept `cybros/tmp/.keep` and `cybros/tmp/storage/.keep`; the only tracked `tmp` files were placeholders, while the noisier temp artifacts are gitignored local clutter rather than tracked repository state.
+- Verification commands for this round:
+  - `git ls-files cybros/docs/reports cybros/docs/archive/product cybros/docs/archive/execution cybros/docs/archive/audits cybros/tmp`
+  - `rg -n "product\\.old|execution\\.old|2026-02-19-dag-engine-audit\\.md" cybros/docs cybros/README.md cybros/AGENTS.md`
+  - `rg -n "docs/reports|docs/archive/product|docs/archive/execution|docs/archive/audits|cybros/tmp" cybros/docs cybros/README.md cybros/AGENTS.md`
+- Tracked-clutter conclusion:
+  - the misleading top-level `.old` doc surface is gone
+  - the clearly historical DAG audit is archived
+  - `docs/reports/` now only holds current proof/report material or evidence trees that are still transitively referenced
+  - the unrelated untracked audit report remains untouched and out of scope
 
 ## Reusable Strategy Notes
 

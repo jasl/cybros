@@ -11,6 +11,7 @@ This directory contains Cybros architecture/design notes intended for humans and
 - Active cleanup process docs: `docs/plans/2026-03-17-cybros-main-app-cleanup-design.md`, `docs/plans/2026-03-17-cybros-main-app-cleanup.md`, `docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md`
 
 Historical executable plans and audits belong under `docs/archive/` once they stop being active truth sources.
+Historical product/runtime notes now live under `docs/archive/product/` and `docs/archive/execution/`.
 
 ## DAG engine
 
@@ -18,7 +19,7 @@ Historical executable plans and audits belong under `docs/archive/` once they st
 - Workflow engine (scheduler/runner/jobs/hooks): `docs/dag/workflow_engine.md`
 - Normative behavior spec (nodes/edges/states/invariants/streaming): `docs/dag/behavior_spec.md`
 - Sub-agent patterns: `docs/dag/subagent_patterns.md`
-- Historical DAG audit report: `docs/reports/2026-02-19-dag-engine-audit.md`
+- Historical DAG audit report: `docs/archive/audits/2026-02-19-dag-engine-audit.md`
 - Errors: `docs/dag/errors.md`
 
 ## AgentCore (DAG-first)

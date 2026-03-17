@@ -4,7 +4,7 @@
 
 历史审计报告已移到：
 
-- `docs/reports/2026-02-19-dag-engine-audit.md`
+- `docs/archive/audits/2026-02-19-dag-engine-audit.md`
 
 当前 DAG 规范入口：
 
