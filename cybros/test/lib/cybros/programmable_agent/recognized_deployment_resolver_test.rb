@@ -83,7 +83,7 @@ class Cybros::ProgrammableAgent::RecognizedDeploymentResolverTest < ActiveSuppor
           name: "Fixture Program #{SecureRandom.hex(4)}",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "agent_program_key" => "fixture-program" },
+          manifest_snapshot: { "agent_key" => "fixture-program" },
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },
@@ -118,7 +118,7 @@ class Cybros::ProgrammableAgent::RecognizedDeploymentResolverTest < ActiveSuppor
       }
       initialize_result = {
         "identity" => {
-          "agent_program_key" => "fixture-program",
+          "agent_key" => "fixture-program",
           "deployment_fingerprint" => deployment.deployment_fingerprint,
           "protocol_version" => deployment.protocol_version,
           "agent_sdk_version" => deployment.agent_sdk_version,

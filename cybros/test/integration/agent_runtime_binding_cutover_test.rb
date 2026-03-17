@@ -81,7 +81,7 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
           name: name,
           config_namespace: "#{namespace}.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "name" => name, "agent_program_key" => namespace.tr(".", "-") },
+          manifest_snapshot: { "name" => name, "agent_key" => namespace.tr(".", "-") },
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },

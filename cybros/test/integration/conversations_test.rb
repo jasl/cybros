@@ -557,7 +557,7 @@ class ConversationsTest < ActionDispatch::IntegrationTest
           name: name,
           config_namespace: "fixture.conversations.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "agent_program_key" => SecureRandom.hex(4), "name" => name },
+          manifest_snapshot: { "agent_key" => SecureRandom.hex(4), "name" => name },
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },

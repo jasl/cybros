@@ -212,7 +212,7 @@ class SystemSettingsAutomationsTest < ActionDispatch::IntegrationTest
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
         manifest_snapshot: {
-          "agent_program_key" => "fixture-program",
+          "agent_key" => "fixture-program",
           "name" => "Operator Fixture Program",
         },
         global_config: {},

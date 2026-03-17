@@ -57,7 +57,7 @@ class AgentUpgradeConversationBindingTest < ActiveSupport::TestCase
           config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
           config_schema_fingerprint: "config:v1",
-          manifest_snapshot: { "name" => "Fixture Agent", "agent_program_key" => "fixture-program" },
+          manifest_snapshot: { "name" => "Fixture Agent", "agent_key" => "fixture-program" },
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",

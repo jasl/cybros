@@ -76,6 +76,12 @@ Old nouns/removal targets for this cleanup:
    - `cybros/lib/cybros/programmable_agent_fixture.rb:14`
    Action: `delete`
    Notes: This is the first broad test/data cleanup cluster after the live fallback is removed.
+   Batch A (Task 4): `run_draft_test`, `conversation_run_test`, `lifecycle_caller_test`, `agent_runtime_binding_cutover_test`, `agent_rpc_runtime_state_cutover_test`, `programmable_agent_execution_test`, `conversations_test`, `programmable_agent_step_status_placeholder_test`.
+   Batch B (Task 4): `agent_runtime_resolver_llm_provider_test`, `programmable_agent/tool_execution_test`, `programmable_agent/recognized_deployment_resolver_test`, `programmable_agent_provider_test`, `programmable_agent/hook_action_executor_test`, `agent_core/dag/runtime_surface_error_handling_test`, `agent_core/dag/agent_output_finalization_test`, `agent_core/dag/task_executor_runtime_surface_test`.
+   Batch C (Task 4): `agent_upgrade_conversation_binding_test`, `agent_rpc_lost_reply_recovery_test`, `agent_rpc_activation_drift_test`, `programmable_agent_capabilities_refresh_test`, `programmable_agent_hooks_test`, `programmable_agent_execution_context_test`, `agent_rpc_invocation_replay_test`, `bootstrap_hook_contract_test`.
+   Batch D (Task 4): `jobs/automations/execute_conversation_job_test`, `integration/system_settings_automations_test`, `integration/automation_failure_recovery_test`, `integration/automation_execution_conversation_test`, `integration/automation_execution_run_draft_flow_test`, `integration/automation_manual_approval_test`, `integration/run_draft_finalization_test`, `integration/run_draft_approval_resume_test`.
+   Batch E (Task 4): `dashboard_test`, `conversation_bootstrap_dispatch_test`, `programmable_agent_tool_routing_test`, `agent_execution_capacity_test`, `programmable_agent_capabilities_handshake_test`, `recognized_deployment_drift_test`.
+   Batch F (Task 4, unverified in this environment): `test/system/system_settings_automations_test.rb`, `test/script/live_acceptance/agent_root_workspace_test.rb`.
 
 2. `test/test_helper.rb` still exposes obsolete conversation/runtime helper arguments.
    Evidence:
@@ -213,6 +219,27 @@ Old nouns/removal targets for this cleanup:
   - `rg -n "agent_program_key" cybros/app cybros/lib cybros/config` returned no live hits.
   - targeted cybros tests passed for creator/session auth/bootstrap/fixture surfaces.
   - targeted bundled claw tests passed for manifest and RPC contract surfaces.
+
+### Round 4
+
+- Normalized `agent_program_key` fixture payloads to `agent_key` across five explicit verified batches covering:
+  - model/runtime fixture helpers
+  - lib and DAG tests
+  - recovery / replay / hook integration tests
+  - automation / run-draft integration and job tests
+  - remaining dashboard / bootstrap / routing / capacity / handshake integration tests
+- Final grep now leaves `agent_program_key` only in:
+  - explicit negative tests that prove legacy payloads are rejected
+  - `refute ...key?("agent_program_key")` assertions that prove the new snapshots no longer carry the old key
+- Unverified but updated for consistency:
+  - `cybros/test/system/system_settings_automations_test.rb`
+  - `cybros/test/script/live_acceptance/agent_root_workspace_test.rb`
+- Verification commands that passed during this round:
+  - `bin/rails test test/scenarios/dag/programmable_agent_step_status_placeholder_test.rb test/services/agent_rpc/lifecycle_caller_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb test/integration/agent_runtime_binding_cutover_test.rb test/integration/agent_rpc_runtime_state_cutover_test.rb test/integration/programmable_agent_execution_test.rb test/integration/conversations_test.rb`
+  - `bin/rails test test/lib/cybros/agent_runtime_resolver_llm_provider_test.rb test/lib/cybros/programmable_agent/tool_execution_test.rb test/lib/cybros/programmable_agent/recognized_deployment_resolver_test.rb test/lib/cybros/programmable_agent_provider_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
+  - `bin/rails test test/integration/agent_upgrade_conversation_binding_test.rb test/integration/agent_rpc_lost_reply_recovery_test.rb test/integration/agent_rpc_activation_drift_test.rb test/integration/programmable_agent_capabilities_refresh_test.rb test/integration/programmable_agent_hooks_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/bootstrap_hook_contract_test.rb`
+  - `bin/rails test test/jobs/automations/execute_conversation_job_test.rb test/integration/system_settings_automations_test.rb test/integration/automation_failure_recovery_test.rb test/integration/automation_execution_conversation_test.rb test/integration/automation_execution_run_draft_flow_test.rb test/integration/automation_manual_approval_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb`
+  - `bin/rails test test/integration/dashboard_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/programmable_agent_tool_routing_test.rb test/integration/agent_execution_capacity_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb test/integration/recognized_deployment_drift_test.rb`
 
 ## Reusable Strategy Notes
 

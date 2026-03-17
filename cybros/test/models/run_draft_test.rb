@@ -253,7 +253,7 @@ class RunDraftTest < ActiveSupport::TestCase
           name: "Fixture Program #{SecureRandom.hex(4)}",
           config_namespace: "#{namespace}.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "name" => "Fixture", "agent_program_key" => "fixture-program" },
+          manifest_snapshot: { "name" => "Fixture", "agent_key" => "fixture-program" },
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },
@@ -268,7 +268,7 @@ class RunDraftTest < ActiveSupport::TestCase
           deployment: deployment,
           initialize_result: {
             "identity" => {
-              "agent_program_key" => program.manifest_snapshot["agent_program_key"],
+              "agent_key" => program.manifest_snapshot["agent_key"],
               "deployment_fingerprint" => deployment.deployment_fingerprint,
               "protocol_version" => deployment.protocol_version,
               "agent_sdk_version" => deployment.agent_sdk_version,

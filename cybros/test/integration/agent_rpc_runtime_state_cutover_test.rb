@@ -93,7 +93,7 @@ class AgentRPCRuntimeStateCutoverTest < ActiveSupport::TestCase
         deployment: runtime.fetch(:deployment),
         initialize_result: {
           "identity" => {
-            "agent_program_key" => runtime.fetch(:program).manifest_snapshot.fetch("agent_program_key"),
+            "agent_key" => runtime.fetch(:program).manifest_snapshot.fetch("agent_key"),
             "deployment_fingerprint" => runtime.fetch(:deployment).deployment_fingerprint,
             "protocol_version" => runtime.fetch(:deployment).protocol_version,
             "agent_sdk_version" => runtime.fetch(:deployment).agent_sdk_version,
@@ -129,7 +129,7 @@ class AgentRPCRuntimeStateCutoverTest < ActiveSupport::TestCase
           name: "Fixture Program",
           config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
-          manifest_snapshot: { "agent_program_key" => "fixture-program", "name" => "Fixture Program" },
+          manifest_snapshot: { "agent_key" => "fixture-program", "name" => "Fixture Program" },
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },

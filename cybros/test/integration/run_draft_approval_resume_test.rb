@@ -467,7 +467,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
         manifest_snapshot: {
-          "agent_program_key" => "fixture-program",
+          "agent_key" => "fixture-program",
           "name" => "Fixture Program",
         },
         global_config: {},
@@ -514,7 +514,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
           config_namespace: config_namespace,
           published_contract_fingerprint: "contract:#{config_namespace}",
           manifest_snapshot: {
-            "agent_program_key" => config_namespace.tr(".", "-"),
+            "agent_key" => config_namespace.tr(".", "-"),
             "name" => name,
           },
           global_config: {},

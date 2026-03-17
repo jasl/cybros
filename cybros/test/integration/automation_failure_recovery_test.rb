@@ -107,7 +107,7 @@ class AutomationFailureRecoveryTest < ActiveSupport::TestCase
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
         manifest_snapshot: {
-          "agent_program_key" => "fixture-program",
+          "agent_key" => "fixture-program",
           "name" => "Fixture Program",
         },
         global_config: {},
