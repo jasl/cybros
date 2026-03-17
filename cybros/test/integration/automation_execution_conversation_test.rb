@@ -175,8 +175,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
       user = create_user!
       program = create_program!
       deployment = active_deployment!(program: program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
-      target = create_execution_target!(name: "Automation target")
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, deployment: deployment)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
@@ -194,7 +193,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
           },
         )
 
-      { agent: agent, automation: automation, program: program, deployment: deployment, target: target }
+      { agent: agent, automation: automation, program: program, deployment: deployment }
     end
 
     def dispatch_automation!(automation:, scheduled_for:)
@@ -224,7 +223,7 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -240,40 +239,6 @@ class AutomationExecutionConversationTest < ActiveSupport::TestCase
         capability_snapshot: {},
         inspection_details: {},
         activated_at: Time.current.change(usec: 0),
-      )
-    end
-
-    def create_execution_target!(name:)
-      location =
-        create_execution_location_profile!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
       )
     end
 

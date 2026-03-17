@@ -190,10 +190,9 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     end
 
     def create_runtime!(max_concurrent_tasks:, max_queued_tasks:)
-      program = create_program!
-      target = create_execution_target!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
-      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+      program = create_program!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
       deployment = create_deployment!(program)
+      agent = create_agent_runtime!(agent: program, deployment: deployment)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       credential =
         LLMProviderCredential.create!(
@@ -209,45 +208,10 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
         deployment: deployment,
         program: program,
         recognized_deployment: recognized_deployment,
-        target: target,
       }
     end
 
-    def create_execution_target!(max_concurrent_tasks:, max_queued_tasks:)
-      location =
-        create_execution_location_profile!(
-          name: "Fixture host #{SecureRandom.hex(4)}",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: max_concurrent_tasks,
-          max_queued_tasks: max_queued_tasks,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "Fixture workspace #{SecureRandom.hex(4)}",
-          root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: "Fixture target",
-        status: "active",
-        sandboxed: true,
-      )
-    end
-
-    def create_program!
+    def create_program!(max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
         name: "Fixture Program #{SecureRandom.hex(4)}",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
@@ -257,6 +221,8 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
       )
     end
 

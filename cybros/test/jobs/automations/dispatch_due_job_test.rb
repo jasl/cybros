@@ -35,38 +35,7 @@ class Automations::DispatchDueJobTest < ActiveJob::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      location =
-        create_execution_location_profile!(
-          name: "Automation host #{SecureRandom.hex(4)}",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["automation"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "Automation workspace #{SecureRandom.hex(4)}",
-          root_path: "/tmp/automation-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["automation"],
-        )
-      target =
-        create_execution_profile!(
-          execution_location: location,
-          workspace: workspace,
-          name: "Automation target #{SecureRandom.hex(4)}",
-          status: "active",
-          sandboxed: true,
-        )
-      agent = create_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program)
 
       Automation.create!(
         user: create_user!,

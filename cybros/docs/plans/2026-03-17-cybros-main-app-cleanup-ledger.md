@@ -114,6 +114,7 @@ Old nouns/removal targets for this cleanup:
    - `cybros/test/jobs/automations/execute_conversation_job_test.rb:83`
    Action: `delete` / `Rails-shaped simplify`
    Notes: This is Task 6's main cluster.
+   Round 6 update: the selected runtime-governance and automation suites are now agent-centric and verified; remaining `execution_target` residue is concentrated in adjacent system/runtime-governance surfaces, RPC/runtime fixture tests, and tool/attachment/runtime-surface tests.
 
 ## P2 Rails-Shaped Simplify Findings
 
@@ -273,6 +274,33 @@ Old nouns/removal targets for this cleanup:
   - agent RPC / attachment / tool execution integration tests
   - lib and DAG runtime-surface tests
   - system and live-acceptance surfaces that were already out of the first verified batch
+
+### Round 6
+
+- Removed execution-target-centric setup from the selected runtime-governance and automation suites by moving capacity facts onto the `Agent` records those tests already own.
+- Deleted local `create_execution_target!` scaffolding from:
+  - `execution_capacity_resolver_test`
+  - `execution_capacity_enforcer_test`
+  - `dispatch_test`
+  - `dispatch_due_job_test`
+  - `execute_conversation_job_test`
+  - `automation_test`
+  - `automation_failure_recovery_test`
+  - `automation_execution_conversation_test`
+  - `automation_execution_run_draft_flow_test`
+  - `automation_manual_approval_test`
+- Simplified the selected integration/unit helpers so they now use:
+  - `create_agent_runtime!(agent:, deployment:)`
+  - `create_runtime_binding_record!(agent:, ...)`
+  - direct `Agent` capacity attributes instead of synthetic execution-profile wrappers
+- Kept the shared execution-profile helpers in `test/test_helper.rb` for now because later clusters still depend on them; helper deletion is deferred until those consumers are migrated, rather than leaving the suite half-broken.
+- Verification command that passed during this round:
+  - `bin/rails test test/services/runtime_governance/execution_capacity_resolver_test.rb test/services/runtime_governance/execution_capacity_enforcer_test.rb test/integration/execution_capacity_enforcement_test.rb test/integration/runtime_governance_observability_test.rb test/services/automations/dispatch_test.rb test/jobs/automations/dispatch_due_job_test.rb test/jobs/automations/execute_conversation_job_test.rb test/models/automation_test.rb test/integration/automation_failure_recovery_test.rb test/integration/automation_execution_conversation_test.rb test/integration/automation_execution_run_draft_flow_test.rb test/integration/automation_manual_approval_test.rb`
+- Remaining `execution_target` / old runtime-helper residue after this batch is now concentrated in:
+  - adjacent runtime governance/system tests (`execution_capacity_leases_test`, `system_settings_runtime_governance_test`)
+  - RPC/runtime model tests (`agent_rpc_*`, `recognized_deployment_*`, `run_draft_*`, `conversation_run_*`)
+  - programmable-agent tool/runtime-surface tests
+  - attachment and system/live-acceptance integration surfaces
 
 ## Reusable Strategy Notes
 

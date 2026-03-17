@@ -114,8 +114,7 @@ class AutomationTest < ActiveSupport::TestCase
 
     def create_agent!
       program = create_program!
-      target = create_execution_target!(name: "Automation target")
-      create_agent_runtime!(program: program, execution_target: target)
+      create_agent_runtime!(agent: program)
     end
 
     def create_program!
@@ -131,37 +130,4 @@ class AutomationTest < ActiveSupport::TestCase
       )
     end
 
-    def create_execution_target!(name:)
-      location =
-        create_execution_location_profile!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["automation"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["automation"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
-      )
-    end
 end

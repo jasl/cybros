@@ -79,17 +79,9 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
         at: 3.days.ago,
       )
 
-      target =
-        create_execution_target!(
-          name: "Stale target",
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 4,
-          max_concurrent_tasks_override: 1,
-          max_queued_tasks_override: 1,
-        )
-      stale_execution = create_queued_execution!(execution_target: target)
+      stale_agent = create_program!(name: "Stale target", max_concurrent_tasks: 1, max_queued_tasks: 1)
+      stale_execution = create_queued_execution!(agent: stale_agent)
       stale_run = stale_execution.fetch(:run)
-      stale_agent = stale_execution.fetch(:agent)
       create_execution_wait_record!(
         owner_id: stale_run.id,
         subject_type: "agent",
@@ -104,7 +96,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
         status: "released",
         at: 3.days.ago,
       )
-      create_execution_denial_record!(execution_target: target, agent: stale_agent, at: 3.days.ago)
+      create_execution_denial_record!(agent: stale_agent, at: 3.days.ago)
 
       feed = RuntimeGovernance::ObservabilityFeed.build(recent_limit: 10)
 
@@ -209,37 +201,25 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     end
 
     def create_blocked_execution_subject!
-      target = create_execution_target!(name: "Blocked host", max_concurrent_tasks: 1, max_queued_tasks: 2)
-      program = create_program!(name: "Blocked program")
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
-      first = create_queued_execution!(execution_target: target, agent: agent)
-      second = create_queued_execution!(execution_target: target, agent: agent)
+      agent = create_program!(name: "Blocked program", max_concurrent_tasks: 1, max_queued_tasks: 2)
+      first = create_queued_execution!(agent: agent)
+      second = create_queued_execution!(agent: agent)
 
       DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
       DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
 
       {
         agent: agent,
-        target: target,
         subject_id: agent.id,
         parked_run: second.fetch(:run).reload,
       }
     end
 
     def create_recovered_execution_subject!
-      target =
-        create_execution_target!(
-          name: "Recovered target",
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 4,
-          max_concurrent_tasks_override: 1,
-          max_queued_tasks_override: 1,
-        )
-      program = create_program!(name: "Recovered program")
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
-      first = create_queued_execution!(execution_target: target, agent: agent)
-      second = create_queued_execution!(execution_target: target, agent: agent)
-      third = create_queued_execution!(execution_target: target, agent: agent)
+      agent = create_program!(name: "Recovered program", max_concurrent_tasks: 1, max_queued_tasks: 1)
+      first = create_queued_execution!(agent: agent)
+      second = create_queued_execution!(agent: agent)
+      third = create_queued_execution!(agent: agent)
 
       DAG::Scheduler.claim_executable_nodes(graph: first.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
       DAG::Scheduler.claim_executable_nodes(graph: second.fetch(:conversation).dag_graph, limit: 10, claimed_by: "test")
@@ -249,7 +229,6 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
 
       {
         agent: agent,
-        target: target,
         parked_run: second.fetch(:run).reload,
         denied_run: third.fetch(:run).reload,
       }
@@ -258,8 +237,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     def create_deployment_backoff_subject!
       program = create_program!(name: "Backoff program")
       deployment = create_deployment!(program: program)
-      target = create_execution_target!(name: "Backoff host", max_concurrent_tasks: 1, max_queued_tasks: 1)
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, deployment: deployment)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
 
       RuntimeGovernance::RuntimeWaits.park!(
@@ -309,8 +287,8 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
       )
     end
 
-    def create_execution_denial_record!(execution_target:, agent: nil, at:)
-      denied_execution = create_queued_execution!(execution_target: execution_target, agent: agent)
+    def create_execution_denial_record!(agent:, at:)
+      denied_execution = create_queued_execution!(agent: agent)
       denied_run = denied_execution.fetch(:run)
       denied_run.update!(
         state: "failed",
@@ -335,53 +313,16 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
       )
     end
 
-    def create_execution_target!(name:, max_concurrent_tasks:, max_queued_tasks:, max_concurrent_tasks_override: nil, max_queued_tasks_override: nil)
-      location =
-        create_execution_location_profile!(
-          name: name,
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: max_concurrent_tasks,
-          max_queued_tasks: max_queued_tasks,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: "#{name} target",
-        status: "active",
-        sandboxed: true,
-        max_concurrent_tasks_override: max_concurrent_tasks_override,
-        max_queued_tasks_override: max_queued_tasks_override,
-      )
-    end
-
-    def create_queued_execution!(execution_target:, agent: nil)
-      program = agent || create_program!
-      agent ||= materialize_agent_runtime!(program: program, execution_target: execution_target)
-      deployment = agent.status == "active" && agent.health_status == "healthy" ? agent : create_deployment!(program: program)
+    def create_queued_execution!(agent: nil, max_concurrent_tasks: 1, max_queued_tasks: 2)
+      agent ||= create_program!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      if agent.status == "active" && agent.health_status == "healthy"
+        deployment = agent
+      else
+        deployment = create_deployment!(program: agent)
+        agent = create_agent_runtime!(agent: agent, deployment: deployment)
+      end
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: nil,
-        )
+      conversation = create_conversation!(agent: agent)
       graph = conversation.dag_graph
       user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
       node = graph.nodes.create!(node_type: Messages::AgentMessage.node_type_key, state: DAG::Node::PENDING, metadata: {})
@@ -401,14 +342,14 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
           agent: agent,
           recognized_deployment: recognized_deployment,
           recognized_deployment_key: recognized_deployment.recognized_deployment_key,
-          contract_fingerprint: program.published_contract_fingerprint,
+          contract_fingerprint: agent.published_contract_fingerprint,
           deployment_fingerprint: deployment.deployment_fingerprint,
           deployment_activated_at: deployment.activated_at || Time.current.change(usec: 0),
           provider_credential: credential,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: agent.config_schema_fingerprint,
           effective_policy: {},
           runtime_governors: {
             "provider_limiter" => provider_limiter_snapshot(
@@ -423,7 +364,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
       { conversation: conversation, node: node, run: run, agent: agent }
     end
 
-    def create_program!(name: "Fixture Program")
+    def create_program!(name: "Fixture Program", max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
         name: "#{name} #{SecureRandom.hex(4)}",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
@@ -433,12 +374,14 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
       )
     end
 
     def create_deployment!(program:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

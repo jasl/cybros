@@ -15,15 +15,8 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
   end
 
   test "admit! keeps agent-scoped lease identity even when imported capacity came from target overrides" do
-    target =
-      create_execution_target!(
-        max_concurrent_tasks: 1,
-        max_queued_tasks: 2,
-        max_concurrent_tasks_override: 2,
-        max_queued_tasks_override: 3,
-      )
-    run_one = create_conversation_run!(execution_target: target)
-    run_two = create_conversation_run!(execution_target: target)
+    run_one = create_conversation_run!(max_concurrent_tasks: 2, max_queued_tasks: 3)
+    run_two = create_conversation_run!(max_concurrent_tasks: 2, max_queued_tasks: 3)
 
     first = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run_one)
     second = RuntimeGovernance::ExecutionCapacityEnforcer.admit!(conversation_run: run_two)
@@ -58,15 +51,10 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
 
   private
 
-    def create_conversation_run!(execution_target: nil, runtime_governors: nil)
-      runtime = create_runtime!(execution_target: execution_target)
-      conversation =
-        create_conversation!(
-          agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: execution_target,
-        )
-      runtime_governors ||= default_runtime_governors(runtime: runtime, execution_target: execution_target)
+    def create_conversation_run!(max_concurrent_tasks: 1, max_queued_tasks: 2, runtime_governors: nil)
+      runtime = create_runtime!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      conversation = create_conversation!(agent: runtime.fetch(:agent))
+      runtime_governors ||= default_runtime_governors(runtime: runtime)
 
       ConversationRun.create!(
         build_conversation_run_attributes(
@@ -90,7 +78,7 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
       )
     end
 
-    def default_runtime_governors(runtime:, execution_target:)
+    def default_runtime_governors(runtime:)
       runtime_governors_snapshot(
         provider_credential: runtime.fetch(:credential),
         selected_model_ref: "openai/gpt-5.4",
@@ -98,11 +86,10 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
       )
     end
 
-    def create_runtime!(execution_target: nil)
-      program = create_program!
-      target = execution_target || create_execution_target!(max_concurrent_tasks: 1, max_queued_tasks: 2)
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+    def create_runtime!(max_concurrent_tasks:, max_queued_tasks:)
+      program = create_program!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
       deployment = create_deployment!(program)
+      agent = create_agent_runtime!(agent: program, deployment: deployment)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       credential =
         LLMProviderCredential.create!(
@@ -118,47 +105,10 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
         deployment: deployment,
         program: program,
         recognized_deployment: recognized_deployment,
-        target: target,
       }
     end
 
-    def create_execution_target!(max_concurrent_tasks:, max_queued_tasks:, **overrides)
-      location =
-        create_execution_location_profile!(
-          name: "Fixture host #{SecureRandom.hex(4)}",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: max_concurrent_tasks,
-          max_queued_tasks: max_queued_tasks,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "Fixture workspace #{SecureRandom.hex(4)}",
-          root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        {
-          execution_location: location,
-          workspace: workspace,
-          name: "Fixture target",
-          status: "active",
-          sandboxed: true,
-        }.merge(overrides),
-      )
-    end
-
-    def create_program!
+    def create_program!(max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
         name: "Fixture Program #{SecureRandom.hex(4)}",
         config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
@@ -168,12 +118,14 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
       )
     end
 
     def create_deployment!(program)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
