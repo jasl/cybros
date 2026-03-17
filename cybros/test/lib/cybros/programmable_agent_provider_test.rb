@@ -242,12 +242,12 @@ class Cybros::ProgrammableAgentProviderTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       target = build_default_execution_profile!
-      agent = create_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, execution_profile: target)
       fixture_identity = Cybros::ProgrammableAgentFixture.identity
       supported_methods ||= fixture_identity.fetch("supported_methods")
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: deployment_bearer_secret_ref,

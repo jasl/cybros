@@ -598,7 +598,7 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -615,7 +615,7 @@ class AgentCore::DAG::RuntimeSurfaceErrorHandlingTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      agent_runtime = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      agent_runtime = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
       conversation.update!(agent: agent_runtime, agent_config_schema_fingerprint: program.config_schema_fingerprint)
       recognized_deployment = recognize_agent_runtime!(agent: agent_runtime, deployment: deployment)
       snapshot =

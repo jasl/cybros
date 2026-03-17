@@ -418,6 +418,27 @@ Old nouns/removal targets for this cleanup:
   - system and live-acceptance surfaces
   - a smaller number of scenario/model tests still carrying local execution-target fixture builders
 
+### Round 13
+
+- Cleaned the first lib runtime-surface residue batch across:
+  - `test/lib/cybros/programmable_agent_provider_test.rb`
+  - `test/lib/cybros/programmable_agent/hook_action_executor_test.rb`
+  - `test/lib/agent_core/dag/agent_output_finalization_test.rb`
+  - `test/lib/agent_core/dag/runtime_surface_error_handling_test.rb`
+  - `test/lib/dag/runner_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `create_agent_runtime!(program:, execution_target:)`
+- The initial red run also restored the hidden signal that several of those tests were expecting domain validation failures, not helper argument errors; after the helper cleanup, those original assertions passed again unchanged.
+- Verification commands for this round:
+  - red check: `bin/rails test test/lib/cybros/programmable_agent_provider_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb test/lib/dag/runner_test.rb` -> 28 errors and 2 expectation failures, all caused by the removed helper keywords surfacing ahead of the real domain assertions
+  - green check: `bin/rails test test/lib/cybros/programmable_agent_provider_test.rb test/lib/cybros/programmable_agent/hook_action_executor_test.rb test/lib/agent_core/dag/agent_output_finalization_test.rb test/lib/agent_core/dag/runtime_surface_error_handling_test.rb test/lib/dag/runner_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - `task_executor_runtime_surface_test` and `agent_runtime_resolver_llm_provider_test`
+  - scenario tests with local runtime builders
+  - system and live-acceptance surfaces
+  - a few model/integration helpers that still keep local execution-target builders for capacity setup
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

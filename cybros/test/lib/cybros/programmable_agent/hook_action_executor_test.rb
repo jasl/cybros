@@ -1049,7 +1049,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     def create_active_deployment!(program:, capability_snapshot:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:9999/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -1075,7 +1075,7 @@ class Cybros::ProgrammableAgent::HookActionExecutorTest < ActiveSupport::TestCas
 
     def create_conversation_run!(conversation:, dag_node_id:, program:, snapshot:, tool_surface:)
       target = build_default_execution_profile!
-      agent = create_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, execution_profile: target)
       conversation.update!(
         agent: agent,
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
