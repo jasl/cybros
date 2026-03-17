@@ -49,11 +49,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
           .order(:id)
           .last
           .id
-      conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-      assert_includes claimed, agent_node_id
-
-      DAG::Runner.run_node!(agent_node_id)
+      run_agent_turn_until_finished!(graph: conversation.root_graph, agent_node_id: agent_node_id)
 
       agent =
         conversation.root_graph.nodes
@@ -118,11 +114,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
           .order(:id)
           .last
           .id
-      conversation.root_graph.nodes.find(agent_node_id).update!(claim_after_at: nil)
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-      assert_includes claimed, agent_node_id
-
-      DAG::Runner.run_node!(agent_node_id)
+      run_agent_turn_until_finished!(graph: conversation.root_graph, agent_node_id: agent_node_id)
 
       agent =
         conversation.root_graph.nodes
@@ -192,12 +184,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
 
       result = conversation.append_user_message!(content: "Search the repo", model_ref: "dev/mock-model")
       agent_node = result.fetch(:agent_node)
-      agent_node.update!(claim_after_at: nil)
-
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-      assert_includes claimed, agent_node.id
-
-      DAG::Runner.run_node!(agent_node.id)
+      run_agent_turn_until_finished!(graph: conversation.root_graph, agent_node_id: agent_node.id)
 
       queued =
         conversation.turn_internal_tasks
@@ -403,5 +390,23 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
       assert row.materialized_task_node_id.present?,
         "expected row #{row.id} to materialize, status=#{row.status}, queue=#{graph.turn_internal_tasks.where(turn_id: row.turn_id).ordered.map { |queued| { id: queued.id, hook: queued.source_hook_name, logical_tool_name: queued.logical_tool_name, status: queued.status, materialized_task_node_id: queued.materialized_task_node_id, queue_position: queued.queue_position } } }"
       row
+    end
+
+    def run_agent_turn_until_finished!(graph:, agent_node_id:, max_rounds: 6)
+      max_rounds.times do
+        node = graph.nodes.find(agent_node_id)
+        return node if node.state == DAG::Node::FINISHED
+
+        node.update!(claim_after_at: nil) if node.state == DAG::Node::PENDING && node.claim_after_at.present?
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+        break if claimed.empty?
+
+        claimed.each { |claimed_node| DAG::Runner.run_node!(claimed_node.id) }
+      end
+
+      node = graph.nodes.find(agent_node_id)
+      assert_equal DAG::Node::FINISHED, node.state,
+        "expected agent node #{agent_node_id} to finish, state=#{node.state}, queued=#{graph.turn_internal_tasks.where(turn_id: node.turn_id).ordered.map { |row| { id: row.id, hook: row.source_hook_name, status: row.status, materialized_task_node_id: row.materialized_task_node_id, queue_position: row.queue_position } }}"
+      node
     end
 end

@@ -177,6 +177,12 @@ Old nouns/removal targets for this cleanup:
    - `cybros/docs/reports/2026-03-17-cybros-claw-kernel-program-audit.md` (`git status --short` shows it untracked)
    Reason: do not let an unrelated untracked document distort tracked cleanup work.
 
+4. Attachment protocol normalization still strips legacy workspace keys at the boundary.
+   Evidence:
+   - `cybros/app/services/agents/protocol.rb`
+   - `cybros/test/integration/attachment_import_protocol_test.rb`
+   Reason: this is an intentional protocol sanitization boundary for inbound attachment descriptors, not a live truth-source that still teaches the old workspace model.
+
 ## Round Closeout Notes
 
 ### Round 1
@@ -509,10 +515,9 @@ Old nouns/removal targets for this cleanup:
 
 ### Round 17 (P2 Simplify Batch 1)
 
-- Narrowed the conversation/workspace ownership boundary without changing workspace payload semantics:
+- Narrowed the conversation/workspace ownership boundary in the public conversation payload without changing its external semantics:
   - `Conversation#workspace_payload` now derives its exported `root_path` from `agent_root_path`
-  - `Conversations::WorkspaceInitializer.initialize!` no longer returns a duplicate `root_path` key alongside `agent_root_path`
-- This removes one thin compatibility-shaped layer from the workspace contract while keeping the externally consumed payload shape (`root_path`, `conversation_path`, `lane_path`, `cwd`) unchanged.
+- The first attempt in this round also removed the duplicate `root_path` key from `Conversations::WorkspaceInitializer.initialize!`, but that raw service-contract change was later reverted in Round 19 after full-suite verification exposed real callers that still pass the initializer result directly into runtime/tool workspace payloads.
 - Verification commands for this round:
   - red check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb` -> 1 failure proving the duplicate `root_path` key was still exposed
   - green check: `bin/rails test test/services/conversations/workspace_initializer_test.rb test/services/agents/workspace_initializer_test.rb test/models/conversation_program_selection_test.rb test/integration/default_agent_attachment_transfer_test.rb`
@@ -539,9 +544,36 @@ Old nouns/removal targets for this cleanup:
   - `docs/reports/` now only holds current proof/report material or evidence trees that are still transitively referenced
   - the unrelated untracked audit report remains untouched and out of scope
 
+### Round 19 (Final Re-Audit Corrections)
+
+- Full-suite verification exposed that the raw `Conversations::WorkspaceInitializer.initialize!` return shape still has live callers outside `Conversation#workspace_payload`.
+- Restored the duplicate `root_path` key in `Conversations::WorkspaceInitializer.initialize!` so direct runtime/tool callers keep receiving the agent-root workspace anchor they still expect.
+- Kept the smaller, still-valid simplification from Round 17:
+  - `Conversation#workspace_payload` continues to derive exported `root_path` from `agent_root_path`
+- Stabilized `test/integration/programmable_agent_execution_test.rb` by removing an invalid scheduler-order assumption:
+  - the test now drives the graph until the target agent node finishes instead of assuming the target node must be the first node claimed after `append_user_message!`
+  - this matches current behavior where bootstrap and scheduler machinery may legally claim other ready nodes before or around the target node
+- Verification commands for this round:
+  - `bin/rails test test/integration/bundled_default_agent_execution_test.rb test/services/conversations/workspace_initializer_test.rb`
+  - `bin/rails test test/integration/programmable_agent_execution_test.rb test/integration/bundled_default_agent_execution_test.rb`
+  - `bin/rails test test/integration/programmable_agent_execution_test.rb -v --seed 52151`
+  - `rg -l "agent_program|execution_target|ExecutionTarget|ExecutionLocation|AgentDeployment|logical_workspace|agent_program_key" cybros/app cybros/lib cybros/config cybros/test cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/app/assets/builds/**' | sort`
+  - `rg -l "legacy|compat|shim|fallback" cybros/app cybros/lib cybros/config cybros/test cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/app/assets/builds/**' | sort`
+  - `PARALLEL_WORKERS=1 bin/rails test` -> `2054 runs, 10602 assertions, 0 failures, 0 errors, 0 skips`
+- Re-audit conclusion for the P2 workspace boundary:
+  - conversation-level payload simplification is retained
+  - raw initializer contract slimming is deferred because the contract is still live in real runtime/test callers
+  - this is a legitimate keep/defer, not a silent regression
+- Final discovery conclusion:
+  - old-noun hits are now confined to current cleanup/design docs, the untracked audit/report thread, protocol sanitization at the attachment boundary, and explicit negative/contract coverage in tests
+  - generic `fallback` / `compat` / `legacy` hits are predominantly current runtime semantics, compatibility terms inside active AgentCore docs, or cleanup/design materials rather than stale main-app runtime leftovers
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.
 - Treat active docs, live code, and test helper APIs as separate truth-source layers.
 - Do not widen a batch just because a grep returns many hits; record the overflow in the ledger and keep the batch explicit.
 - Negative tests are required for compatibility-removal work; fixture renames alone are not enough proof.
+- When shrinking a service return contract, grep direct callers before relying on a higher-level wrapper as the only public surface.
+- A simplification that survives targeted tests but fails the full suite should be reverted or narrowed immediately; record the failed simplification attempt instead of pretending it landed.
+- Scheduler/integration tests should assert eventual intended state, not brittle first-claim ordering, when bootstrap hooks or queue materialization can legally create additional ready work.
