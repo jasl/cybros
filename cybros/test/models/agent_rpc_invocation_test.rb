@@ -5,9 +5,10 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
 
   test "defaults deployment_activated_at to the agent deployment activation time" do
     activated_at = FIXED_DEPLOYMENT_ACTIVATED_AT
+    program = create_program!
     deployment =
       create_runtime_binding_record!(
-        agent_program: create_program!,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -82,7 +83,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
   def build_invocation(attributes = {})
     conversation = attributes[:conversation] || create_conversation!
     deployment = attributes[:deployment] || build_deployment!(program: attributes[:agent_program] || create_program!)
-    agent = attributes[:agent] || create_agent_runtime!(program: deployment, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = attributes[:agent] || deployment
     recognized_deployment = attributes[:recognized_deployment] || recognize_agent_runtime!(agent: agent, deployment: deployment)
 
     AgentRPCInvocation.new(
@@ -120,7 +121,7 @@ class AgentRPCInvocationTest < ActiveSupport::TestCase
 
   def build_deployment!(program:, deployment_fingerprint: "deployment:v1", status: "active", activated_at: nil)
     create_runtime_binding_record!(
-      agent_program: program,
+      agent: program,
       transport_kind: "websocket",
       endpoint_url: "http://127.0.0.1:4319/rpc",
       deployment_bearer_secret_ref: "secret://fixture",

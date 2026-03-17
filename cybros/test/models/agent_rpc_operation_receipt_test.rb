@@ -81,11 +81,9 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
           global_config_schema: { "type" => "object", "properties" => {} },
           conversation_config_schema: { "type" => "object", "properties" => {} },
         )
-      target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "websocket",
           endpoint_url: "ws://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
@@ -102,13 +100,9 @@ class AgentRPCOperationReceiptTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
+      agent = deployment
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
-      conversation =
-        create_conversation!(
-          agent: agent,
-          agent_program: program,
-          default_execution_target: target,
-        )
+      conversation = create_conversation!(agent: agent)
 
       AgentRPCInvocation.create!(
         agent: agent,

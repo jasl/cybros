@@ -160,53 +160,17 @@ class RuntimeGovernance::ExecutionCapacityLeasesTest < ActiveSupport::TestCase
   private
 
   def create_agent_capacity_snapshot!(max_concurrent_tasks:, max_queued_tasks:)
-    program =
-      create_agent_record!(
-        name: "Fixture Program #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
-        published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
-        manifest_snapshot: {},
-        global_config: {},
-        global_config_schema: { "type" => "object" },
-        conversation_config_schema: { "type" => "object" },
-        config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
-      )
-    target = create_target!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
-    materialize_agent_runtime!(program: program, execution_target: target).execution_capacity_snapshot
-  end
-
-  def create_target!(max_concurrent_tasks:, max_queued_tasks:)
-    location =
-      create_execution_location_profile!(
-        name: "Fixture host #{SecureRandom.hex(4)}",
-        kind: "host",
-        platform: "macos_arm64",
-        status: "active",
-        trust_group: "operator",
-        environment: "development",
-        tags: ["fixture"],
-        max_concurrent_tasks: max_concurrent_tasks,
-        max_queued_tasks: max_queued_tasks,
-        default_timeout_s: 900,
-      )
-    workspace =
-      create_workspace_profile!(
-        execution_location: location,
-        name: "Fixture workspace #{SecureRandom.hex(4)}",
-        root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
-        workspace_type: "git",
-        status: "active",
-        capability_tags: ["git"],
-        tags: ["fixture"],
-      )
-    target =
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: "Fixture target",
-        status: "active",
-        sandboxed: true,
-      )
-    target
+    create_agent_record!(
+      name: "Fixture Program #{SecureRandom.hex(4)}",
+      config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+      published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
+      manifest_snapshot: {},
+      global_config: {},
+      global_config_schema: { "type" => "object" },
+      conversation_config_schema: { "type" => "object" },
+      config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+      max_concurrent_tasks: max_concurrent_tasks,
+      max_queued_tasks: max_queued_tasks,
+    ).execution_capacity_snapshot
   end
 end

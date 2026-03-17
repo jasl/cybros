@@ -314,6 +314,25 @@ Old nouns/removal targets for this cleanup:
   - current cleanup docs that intentionally inventory legacy nouns during this cleanup
   - the unrelated untracked audit report, which remains outside the tracked cleanup scope
 
+### Round 8
+
+- Cleaned the next explicit helper-contract residue batch across:
+  - `test/services/runtime_governance/execution_capacity_leases_test.rb`
+  - `test/models/agent_rpc_operation_receipt_test.rb`
+  - `test/models/agent_rpc_session_test.rb`
+  - `test/models/agent_rpc_invocation_test.rb`
+- Removed the last old helper-contract calls in that cluster:
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `create_conversation!(..., agent_program:, default_execution_target:)`
+- Collapsed `execution_capacity_leases_test` onto direct `Agent` capacity attributes instead of a synthetic execution-target builder.
+- Verification command that passed during this round:
+  - `bin/rails test test/models/agent_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb test/models/recognized_deployment_test.rb test/services/runtime_governance/execution_capacity_leases_test.rb test/models/agent_rpc_operation_receipt_test.rb test/models/agent_rpc_session_test.rb test/models/agent_rpc_invocation_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - agent RPC / recognized deployment integration flows
+  - programmable-agent runtime fixture tests
+  - attachment and system/live-acceptance surfaces
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.
