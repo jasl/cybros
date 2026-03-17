@@ -1,6 +1,6 @@
 # Programmable Agent Rebaseline Repair Handoff
 
-Historical note: this handoff predates the dedicated operator-surface follow-up. `PA-006` was later implemented and closed on 2026-03-10 by [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md). Keep the prompt below as session history, not the current status source for `PA-006`.
+Historical note: this handoff predates the dedicated operator-surface follow-up. `PA-006` was later implemented and closed on 2026-03-10 by [`docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md). Keep the prompt below as session history, not the current status source for `PA-006`.
 
 Use this prompt to start a fresh repair session from the existing audit without re-doing the audit itself.
 

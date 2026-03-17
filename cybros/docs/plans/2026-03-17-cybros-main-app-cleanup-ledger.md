@@ -49,10 +49,12 @@ Old nouns/removal targets for this cleanup:
    Evidence:
    - `cybros/docs/plans/2026-03-08-runtime-governance-design.md:25`
    - `cybros/docs/plans/2026-03-08-runtime-governance.md:9`
+   - `cybros/docs/plans/2026-03-09-agent-deployment-connection-design.md:17`
+   - `cybros/docs/plans/2026-03-09-automation-runtime-design.md:3`
    - `cybros/docs/plans/2026-03-09-execution-target-discovery-design.md:107`
    - `cybros/docs/plans/2026-03-09-automation-runtime.md:29`
-   Action: `archive` or `delete`
-   Notes: The first three are the clearest immediate Task 2 targets. `2026-03-09-automation-runtime.md` should be revisited in the later active-doc sweep.
+   Action: `archive`
+   Notes: These are historical planning materials, so they should move under `docs/archive` rather than remain in the active plans tree.
 
 3. Active docs still document future cleanup work as not-yet-done even where current app truth has already moved.
    Evidence:
@@ -125,11 +127,13 @@ Old nouns/removal targets for this cleanup:
 
 ## Archive Candidates
 
-- `cybros/docs/plans/2026-03-08-runtime-governance-design.md`
-- `cybros/docs/plans/2026-03-08-runtime-governance.md`
-- `cybros/docs/plans/2026-03-09-execution-target-discovery-design.md`
-- `cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`
-- likely later review: `cybros/docs/plans/2026-03-09-automation-runtime.md`
+- `cybros/docs/plans/2026-03-08-runtime-governance-design.md` -> `archive`
+- `cybros/docs/plans/2026-03-08-runtime-governance.md` -> `archive`
+- `cybros/docs/plans/2026-03-09-agent-deployment-connection-design.md` -> `archive`
+- `cybros/docs/plans/2026-03-09-automation-runtime-design.md` -> `archive`
+- `cybros/docs/plans/2026-03-09-automation-runtime.md` -> `archive`
+- `cybros/docs/plans/2026-03-09-execution-target-discovery-design.md` -> `archive`
+- `cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md` -> `archive`
 
 ## Delete Candidates
 
@@ -178,6 +182,25 @@ Old nouns/removal targets for this cleanup:
   - archived docs
   - untracked report material
   - the current cleanup design/plan documents when they intentionally mention removal targets
+
+### Round 2
+
+- Archived seven misleading runtime planning docs from active `docs/plans/` into `docs/archive/plans/2026-03/`:
+  - `2026-03-08-runtime-governance-design.md`
+  - `2026-03-08-runtime-governance.md`
+  - `2026-03-09-agent-deployment-connection-design.md`
+  - `2026-03-09-automation-runtime-design.md`
+  - `2026-03-09-automation-runtime.md`
+  - `2026-03-09-execution-target-discovery-design.md`
+  - `2026-03-09-runtime-governance-operator-surfaces.md`
+- Updated active doc links and index surfaces so live docs no longer point at the old active-plan paths for those files.
+- Residual `ExecutionTarget` / `ExecutionLocation` / `AgentDeployment` hits in active `docs/plans/` are now concentrated in:
+  - current cleanup/audit materials
+  - `2026-03-13-conversation-agent-runtime-simplification-design.md`
+  - `2026-03-13-conversation-agent-runtime-simplification.md`
+- Later active-doc sweep still needs an explicit keep/archive judgment for:
+  - `cybros/docs/plans/2026-03-09-execution-capacity-and-scheduled-automation.md`
+  - `cybros/docs/plans/2026-03-10-full-reaudit-baseline.md`
 
 ## Reusable Strategy Notes
 

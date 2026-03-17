@@ -20,10 +20,10 @@ If a plan doc and a product doc conflict, treat that as a spec conflict and say 
 Use these documents as the primary semantic baseline for the repaired programmable-agent/runtime-governance surface:
 
 - [`docs/plans/2026-03-09-agent-deployment-connection.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-agent-deployment-connection.md)
-- [`docs/plans/2026-03-09-execution-target-discovery-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-execution-target-discovery-design.md)
+- [`docs/archive/plans/2026-03/2026-03-09-execution-target-discovery-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/archive/plans/2026-03/2026-03-09-execution-target-discovery-design.md)
 - [`docs/plans/2026-03-09-permission-presets-design.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-permission-presets-design.md)
 - [`docs/plans/2026-03-09-execution-capacity-and-scheduled-automation.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-execution-capacity-and-scheduled-automation.md)
-- [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md)
+- [`docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md)
 - [`docs/product/runtime_governance.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/product/runtime_governance.md)
 - [`docs/product/run_lifecycle.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/product/run_lifecycle.md)
 - [`docs/product/kernel_service_surface.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/product/kernel_service_surface.md)

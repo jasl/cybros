@@ -15,7 +15,7 @@
 ## Explicit Scope And Assumptions
 
 - This plan intentionally implements `PA-011` and `PA-012`.
-- `PA-006` remained out of scope for this batch. It was later closed by [`docs/plans/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/plans/2026-03-09-runtime-governance-operator-surfaces.md), so do not treat this plan as the current status source for that finding.
+- `PA-006` remained out of scope for this batch. It was later closed by [`docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md`](/Users/jasl/Workspaces/Cybros/cybros/cybros/docs/archive/plans/2026-03/2026-03-09-runtime-governance-operator-surfaces.md), so do not treat this plan as the current status source for that finding.
 - Breaking changes are allowed. Do not preserve legacy governor naming or runtime compatibility paths.
 - Resetting local databases is acceptable. Prefer one-step clean naming over transitional aliases or dual-read logic.
 

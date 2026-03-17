@@ -7,8 +7,8 @@ Define conversation-scoped and automation-scoped permission presets for programm
 Implementation of this design is gated by:
 
 - `docs/plans/2026-03-09-programmable-agent-preflight-design.md`
-- `docs/plans/2026-03-09-execution-target-discovery-design.md`
-- `docs/plans/2026-03-09-agent-deployment-connection-design.md`
+- `docs/archive/plans/2026-03/2026-03-09-execution-target-discovery-design.md`
+- `docs/archive/plans/2026-03/2026-03-09-agent-deployment-connection-design.md`
 
 ## Problem Statement
 
