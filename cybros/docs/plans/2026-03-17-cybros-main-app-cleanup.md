@@ -472,7 +472,10 @@ git commit -m "docs: clear remaining misleading active references"
 ### Task 8: Execute The Highest-Priority P2 Simplification Batch After P0/P1 Are Clean
 
 **Files:**
-- Re-audit first, then modify the highest-priority explicit P2 batch from the ledger
+- Modify: `cybros/app/models/conversation.rb`
+- Modify: `cybros/app/services/conversations/workspace_initializer.rb`
+- Modify: `cybros/test/models/conversation_program_selection_test.rb`
+- Modify: `cybros/test/services/agents/workspace_initializer_test.rb`
 - Preferred starting candidate:
   - `cybros/app/models/conversation.rb`
   - `cybros/app/services/conversations/workspace_initializer.rb`
@@ -501,7 +504,7 @@ sed -n '1,220p' cybros/test/models/conversation_program_selection_test.rb
 sed -n '1,220p' cybros/test/services/agents/workspace_initializer_test.rb
 ```
 
-Expected: a clear decision on whether `Conversations::WorkspaceInitializer` should stay as a thin wrapper, be collapsed, or be narrowed. If a different P2 batch is now clearly higher priority, record that in the ledger and use that batch instead.
+Expected: a clear decision on whether `Conversations::WorkspaceInitializer` should stay as a thin wrapper, be collapsed, or be narrowed.
 
 **Step 3: Write the failing test for the simplification**
 
@@ -531,9 +534,9 @@ Run:
 sed -n '1,260p' cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
 ```
 
-Expected: the remaining P2 findings are either small enough for another explicit batch or are recorded with a clear keep/defer reason.
+Expected: the remaining P2 findings are either small enough for a later explicit batch or are recorded with a clear keep/defer reason.
 
-If another high-confidence P2 batch remains, repeat Task 8 before moving to Task 9.
+If another high-confidence P2 batch remains after this workspace-boundary cleanup, record it in the ledger as the next explicit simplification batch instead of silently widening the current task.
 
 **Step 7: Commit**
 
