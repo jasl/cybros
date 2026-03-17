@@ -2,37 +2,32 @@ require "test_helper"
 
 class AgentTest < ActiveSupport::TestCase
   test "stores user-visible runtime config and execution-capacity policy" do
-    program = create_program!
-    target = create_execution_target!
+    agent_fixture = create_agent_fixture!(max_concurrent_tasks: 4, max_queued_tasks: 16)
+    agent = materialize_agent_runtime!(agent: agent_fixture)
 
-    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
-
-    assert_equal program.name, agent.name
-    assert_equal program.config_namespace, agent.config_namespace
-    assert_equal program.published_contract_fingerprint, agent.published_contract_fingerprint
-    assert_equal target.execution_location.max_concurrent_tasks, agent.max_concurrent_tasks
-    assert_equal target.execution_location.max_queued_tasks, agent.max_queued_tasks
+    assert_equal agent_fixture.name, agent.name
+    assert_equal agent_fixture.config_namespace, agent.config_namespace
+    assert_equal agent_fixture.published_contract_fingerprint, agent.published_contract_fingerprint
+    assert_equal 4, agent.max_concurrent_tasks
+    assert_equal 16, agent.max_queued_tasks
     assert_equal "agent", agent.execution_capacity_snapshot.fetch("scope_type")
     assert_equal agent.id, agent.execution_capacity_snapshot.fetch("scope_id")
   end
 
-  test "updates the existing row when re-importing the same legacy program" do
-    program = create_program!
-    first_target = create_execution_target!(name: "Primary target", max_concurrent_tasks: 4)
-    second_target = create_execution_target!(name: "Scaled target", max_concurrent_tasks: 9)
+  test "rematerializing the same agent fixture keeps the same row and latest agent-owned capacity" do
+    agent_fixture = create_agent_fixture!(max_concurrent_tasks: 4)
+    first = materialize_agent_runtime!(agent: agent_fixture)
 
-    first = materialize_agent_runtime!(agent: program, execution_profile: first_target)
-    second = materialize_agent_runtime!(agent: program, execution_profile: second_target)
+    agent_fixture.update!(max_concurrent_tasks: 9)
+    second = materialize_agent_runtime!(agent: agent_fixture)
 
     assert_equal first.id, second.id
     assert_equal 9, second.max_concurrent_tasks
-    assert_equal second_target.max_concurrent_tasks, second.execution_capacity_snapshot.fetch("max_concurrent_tasks")
+    assert_equal 9, second.execution_capacity_snapshot.fetch("max_concurrent_tasks")
   end
 
   test "restricts deletion when conversations still reference the agent" do
-    program = create_program!
-    target = create_execution_target!
-    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+    agent = materialize_agent_runtime!(agent: create_agent_fixture!)
     create_conversation!(agent: agent)
 
     assert_raises(ActiveRecord::DeleteRestrictionError) do
@@ -40,20 +35,22 @@ class AgentTest < ActiveSupport::TestCase
     end
   end
 
-  test "prefers agent-owned runtime surface config over the legacy program snapshot" do
-    program = create_program!
-    target = create_execution_target!
-    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+  test "prefers agent-owned runtime surface config over manifest snapshot defaults" do
+    agent =
+      materialize_agent_runtime!(
+        agent:
+          create_agent_fixture!(
+            manifest_snapshot: {
+              "name" => "Fixture Agent",
+              "runtime_surface" => {
+                "type" => "noop",
+                "helpers" => { "estimate_tokens" => true },
+              },
+              "runtime_surface_status" => "configured",
+            },
+          ),
+      )
 
-    program.update!(
-      args: {
-        "runtime_surface" => {
-          "type" => "noop",
-          "helpers" => { "estimate_tokens" => true },
-        },
-        "runtime_surface_status" => "configured",
-      },
-    )
     agent.update!(
       args: {
         "runtime_surface" => {
@@ -87,80 +84,51 @@ class AgentTest < ActiveSupport::TestCase
   end
 
   test "create_conversation helper rejects legacy agent_program and default_execution_target keywords" do
-    program = create_program!
-    target = create_execution_target!
-    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+    legacy_agent = create_agent_fixture!
+    legacy_execution_profile = Object.new
 
     assert_raises(ArgumentError) do
-      create_conversation!(agent: agent, agent_program: program, default_execution_target: target)
+      create_conversation!(
+        agent: legacy_agent,
+        agent_program: legacy_agent,
+        default_execution_target: legacy_execution_profile,
+      )
     end
   end
 
   test "runtime helper APIs reject legacy program and execution_target keywords" do
-    program = create_program!
-    target = create_execution_target!
+    legacy_agent = create_agent_fixture!
+    legacy_execution_profile = Object.new
 
     assert_raises(ArgumentError) do
-      materialize_agent_runtime!(program: program, execution_target: target)
+      materialize_agent_runtime!(program: legacy_agent, execution_target: legacy_execution_profile)
     end
 
     assert_raises(ArgumentError) do
-      create_agent_runtime!(program: program, execution_target: target)
+      create_agent_runtime!(program: legacy_agent, execution_target: legacy_execution_profile)
     end
 
     assert_raises(ArgumentError) do
-      create_runtime_binding_record!(agent_program: program)
+      create_runtime_binding_record!(agent_program: legacy_agent)
     end
   end
 
   private
 
-    def create_program!
+    def create_agent_fixture!(max_concurrent_tasks: 4, max_queued_tasks: 16, manifest_snapshot: nil)
       create_agent_record!(
-        name: "Fixture Program #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        name: "Fixture Agent #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
-        manifest_snapshot: { "name" => "Fixture" },
+        manifest_snapshot: manifest_snapshot || { "name" => "Fixture Agent" },
         global_config: {},
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:v1",
         source_kind: "custom",
-        local_path: "storage/agent_programs/#{SecureRandom.hex(4)}",
-      )
-    end
-
-    def create_execution_target!(name: "Fixture target", max_concurrent_tasks: 4)
-      location =
-        create_execution_location_profile!(
-          name: "#{name} host",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: max_concurrent_tasks,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: name,
-        status: "active",
-        sandboxed: true,
+        local_path: "storage/agents/#{SecureRandom.hex(4)}",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
       )
     end
 end

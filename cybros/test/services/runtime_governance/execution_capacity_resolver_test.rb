@@ -2,7 +2,7 @@ require "test_helper"
 
 class RuntimeGovernance::ExecutionCapacityResolverTest < ActiveSupport::TestCase
   test "resolve! returns an agent-scoped snapshot without execution target identifiers" do
-    agent = create_program!(max_concurrent_tasks: 2, max_queued_tasks: 5)
+    agent = create_governed_agent!(max_concurrent_tasks: 2, max_queued_tasks: 5)
 
     snapshot = RuntimeGovernance::ExecutionCapacityResolver.resolve!(agent: agent)
 
@@ -15,7 +15,7 @@ class RuntimeGovernance::ExecutionCapacityResolverTest < ActiveSupport::TestCase
   end
 
   test "resolve! preserves imported capacity overrides while keeping agent-scoped identity" do
-    agent = create_program!(max_concurrent_tasks: 3, max_queued_tasks: 2)
+    agent = create_governed_agent!(max_concurrent_tasks: 3, max_queued_tasks: 2)
 
     snapshot = RuntimeGovernance::ExecutionCapacityResolver.resolve!(agent: agent)
 
@@ -26,10 +26,10 @@ class RuntimeGovernance::ExecutionCapacityResolverTest < ActiveSupport::TestCase
 
   private
 
-    def create_program!(max_concurrent_tasks: 4, max_queued_tasks: 16)
+    def create_governed_agent!(max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
-        name: "Fixture Program #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        name: "Fixture Agent #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
         manifest_snapshot: {},
         global_config: {},

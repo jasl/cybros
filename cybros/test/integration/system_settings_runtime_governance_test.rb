@@ -19,9 +19,8 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
     sign_in_as!(role: :owner)
     provider_credential = create_provider_credential!(provider_key: "openai-ops")
     create_provider_wait!(provider_credential: provider_credential)
-    execution_target = create_execution_target!(name: "Observability host")
-    execution_wait_agent = create_execution_wait!(execution_target: execution_target)
-    denied_agent = create_execution_denial!(execution_target: execution_target)
+    execution_wait_agent = create_execution_wait!(max_concurrent_tasks: 2, max_queued_tasks: 4)
+    denied_agent = create_execution_denial!(max_concurrent_tasks: 2, max_queued_tasks: 4)
     deployment = create_deployment_with_backoff!
 
     get system_settings_runtime_governance_path
@@ -61,9 +60,12 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
       )
     end
 
-    def create_execution_wait!(execution_target:)
-      program = create_program!(name: "Execution wait")
-      agent = create_agent_runtime!(agent: program, execution_profile: execution_target)
+    def create_execution_wait!(max_concurrent_tasks:, max_queued_tasks:)
+      agent = create_governed_agent!(
+        name: "Execution wait",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
+      )
 
       RuntimeGovernance::RuntimeWaits.park!(
         owner_type: "ConversationRun",
@@ -78,12 +80,10 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
       agent
     end
 
-    def create_execution_denial!(execution_target:)
-      program = create_program!
-      agent = create_agent_runtime!(agent: program, execution_profile: execution_target)
-      deployment = create_deployment!(program: program)
-      sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
-      recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
+    def create_execution_denial!(max_concurrent_tasks:, max_queued_tasks:)
+      agent = create_governed_agent!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      runtime_binding = create_runtime_binding!(agent: agent)
+      recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: runtime_binding)
       conversation = create_conversation!(agent: agent)
       credential = create_provider_credential!(provider_key: "provider-#{SecureRandom.hex(4)}")
 
@@ -98,7 +98,7 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
           effective_agent_config: {},
-          agent_config_schema_fingerprint: program.config_schema_fingerprint,
+          agent_config_schema_fingerprint: agent.config_schema_fingerprint,
           effective_policy: {},
           runtime_governors: {
             "provider_limiter" => provider_limiter_snapshot(
@@ -116,20 +116,20 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
     end
 
     def create_deployment_with_backoff!
-      program = create_program!(name: "Deployment backoff")
-      deployment = create_deployment!(program: program)
+      agent = create_governed_agent!(name: "Deployment backoff")
+      runtime_binding = create_runtime_binding!(agent: agent)
 
       RuntimeGovernance::RuntimeWaits.park!(
         owner_type: "Agent",
-        owner_id: deployment.id,
+        owner_id: runtime_binding.id,
         reason_type: "deployment_backoff",
         subject_type: "agent",
-        subject_id: deployment.id,
+        subject_id: runtime_binding.id,
         retry_at: 10.minutes.from_now.change(usec: 0),
         details: { "attempt" => 3 },
       )
 
-      deployment
+      runtime_binding
     end
 
     def create_provider_credential!(provider_key:)
@@ -141,60 +141,28 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
       )
     end
 
-    def create_execution_target!(name:)
-      location =
-        create_execution_location_profile!(
-          name: name,
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 2,
-          max_queued_tasks: 4,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "#{name} workspace",
-          root_path: "/tmp/#{name.parameterize}-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: "#{name} target",
-        status: "active",
-        sandboxed: true,
-      )
-    end
-
-    def create_program!(name: "Observability program")
+    def create_governed_agent!(name: "Observability agent", max_concurrent_tasks: 2, max_queued_tasks: 4)
       create_agent_record!(
         name: "#{name} #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
         manifest_snapshot: {},
         global_config: {},
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
         config_schema_fingerprint: "config:#{SecureRandom.hex(4)}",
+        max_concurrent_tasks: max_concurrent_tasks,
+        max_queued_tasks: max_queued_tasks,
       )
     end
 
-    def create_deployment!(program:)
+    def create_runtime_binding!(agent:)
       create_runtime_binding_record!(
-        agent: program,
+        agent: agent,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
+        contract_fingerprint: agent.published_contract_fingerprint,
         deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
         status: "active",
         health_status: "healthy",

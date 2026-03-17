@@ -79,7 +79,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
         at: 3.days.ago,
       )
 
-      stale_agent = create_program!(name: "Stale target", max_concurrent_tasks: 1, max_queued_tasks: 1)
+      stale_agent = create_governed_agent!(name: "Stale agent", max_concurrent_tasks: 1, max_queued_tasks: 1)
       stale_execution = create_queued_execution!(agent: stale_agent)
       stale_run = stale_execution.fetch(:run)
       create_execution_wait_record!(
@@ -201,7 +201,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     end
 
     def create_blocked_execution_subject!
-      agent = create_program!(name: "Blocked program", max_concurrent_tasks: 1, max_queued_tasks: 2)
+      agent = create_governed_agent!(name: "Blocked agent", max_concurrent_tasks: 1, max_queued_tasks: 2)
       first = create_queued_execution!(agent: agent)
       second = create_queued_execution!(agent: agent)
 
@@ -216,7 +216,7 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     end
 
     def create_recovered_execution_subject!
-      agent = create_program!(name: "Recovered program", max_concurrent_tasks: 1, max_queued_tasks: 1)
+      agent = create_governed_agent!(name: "Recovered agent", max_concurrent_tasks: 1, max_queued_tasks: 1)
       first = create_queued_execution!(agent: agent)
       second = create_queued_execution!(agent: agent)
       third = create_queued_execution!(agent: agent)
@@ -235,10 +235,9 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     end
 
     def create_deployment_backoff_subject!
-      program = create_program!(name: "Backoff program")
-      deployment = create_deployment!(program: program)
-      agent = create_agent_runtime!(agent: program, deployment: deployment)
-      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      agent = create_governed_agent!(name: "Backoff agent")
+      runtime_binding = create_runtime_binding!(agent: agent)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: runtime_binding)
 
       RuntimeGovernance::RuntimeWaits.park!(
         owner_type: "RecognizedDeployment",
@@ -314,14 +313,13 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
     end
 
     def create_queued_execution!(agent: nil, max_concurrent_tasks: 1, max_queued_tasks: 2)
-      agent ||= create_program!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      agent ||= create_governed_agent!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
       if agent.status == "active" && agent.health_status == "healthy"
-        deployment = agent
+        runtime_binding = agent
       else
-        deployment = create_deployment!(program: agent)
-        agent = create_agent_runtime!(agent: agent, deployment: deployment)
+        runtime_binding = create_runtime_binding!(agent: agent)
       end
-      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: runtime_binding)
       conversation = create_conversation!(agent: agent)
       graph = conversation.dag_graph
       user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -343,8 +341,8 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
           recognized_deployment: recognized_deployment,
           recognized_deployment_key: recognized_deployment.recognized_deployment_key,
           contract_fingerprint: agent.published_contract_fingerprint,
-          deployment_fingerprint: deployment.deployment_fingerprint,
-          deployment_activated_at: deployment.activated_at || Time.current.change(usec: 0),
+          deployment_fingerprint: runtime_binding.deployment_fingerprint,
+          deployment_activated_at: runtime_binding.activated_at || Time.current.change(usec: 0),
           provider_credential: credential,
           selected_model_ref: "openai/gpt-5.4",
           effective_public_settings: {},
@@ -364,10 +362,10 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
       { conversation: conversation, node: node, run: run, agent: agent }
     end
 
-    def create_program!(name: "Fixture Program", max_concurrent_tasks: 4, max_queued_tasks: 16)
+    def create_governed_agent!(name: "Fixture Agent", max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
         name: "#{name} #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
         manifest_snapshot: {},
         global_config: {},
@@ -379,13 +377,13 @@ class RuntimeGovernanceObservabilityTest < ActiveSupport::TestCase
       )
     end
 
-    def create_deployment!(program:)
+    def create_runtime_binding!(agent:)
       create_runtime_binding_record!(
-        agent: program,
+        agent: agent,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
+        contract_fingerprint: agent.published_contract_fingerprint,
         deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
         status: "active",
         health_status: "healthy",

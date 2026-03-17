@@ -87,10 +87,9 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
     end
 
     def create_runtime!(max_concurrent_tasks:, max_queued_tasks:)
-      program = create_program!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
-      deployment = create_deployment!(program)
-      agent = create_agent_runtime!(agent: program, deployment: deployment)
-      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
+      agent = create_governed_agent!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
+      runtime_binding = create_runtime_binding!(agent)
+      recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: runtime_binding)
       credential =
         LLMProviderCredential.create!(
           provider_key: "openai-#{SecureRandom.hex(4)}",
@@ -102,16 +101,15 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
       {
         agent: agent,
         credential: credential,
-        deployment: deployment,
-        program: program,
+        runtime_binding: runtime_binding,
         recognized_deployment: recognized_deployment,
       }
     end
 
-    def create_program!(max_concurrent_tasks: 4, max_queued_tasks: 16)
+    def create_governed_agent!(max_concurrent_tasks: 4, max_queued_tasks: 16)
       create_agent_record!(
-        name: "Fixture Program #{SecureRandom.hex(4)}",
-        config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+        name: "Fixture Agent #{SecureRandom.hex(4)}",
+        config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:#{SecureRandom.hex(4)}",
         manifest_snapshot: {},
         global_config: {},
@@ -123,13 +121,13 @@ class RuntimeGovernance::ExecutionCapacityEnforcerTest < ActiveSupport::TestCase
       )
     end
 
-    def create_deployment!(program)
+    def create_runtime_binding!(agent)
       create_runtime_binding_record!(
-        agent: program,
+        agent: agent,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
+        contract_fingerprint: agent.published_contract_fingerprint,
         deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
         status: "active",
         health_status: "healthy",

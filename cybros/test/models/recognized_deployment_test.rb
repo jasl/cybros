@@ -103,26 +103,27 @@ class RecognizedDeploymentTest < ActiveSupport::TestCase
   private
 
     def create_runtime!
-      program =
+      agent_fixture =
         create_agent_record!(
-          name: "Fixture Program #{SecureRandom.hex(4)}",
-          config_namespace: "fixture.program.#{SecureRandom.hex(4)}",
+          name: "Fixture Agent #{SecureRandom.hex(4)}",
+          config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
           published_contract_fingerprint: "contract:v1",
           manifest_snapshot: {},
           global_config: {},
           global_config_schema: { "type" => "object" },
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
+          max_concurrent_tasks: 4,
+          max_queued_tasks: 16,
         )
-      target = create_execution_target!
-      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+      agent = materialize_agent_runtime!(agent: agent_fixture)
       deployment =
         create_runtime_binding_record!(
-          agent: program,
+          agent: agent_fixture,
           transport_kind: "http_jsonrpc",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
-          contract_fingerprint: program.published_contract_fingerprint,
+          contract_fingerprint: agent_fixture.published_contract_fingerprint,
           deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}",
           status: "active",
           health_status: "healthy",
@@ -145,42 +146,6 @@ class RecognizedDeploymentTest < ActiveSupport::TestCase
       {
         agent: agent,
         deployment: deployment,
-        program: program,
-        target: target,
       }
-    end
-
-    def create_execution_target!
-      location =
-        create_execution_location_profile!(
-          name: "Fixture host #{SecureRandom.hex(4)}",
-          kind: "host",
-          platform: "macos_arm64",
-          status: "active",
-          trust_group: "operator",
-          environment: "development",
-          tags: ["fixture"],
-          max_concurrent_tasks: 4,
-          max_queued_tasks: 16,
-          default_timeout_s: 900,
-        )
-      workspace =
-        create_workspace_profile!(
-          execution_location: location,
-          name: "Fixture workspace #{SecureRandom.hex(4)}",
-          root_path: "/tmp/fixture-#{SecureRandom.hex(4)}",
-          workspace_type: "git",
-          status: "active",
-          capability_tags: ["git"],
-          tags: ["fixture"],
-        )
-
-      create_execution_profile!(
-        execution_location: location,
-        workspace: workspace,
-        name: "Fixture target #{SecureRandom.hex(4)}",
-        status: "active",
-        sandboxed: true,
-      )
     end
 end
