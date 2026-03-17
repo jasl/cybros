@@ -249,12 +249,12 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
           conversation_config_schema: { "type" => "object" },
           config_schema_fingerprint: "config:v1",
         )
-      agent = materialize_agent_runtime!(program: program)
+      agent = materialize_agent_runtime!(agent: program)
       fixture_identity = Cybros::ProgrammableAgentFixture.identity
       supported_methods = fixture_identity.fetch("supported_methods")
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -318,7 +318,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
 
     def create_active_deployment!(program:, endpoint_url:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -371,7 +371,7 @@ class ProgrammableAgentExecutionTest < ActiveSupport::TestCase
         )
 
       conversation = create_conversation!(title: "Programmable execution")
-      agent = create_agent_runtime!(program: program, execution_target: target)
+      agent = create_agent_runtime!(agent: program, execution_profile: target)
       conversation.update!(
         agent: agent,
         permission_mode: "default",

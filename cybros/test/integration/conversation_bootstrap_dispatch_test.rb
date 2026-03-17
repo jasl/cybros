@@ -117,7 +117,7 @@ class ConversationBootstrapDispatchTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -135,7 +135,7 @@ class ConversationBootstrapDispatchTest < ActiveSupport::TestCase
           activated_at: Time.current.change(usec: 0),
         )
       inspect_agent_runtime!(agent: deployment)
-      agent = materialize_agent_runtime!(program: program)
+      agent = materialize_agent_runtime!(agent: program)
 
       { agent: agent, deployment: deployment, program: program }
     end

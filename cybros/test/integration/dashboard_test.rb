@@ -87,7 +87,7 @@ class DashboardTest < ActionDispatch::IntegrationTest
           config_schema_fingerprint: "config:v1",
         )
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -104,6 +104,6 @@ class DashboardTest < ActionDispatch::IntegrationTest
         inspection_details: {},
         activated_at: Time.current.change(usec: 0),
       )
-      materialize_agent_runtime!(program: program, execution_target: build_default_execution_profile!)
+      materialize_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!)
     end
 end

@@ -377,6 +377,27 @@ Old nouns/removal targets for this cleanup:
   - DAG and runtime-surface lib tests
   - system and live-acceptance surfaces
 
+### Round 11
+
+- Cleaned the dashboard / bootstrap / programmable execution integration residue batch across:
+  - `test/integration/dashboard_test.rb`
+  - `test/integration/conversation_bootstrap_dispatch_test.rb`
+  - `test/integration/bootstrap_hook_contract_test.rb`
+  - `test/integration/programmable_agent_execution_test.rb`
+  - `test/integration/programmable_agent_capabilities_refresh_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `materialize_agent_runtime!(program:)`
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_agent_runtime!(program:, execution_target:)`
+- Verification commands for this round:
+  - red check: `bin/rails test test/integration/dashboard_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/bootstrap_hook_contract_test.rb test/integration/programmable_agent_execution_test.rb test/integration/programmable_agent_capabilities_refresh_test.rb` -> 10 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/integration/dashboard_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/bootstrap_hook_contract_test.rb test/integration/programmable_agent_execution_test.rb test/integration/programmable_agent_capabilities_refresh_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - runtime-governance and operator-surface integration tests
+  - DAG and runtime-surface lib tests
+  - system and live-acceptance surfaces
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

@@ -147,7 +147,7 @@ class ProgrammableAgentCapabilitiesRefreshTest < ActiveSupport::TestCase
 
     def create_registered_deployment!(program:, endpoint_url:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",

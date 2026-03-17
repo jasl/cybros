@@ -48,7 +48,7 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -66,7 +66,7 @@ class BootstrapHookContractTest < ActiveSupport::TestCase
           activated_at: Time.current.change(usec: 0),
         )
       conversation = create_conversation!(user: user, title: "Chat")
-      agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+      agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
       conversation.update!(
         agent: agent,
         agent_config_schema_fingerprint: program.config_schema_fingerprint,
