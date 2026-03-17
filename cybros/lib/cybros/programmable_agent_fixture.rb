@@ -11,7 +11,7 @@ module Cybros
     def identity(overrides = nil)
       base =
         {
-          "agent_program_key" => "fixture-program",
+          "agent_key" => "fixture-program",
           "agent_deployment_key" => "fixture-deployment",
           "deployment_fingerprint" => "fixture-deployment-v1",
           "protocol_version" => "agent_rpc.v1",
@@ -65,7 +65,7 @@ module Cybros
         {
           "identity" => identity,
           "agent" => {
-            "key" => "fixture-programmable-agent",
+            "key" => identity.fetch("agent_key"),
             "name" => "Fixture Programmable Agent",
           },
           "deployment" => {

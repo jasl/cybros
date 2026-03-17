@@ -221,15 +221,11 @@ module AgentRPC
 
       def manifest_agent_key(payload)
         normalized = payload.is_a?(Hash) ? payload.deep_stringify_keys : {}
-        normalized.fetch("agent_key", normalized[legacy_manifest_agent_key]).to_s.presence
+        normalized["agent_key"].to_s.presence
       end
 
       def resolved_identity_agent_key(identity)
-        identity.fetch("agent_key", identity[legacy_manifest_agent_key]).to_s
-      end
-
-      def legacy_manifest_agent_key
-        @legacy_manifest_agent_key ||= %w[agent program key].join("_")
+        identity["agent_key"].to_s
       end
 
       def find_session!

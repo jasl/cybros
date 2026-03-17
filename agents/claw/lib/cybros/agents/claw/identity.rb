@@ -10,7 +10,7 @@ module Cybros
 
         def to_h
           {
-            "agent_program_key" => @manifest.fetch("agent_program_key"),
+            "agent_key" => @manifest.fetch("agent_key"),
             "agent_deployment_key" => @deployment_key,
             "deployment_fingerprint" => @deployment_fingerprint,
             "protocol_version" => @manifest.fetch("protocol_version"),

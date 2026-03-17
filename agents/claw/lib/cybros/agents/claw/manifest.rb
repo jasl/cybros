@@ -3,7 +3,7 @@ module Cybros
     module Claw
       class Manifest
         REQUIRED_KEYS = %w[
-          agent_program_key
+          agent_key
           name
           description
           protocol_version

@@ -43,7 +43,7 @@ Old nouns/removal targets for this cleanup:
    - `cybros/app/services/agent_rpc/session_authorizer.rb:228`
    - `cybros/app/services/agent_rpc/session_authorizer.rb:231`
    Action: `delete`
-   Notes: This is the clearest live compatibility branch still shaping the runtime contract.
+   Notes: Removed in Round 3. Live `app/`, `lib/`, and `config/` now have zero `agent_program_key` hits; remaining hits are test/data cleanup plus explicit negative coverage.
 
 2. Active plans still expose old runtime truth as if it were current.
    Evidence:
@@ -201,6 +201,18 @@ Old nouns/removal targets for this cleanup:
 - Later active-doc sweep still needs an explicit keep/archive judgment for:
   - `cybros/docs/plans/2026-03-09-execution-capacity-and-scheduled-automation.md`
   - `cybros/docs/plans/2026-03-10-full-reaudit-baseline.md`
+
+### Round 3
+
+- Removed live `agent_program_key` fallback from:
+  - `cybros/app/services/agents/creator.rb`
+  - `cybros/app/services/agent_rpc/session_authorizer.rb`
+- Cut the bundled claw and cybros fixture contract over to `agent_key` so the real bundled-source path and programmable-agent fixture no longer depend on the legacy noun.
+- Added negative coverage proving `agent_program_key`-only manifests and callback identities are rejected.
+- Verification:
+  - `rg -n "agent_program_key" cybros/app cybros/lib cybros/config` returned no live hits.
+  - targeted cybros tests passed for creator/session auth/bootstrap/fixture surfaces.
+  - targeted bundled claw tests passed for manifest and RPC contract surfaces.
 
 ## Reusable Strategy Notes
 

@@ -9,7 +9,8 @@ class Cybros::ProgrammableAgentFixtureTest < ActiveSupport::TestCase
   test "identity is deterministic and exposes planning and execution methods" do
     identity = Cybros::ProgrammableAgentFixture.identity
 
-    assert_equal "fixture-program", identity.fetch("agent_program_key")
+    assert_equal "fixture-program", identity.fetch("agent_key")
+    refute identity.key?("agent_program_key")
     assert_equal "fixture-deployment", identity.fetch("agent_deployment_key")
     assert_equal "fixture-deployment-v1", identity.fetch("deployment_fingerprint")
     assert_equal "fixture-ruby-sdk/1.0", identity.fetch("agent_sdk_version")

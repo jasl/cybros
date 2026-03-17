@@ -14,7 +14,7 @@ module Cybros
             {
               "identity" => @application.identity,
               "agent" => {
-                "key" => @application.manifest.fetch("agent_program_key"),
+                "key" => @application.manifest.fetch("agent_key"),
                 "name" => @application.manifest.fetch("name")
               },
               "deployment" => {

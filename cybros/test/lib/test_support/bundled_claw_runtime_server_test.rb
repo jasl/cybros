@@ -23,8 +23,8 @@ class TestSupport::BundledClawRuntimeServerTest < ActiveSupport::TestCase
       )
 
     assert_equal true, health_payload.fetch("ok")
-    assert_equal "claw", health_payload.dig("identity", "agent_program_key")
-    assert_equal "claw", initialize_payload.dig("result", "identity", "agent_program_key")
+    assert_equal "claw", health_payload.dig("identity", "agent_key")
+    assert_equal "claw", initialize_payload.dig("result", "identity", "agent_key")
     assert_equal "deployment:test-claw", initialize_payload.dig("result", "identity", "deployment_fingerprint")
   ensure
     server&.shutdown

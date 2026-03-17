@@ -8,7 +8,7 @@ module Agents
 
       loaded = Loader.new(base_dir: source_dir).load
       manifest = loaded.manifest
-      manifest_key = manifest["agent_key"].presence || manifest.fetch(legacy_manifest_agent_key)
+      manifest_key = manifest.fetch("agent_key").to_s.presence || raise(KeyError, 'key not found: "agent_key"')
       retries = 0
 
       begin
@@ -66,10 +66,6 @@ module Agents
 
     def self.default_max_queued_tasks(max_concurrent_tasks)
       max_concurrent_tasks.to_i * Agent::DEFAULT_EXECUTION_CAPACITY_QUEUE_MULTIPLIER
-    end
-
-    def self.legacy_manifest_agent_key
-      @legacy_manifest_agent_key ||= %w[agent program key].join("_")
     end
   end
 end

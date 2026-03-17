@@ -21,13 +21,14 @@ module TestSupport
 
     def assert_manifest_contract(
       manifest,
-      expected_agent_program_key:,
+      expected_agent_key:,
       expected_name:,
       expected_description:,
       expected_config_namespace:,
       expected_agent_sdk_version:
     )
-      assert_equal expected_agent_program_key, manifest.fetch("agent_program_key")
+      assert_equal expected_agent_key, manifest.fetch("agent_key")
+      refute manifest.key?("agent_program_key")
       assert_equal expected_name, manifest.fetch("name")
       assert_equal expected_description, manifest.fetch("description")
       assert_equal expected_config_namespace, manifest.fetch("config_namespace")
@@ -522,7 +523,7 @@ module TestSupport
         refresh_payload = rpc_json(host.rpc_url, id: 7, method: "capabilities.refresh", params: { "reason" => "manual" })
 
         assert_identity_payload(initialize_payload.dig("result", "identity"))
-        assert_equal expected_agent_program_key, initialize_payload.dig("result", "agent", "key")
+        assert_equal expected_agent_key, initialize_payload.dig("result", "agent", "key")
         assert_equal expected_agent_name, initialize_payload.dig("result", "agent", "name")
         assert_equal expected_deployment_key, initialize_payload.dig("result", "deployment", "key")
         assert_equal expected_deployment_fingerprint, initialize_payload.dig("result", "deployment", "fingerprint")
@@ -996,7 +997,8 @@ module TestSupport
       end
 
       def assert_identity_payload(identity)
-        assert_equal expected_agent_program_key, identity.fetch("agent_program_key")
+        assert_equal expected_agent_key, identity.fetch("agent_key")
+        refute identity.key?("agent_program_key")
         assert_equal expected_deployment_key, identity.fetch("agent_deployment_key")
         assert_equal expected_deployment_fingerprint, identity.fetch("deployment_fingerprint")
         assert_equal "agent_rpc.v1", identity.fetch("protocol_version")

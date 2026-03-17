@@ -65,6 +65,30 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "opening a callback session rejects initialize identity payloads that only expose agent_program_key" do
+    server =
+      start_fixture_server!(
+        identity_overrides: {
+          "agent_key" => nil,
+          "agent_program_key" => "fixture-program",
+        },
+      )
+    runtime = create_bound_runtime!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://fixture")
+
+    error =
+      assert_raises(AgentCore::ValidationError) do
+        AgentRPC::SessionAuthorizer.open!(
+          deployment: runtime.fetch(:deployment),
+          conversation: runtime.fetch(:conversation),
+          scope_type: "run_draft",
+          scope_id: SecureRandom.uuid,
+          allowed_methods: %w[conversation.settings.get],
+        )
+      end
+
+    assert_equal "cybros.agent_rpc.initialize_identity_mismatch", error.code
+  end
+
   test "opening a callback session resolves recognized deployment from the deployment bound agent, not an unrelated conversation agent" do
     server = Cybros::ProgrammableAgentFixture::Server.new(required_bearer: "secret://fixture").start
     runtime = create_bound_runtime!(endpoint_url: server.rpc_url, deployment_bearer_secret_ref: "secret://fixture")
@@ -283,7 +307,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
         name: "Fixture Agent",
         config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
-        manifest_snapshot: { "agent_program_key" => "fixture-program", "name" => "Fixture Agent" },
+        manifest_snapshot: { "agent_key" => "fixture-program", "name" => "Fixture Agent" },
         global_config: {},
         global_config_schema: { "type" => "object" },
         conversation_config_schema: { "type" => "object" },
@@ -303,7 +327,7 @@ class AgentRPCSessionAuthTest < ActiveSupport::TestCase
         config_namespace: "fixture.agent.#{SecureRandom.hex(4)}",
         published_contract_fingerprint: "contract:v1",
         config_schema_fingerprint: "config:v1",
-        manifest_snapshot: { "agent_program_key" => "fixture-program", "name" => "Fixture Agent" },
+        manifest_snapshot: { "agent_key" => "fixture-program", "name" => "Fixture Agent" },
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: deployment_bearer_secret_ref,

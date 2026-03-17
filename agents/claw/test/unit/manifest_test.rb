@@ -6,7 +6,7 @@ class ManifestTest < ActiveSupport::TestCase
 
     assert_manifest_contract(
       manifest,
-      expected_agent_program_key: "claw",
+      expected_agent_key: "claw",
       expected_name: "Claw",
       expected_description: "Bundled claw Cybros programmable agent.",
       expected_config_namespace: "bundled.claw",

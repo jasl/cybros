@@ -1,4 +1,4 @@
-agent_program_key: claw
+agent_key: claw
 name: Claw
 description: Bundled claw Cybros programmable agent.
 config_namespace: bundled.claw

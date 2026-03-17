@@ -54,6 +54,8 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
       agent = Agents::BootstrapBundledDefaultService.ensure_agent!
 
       assert_equal "claw", agent.bundled_agent_key
+      assert_equal "claw", agent.manifest_snapshot.fetch("agent_key")
+      refute agent.manifest_snapshot.key?("agent_program_key")
       assert_equal "bundled", agent.source_kind
       assert_equal Agents::BundledSources.path_for("claw").to_s, agent.absolute_local_path.to_s
       assert_equal "http_jsonrpc", agent.transport_kind
@@ -71,7 +73,7 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
     server =
       Cybros::ProgrammableAgentFixture::Server.new(
         identity_overrides: {
-          "agent_program_key" => "claw",
+          "agent_key" => "claw",
           "agent_deployment_key" => "claw",
           "deployment_fingerprint" => "deployment:bundled-claw:dev",
         },
@@ -89,6 +91,7 @@ class Agents::BootstrapBundledDefaultServiceTest < ActiveSupport::TestCase
         assert_equal server.rpc_url, agent.endpoint_url
         assert_equal "secret://bundled-claw:dev", agent.deployment_bearer_secret_ref
         assert_equal "deployment:bundled-claw:dev", agent.deployment_fingerprint
+        assert_equal "claw", agent.manifest_snapshot.fetch("agent_key")
       end
     end
   ensure

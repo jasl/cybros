@@ -16,7 +16,8 @@ class RPCContractTest < ActiveSupport::TestCase
     handshake_payload = application.call(method_name: "capabilities.handshake", params: {})
     refresh_payload = application.call(method_name: "capabilities.refresh", params: { "reason" => "manual" })
 
-    assert_equal "claw", initialize_payload.dig("identity", "agent_program_key")
+    assert_equal "claw", initialize_payload.dig("identity", "agent_key")
+    refute initialize_payload.dig("identity").key?("agent_program_key")
     assert_equal "deployment:test-claw", initialize_payload.dig("identity", "deployment_fingerprint")
     assert_includes initialize_payload.dig("identity", "supported_methods"), "on_conversation_created"
     assert_includes initialize_payload.dig("identity", "supported_methods"), "on_lane_first_user_message"
