@@ -398,6 +398,26 @@ Old nouns/removal targets for this cleanup:
   - DAG and runtime-surface lib tests
   - system and live-acceptance surfaces
 
+### Round 12
+
+- Cleaned the runtime-governance / operator-surface integration residue batch across:
+  - `test/integration/system_settings_automations_test.rb`
+  - `test/integration/system_settings_runtime_governance_test.rb`
+  - `test/integration/automation_scheduler_flow_test.rb`
+  - `test/integration/agent_execution_capacity_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_agent_runtime!(program:, execution_target:)`
+- Kept local execution-profile builders where the tests still need capacity fixtures for observability assertions; this round only cut out the obsolete helper contract.
+- Verification commands for this round:
+  - red check: `bin/rails test test/integration/system_settings_automations_test.rb test/integration/system_settings_runtime_governance_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/agent_execution_capacity_test.rb` -> 5 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/integration/system_settings_automations_test.rb test/integration/system_settings_runtime_governance_test.rb test/integration/automation_scheduler_flow_test.rb test/integration/agent_execution_capacity_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - DAG and runtime-surface lib tests
+  - system and live-acceptance surfaces
+  - a smaller number of scenario/model tests still carrying local execution-target fixture builders
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

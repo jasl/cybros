@@ -49,7 +49,7 @@ class AgentExecutionCapacityTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -71,7 +71,7 @@ class AgentExecutionCapacityTest < ActiveSupport::TestCase
           max_concurrent_tasks: 2,
           max_queued_tasks: 5,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", status: "active", api_key: "sk-test")
       conversation =

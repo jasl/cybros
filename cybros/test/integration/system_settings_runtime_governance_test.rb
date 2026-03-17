@@ -63,7 +63,7 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
 
     def create_execution_wait!(execution_target:)
       program = create_program!(name: "Execution wait")
-      agent = create_agent_runtime!(program: program, execution_target: execution_target)
+      agent = create_agent_runtime!(agent: program, execution_profile: execution_target)
 
       RuntimeGovernance::RuntimeWaits.park!(
         owner_type: "ConversationRun",
@@ -80,7 +80,7 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
 
     def create_execution_denial!(execution_target:)
       program = create_program!
-      agent = create_agent_runtime!(program: program, execution_target: execution_target)
+      agent = create_agent_runtime!(agent: program, execution_profile: execution_target)
       deployment = create_deployment!(program: program)
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
       recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
@@ -190,7 +190,7 @@ class SystemSettingsRuntimeGovernanceIntegrationTest < ActionDispatch::Integrati
 
     def create_deployment!(program:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

@@ -96,7 +96,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
         )
       ensure_active_openai_credential!
       deployment = active_deployment!(program:, endpoint_url:, deployment_fingerprint: "fixture-deployment-v1")
-      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
+      agent = create_agent_runtime!(agent: program, execution_profile: target, deployment: deployment)
 
       Automation.create!(
         user: create_user!,
@@ -112,7 +112,7 @@ class AutomationSchedulerFlowTest < ActiveSupport::TestCase
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
