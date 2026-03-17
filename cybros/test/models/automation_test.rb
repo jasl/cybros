@@ -129,5 +129,4 @@ class AutomationTest < ActiveSupport::TestCase
         config_schema_fingerprint: "config:v1",
       )
     end
-
 end
