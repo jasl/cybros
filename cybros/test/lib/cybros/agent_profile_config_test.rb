@@ -140,4 +140,66 @@ class Cybros::AgentProfileConfigTest < Minitest::Test
     assert_equal "product_guard", policy.dig("oversize", "single_message", "hard_strategy")
     assert_nil policy.dig("oversize", "multi_message")
   end
+
+  def test_unknown_profile_names_fall_back_to_the_default_profile_definition
+    definition = Cybros::AgentProfiles.definition("unknown")
+
+    assert_equal ["*"], definition.fetch(:tool_patterns)
+    assert_equal :full, definition.fetch(:prompt_mode)
+    assert_equal 5, definition.fetch(:memory_search_limit)
+    assert_equal true, definition.fetch(:phase_0_auto_allow_memory_and_skills)
+    assert_equal "discard_context", definition.dig(:input_policy, "interrupted_output_policy")
+  end
+
+  def test_symbol_keyed_internal_runtime_surface_and_prompt_sections_round_trip_cleanly
+    cfg =
+      Cybros::AgentProfileConfig.new(
+        base_profile: "coding",
+        context_turns: nil,
+        prompt_mode: nil,
+        memory_search_limit: nil,
+        tools_allowed: nil,
+        directives_enabled: nil,
+        repo_docs_enabled: nil,
+        repo_docs_max_total_bytes: nil,
+        runtime_surface: {
+          type: :noop,
+          helpers: { estimate_tokens: true },
+          stage_limits: {
+            prepare_turn: { timeout_s: 0.5, max_output_bytes: 256 },
+          },
+        },
+        system_prompt_sections: {
+          tooling: { enabled: false, prompt_modes: [:full], stability: :prefix },
+        },
+      )
+
+    assert_equal(
+      {
+        "base" => "coding",
+        "runtime_surface" => {
+          "type" => "noop",
+          "helpers" => { "estimate_tokens" => true },
+          "stage_limits" => {
+            "prepare_turn" => { "timeout_s" => 0.5, "max_output_bytes" => 256 },
+          },
+        },
+        "system_prompt_sections" => {
+          "tooling" => { "enabled" => false, "prompt_modes" => ["full"], "stability" => "prefix" },
+        },
+      },
+      cfg.to_metadata,
+    )
+
+    assert_equal(
+      {
+        type: :noop,
+        helpers: { estimate_tokens: true },
+        stage_limits: {
+          prepare_turn: { timeout_s: 0.5, max_output_bytes: 256 },
+        },
+      },
+      cfg.apply_overrides({}).fetch(:runtime_surface),
+    )
+  end
 end

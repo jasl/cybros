@@ -13,7 +13,12 @@ module AgentCore
     def error? = error
 
     def to_h
-      { type: :tool_result, tool_use_id: tool_use_id, content: content, error: error }
+      {
+        "type" => "tool_result",
+        "tool_use_id" => tool_use_id,
+        "content" => serialize_content(content),
+        "error" => error,
+      }
     end
 
     def ==(other)
@@ -21,6 +26,17 @@ module AgentCore
         tool_use_id == other.tool_use_id &&
         content == other.content &&
         error == other.error
+    end
+
+    private
+
+    def serialize_content(value)
+      case value
+      when Hash, Array
+        AgentCore::Utils.deep_stringify_keys(value)
+      else
+        value
+      end
     end
   end
 end

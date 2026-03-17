@@ -177,8 +177,8 @@ module AgentCore
                 {}
               end
 
-            metadata.fetch(:source, metadata.fetch("source", "")).to_s == "lane_prompt_buffer" &&
-              excluded.include?(metadata.fetch(:buffer_name, metadata.fetch("buffer_name", "")).to_s)
+            metadata.fetch(:source, "").to_s == "lane_prompt_buffer" &&
+              excluded.include?(metadata.fetch(:buffer_name, "").to_s)
           end
         rescue StandardError
           Array(items)
@@ -248,13 +248,13 @@ module AgentCore
         def context_budget_prompt_payload(visible_tools:)
           budget = @execution_context.attributes.fetch(:context_budget, nil)
           return nil unless budget.is_a?(Hash)
-          return nil unless budget.fetch(:budget_action, budget.fetch("budget_action", nil)).to_s == "advise_compact"
+          return nil unless budget.fetch(:budget_action, nil).to_s == "advise_compact"
 
           payload = {
-            effective_prompt_budget_tokens: budget.fetch(:effective_prompt_budget_tokens, budget.fetch("effective_prompt_budget_tokens", nil)),
-            effective_context_soft_limit_tokens: budget.fetch(:effective_context_soft_limit_tokens, budget.fetch("effective_context_soft_limit_tokens", nil)),
-            estimated_tokens: budget.fetch(:estimated_tokens, budget.fetch("estimated_tokens", nil)),
-            budget_state: budget.fetch(:budget_state, budget.fetch("budget_state", nil)),
+            effective_prompt_budget_tokens: budget.fetch(:effective_prompt_budget_tokens, nil),
+            effective_context_soft_limit_tokens: budget.fetch(:effective_context_soft_limit_tokens, nil),
+            estimated_tokens: budget.fetch(:estimated_tokens, nil),
+            budget_state: budget.fetch(:budget_state, nil),
             compact_context_available: compact_context_visible?(visible_tools),
           }.compact
 
@@ -272,7 +272,7 @@ module AgentCore
         def tool_name_from_definition(tool_def)
           return "" unless tool_def.is_a?(Hash)
 
-          tool_def.fetch(:name, tool_def.fetch("name", tool_def.dig(:function, :name) || tool_def.dig("function", "name") || "")).to_s
+          tool_def.fetch(:name, tool_def.dig(:function, :name) || "").to_s
         rescue StandardError
           ""
         end

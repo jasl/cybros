@@ -377,16 +377,19 @@ module Cybros
     def agent_from_context(context)
       return nil unless context.respond_to?(:attributes)
 
-      attributes = context.attributes.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(context.attributes) : {}
+      raw_attributes = context.attributes
+      return nil unless raw_attributes.is_a?(Hash)
+
+      attributes = AgentCore::Utils.deep_stringify_keys(raw_attributes)
       agent_id = attributes.dig("agent", "id").to_s.strip.presence
       return Agent.find_by(id: agent_id) if agent_id.present?
 
       conversation_id =
         attributes.dig("cybros", "session_context", "conversation_id").to_s.strip.presence ||
           attributes.dig("cybros", "execution_context", "conversation_id").to_s.strip.presence
+      return nil unless conversation_id
+
       Conversation.find_by(id: conversation_id)&.agent
-    rescue StandardError
-      nil
     end
     private_class_method :agent_from_context
 

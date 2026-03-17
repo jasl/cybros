@@ -592,8 +592,6 @@ module AgentCore
             return provider if required_methods.all? { |method_name| provider.respond_to?(method_name) }
 
             nil
-          rescue StandardError
-            nil
           end
 
           def normalize_final_output_payload(value, fallback:, runtime:, stop_reason:, model:)
@@ -658,15 +656,11 @@ module AgentCore
           def extract_output_directives(value, fallback:)
             hash = value.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(value) : {}
             hash.fetch("directives", fallback["directives"])
-          rescue StandardError
-            fallback["directives"]
           end
 
           def handleable_error?(error)
             return false if error.is_a?(AgentCore::StreamError) && error.output_committed == true
 
-            true
-          rescue StandardError
             true
           end
 
@@ -692,8 +686,6 @@ module AgentCore
 
             code = error.code.to_s
             code.start_with?("cybros.programmable_agent.", "cybros.agent_rpc.")
-          rescue StandardError
-            false
           end
 
           def error_view_for(error)
@@ -749,11 +741,15 @@ module AgentCore
           end
 
           def agent_attributes_from(execution_context:, runtime:)
-            agent = execution_context&.attributes&.fetch(:agent, nil)
-            agent = runtime&.execution_context_attributes&.fetch(:agent, nil) if agent.nil?
+            context_attributes = execution_context&.attributes
+            agent = context_attributes.fetch(:agent, nil) if context_attributes.is_a?(Hash)
+
+            if agent.nil?
+              runtime_attributes = runtime&.execution_context_attributes
+              agent = runtime_attributes.fetch(:agent, nil) if runtime_attributes.is_a?(Hash)
+            end
+
             agent.is_a?(Hash) ? agent : {}
-          rescue StandardError
-            {}
           end
 
           def build_prompt_with_budget(node, context_nodes:, runtime:, execution_context:)
@@ -1171,8 +1167,8 @@ module AgentCore
                 )
               result = result.is_a?(Hash) ? result : {}
 
-              assistant_text = result.fetch(:assistant_text, result.fetch("assistant_text", "")).to_s
-              directives = Array(result.fetch(:directives, result.fetch("directives", []))).select { |d| d.is_a?(Hash) }
+              assistant_text = result.fetch(:assistant_text, "").to_s
+              directives = Array(result.fetch(:directives, [])).select { |d| d.is_a?(Hash) }
 
               {
                 message: Message.new(role: :assistant, content: assistant_text),
@@ -1188,23 +1184,23 @@ module AgentCore
 
           def directives_metadata(result)
             h = result.is_a?(Hash) ? result : {}
-            ok = h.fetch(:ok, h.fetch("ok", false)) == true
+            ok = h.fetch(:ok, false) == true
 
-            attempts = Array(h.fetch(:attempts, h.fetch("attempts", [])))
-            warnings = Array(h.fetch(:warnings, h.fetch("warnings", [])))
+            attempts = Array(h.fetch(:attempts, []))
+            warnings = Array(h.fetch(:warnings, []))
 
             error_code = nil
             unless ok
               last = attempts.last
               if last.is_a?(Hash)
-                error = last[:structured_output_error] || last["structured_output_error"]
-                error_code = error[:code] || error["code"] if error.is_a?(Hash)
-                error_code ||= "HTTP_ERROR" if last[:http_error] || last["http_error"]
+                error = last[:structured_output_error]
+                error_code = error[:code] if error.is_a?(Hash)
+                error_code ||= "HTTP_ERROR" if last[:http_error]
               end
             end
 
-            mode = h.fetch(:mode, h.fetch("mode", nil))
-            elapsed_ms = h.fetch(:elapsed_ms, h.fetch("elapsed_ms", nil))
+            mode = h.fetch(:mode, nil)
+            elapsed_ms = h.fetch(:elapsed_ms, nil)
 
             {
               "directives" => {
@@ -2168,7 +2164,7 @@ module AgentCore
               name = name.to_s.strip
               next if name.empty?
 
-              out[name] ||= schema.is_a?(Hash) ? schema : {}
+              out[name] ||= schema.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(schema) : {}
             rescue StandardError
               next
             end
@@ -2185,7 +2181,7 @@ module AgentCore
               defn = {} unless defn.is_a?(Hash)
 
               params = defn.fetch(:input_schema) { defn.fetch(:parameters, {}) }
-              params.is_a?(Hash) ? params : {}
+              params.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(params) : {}
             else
               {}
             end
@@ -2544,12 +2540,12 @@ module AgentCore
               when AgentCore::Resources::Tools::Tool
                 tool_info.metadata
               when Hash
-                tool_info.fetch(:metadata, tool_info.fetch("metadata", {}))
+                tool_info.fetch(:metadata, {})
               else
                 {}
               end
 
-            execution_mode = metadata.is_a?(Hash) ? metadata[:execution_mode] || metadata["execution_mode"] : nil
+            execution_mode = metadata.is_a?(Hash) ? metadata[:execution_mode] : nil
             execution_mode.to_s.presence || "serial"
           rescue StandardError
             "serial"

@@ -496,7 +496,8 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
         )
 
       tool_name = lambda { |tool|
-        tool[:name] || tool["name"] || tool.dig(:function, :name) || tool.dig("function", "name")
+        normalized = tool.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(tool) : {}
+        normalized["name"] || normalized.dig("function", "name")
       }
 
       normal_names = normal_visible.map(&tool_name)
@@ -582,6 +583,53 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal "mutate", registry.find("memory_store").metadata[:permission_class]
     assert_equal "read", registry.find("web_search").metadata[:permission_class]
     assert_equal "read", registry.find("web_fetch").metadata[:permission_class]
+  end
+
+  test "protected path classifier falls back to redirection parsing for malformed shell commands" do
+    root = Pathname.new("/tmp/agent-root")
+    context =
+      Struct.new(:attributes).new(
+        {
+          cybros: {
+            execution_context: {
+              workspace: {
+                root_path: root.to_s,
+                cwd: root.to_s,
+              },
+            },
+          },
+        },
+      )
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "exec",
+        arguments: { "command" => "echo hello > SOUL.md'" },
+        context: context,
+      )
+
+    assert_equal :deny, result.fetch(:action)
+    assert_equal Cybros::AgentRuntimeResolver::PROTECTED_AGENT_ROOT_EXEC_DENY_REASON, result.fetch(:reason)
+  end
+
+  test "protected path classifier ignores malformed execution context payload shapes" do
+    context = Struct.new(:attributes).new({ cybros: "unexpected" })
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "write",
+        arguments: { "path" => "../../SOUL.md" },
+        context: context,
+      )
+
+    assert_equal({ action: nil }, result)
+  end
+
+  test "channel_for ignores nodes without a conversation-backed graph" do
+    graph = Struct.new(:attachable).new(Object.new)
+    node = Struct.new(:metadata, :graph).new({ "routing" => {} }, graph)
+
+    assert_nil Cybros::AgentRuntimeResolver.channel_for(node: node)
   end
 
   private

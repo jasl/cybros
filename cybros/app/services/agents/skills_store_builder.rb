@@ -92,12 +92,12 @@ module Agents
         end
 
         def normalize_positive_integer(value, default:, code:)
-          candidate = value.nil? ? default : Integer(value)
+          candidate = value.nil? ? default : Integer(value, exception: false)
           AgentCore::ValidationError.raise!(
             "max_bytes must be positive",
             code: code,
-            details: { max_bytes: candidate },
-          ) if candidate <= 0
+            details: { max_bytes: value.nil? ? candidate : value },
+          ) if candidate.nil? || candidate <= 0
 
           candidate
         end

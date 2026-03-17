@@ -37,6 +37,6 @@ class AgentCore::ToolCallTest < Minitest::Test
         arguments_raw: "not json",
       )
 
-    assert_equal "not json", bad.to_h.fetch(:arguments_raw)
+    assert_equal "not json", bad.to_h.fetch("arguments_raw")
   end
 end

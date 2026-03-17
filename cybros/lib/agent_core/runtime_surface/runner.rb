@@ -131,11 +131,11 @@ module AgentCore
           ) unless raw.is_a?(Hash)
 
           STAGE_INPUT_TYPES.keys.each_with_object({}) do |stage_name, out|
-            provided = raw.fetch(stage_name, raw.fetch(stage_name.to_s, {}))
+            provided = raw.fetch(stage_name, {})
             provided = {} unless provided.is_a?(Hash)
 
-            timeout_s = normalize_positive_number(provided.fetch(:timeout_s, provided.fetch("timeout_s", DEFAULT_TIMEOUT_S)))
-            max_output_bytes = normalize_positive_integer(provided.fetch(:max_output_bytes, provided.fetch("max_output_bytes", DEFAULT_MAX_OUTPUT_BYTES)))
+            timeout_s = normalize_positive_number(provided.fetch(:timeout_s, DEFAULT_TIMEOUT_S))
+            max_output_bytes = normalize_positive_integer(provided.fetch(:max_output_bytes, DEFAULT_MAX_OUTPUT_BYTES))
 
             out[stage_name] = {
               timeout_s: timeout_s,

@@ -401,7 +401,7 @@ export default class extends Controller {
   }
 
   async #saveComposerDraft() {
-    const response = await this.#fetchJson(this.composerDraftUrlValue, {
+    await this.#fetchJson(this.composerDraftUrlValue, {
       method: "PATCH",
       body: {
         composer_draft: {
@@ -412,10 +412,6 @@ export default class extends Controller {
         },
       },
     })
-
-    if (!response?.ok) {
-      // Best-effort persistence. Keep the UI usable even if autosave fails.
-    }
   }
 
   #captureSubmission(form) {

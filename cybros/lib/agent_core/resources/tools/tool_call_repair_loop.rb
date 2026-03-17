@@ -500,7 +500,7 @@ module AgentCore
             name = name.to_s.strip
             next if name.empty?
 
-            out[name] ||= { name: name, schema: schema.is_a?(Hash) ? schema : {} }
+            out[name] ||= { name: name, schema: schema.is_a?(Hash) ? AgentCore::Utils.deep_stringify_keys(schema) : {} }
           rescue StandardError
             next
           end
@@ -596,19 +596,19 @@ module AgentCore
 
           out = {}
 
-          type = s.fetch("type", s.fetch(:type, nil))
+          type = s.fetch("type", nil)
           out["type"] = type if type
 
-          ap = s.fetch("additionalProperties", s.fetch(:additionalProperties, nil))
+          ap = s.fetch("additionalProperties", nil)
           out["additionalProperties"] = ap if ap == true || ap == false
 
-          req = s.fetch("required", s.fetch(:required, nil))
+          req = s.fetch("required", nil)
           out["required"] = Array(req).map { |v| v.to_s }.reject(&:empty?) if req.is_a?(Array)
 
-          enum = s.fetch("enum", s.fetch(:enum, nil))
+          enum = s.fetch("enum", nil)
           out["enum"] = enum if enum.is_a?(Array)
 
-          props = s.fetch("properties", s.fetch(:properties, nil))
+          props = s.fetch("properties", nil)
           if props.is_a?(Hash)
             out["properties"] = {}
             props.each do |k, v|
@@ -624,7 +624,7 @@ module AgentCore
             end
           end
 
-          items = s.fetch("items", s.fetch(:items, nil))
+          items = s.fetch("items", nil)
           if items.is_a?(Hash)
             out["items"] =
               if depth_left <= 0
@@ -645,16 +645,16 @@ module AgentCore
 
           out = {}
 
-          type = s.fetch("type", s.fetch(:type, nil))
+          type = s.fetch("type", nil)
           out["type"] = type if type
 
-          ap = s.fetch("additionalProperties", s.fetch(:additionalProperties, nil))
+          ap = s.fetch("additionalProperties", nil)
           out["additionalProperties"] = ap if ap == true || ap == false
 
-          req = s.fetch("required", s.fetch(:required, nil))
+          req = s.fetch("required", nil)
           out["required"] = Array(req).map { |v| v.to_s }.reject(&:empty?) if req.is_a?(Array)
 
-          props = s.fetch("properties", s.fetch(:properties, nil))
+          props = s.fetch("properties", nil)
           if props.is_a?(Hash)
             out["properties"] = props.keys.each_with_object({}) do |k, h|
               key = k.to_s
@@ -670,7 +670,7 @@ module AgentCore
         end
 
         def object_schema?(schema)
-          t = schema.fetch("type", schema.fetch(:type, nil))
+          t = schema.fetch("type", nil)
           case t
           when Array
             t.map { |v| v.to_s }.include?("object")

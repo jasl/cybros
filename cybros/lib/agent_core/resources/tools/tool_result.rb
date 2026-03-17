@@ -64,11 +64,15 @@ module AgentCore
         #
         # @return [Array<ContentBlock>] Array of typed content block objects
         def to_content_blocks
-          content.map { |block| AgentCore::ContentBlock.from_h(block) }
+          content.map { |block| AgentCore::ContentBlock.from_h(AgentCore::Utils.deep_stringify_keys(block)) }
         end
 
         def to_h
-          { content: content, error: error, metadata: metadata }
+          {
+            "content" => content.map { |block| serialize_block(block) },
+            "error" => error,
+            "metadata" => metadata,
+          }
         end
 
         def artifact_refs
@@ -117,7 +121,7 @@ module AgentCore
           )
         end
 
-        # Build a ToolResult from a Hash (symbol or string keys) or JSON String.
+        # Build a ToolResult from a string-keyed Hash or JSON String.
         #
         # Intended for app-side persistence round-trips and job queues.
         #
@@ -154,16 +158,16 @@ module AgentCore
             details: { value_class: h.class.name },
           ) unless h.is_a?(Hash)
 
-          content = h.fetch("content", h.fetch(:content, nil))
+          content = h.fetch("content", nil)
           ValidationError.raise!(
             "tool result content must be an Array",
             code: "agent_core.tools.tool_result.tool_result_content_must_be_an_array",
             details: { content_class: content.class.name },
           ) unless content.is_a?(Array)
 
-          error = h.fetch("error", h.fetch(:error, false))
+          error = h.fetch("error", false)
 
-          metadata = h.fetch("metadata", h.fetch(:metadata, {}))
+          metadata = h.fetch("metadata", {})
           metadata = {} if metadata.nil?
           ValidationError.raise!(
             "tool result metadata must be a Hash",
@@ -253,6 +257,15 @@ module AgentCore
         end
 
         private
+
+        def serialize_block(block)
+          serialized = AgentCore::Utils.deep_stringify_keys(block)
+          serialized["type"] = serialized["type"].to_s if serialized["type"]
+          serialized["source_type"] = serialized["source_type"].to_s if serialized["source_type"]
+          serialized
+        rescue StandardError
+          { "type" => "text", "text" => block.to_s }
+        end
 
         def normalize_block(block)
           unless block.is_a?(Hash)

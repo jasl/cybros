@@ -89,9 +89,10 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
     result = ToolResult.success(text: "ok")
     h = result.to_h
 
-    assert_equal false, h[:error]
-    assert_instance_of Array, h[:content]
-    assert_instance_of Hash, h[:metadata]
+    assert_equal false, h["error"]
+    assert_instance_of Array, h["content"]
+    assert_instance_of Hash, h["metadata"]
+    assert_equal "text", h["content"].first["type"]
   end
 
   def test_error_coercion
@@ -133,13 +134,19 @@ class AgentCore::Resources::Tools::ToolResultTest < Minitest::Test
 
   def test_from_h_raises_on_non_array_content
     assert_raises(AgentCore::ValidationError) do
-      ToolResult.from_h({ content: "nope", error: false, metadata: {} })
+      ToolResult.from_h({ "content" => "nope", "error" => false, "metadata" => {} })
     end
   end
 
   def test_from_h_raises_on_non_hash_metadata
     assert_raises(AgentCore::ValidationError) do
-      ToolResult.from_h({ content: [], error: false, metadata: "nope" })
+      ToolResult.from_h({ "content" => [], "error" => false, "metadata" => "nope" })
+    end
+  end
+
+  def test_from_h_rejects_symbol_key_serialization_hash
+    assert_raises(AgentCore::ValidationError) do
+      ToolResult.from_h({ content: [{ type: :text, text: "nope" }], error: false, metadata: {} })
     end
   end
 end

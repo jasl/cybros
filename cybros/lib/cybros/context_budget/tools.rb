@@ -105,7 +105,9 @@ module Cybros
       end
 
       def current_task_node!(context)
-        node_id = context&.attributes&.dig(:dag, :node_id).to_s
+        attributes = context.attributes if context.respond_to?(:attributes)
+        dag = attributes.is_a?(Hash) ? attributes[:dag] : nil
+        node_id = dag.is_a?(Hash) ? dag[:node_id].to_s : ""
         node = DAG::Node.find_by(id: node_id)
         return node if node
 
@@ -133,12 +135,11 @@ module Cybros
         context_budget = metadata.fetch("context_budget", nil)
         return 0 unless context_budget.is_a?(Hash)
 
-        budget_estimate = context_budget.fetch("estimated_tokens", context_budget.fetch(:estimated_tokens, nil)).to_i
+        budget_estimate = context_budget["estimated_tokens"]
+        budget_estimate = Integer(budget_estimate, exception: false).to_i
         return 0 unless budget_estimate.positive?
 
         [budget_estimate - plan.estimated_tokens.to_i, 0].max
-      rescue StandardError
-        0
       end
       private_class_method :context_budget_estimated_tokens_offset_for
 
@@ -195,14 +196,13 @@ module Cybros
 
       def runtime_surface_resolution_for(runtime)
         return nil if runtime.nil?
+        return nil unless runtime.respond_to?(:runtime_surface) && runtime.respond_to?(:runtime_surface_runner)
         return nil if runtime.runtime_surface.nil? || runtime.runtime_surface_runner.nil?
 
         {
           runtime_surface: runtime.runtime_surface,
           runtime_surface_runner: runtime.runtime_surface_runner,
         }
-      rescue StandardError
-        nil
       end
       private_class_method :runtime_surface_resolution_for
 

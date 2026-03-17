@@ -24,7 +24,7 @@ module AgentCore
       @tool_calls = tool_calls&.freeze
       @tool_call_id = tool_call_id
       @name = name
-      @metadata = (metadata || {}).freeze
+      @metadata = AgentCore::Utils.deep_stringify_keys(metadata || {}).freeze
     end
 
     def system? = role == :system
@@ -52,11 +52,11 @@ module AgentCore
 
     # Convert to a plain Hash for serialization.
     def to_h
-      h = { role: role, content: serialize_content }
-      h[:tool_calls] = tool_calls.map(&:to_h) if has_tool_calls?
-      h[:tool_call_id] = tool_call_id if tool_call_id
-      h[:name] = name if name
-      h[:metadata] = metadata unless metadata.empty?
+      h = { "role" => role.to_s, "content" => serialize_content }
+      h["tool_calls"] = tool_calls.map(&:to_h) if has_tool_calls?
+      h["tool_call_id"] = tool_call_id if tool_call_id
+      h["name"] = name if name
+      h["metadata"] = metadata unless metadata.empty?
       h
     end
 
@@ -78,12 +78,12 @@ module AgentCore
         details: { value_class: hash.class.name },
       ) unless hash.is_a?(Hash)
 
-      role = hash.fetch("role", hash.fetch(:role, nil))
-      content = deserialize_content(hash.fetch("content", hash.fetch(:content, nil)))
+      role = hash.fetch("role", nil)
+      content = deserialize_content(hash.fetch("content", nil))
 
       tool_calls =
-        if hash.key?("tool_calls") || hash.key?(:tool_calls)
-          raw = hash.fetch("tool_calls", hash.fetch(:tool_calls, nil))
+        if hash.key?("tool_calls")
+          raw = hash.fetch("tool_calls", nil)
           ValidationError.raise!(
             "tool_calls must be an Array",
             code: "agent_core.message.tool_calls_must_be_an_array",
@@ -93,10 +93,10 @@ module AgentCore
           raw.map { |tc| ToolCall.from_h(tc) }
         end
 
-      tool_call_id = hash.fetch("tool_call_id", hash.fetch(:tool_call_id, nil))
-      name = hash.fetch("name", hash.fetch(:name, nil))
+      tool_call_id = hash.fetch("tool_call_id", nil)
+      name = hash.fetch("name", nil)
 
-      metadata = hash.fetch("metadata", hash.fetch(:metadata, {}))
+      metadata = hash.fetch("metadata", {})
       metadata = {} unless metadata.is_a?(Hash)
 
       new(

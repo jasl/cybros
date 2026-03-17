@@ -6,13 +6,13 @@ module AgentCore
     def initialize(id:, name:, input:)
       @id = id
       @name = name
-      @input = (input || {}).freeze
+      @input = AgentCore::Utils.deep_stringify_keys(input || {}).freeze
     end
 
     def type = :tool_use
 
     def to_h
-      { type: :tool_use, id: id, name: name, input: input }
+      { "type" => "tool_use", "id" => id, "name" => name, "input" => input }
     end
 
     def ==(other)

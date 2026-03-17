@@ -138,6 +138,31 @@ class Agents::SkillsStoreBuilderTest < ActiveSupport::TestCase
     end
   end
 
+  test "snapshot store rejects non-integer max_bytes with a validation error" do
+    Dir.mktmpdir("cybros-platform-skills-") do |platform_skills_root|
+      Dir.mktmpdir("cybros-agent-root-") do |workspace_root|
+        write_skill!(platform_skills_root, name: "platform-skill", description: "Platform description")
+
+        with_default_agent_workspace_root(workspace_root) do
+          conversation = create_conversation!(title: "Invalid snapshot max bytes")
+          store =
+            Agents::SkillsStoreBuilder.build(
+              agent: conversation.agent,
+              platform_skill_dirs: [platform_skills_root],
+            )
+
+          error =
+            assert_raises(AgentCore::ValidationError) do
+              store.load_skill(name: "platform-skill", max_bytes: "nope")
+            end
+
+          assert_equal "agent_core.skills.file_system_store.max_bytes_must_be_positive", error.code
+          assert_equal "nope", error.details[:max_bytes]
+        end
+      end
+    end
+  end
+
   private
 
     def write_skill!(root, name:, description:)

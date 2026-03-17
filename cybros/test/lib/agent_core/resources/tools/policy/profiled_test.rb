@@ -22,7 +22,7 @@ class AgentCore::Resources::Tools::Policy::ProfiledTest < Minitest::Test
 
     names =
       filtered.map do |t|
-        t.fetch(:name, t.fetch("name", t.dig(:function, :name) || t.dig("function", "name")))
+        t[:name].presence || t.dig(:function, :name)
       end
 
     assert_equal ["read", "skills_list", "mcp__server__echo"], names
@@ -48,7 +48,7 @@ class AgentCore::Resources::Tools::Policy::ProfiledTest < Minitest::Test
     ctx = AgentCore::ExecutionContext.from(nil)
     filtered = policy.filter(tools: tools, context: ctx)
 
-    names = filtered.map { |t| t.fetch(:name, t.fetch("name", "")) }
+    names = filtered.map { |t| t.fetch(:name, "") }
     assert_equal ["read", "write"], names
   end
 

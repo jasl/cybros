@@ -75,20 +75,14 @@ module Cybros
       s = DEFAULT_PROFILE if s.empty?
 
       PROFILES.key?(s) ? s : DEFAULT_PROFILE
-    rescue StandardError
-      DEFAULT_PROFILE
     end
 
     def allowed_patterns(profile)
       PROFILES.fetch(normalize(profile))
-    rescue StandardError
-      PROFILES.fetch(DEFAULT_PROFILE)
     end
 
     def valid?(profile)
       PROFILES.key?(profile.to_s.strip.downcase)
-    rescue StandardError
-      false
     end
 
     def definition(profile)
@@ -105,18 +99,6 @@ module Cybros
         phase_0_auto_allow_memory_and_skills: phase_0_auto_allow_memory_and_skills(key),
         input_policy: input_policy(key),
       }
-    rescue StandardError
-      {
-        tool_patterns: PROFILES.fetch(DEFAULT_PROFILE),
-        prompt_mode: :full,
-        memory_search_limit: DEFAULT_MEMORY_SEARCH_LIMIT,
-        prompt_injections: [],
-        include_skill_locations: false,
-        directives_config: nil,
-        system_prompt_section_overrides: {},
-        phase_0_auto_allow_memory_and_skills: phase_0_auto_allow_memory_and_skills(DEFAULT_PROFILE),
-        input_policy: input_policy(DEFAULT_PROFILE),
-      }
     end
 
     def global_input_policy
@@ -125,34 +107,24 @@ module Cybros
 
     def input_policy(profile)
       global_input_policy.deep_merge(INPUT_POLICY_OVERRIDES.fetch(normalize(profile), {}).deep_dup)
-    rescue StandardError
-      global_input_policy
     end
 
     def prompt_mode(profile)
       PROMPT_MODES.fetch(normalize(profile))
-    rescue StandardError
-      :full
     end
 
     def memory_search_limit(profile)
       MEMORY_SEARCH_LIMITS.fetch(normalize(profile))
-    rescue StandardError
-      DEFAULT_MEMORY_SEARCH_LIMIT
     end
 
     def prompt_injection_specs(profile)
       Array(PROMPT_INJECTION_SPECS.fetch(normalize(profile))).map do |spec|
         spec.is_a?(Hash) ? spec.dup : spec
       end
-    rescue StandardError
-      []
     end
 
     def phase_0_auto_allow_memory_and_skills(profile)
       PHASE_0_AUTO_ALLOW_MEMORY_AND_SKILLS.fetch(normalize(profile), true)
-    rescue StandardError
-      true
     end
 
     def deep_dup_value(value)

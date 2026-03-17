@@ -420,8 +420,6 @@ module Cybros
           helpers: helpers.freeze,
           stage_limits: stage_limits.freeze,
         }.freeze
-      rescue StandardError
-        nil
       end
 
       private_class_method def self.parse_runtime_surface_helpers(raw)
@@ -628,14 +626,10 @@ module Cybros
 
           out[section_id.to_s] = entry
         end
-      rescue StandardError
-        {}
       end
 
       private_class_method def self.runtime_surface_to_definition(runtime_surface)
         AgentCore::Utils.deep_symbolize_keys(runtime_surface)
-      rescue StandardError
-        nil
       end
 
       private_class_method def self.runtime_surface_to_metadata(runtime_surface)
@@ -673,8 +667,6 @@ module Cybros
           end
 
         out
-      rescue StandardError
-        {}
       end
     end
 end

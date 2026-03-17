@@ -206,10 +206,11 @@ class Conversation < ApplicationRecord
     namespace = agent_like&.config_namespace.to_s.strip
     return {} if namespace.empty?
 
-    value = agent_config.fetch(namespace, nil)
+    config = self[:agent_config]
+    return {} unless config.is_a?(Hash)
+
+    value = config.deep_stringify_keys.fetch(namespace, nil)
     value.is_a?(Hash) ? value.deep_stringify_keys : {}
-  rescue StandardError
-    {}
   end
 
   def resolved_composer_draft
@@ -1328,10 +1329,11 @@ class Conversation < ApplicationRecord
     end
 
     def metadata_model_ref
-      value = metadata.dig("llm", "model_ref").to_s.strip
+      raw_metadata = self[:metadata]
+      return nil unless raw_metadata.is_a?(Hash)
+
+      value = raw_metadata.dig("llm", "model_ref").to_s.strip
       value.presence
-    rescue StandardError
-      nil
     end
 
     def normalized_composer_draft_payload(value)
@@ -1818,15 +1820,17 @@ class Conversation < ApplicationRecord
       capacity = run.execution_capacity_snapshot
       return unless capacity.is_a?(Hash)
 
+      scope_type = capacity["scope_type"]
+      scope_id = capacity["scope_id"]
+      return if scope_type.blank? || scope_id.blank?
+
       RuntimeGovernance::RuntimeWaits.cancel!(
         owner_type: run.class.name,
         owner_id: run.id,
         reason_type: "execution_capacity",
-        subject_type: capacity.fetch("scope_type"),
-        subject_id: capacity.fetch("scope_id"),
+        subject_type: scope_type,
+        subject_id: scope_id,
       )
-    rescue KeyError
-      nil
     end
 
     def rewrite_queued_turns!(selected_user_node_id:, mode:, model_ref: nil, interrupted_output_policy_override: nil)

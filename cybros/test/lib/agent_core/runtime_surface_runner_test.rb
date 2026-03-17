@@ -46,7 +46,7 @@ class AgentCore::RuntimeSurfaceRunnerTest < Minitest::Test
 
   class ExplodingSurface < AgentCore::RuntimeSurface::Base
     def review_tool_call(input:)
-      raise "boom: #{input.tool_call.fetch(:name)}"
+      raise "boom: #{input.tool_call.fetch(:name, "")}"
     end
   end
 

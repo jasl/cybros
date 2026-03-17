@@ -103,32 +103,32 @@ class AgentCore::MessageTest < Minitest::Test
     msg = AgentCore::Message.new(role: :user, content: "hi")
     h = msg.to_h
 
-    assert_equal :user, h[:role]
-    assert_equal "hi", h[:content]
-    refute h.key?(:tool_calls)
-    refute h.key?(:tool_call_id)
-    refute h.key?(:name)
-    refute h.key?(:metadata)
+    assert_equal "user", h["role"]
+    assert_equal "hi", h["content"]
+    refute h.key?("tool_calls")
+    refute h.key?("tool_call_id")
+    refute h.key?("name")
+    refute h.key?("metadata")
   end
 
   def test_to_h_includes_tool_call_id
     msg = AgentCore::Message.new(role: :tool_result, content: "ok", tool_call_id: "tc_1")
     h = msg.to_h
-    assert_equal "tc_1", h[:tool_call_id]
+    assert_equal "tc_1", h["tool_call_id"]
   end
 
   def test_to_h_includes_name
     msg = AgentCore::Message.new(role: :tool_result, content: "ok", tool_call_id: "tc_1", name: "read")
     h = msg.to_h
-    assert_equal "read", h[:name]
+    assert_equal "read", h["name"]
   end
 
   def test_to_h_serializes_content_blocks
     blocks = [AgentCore::TextContent.new(text: "hello")]
     msg = AgentCore::Message.new(role: :user, content: blocks)
     h = msg.to_h
-    assert_instance_of Array, h[:content]
-    assert_equal :text, h[:content].first[:type]
+    assert_instance_of Array, h["content"]
+    assert_equal "text", h["content"].first["type"]
   end
 
   def test_equality
@@ -170,11 +170,17 @@ class AgentCore::MessageTest < Minitest::Test
 
   def test_from_h_deserializes_content_blocks
     h = {
-      role: :user,
-      content: [{ type: :text, text: "hello" }],
+      "role" => "user",
+      "content" => [{ "type" => "text", "text" => "hello" }],
     }
     msg = AgentCore::Message.from_h(h)
     assert_instance_of AgentCore::TextContent, msg.content.first
+  end
+
+  def test_from_h_rejects_symbol_key_serialization_hash
+    assert_raises(AgentCore::ValidationError) do
+      AgentCore::Message.from_h({ role: :user, content: "hello" })
+    end
   end
 end
 
@@ -228,7 +234,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
     tc = AgentCore::TextContent.new(text: "hello")
     assert_equal :text, tc.type
     assert_equal "hello", tc.text
-    assert_equal({ type: :text, text: "hello" }, tc.to_h)
+    assert_equal({ "type" => "text", "text" => "hello" }, tc.to_h)
   end
 
   def test_text_content_equality
@@ -550,7 +556,7 @@ class AgentCore::ContentBlockTest < Minitest::Test
     assert_equal :tool_use, tuc.type
     assert_equal "tc_1", tuc.id
     assert_equal "read", tuc.name
-    assert_equal({ path: "foo" }, tuc.input)
+    assert_equal({ "path" => "foo" }, tuc.input)
   end
 
   def test_tool_use_content_nil_input
@@ -562,10 +568,10 @@ class AgentCore::ContentBlockTest < Minitest::Test
   def test_tool_use_content_to_h
     tuc = AgentCore::ToolUseContent.new(id: "tc_1", name: "read", input: { path: "foo" })
     h = tuc.to_h
-    assert_equal :tool_use, h[:type]
-    assert_equal "tc_1", h[:id]
-    assert_equal "read", h[:name]
-    assert_equal({ path: "foo" }, h[:input])
+    assert_equal "tool_use", h["type"]
+    assert_equal "tc_1", h["id"]
+    assert_equal "read", h["name"]
+    assert_equal({ "path" => "foo" }, h["input"])
   end
 
   def test_tool_use_content_equality
@@ -608,10 +614,10 @@ class AgentCore::ContentBlockTest < Minitest::Test
   def test_tool_result_content_to_h
     trc = AgentCore::ToolResultContent.new(tool_use_id: "tc_1", content: "ok", error: false)
     h = trc.to_h
-    assert_equal :tool_result, h[:type]
-    assert_equal "tc_1", h[:tool_use_id]
-    assert_equal "ok", h[:content]
-    assert_equal false, h[:error]
+    assert_equal "tool_result", h["type"]
+    assert_equal "tc_1", h["tool_use_id"]
+    assert_equal "ok", h["content"]
+    assert_equal false, h["error"]
   end
 
   def test_tool_result_content_equality
@@ -634,48 +640,48 @@ class AgentCore::ContentBlockTest < Minitest::Test
   # --- ContentBlock.from_h dispatch ---
 
   def test_from_h_text
-    block = AgentCore::ContentBlock.from_h({ type: "text", text: "hi" })
+    block = AgentCore::ContentBlock.from_h({ "type" => "text", "text" => "hi" })
     assert_instance_of AgentCore::TextContent, block
     assert_equal "hi", block.text
   end
 
   def test_from_h_image
     block = AgentCore::ContentBlock.from_h({
-      type: "image", source_type: "base64", data: "abc", media_type: "image/png",
+      "type" => "image", "source_type" => "base64", "data" => "abc", "media_type" => "image/png",
     })
     assert_instance_of AgentCore::ImageContent, block
   end
 
   def test_from_h_document
     block = AgentCore::ContentBlock.from_h({
-      type: "document", source_type: "base64", data: "JVBERi", media_type: "application/pdf",
+      "type" => "document", "source_type" => "base64", "data" => "JVBERi", "media_type" => "application/pdf",
     })
     assert_instance_of AgentCore::DocumentContent, block
   end
 
   def test_from_h_audio
     block = AgentCore::ContentBlock.from_h({
-      type: "audio", source_type: "base64", data: "UklGR", media_type: "audio/wav",
+      "type" => "audio", "source_type" => "base64", "data" => "UklGR", "media_type" => "audio/wav",
     })
     assert_instance_of AgentCore::AudioContent, block
   end
 
   def test_from_h_tool_use
     block = AgentCore::ContentBlock.from_h({
-      type: "tool_use", id: "tc_1", name: "read", input: { path: "f" },
+      "type" => "tool_use", "id" => "tc_1", "name" => "read", "input" => { "path" => "f" },
     })
     assert_instance_of AgentCore::ToolUseContent, block
   end
 
   def test_from_h_tool_result
     block = AgentCore::ContentBlock.from_h({
-      type: "tool_result", tool_use_id: "tc_1", content: "data", error: false,
+      "type" => "tool_result", "tool_use_id" => "tc_1", "content" => "data", "error" => false,
     })
     assert_instance_of AgentCore::ToolResultContent, block
   end
 
   def test_from_h_unknown_falls_back_to_text
-    block = AgentCore::ContentBlock.from_h({ type: "unknown", text: "fallback" })
+    block = AgentCore::ContentBlock.from_h({ "type" => "unknown", "text" => "fallback" })
     assert_instance_of AgentCore::TextContent, block
     assert_equal "fallback", block.text
   end

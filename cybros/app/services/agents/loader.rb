@@ -22,7 +22,7 @@ module Agents
           manifest: data_hash(agent_yml),
         )
       end
-    rescue StandardError
+    rescue Timeout::Error
       Loaded.new(
         runtime_surface_config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
         runtime_surface_status: "missing",
@@ -41,11 +41,6 @@ module Agents
           config: Cybros::AgentProfileConfig.normalize_runtime_surface_metadata(raw),
           status: Cybros::AgentProfileConfig.runtime_surface_status(raw, present: present),
         }
-      rescue StandardError
-        {
-          config: Cybros::AgentProfileConfig.default_runtime_surface_metadata,
-          status: present ? "invalid" : "missing",
-        }
       end
 
       def data_hash(value)
@@ -58,7 +53,7 @@ module Agents
 
         parsed = YAML.safe_load(raw, permitted_classes: [], permitted_symbols: [], aliases: false)
         parsed.is_a?(Hash) ? parsed : {}
-      rescue StandardError
+      rescue Psych::Exception
         {}
       end
 
@@ -67,7 +62,7 @@ module Agents
         return "" unless path&.file?
 
         path.read
-      rescue StandardError
+      rescue Errno::EACCES, Errno::ENOENT, IOError
         ""
       end
 
@@ -78,8 +73,6 @@ module Agents
         return nil unless expanded.to_s.start_with?(root.expand_path.to_s + File::SEPARATOR) || expanded == root.expand_path
 
         expanded
-      rescue StandardError
-        nil
       end
   end
 end

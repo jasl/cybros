@@ -192,9 +192,8 @@ class Conversation::NodeActionPolicy
     def attachment_bearing_user_message?
       return false unless user_message?
 
-      Array(node.body_input["attachments"]).any?
-    rescue StandardError
-      false
+      body_input = node.body_input.is_a?(Hash) ? node.body_input : {}
+      Array(body_input["attachments"]).any?
     end
 
     def latest_user_message?
@@ -216,8 +215,6 @@ class Conversation::NodeActionPolicy
 
     def start_dependencies_satisfied?
       conversation.send(:pending_agent_dependencies_satisfied?, graph: conversation.root_graph, agent_node: node)
-    rescue StandardError
-      false
     end
 
     def retry_depth
@@ -282,7 +279,8 @@ class Conversation::NodeActionPolicy
       candidate = conversation.root_graph.nodes.find_by(id: node_id)
       return nil if candidate.nil?
 
-      candidate.retry_of_id || candidate.metadata&.dig("retry_of_node_id")
+      metadata = candidate.metadata.is_a?(Hash) ? candidate.metadata : {}
+      candidate.retry_of_id || metadata["retry_of_node_id"]
     end
 
     def rerunnable_in_place?

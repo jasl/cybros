@@ -250,7 +250,7 @@ module AgentCore
 
       description = value.fetch("description", "").to_s
       input_schema = value.fetch("inputSchema", value.fetch("input_schema", value.fetch("parameters", {})))
-      input_schema = {} unless input_schema.is_a?(Hash)
+      input_schema = input_schema.is_a?(Hash) ? deep_stringify_keys(input_schema) : {}
 
       { name: name, description: description, input_schema: input_schema }
     end
@@ -266,30 +266,23 @@ module AgentCore
         return { content: [{ type: :text, text: value.to_s }], error: false, metadata: {} }
       end
 
-      content = value.fetch("content", value.fetch(:content, nil))
+      content = value["content"]
       content = [{ type: :text, text: value.to_s }] unless content.is_a?(Array)
       content = normalize_mcp_tool_call_content(content)
 
       error =
         if value.key?("isError")
           value.fetch("isError")
-        elsif value.key?(:isError)
-          value.fetch(:isError)
         elsif value.key?("is_error")
           value.fetch("is_error")
-        elsif value.key?(:is_error)
-          value.fetch(:is_error)
         elsif value.key?("error")
           value.fetch("error")
         else
-          value.fetch(:error, false)
+          false
         end
 
       structured_content =
-        value.fetch("structuredContent",
-                    value.fetch(:structuredContent,
-                                value.fetch("structured_content",
-                                            value.fetch(:structured_content, nil))))
+        value.fetch("structuredContent", value.fetch("structured_content", nil))
 
       metadata = {}
       metadata[:structured_content] = structured_content unless structured_content.nil?
@@ -309,21 +302,21 @@ module AgentCore
         return { type: :text, text: block.to_s }
       end
 
-      type = block.fetch("type", block.fetch(:type, nil)).to_s.strip
+      type = block.fetch("type", nil).to_s.strip
 
       case type
       when "text"
-        text = block.fetch("text", block.fetch(:text, "")).to_s
-        annotations = block.fetch("annotations", block.fetch(:annotations, nil))
+        text = block.fetch("text", "").to_s
+        annotations = block.fetch("annotations", nil)
 
         out = { type: :text, text: text }
         out[:annotations] = annotations if annotations
         out
       when "image"
-        data = block.fetch("data", block.fetch(:data, nil)).to_s
-        mime_type = block.fetch("mime_type", block.fetch(:mime_type, block.fetch("mimeType", block.fetch(:mimeType, nil))))
+        data = block.fetch("data", nil).to_s
+        mime_type = block.fetch("mime_type", block.fetch("mimeType", nil))
         media_type = normalize_mime_type(mime_type)
-        annotations = block.fetch("annotations", block.fetch(:annotations, nil))
+        annotations = block.fetch("annotations", nil)
 
         if data.strip.empty? || media_type.nil?
           { type: :text, text: block.to_s }

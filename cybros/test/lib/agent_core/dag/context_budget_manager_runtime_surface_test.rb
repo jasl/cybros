@@ -25,7 +25,7 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
   class RewritingSurface < AgentCore::RuntimeSurface::Base
     def prepare_turn(input:)
       prompt = input.prompt.dup
-      system_prompt = prompt.fetch(:system_prompt, prompt.fetch("system_prompt", ""))
+      system_prompt = prompt.fetch(:system_prompt, "")
 
       AgentCore::RuntimeSurface::Decisions::TurnRewrite.new(
         prompt: prompt.merge(system_prompt: "#{system_prompt}\nRUNTIME_NOTE"),
@@ -37,7 +37,7 @@ class AgentCore::DAG::ContextBudgetManagerRuntimeSurfaceTest < ActiveSupport::Te
   class OversizedRewritingSurface < AgentCore::RuntimeSurface::Base
     def prepare_turn(input:)
       prompt = input.prompt.dup
-      system_prompt = prompt.fetch(:system_prompt, prompt.fetch("system_prompt", ""))
+      system_prompt = prompt.fetch(:system_prompt, "")
 
       AgentCore::RuntimeSurface::Decisions::TurnRewrite.new(
         prompt: prompt.merge(system_prompt: "#{system_prompt}\nOVERSIZED_NOTE #{"x" * 4000}"),

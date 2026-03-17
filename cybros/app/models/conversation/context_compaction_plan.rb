@@ -202,7 +202,7 @@ class Conversation::ContextCompactionPlan
       kept_turn_ids =
         Array(decision.kept_items).filter_map do |item|
           if item.is_a?(Hash)
-            item.fetch("turn_id", item.fetch(:turn_id, nil)).to_s.presence
+            item["turn_id"].to_s.presence
           else
             item.to_s.presence
           end
@@ -220,15 +220,13 @@ class Conversation::ContextCompactionPlan
         )
 
       estimate <= budget ? [adjusted_turn_ids, true] : [compacted_turn_ids, false]
-    rescue StandardError
-      [compacted_turn_ids, false]
     end
 
     def summary_text_from_decision(decision)
       Array(decision.summaries).each do |summary|
         text =
           if summary.is_a?(Hash)
-            summary.fetch("content", summary.fetch(:content, nil)).to_s
+            summary["content"].to_s
           else
             summary.to_s
           end
@@ -236,8 +234,6 @@ class Conversation::ContextCompactionPlan
         return text if text.present?
       end
 
-      nil
-    rescue StandardError
       nil
     end
 
@@ -289,7 +285,7 @@ class Conversation::ContextCompactionPlan
       return output_preview.fetch("result", "").to_s unless result
 
       AgentCore::Resources::Tools::ToolResult.from_h(result).text.to_s
-    rescue StandardError
+    rescue AgentCore::ValidationError
       output_preview.fetch("result", "").to_s
     end
 

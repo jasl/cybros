@@ -46,7 +46,7 @@ module AgentRPC
             if message.respond_to?(:content)
               message.content
             elsif message.is_a?(Hash)
-              message.fetch("content", message.fetch(:content, nil))
+              message["content"]
             else
               message
             end
@@ -69,11 +69,11 @@ module AgentRPC
             return AgentCore::TextContent.new(text: block.to_s)
           end
 
-          type = block.fetch("type", block.fetch(:type, "text")).to_s
+          type = block.fetch("type", "text").to_s
 
           case type
           when "text"
-            AgentCore::TextContent.new(text: block.fetch("text", block.fetch(:text, "")))
+            AgentCore::TextContent.new(text: block.fetch("text", ""))
           when "image"
             AgentCore::ImageContent.from_h(block)
           when "document"

@@ -11,17 +11,17 @@ module TurnInternalTasks
       @graph = graph
     end
 
-      def materialize_ready!
-        rows = select_rows_to_materialize
-        return [] if rows.empty?
+    def materialize_ready!
+      rows = select_rows_to_materialize
+      return [] if rows.empty?
 
-        rows.each_with_index.map do |row, index|
-          materialize_row!(row)
-        rescue StandardError
-          rewind_selected_rows!(rows[(index + 1)..])
-          raise
-        end
+      rows.each_with_index.map do |row, index|
+        materialize_row!(row)
+      rescue StandardError
+        rewind_selected_rows!(rows[(index + 1)..])
+        raise
       end
+    end
 
     private
 
@@ -179,7 +179,7 @@ module TurnInternalTasks
       def summarize_arguments(arguments)
         json = JSON.generate(arguments)
         AgentCore::Utils.truncate_utf8_bytes(json, max_bytes: 4_000)
-      rescue StandardError
+      rescue JSON::GeneratorError, JSON::NestingError
         ""
       end
 
@@ -237,8 +237,6 @@ module TurnInternalTasks
           node_type: Messages::AgentMessage.node_type_key,
           idempotency_key: "agent_core.next_from:#{row.source_node_id}",
         )
-      rescue StandardError
-        nil
       end
 
       def task_state_for(row)
@@ -315,11 +313,8 @@ module TurnInternalTasks
 
       def direct_tool_activity_kind_for(task)
         input = task.body_input.is_a?(Hash) ? task.body_input : {}
-        tool_name =
-          input.fetch("name", input.fetch("requested_name", input.fetch("logical_tool_name", ""))).to_s
+        tool_name = input["name"].presence || input["requested_name"].presence || input["logical_tool_name"].to_s
         tool_name == "compress_input" ? "preflight_task" : "tool_call"
-      rescue StandardError
-        "tool_call"
       end
 
       def direct_tool_diagnostic_level_for(row)
@@ -329,8 +324,6 @@ module TurnInternalTasks
           end
 
         level.to_s == "debug" ? "debug" : "standard"
-      rescue StandardError
-        "standard"
       end
   end
 end

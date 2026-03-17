@@ -70,6 +70,19 @@ class Conversation::ContextCompactionPlanTest < ActiveSupport::TestCase
     assert_equal "DEFAULT_SUMMARY", result.summary_text
   end
 
+  test "malformed task tool results fall back to the projected preview" do
+    plan = build_plan(runtime_surface_resolution: nil)
+
+    text =
+      plan.send(
+        :tool_result_text_for_task,
+        output: { "result" => "{" },
+        output_preview: { "result" => "PREVIEW_RESULT" },
+      )
+
+    assert_equal "PREVIEW_RESULT", text
+  end
+
   test "estimated token offsets make fixed prompt overhead count toward compaction" do
     plan =
       Conversation::ContextCompactionPlan.new(

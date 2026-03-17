@@ -25,9 +25,6 @@ export default class extends Controller {
   #reconcile() {
     const connectedAttribute = this.element.getAttribute("data-conversation-channel-connected")
     if (connectedAttribute === null) {
-      // Turbo morph can temporarily remove this client-only attribute while the
-      // existing Stimulus controllers stay connected on the preserved element.
-      // Treat that as "unknown", not a real disconnect.
       this.#hideDisconnected()
       this.#clearDisconnectHealthTimer()
       return
@@ -39,8 +36,6 @@ export default class extends Controller {
       this.#hideDisconnected()
       this.#clearDisconnectHealthTimer()
     } else {
-      // Avoid a banner flash on initial page load. Only show disconnect UX after we've
-      // observed at least one successful connection during this page lifecycle.
       if (!this.everConnected) {
         this.#hideDisconnected()
         this.#clearDisconnectHealthTimer()
@@ -67,7 +62,6 @@ export default class extends Controller {
     const generation = (this.disconnectHealthGeneration || 0) + 1
     this.disconnectHealthGeneration = generation
 
-    // Exponential-ish backoff: 1s, 2s, 4s, 8s, then cap at 15s.
     const tick = async () => {
       if (!this.disconnectHealthTimer) return
       if (this.disconnectHealthGeneration !== generation) return

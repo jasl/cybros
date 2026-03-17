@@ -81,23 +81,21 @@ class Agent < ApplicationRecord
   end
 
   def preferred_model_refs
-    model = manifest_snapshot.fetch("model", nil)
+    snapshot = manifest_snapshot
+    model = snapshot.fetch("model", nil)
     prefer = model.is_a?(Hash) ? model.fetch("prefer", nil) : model
     refs = Array(prefer).flatten.map { |value| value.to_s.strip }.reject(&:blank?).uniq
-    return refs if refs.any? || manifest_snapshot.key?("model")
+    return refs if refs.any? || snapshot.key?("model")
 
-    []
-  rescue StandardError
     []
   end
 
   def input_policy_config
-    overrides = manifest_snapshot.fetch("input_policy", nil)
+    snapshot = manifest_snapshot
+    overrides = snapshot.fetch("input_policy", nil)
     overrides = normalize_hash(overrides)
-    return Cybros::AgentProfiles.global_input_policy.deep_merge(overrides) if overrides.any? || manifest_snapshot.key?("input_policy")
+    return Cybros::AgentProfiles.global_input_policy.deep_merge(overrides) if overrides.any? || snapshot.key?("input_policy")
 
-    Cybros::AgentProfiles.global_input_policy
-  rescue StandardError
     Cybros::AgentProfiles.global_input_policy
   end
 
@@ -112,16 +110,12 @@ class Agent < ApplicationRecord
     return stored.deep_stringify_keys if stored.is_a?(Hash)
 
     Cybros::AgentProfileConfig.default_runtime_surface_metadata
-  rescue StandardError
-    Cybros::AgentProfileConfig.default_runtime_surface_metadata
   end
 
   def runtime_surface_status
     status = args.fetch("runtime_surface_status", nil).to_s
     return status if %w[configured missing invalid].include?(status)
 
-    "missing"
-  rescue StandardError
     "missing"
   end
 
@@ -173,11 +167,11 @@ class Agent < ApplicationRecord
   end
 
   def supports_upload?
-    supported_methods =
+    available_methods =
       Array(capability_snapshot.dig("observed_runtime_identity", "supported_methods")).presence ||
         supported_methods()
 
-    Array(supported_methods).map(&:to_s).include?("attachments.import")
+    Array(available_methods).map(&:to_s).include?("attachments.import")
   end
 
   def allocated_port

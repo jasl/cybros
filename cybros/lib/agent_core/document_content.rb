@@ -37,12 +37,12 @@ module AgentCore
     end
 
     def to_h
-      h = { type: :document, source_type: source_type }
-      h[:data] = data if data
-      h[:media_type] = media_type if media_type
-      h[:url] = url if url
-      h[:filename] = filename if filename
-      h[:title] = title if title
+      h = { "type" => "document", "source_type" => source_type.to_s }
+      h["data"] = data if data
+      h["media_type"] = media_type if media_type
+      h["url"] = url if url
+      h["filename"] = filename if filename
+      h["title"] = title if title
       h
     end
 
@@ -64,12 +64,12 @@ module AgentCore
       ) unless hash.is_a?(Hash)
 
       new(
-        source_type: hash.fetch("source_type", hash.fetch(:source_type, nil)),
-        data: hash.fetch("data", hash.fetch(:data, nil)),
-        media_type: hash.fetch("media_type", hash.fetch(:media_type, nil)),
-        url: hash.fetch("url", hash.fetch(:url, nil)),
-        filename: hash.fetch("filename", hash.fetch(:filename, nil)),
-        title: hash.fetch("title", hash.fetch(:title, nil)),
+        source_type: hash.fetch("source_type", nil),
+        data: hash.fetch("data", nil),
+        media_type: hash.fetch("media_type", nil),
+        url: hash.fetch("url", nil),
+        filename: hash.fetch("filename", nil),
+        title: hash.fetch("title", nil),
       )
     end
   end

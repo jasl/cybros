@@ -179,7 +179,6 @@ module Agents
       rescue StandardError
         @file_utils.rm_rf(live_path) if live_path.exist? && backup_path&.exist?
         @file_utils.mv(backup_path, live_path) if backup_path&.exist? && !live_path.exist?
-        @file_utils.rm_rf(temp_path) if temp_path.exist?
         raise
       ensure
         @file_utils.rm_rf(temp_path) if temp_path.exist?

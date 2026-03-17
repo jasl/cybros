@@ -26,11 +26,11 @@ module AgentCore
     end
 
     def to_h
-      h = { type: :audio, source_type: source_type }
-      h[:data] = data if data
-      h[:media_type] = media_type if media_type
-      h[:url] = url if url
-      h[:transcript] = transcript if transcript
+      h = { "type" => "audio", "source_type" => source_type.to_s }
+      h["data"] = data if data
+      h["media_type"] = media_type if media_type
+      h["url"] = url if url
+      h["transcript"] = transcript if transcript
       h
     end
 
@@ -51,11 +51,11 @@ module AgentCore
       ) unless hash.is_a?(Hash)
 
       new(
-        source_type: hash.fetch("source_type", hash.fetch(:source_type, nil)),
-        data: hash.fetch("data", hash.fetch(:data, nil)),
-        media_type: hash.fetch("media_type", hash.fetch(:media_type, nil)),
-        url: hash.fetch("url", hash.fetch(:url, nil)),
-        transcript: hash.fetch("transcript", hash.fetch(:transcript, nil)),
+        source_type: hash.fetch("source_type", nil),
+        data: hash.fetch("data", nil),
+        media_type: hash.fetch("media_type", nil),
+        url: hash.fetch("url", nil),
+        transcript: hash.fetch("transcript", nil),
       )
     end
   end

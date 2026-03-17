@@ -85,30 +85,26 @@ module AgentCore
 
         out = tool.dup
 
-        if out.key?(:parameters) || out.key?("parameters")
-          key = out.key?(:parameters) ? :parameters : "parameters"
-          out[key] = Resources::Tools::StrictJsonSchema.normalize(out[key])
+        if out.key?(:parameters)
+          out[:parameters] = Resources::Tools::StrictJsonSchema.normalize(out[:parameters])
           return out
         end
 
-        type = out.fetch(:type, out.fetch("type", "")).to_s
+        type = out.fetch(:type, "").to_s
         if type == "function"
-          fn_key = out.key?(:function) ? :function : "function"
-          fn = out.fetch(fn_key, nil)
+          fn = out.fetch(:function, nil)
           if fn.is_a?(Hash)
             fn_out = fn.dup
-            if fn_out.key?(:parameters) || fn_out.key?("parameters")
-              k = fn_out.key?(:parameters) ? :parameters : "parameters"
-              fn_out[k] = Resources::Tools::StrictJsonSchema.normalize(fn_out[k])
-              out[fn_key] = fn_out
+            if fn_out.key?(:parameters)
+              fn_out[:parameters] = Resources::Tools::StrictJsonSchema.normalize(fn_out[:parameters])
+              out[:function] = fn_out
             end
           end
           return out
         end
 
-        if out.key?(:input_schema) || out.key?("input_schema")
-          k = out.key?(:input_schema) ? :input_schema : "input_schema"
-          out[k] = Resources::Tools::StrictJsonSchema.normalize(out[k])
+        if out.key?(:input_schema)
+          out[:input_schema] = Resources::Tools::StrictJsonSchema.normalize(out[:input_schema])
         end
 
         out

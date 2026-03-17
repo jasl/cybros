@@ -73,14 +73,14 @@ class ConversationRun < ApplicationRecord
   end
 
   def self.conversation_for_runtime_node(node)
-    lane_attachable = node.respond_to?(:lane) ? node.lane&.attachable : nil
+    lane = node.lane if node.respond_to?(:lane)
+    lane_attachable = lane&.attachable if lane.respond_to?(:attachable)
     return lane_attachable if lane_attachable.is_a?(Conversation)
 
-    graph_attachable = node.respond_to?(:graph) ? node.graph&.attachable : nil
+    graph = node.graph if node.respond_to?(:graph)
+    graph_attachable = graph&.attachable if graph.respond_to?(:attachable)
     return graph_attachable if graph_attachable.is_a?(Conversation)
 
-    nil
-  rescue StandardError
     nil
   end
   private_class_method :conversation_for_runtime_node

@@ -350,6 +350,17 @@ class TurnInternalTasks::MaterializerTest < ActiveSupport::TestCase
     assert_equal "block", events.last.fetch("payload").dig("data", "deny_effect")
   end
 
+  test "summarize_arguments falls back cleanly for non-serializable argument payloads" do
+    conversation = create_conversation!(title: "Materializer summarize arguments")
+    materializer = TurnInternalTasks::Materializer.new(graph: conversation.dag_graph)
+    arguments = {}
+    arguments["self"] = arguments
+
+    summary = materializer.send(:summarize_arguments, arguments)
+
+    assert_equal "", summary
+  end
+
   private
 
     def create_queue_row!(conversation:, queue_position:, execution_mode:, turn: nil, source_node: nil, source_fingerprint: nil, source_hook_name: "after_task_notice", logical_tool_name: "subagent_spawn", input: nil, authored_metadata: nil)

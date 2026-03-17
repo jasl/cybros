@@ -28,12 +28,10 @@ function configureMarkedOnce() {
 
   marked.use({
     renderer: {
-      // Disallow raw HTML from user content (XSS mitigation).
       html({ text }) {
         return escapeHtml(text)
       },
 
-      // Keep headings deterministic and avoid id generation.
       heading({ depth, tokens }) {
         const d = Number(depth)
         const safeDepth = Number.isFinite(d) ? Math.min(Math.max(d, 1), 6) : 1
@@ -41,7 +39,6 @@ function configureMarkedOnce() {
         return `<h${safeDepth}>${label}</h${safeDepth}>`
       },
 
-      // Sanitize links to block javascript:/data: etc.
       link({ href, title, tokens, text }) {
         const url = sanitizeLinkUrl(href)
         const label = text ?? tokensToPlainText(tokens)
@@ -56,7 +53,6 @@ function configureMarkedOnce() {
         return `<a href="${safeHref}"${safeTitle}${externalAttrs}>${safeText}</a>`
       },
 
-      // Allow only http(s) images (blocks data: and other schemes).
       image({ href, title, text }) {
         const url = sanitizeImageUrl(href)
         if (!url) return ""
@@ -68,8 +64,6 @@ function configureMarkedOnce() {
         return `<img src="${safeSrc}" alt="${safeAlt}" loading="lazy" referrerpolicy="no-referrer"${safeTitle} />`
       },
 
-      // Do not trust/propagate user-controlled "language" strings into class attributes.
-      // Keep code blocks plain and escaped.
       code({ text }) {
         return `<pre><code>${escapeHtml(text)}</code></pre>`
       },

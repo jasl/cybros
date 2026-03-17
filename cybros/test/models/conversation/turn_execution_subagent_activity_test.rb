@@ -178,6 +178,43 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
     assert_equal "settled", execution.fetch("activities").sole.dig("snapshot", "wait_status")
   end
 
+  test "subagent projection skips malformed earlier tool result payloads and keeps later valid snapshots" do
+    conversation = create_conversation!(title: "Chat")
+    graph = conversation.root_graph
+
+    turn = conversation.append_user_message!(content: "Hello")
+    agent = turn.fetch(:agent_node)
+    agent.mark_running!
+
+    child = create_subagent_runtime_conversation!(user: conversation.user)
+    task =
+      create_subagent_task!(
+        graph: graph,
+        lane_id: conversation.chat_lane.id,
+        turn_id: agent.turn_id,
+        state: DAG::Node::FINISHED,
+        name: "subagent_wait",
+        tool_call_id: "tc_wait",
+        arguments: { "subagent_id" => child.metadata.dig("subagent", "subagent_id") },
+        payload: subagent_payload(
+          child: child,
+          status: "running",
+          counts: { "pending" => 0, "running" => 1, "awaiting_approval" => 0 },
+          transcript_lines: ["U:child: hello", "A:child: partial"],
+          wait_status: "polling",
+        ),
+        raw_result: "{",
+      )
+
+    execution = conversation.turn_execution_for_turn_id(agent.turn_id)
+    activity = execution.fetch("activities").sole
+
+    assert_equal task.id, activity.fetch("source_node_id")
+    assert_equal child.metadata.dig("subagent", "subagent_id"), activity.dig("links", "subagent_id")
+    assert_equal "running", activity.dig("snapshot", "status")
+    assert_equal "polling", activity.dig("snapshot", "wait_status")
+  end
+
   private
 
     def create_subagent_runtime_conversation!(user:, hidden_task_name: nil)
@@ -240,7 +277,7 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
       subagent_conversation
     end
 
-    def create_subagent_task!(graph:, lane_id:, turn_id:, state:, name:, tool_call_id:, arguments:, payload:)
+    def create_subagent_task!(graph:, lane_id:, turn_id:, state:, name:, tool_call_id:, arguments:, payload:, raw_result: nil)
       task =
         graph.nodes.create!(
           node_type: Messages::Task.node_type_key,
@@ -256,8 +293,9 @@ class Conversation::TurnExecutionSubagentActivityTest < ActiveSupport::TestCase
             "arguments_summary" => JSON.generate(arguments),
           },
           body_output: {
+            "raw_result" => raw_result,
             "result" => subagent_result(payload),
-          },
+          }.compact,
         )
 
       stream = DAG::NodeEventStream.new(node: task)

@@ -62,7 +62,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
 
   class ExplodingSurface < AgentCore::RuntimeSurface::Base
     def project_tool_result(input:)
-      raise "boom: #{input.preview.fetch(:text, input.preview.fetch("text", ""))}"
+      raise "boom: #{input.preview.fetch(:text, "")}"
     end
   end
 

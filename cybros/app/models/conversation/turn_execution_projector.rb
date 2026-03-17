@@ -17,7 +17,7 @@ class Conversation::TurnExecutionProjector
     raise ArgumentError, "lane_id is required" if @lane_id.blank?
   end
 
-    def turn_execution_for_turn_id(turn_id)
+  def turn_execution_for_turn_id(turn_id)
     turn_id = turn_id.to_s
     return nil if turn_id.blank?
 
@@ -322,7 +322,7 @@ class Conversation::TurnExecutionProjector
         tool_result = AgentCore::Resources::Tools::ToolResult.from_h(candidate)
         snapshot = tool_result.metadata["subagent"]
         return snapshot if snapshot.is_a?(Hash)
-      rescue StandardError
+      rescue AgentCore::ValidationError
         next
       end
 
@@ -411,11 +411,12 @@ class Conversation::TurnExecutionProjector
     end
 
     def activity_output_preview_for(task)
-      task.body_output_preview["activity_preview"].presence ||
-        task.body_output["activity_preview"].to_s.presence ||
-        task.body_output_preview["result"].presence
-    rescue StandardError
-      task.body_output_preview["result"].presence
+      preview = task.body_output_preview
+      output = task.body_output
+
+      preview["activity_preview"].presence ||
+        output["activity_preview"].to_s.presence ||
+        preview["result"].presence
     end
 
     def subagent_error_for(task, status:, snapshot:, last_payload:)

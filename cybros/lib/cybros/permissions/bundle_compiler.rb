@@ -74,12 +74,12 @@ module Cybros
               tool_info.metadata
             when Hash
               definition = tool_info[:definition]
-              definition.fetch(:metadata, definition.fetch("metadata", {})) if definition.is_a?(Hash)
+              definition.fetch(:metadata, {}) if definition.is_a?(Hash)
             else
               {}
             end
 
-          permission_class = raw.is_a?(Hash) ? raw.fetch(:permission_class, raw.fetch("permission_class", nil)).to_s.strip : ""
+          permission_class = raw.is_a?(Hash) ? raw.fetch(:permission_class, nil).to_s.strip : ""
           return permission_class if TOOL_PERMISSION_CLASSES.include?(permission_class)
 
           "unknown"

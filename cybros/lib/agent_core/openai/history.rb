@@ -82,7 +82,13 @@ module AgentCore
         h = AgentCore::Utils.symbolize_keys(value)
 
         if h.key?(:name) && h.key?(:arguments)
-          return AgentCore::ToolCall.from_h(h)
+          return AgentCore::ToolCall.new(
+            id: h.fetch(:id, fallback_id),
+            name: h.fetch(:name, nil),
+            arguments: h.fetch(:arguments, {}),
+            arguments_parse_error: h.fetch(:arguments_parse_error, nil),
+            arguments_raw: h.fetch(:arguments_raw, nil),
+          )
         end
 
         fn = AgentCore::Utils.symbolize_keys(h.fetch(:function, nil))

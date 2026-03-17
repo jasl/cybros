@@ -438,6 +438,25 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal true, policy.dig("actions", "delete", "available")
   end
 
+  test "latest user message with malformed body_input still exposes edit when no attachments are present" do
+    conversation = create_conversation!
+    graph = conversation.dag_graph
+
+    user =
+      graph.nodes.create!(
+        node_type: Messages::UserMessage.node_type_key,
+        state: DAG::Node::FINISHED,
+        lane_id: conversation.chat_lane.id,
+        body_input: "unexpected",
+        metadata: {},
+      )
+
+    policy = policy_for(conversation: conversation, node: user)
+
+    assert_equal true, policy.dig("actions", "edit", "supported")
+    assert_equal true, policy.dig("actions", "edit", "available")
+  end
+
   test "historical user message hides edit even after descendants are finished" do
     conversation = create_conversation!
 

@@ -105,4 +105,31 @@ class ConversationInputPolicyResolverTest < ActiveSupport::TestCase
     assert_equal "keep_context", policy.fetch("interrupted_output_policy")
     assert_equal true, policy.fetch("steer_capability")
   end
+
+  test "unexpected metadata column shapes degrade to the default profile policy" do
+    conversation = create_conversation!(metadata: {})
+    conversation.update_columns(metadata: "unexpected")
+    expected = conversation.agent.input_policy_config
+
+    policy = conversation.resolved_input_policy
+
+    assert_equal expected.fetch("running_input_policy"), policy.fetch("running_input_policy")
+    assert_equal expected.fetch("interrupted_output_policy"), policy.fetch("interrupted_output_policy")
+    assert_equal expected.fetch("steer_capability"), policy.fetch("steer_capability")
+  end
+
+  test "invalid agent profile metadata falls back to the default profile policy" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => { "agent_profile" => "{" },
+        },
+      )
+
+    policy = conversation.resolved_input_policy
+
+    assert_equal "queue", policy.fetch("running_input_policy")
+    assert_equal "discard_context", policy.fetch("interrupted_output_policy")
+    assert_equal true, policy.fetch("steer_capability")
+  end
 end

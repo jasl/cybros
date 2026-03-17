@@ -115,17 +115,17 @@ module AgentCore
             def tool_name_from_definition(tool_def)
               return "" unless tool_def.is_a?(Hash)
 
-              name = tool_def.fetch(:name, tool_def.fetch("name", ""))
+              name = tool_def.fetch(:name, "")
               name = name.to_s
               return name unless name.strip.empty?
 
-              type = tool_def.fetch(:type, tool_def.fetch("type", "")).to_s
+              type = tool_def.fetch(:type, "").to_s
               return "" unless type == "function"
 
-              fn = tool_def.fetch(:function, tool_def.fetch("function", nil))
+              fn = tool_def.fetch(:function, nil)
               return "" unless fn.is_a?(Hash)
 
-              fn.fetch(:name, fn.fetch("name", "")).to_s
+              fn.fetch(:name, "").to_s
             rescue StandardError
               ""
             end

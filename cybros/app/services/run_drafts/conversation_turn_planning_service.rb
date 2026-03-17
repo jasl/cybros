@@ -192,8 +192,6 @@ module RunDrafts
           conversation: conversation,
           source_message_node_id: user_node.id,
         )
-      rescue StandardError
-        []
       end
 
       def source_user_node_for_step(node:)

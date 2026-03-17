@@ -153,7 +153,7 @@ module AgentCore
         private_class_method :validate_value!
 
         def fetch_required(schema)
-          req = schema.fetch("required", schema.fetch(:required, nil))
+          req = schema.fetch("required", nil)
           Array(req).map { |v| v.to_s }.reject(&:empty?)
         rescue StandardError
           []
@@ -161,7 +161,7 @@ module AgentCore
         private_class_method :fetch_required
 
         def fetch_properties(schema)
-          props = schema.fetch("properties", schema.fetch(:properties, nil))
+          props = schema.fetch("properties", nil)
           return {} unless props.is_a?(Hash)
 
           props.each_with_object({}) do |(k, v), out|
@@ -176,14 +176,14 @@ module AgentCore
         private_class_method :fetch_properties
 
         def fetch_items(schema)
-          schema.fetch("items", schema.fetch(:items, nil))
+          schema.fetch("items", nil)
         rescue StandardError
           nil
         end
         private_class_method :fetch_items
 
         def fetch_types(schema)
-          t = schema.fetch("type", schema.fetch(:type, nil))
+          t = schema.fetch("type", nil)
           case t
           when Array
             t.map { |v| v.to_s }.reject(&:empty?)
@@ -216,7 +216,7 @@ module AgentCore
         private_class_method :schema_type_includes?
 
         def additional_properties_false?(schema)
-          ap = schema.fetch("additionalProperties", schema.fetch(:additionalProperties, schema.fetch(:additional_properties, schema.fetch("additional_properties", nil))))
+          ap = schema.fetch("additionalProperties", schema.fetch("additional_properties", nil))
           ap == false
         rescue StandardError
           false

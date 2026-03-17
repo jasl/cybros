@@ -63,4 +63,25 @@ class ConversationComposerDraftTest < ActiveSupport::TestCase
     assert_equal "2026-03-17T12:34:56.000000Z", conversation.composer_draft["updated_at"]
     assert_equal "newest draft", conversation.resolved_composer_draft.fetch("content")
   end
+
+  test "reader helpers degrade cleanly when stored JSON columns contain unexpected shapes" do
+    conversation =
+      create_conversation!(
+        metadata: {
+          "agent" => { "agent_profile" => "coding" },
+          "llm" => { "model_ref" => "openai/gpt-5.4" },
+        },
+      )
+
+    conversation.update_columns(
+      agent_config: "unexpected",
+      composer_draft: "unexpected",
+      metadata: "unexpected",
+    )
+    conversation.reload
+
+    assert_equal({}, conversation.selected_agent_config)
+    assert_equal({ "content" => "", "permission_mode" => conversation.permission_mode }, conversation.resolved_composer_draft)
+    assert_nil conversation.composer_draft_updated_at
+  end
 end

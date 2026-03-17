@@ -163,6 +163,12 @@ class ConversationRunTest < ActiveSupport::TestCase
     assert_equal run, ConversationRun.latest_for_node(task_node)
   end
 
+  test "conversation_for_runtime_node ignores node-like objects without attachable conversation context" do
+    node = Struct.new(:lane, :graph).new(Object.new, Object.new)
+
+    assert_nil ConversationRun.send(:conversation_for_runtime_node, node)
+  end
+
   test "state transitions do not rewrite immutable snapshot fields" do
     runtime = create_runtime!
     run = build_run(runtime: runtime)

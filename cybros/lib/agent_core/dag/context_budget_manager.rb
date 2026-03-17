@@ -528,7 +528,7 @@ module AgentCore
         def build_prompt_from_runtime_surface(value)
           return value if value.is_a?(PromptBuilder::BuiltPrompt)
 
-          hash = value.is_a?(Hash) ? AgentCore::Utils.deep_symbolize_keys(value) : {}
+          hash = value.is_a?(Hash) ? value : {}
           messages = Array(hash.fetch(:messages, [])).map { |message| message.is_a?(Message) ? message : Message.from_h(message) }
 
           PromptBuilder::BuiltPrompt.new(
@@ -1176,7 +1176,7 @@ module AgentCore
         def tool_call_name_for_fingerprint(tool_call)
           case tool_call
           when Hash
-            tool_call.fetch("name", tool_call.fetch(:name, "")).to_s
+            tool_call.fetch("name", "").to_s
           else
             tool_call.respond_to?(:name) ? tool_call.name.to_s : ""
           end

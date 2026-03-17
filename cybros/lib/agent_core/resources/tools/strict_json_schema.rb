@@ -30,21 +30,17 @@ module AgentCore
           out = {}
 
           hash.each do |k, v|
-            out[k] = normalize_value(v)
+            out[k.to_s] = normalize_value(v)
           end
 
           return out unless object_schema?(out)
 
-          ap_key = key_for(out, :additionalProperties, "additionalProperties")
-          out[ap_key] = false unless out.key?(ap_key)
+          out["additionalProperties"] = false unless out.key?("additionalProperties")
 
-          props_key = key_for(out, :properties, "properties")
-          unless out.key?(props_key)
-            out[props_key] = {}
-          end
+          out["properties"] = {} unless out.key?("properties")
 
-          props = out[props_key]
-          out[props_key] = {} unless props.is_a?(Hash)
+          props = out["properties"]
+          out["properties"] = {} unless props.is_a?(Hash)
 
           out
         rescue StandardError
@@ -53,7 +49,7 @@ module AgentCore
         private_class_method :normalize_hash
 
         def object_schema?(hash)
-          t = hash.fetch(:type, hash.fetch("type", nil))
+          t = hash.fetch("type", nil)
           case t
           when Array
             t.map { |v| v.to_s }.include?("object")
@@ -64,16 +60,6 @@ module AgentCore
           false
         end
         private_class_method :object_schema?
-
-        def key_for(hash, sym, str)
-          return sym if hash.key?(sym)
-          return str if hash.key?(str)
-
-          hash.keys.any? { |k| k.is_a?(String) } ? str : sym
-        rescue StandardError
-          sym
-        end
-        private_class_method :key_for
       end
     end
   end

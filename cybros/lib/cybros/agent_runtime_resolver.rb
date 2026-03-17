@@ -113,19 +113,15 @@ module Cybros
 
       def shell_path_candidates(command)
         redirection_targets = command.to_s.scan(/(?:^|\s)(?:\d*>>?|\d*>\>|&>>|&>)\s*([^\s;|&]+)/).flatten
-        tokens = []
+        Shellwords.shellsplit(command.to_s).filter_map do |token|
+          cleaned = normalize_shell_token(token)
+          next if cleaned.empty?
+          next unless cleaned.include?(File::SEPARATOR) || cleaned.start_with?(".") || %w[SOUL.md USER.md AGENTS.md].include?(cleaned)
 
-        tokens =
-          Shellwords.shellsplit(command.to_s).filter_map do |token|
-            cleaned = normalize_shell_token(token)
-            next if cleaned.empty?
-            next unless cleaned.include?(File::SEPARATOR) || cleaned.start_with?(".") || %w[SOUL.md USER.md AGENTS.md].include?(cleaned)
-
-            cleaned
-          end
+          cleaned
+        end.uniq
       rescue ArgumentError
-        tokens = []
-        tokens.concat(redirection_targets.map { |token| normalize_shell_token(token) }).reject(&:blank?).uniq
+        redirection_targets.map { |token| normalize_shell_token(token) }.reject(&:blank?).uniq
       end
       private_class_method :shell_path_candidates
 
@@ -170,10 +166,12 @@ module Cybros
       private_class_method :unified_patch_paths
 
       def workspace_payload_for(context)
-        return nil unless context.respond_to?(:attributes)
+        attributes = context.attributes if context.respond_to?(:attributes)
+        return nil unless attributes.is_a?(Hash)
 
-        cybros = context.attributes.fetch(:cybros, nil)
+        cybros = attributes[:cybros]
         cybros = AgentCore::Utils.deep_stringify_keys(cybros) if cybros.is_a?(Hash)
+        return nil unless cybros.is_a?(Hash)
         workspace = cybros&.dig("execution_context", "workspace")
         return nil unless workspace.is_a?(Hash)
 
@@ -182,8 +180,6 @@ module Cybros
         return nil if root_path.empty? || cwd.empty?
 
         { root_path: Pathname.new(root_path).expand_path, cwd: Pathname.new(cwd).expand_path }
-      rescue StandardError
-        nil
       end
       private_class_method :workspace_payload_for
 
@@ -204,8 +200,6 @@ module Cybros
         return :deny if relative == "AGENTS.md" || relative.start_with?(".history/")
         return :confirm if relative == "SOUL.md" || relative == "USER.md" || relative.start_with?("skills/")
 
-        nil
-      rescue StandardError
         nil
       end
       private_class_method :protected_path_rule
@@ -502,8 +496,6 @@ module Cybros
       return from_conversation if from_conversation
 
       nil
-    rescue StandardError
-      nil
     end
 
     def runtime_for(node:, provider: nil, base_tool_policy: nil, tools_registry: nil, instrumenter: nil)
@@ -779,29 +771,26 @@ module Cybros
           input["name"].to_s.presence ||
           input["requested_name"].to_s.presence
       return false if tool_name.blank?
+      return false unless tools_registry.respond_to?(:include?)
 
       tools_registry.include?(tool_name)
-    rescue StandardError
-      false
     end
     private_class_method :kernel_task_executable_without_materialized_run?
 
     def latest_conversation_run_for(node)
       ConversationRun.latest_for_node(node)
-    rescue StandardError
-      nil
     end
     private_class_method :latest_conversation_run_for
 
     def parse_explicit_model_ref(metadata)
       return nil unless metadata.is_a?(Hash)
 
-      llm = metadata.fetch("llm", nil)
+      llm = metadata["llm"]
       llm = {} unless llm.is_a?(Hash)
 
-      model_ref = llm.fetch("model_ref", nil).to_s.strip
-      provider_key = llm.fetch("provider_key", nil).to_s.strip
-      model_key = llm.fetch("model_key", nil).to_s.strip
+      model_ref = llm["model_ref"].to_s.strip
+      provider_key = llm["provider_key"].to_s.strip
+      model_key = llm["model_key"].to_s.strip
 
       if model_ref.present?
         pk, mk = normalize_model_ref(model_ref: model_ref).split("/", 2).map(&:to_s)
@@ -812,8 +801,6 @@ module Cybros
       return nil if provider_key.empty? || model_key.empty?
 
       [provider_key, model_key]
-    rescue StandardError
-      nil
     end
     private_class_method :parse_explicit_model_ref
 
@@ -1052,9 +1039,6 @@ module Cybros
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
 
-      # Phase 0: always register native skills tools.
-      # Memory tools stay disabled until the embedding backend is promoted to a
-      # productized Cybros runtime capability.
       registry.register_skills_store(skills_store) if skills_store.present?
 
       registry
@@ -1077,14 +1061,13 @@ module Cybros
     private_class_method :protected_agent_root_tool_policy
 
     def context_budget_action(context)
-      return nil unless context.respond_to?(:attributes)
+      attributes = context.attributes if context.respond_to?(:attributes)
+      return nil unless attributes.is_a?(Hash)
 
-      budget = context.attributes.fetch(:context_budget, nil)
+      budget = attributes[:context_budget]
       return nil unless budget.is_a?(Hash)
 
-      budget.fetch(:budget_action, budget.fetch("budget_action", nil)).to_s.presence
-    rescue StandardError
-      nil
+      budget.fetch(:budget_action, nil).to_s.presence
     end
     private_class_method :context_budget_action
 
@@ -1095,8 +1078,6 @@ module Cybros
       prefer = prefer.fetch("prefer", nil) if prefer.is_a?(Hash)
 
       Array(prefer).map { |v| v.to_s.strip }.reject(&:empty?).uniq
-    rescue StandardError
-      []
     end
     private_class_method :model_prefer_from_agent_metadata
 
@@ -1104,8 +1085,6 @@ module Cybros
       return [] unless agent.respond_to?(:preferred_model_refs)
 
       Array(agent.preferred_model_refs).map { |value| value.to_s.strip }.reject(&:empty?).uniq
-    rescue StandardError
-      []
     end
     private_class_method :model_prefer_from_agent
 
@@ -1151,11 +1130,9 @@ module Cybros
     private_class_method :parse_context_turns
 
     def conversation_for(node)
-      graph = node.respond_to?(:graph) ? node.graph : nil
-      attachable = graph&.attachable
+      graph = node.graph if node.respond_to?(:graph)
+      attachable = graph&.attachable if graph.respond_to?(:attachable)
       attachable.is_a?(Conversation) ? attachable : nil
-    rescue StandardError
-      nil
     end
     private_class_method :conversation_for
 
@@ -1163,10 +1140,8 @@ module Cybros
       meta = conversation&.metadata
       return nil unless meta.is_a?(Hash)
 
-      agent = meta["agent"] || meta[:agent]
+      agent = meta["agent"]
       agent.is_a?(Hash) ? agent.transform_keys(&:to_s) : nil
-    rescue StandardError
-      nil
     end
     private_class_method :agent_metadata_for
 
@@ -1174,8 +1149,6 @@ module Cybros
       return nil if explicit_agent_profile_metadata?(agent_metadata)
 
       conversation&.agent
-    rescue StandardError
-      nil
     end
     private_class_method :agent_for_manifest_defaults
 
@@ -1184,8 +1157,6 @@ module Cybros
 
       raw = agent_metadata.fetch("agent_profile", nil)
       raw.is_a?(Hash) || raw.to_s.strip.present?
-    rescue StandardError
-      false
     end
     private_class_method :explicit_agent_profile_metadata?
 
@@ -1193,16 +1164,14 @@ module Cybros
     def routing_channel_from_metadata(metadata)
       return nil unless metadata.is_a?(Hash)
 
-      routing = metadata["routing"] || metadata[:routing]
+      routing = metadata["routing"]
       return nil unless routing.is_a?(Hash)
 
-      channel = routing["channel"] || routing[:channel]
+      channel = routing["channel"]
       channel = channel.to_s.lines.first.to_s.strip
       return nil if channel.empty?
 
       channel
-    rescue StandardError
-      nil
     end
     private_class_method :routing_channel_from_metadata
 
@@ -1309,8 +1278,6 @@ module Cybros
         helpers: normalized_helpers,
         stage_limits: normalized_stage_limits,
       }.freeze
-    rescue StandardError
-      noop_runtime_surface_config
     end
     private_class_method :normalize_runtime_surface_config
 
@@ -1349,8 +1316,6 @@ module Cybros
       else
         AgentCore::RuntimeSurface.default
       end
-    rescue StandardError
-      AgentCore::RuntimeSurface.default
     end
     private_class_method :build_runtime_surface
 

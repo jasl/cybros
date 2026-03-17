@@ -18,10 +18,10 @@ module AgentCore
     end
 
     def to_h
-      h = { id: id, name: name, arguments: arguments }
-      h[:arguments_parse_error] = arguments_parse_error if arguments_parse_error
+      h = { "id" => id, "name" => name, "arguments" => arguments }
+      h["arguments_parse_error"] = arguments_parse_error.to_s if arguments_parse_error
       if arguments_parse_error && arguments_raw
-        h[:arguments_raw] = arguments_raw
+        h["arguments_raw"] = arguments_raw
       end
       h
     end
@@ -43,11 +43,11 @@ module AgentCore
       ) unless hash.is_a?(Hash)
 
       new(
-        id: hash.fetch("id", hash.fetch(:id, nil)),
-        name: hash.fetch("name", hash.fetch(:name, nil)),
-        arguments: hash.fetch("arguments", hash.fetch(:arguments, {})) || {},
-        arguments_parse_error: hash.fetch("arguments_parse_error", hash.fetch(:arguments_parse_error, nil)),
-        arguments_raw: hash.fetch("arguments_raw", hash.fetch(:arguments_raw, nil)),
+        id: hash.fetch("id", nil),
+        name: hash.fetch("name", nil),
+        arguments: hash.fetch("arguments", {}) || {},
+        arguments_parse_error: hash.fetch("arguments_parse_error", nil),
+        arguments_raw: hash.fetch("arguments_raw", nil),
       )
     end
 

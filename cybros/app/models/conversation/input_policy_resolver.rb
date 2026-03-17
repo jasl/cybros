@@ -34,7 +34,7 @@ class Conversation::InputPolicyResolver
   attr_reader :conversation, :app_override, :action, :interrupted_output_policy_override
 
   def conversation_override
-    normalize_policy_hash(conversation.metadata&.dig("input_policy"))
+    normalize_policy_hash(conversation_metadata["input_policy"])
   end
 
   def base_policy
@@ -44,24 +44,21 @@ class Conversation::InputPolicyResolver
   end
 
   def explicit_agent_profile_metadata?
-    agent = conversation.metadata&.dig("agent")
-    return false unless agent.is_a?(Hash) && agent.key?("agent_profile")
+    return false unless agent_metadata.key?("agent_profile")
 
-    raw = agent.fetch("agent_profile", nil)
+    raw = agent_metadata["agent_profile"]
     raw.is_a?(Hash) || raw.to_s.strip.present?
-  rescue StandardError
-    false
   end
 
   def profile_name
-    raw = conversation.metadata&.dig("agent", "agent_profile")
+    raw = agent_metadata["agent_profile"]
 
     if raw.is_a?(Hash) || (raw.is_a?(String) && raw.lstrip.start_with?("{"))
       Cybros::AgentProfileConfig.from_value(raw).base_profile
     else
       Cybros::AgentProfiles.normalize(raw)
     end
-  rescue StandardError
+  rescue AgentCore::ValidationError
     Cybros::AgentProfiles::DEFAULT_PROFILE
   end
 
@@ -76,5 +73,15 @@ class Conversation::InputPolicyResolver
       end
 
     hash.is_a?(Hash) ? hash.deep_stringify_keys : {}
+  end
+
+  def conversation_metadata
+    metadata = conversation.metadata
+    metadata.is_a?(Hash) ? metadata : {}
+  end
+
+  def agent_metadata
+    agent = conversation_metadata["agent"]
+    agent.is_a?(Hash) ? agent : {}
   end
 end

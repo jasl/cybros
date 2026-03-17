@@ -10,7 +10,7 @@ module AgentCore
     def type = :text
 
     def to_h
-      { type: :text, text: text }
+      { "type" => "text", "text" => text }
     end
 
     def ==(other)
