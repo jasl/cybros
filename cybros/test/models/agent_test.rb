@@ -5,7 +5,7 @@ class AgentTest < ActiveSupport::TestCase
     program = create_program!
     target = create_execution_target!
 
-    agent = materialize_agent_runtime!(program: program, execution_target: target)
+    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
 
     assert_equal program.name, agent.name
     assert_equal program.config_namespace, agent.config_namespace
@@ -21,8 +21,8 @@ class AgentTest < ActiveSupport::TestCase
     first_target = create_execution_target!(name: "Primary target", max_concurrent_tasks: 4)
     second_target = create_execution_target!(name: "Scaled target", max_concurrent_tasks: 9)
 
-    first = materialize_agent_runtime!(program: program, execution_target: first_target)
-    second = materialize_agent_runtime!(program: program, execution_target: second_target)
+    first = materialize_agent_runtime!(agent: program, execution_profile: first_target)
+    second = materialize_agent_runtime!(agent: program, execution_profile: second_target)
 
     assert_equal first.id, second.id
     assert_equal 9, second.max_concurrent_tasks
@@ -32,8 +32,8 @@ class AgentTest < ActiveSupport::TestCase
   test "restricts deletion when conversations still reference the agent" do
     program = create_program!
     target = create_execution_target!
-    agent = materialize_agent_runtime!(program: program, execution_target: target)
-    create_conversation!(agent: agent, agent_program: program, default_execution_target: target)
+    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+    create_conversation!(agent: agent)
 
     assert_raises(ActiveRecord::DeleteRestrictionError) do
       agent.destroy!
@@ -43,7 +43,7 @@ class AgentTest < ActiveSupport::TestCase
   test "prefers agent-owned runtime surface config over the legacy program snapshot" do
     program = create_program!
     target = create_execution_target!
-    agent = materialize_agent_runtime!(program: program, execution_target: target)
+    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
 
     program.update!(
       args: {
@@ -84,6 +84,33 @@ class AgentTest < ActiveSupport::TestCase
     end
   ensure
     FileUtils.rm_rf(workspace_root) if workspace_root.present?
+  end
+
+  test "create_conversation helper rejects legacy agent_program and default_execution_target keywords" do
+    program = create_program!
+    target = create_execution_target!
+    agent = materialize_agent_runtime!(agent: program, execution_profile: target)
+
+    assert_raises(ArgumentError) do
+      create_conversation!(agent: agent, agent_program: program, default_execution_target: target)
+    end
+  end
+
+  test "runtime helper APIs reject legacy program and execution_target keywords" do
+    program = create_program!
+    target = create_execution_target!
+
+    assert_raises(ArgumentError) do
+      materialize_agent_runtime!(program: program, execution_target: target)
+    end
+
+    assert_raises(ArgumentError) do
+      create_agent_runtime!(program: program, execution_target: target)
+    end
+
+    assert_raises(ArgumentError) do
+      create_runtime_binding_record!(agent_program: program)
+    end
   end
 
   private

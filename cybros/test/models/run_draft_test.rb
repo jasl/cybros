@@ -137,7 +137,7 @@ class RunDraftTest < ActiveSupport::TestCase
 
   test "snapshots resolved governor facts from a conversation entrypoint without requiring a public execution target" do
     runtime = create_runtime!
-    conversation = create_conversation!(agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program), default_execution_target: nil)
+    conversation = create_conversation!(agent: runtime.fetch(:agent))
     conversation.update!(permission_mode: "conservative")
 
     draft =
@@ -176,8 +176,6 @@ class RunDraftTest < ActiveSupport::TestCase
         else
           create_conversation!(
             agent: runtime.fetch(:agent),
-            agent_program: runtime.fetch(:program),
-            default_execution_target: nil,
           )
         end
       provider_credential =
@@ -260,7 +258,7 @@ class RunDraftTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       target = create_execution_target!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment = create_deployment!(program)
       recognized_deployment =
         Cybros::ProgrammableAgent::RecognizedDeploymentResolver.resolve!(
@@ -297,7 +295,7 @@ class RunDraftTest < ActiveSupport::TestCase
 
     def create_deployment!(program, deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}", status: "active", health_status: "healthy")
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

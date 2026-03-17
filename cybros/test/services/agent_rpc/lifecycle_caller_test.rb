@@ -117,10 +117,10 @@ module AgentRPC
             config_schema_fingerprint: "config:v1",
           )
         target = build_default_execution_profile!
-        agent = materialize_agent_runtime!(program: program, execution_target: target)
+        agent = materialize_agent_runtime!(agent: program, execution_profile: target)
         deployment =
           create_runtime_binding_record!(
-            agent_program: program,
+            agent: program,
             transport_kind: "http_jsonrpc",
             endpoint_url: "http://127.0.0.1:4319/rpc",
             deployment_bearer_secret_ref: "secret://fixture",
@@ -143,8 +143,6 @@ module AgentRPC
         conversation =
           create_conversation!(
             agent: agent,
-            agent_program: program,
-            default_execution_target: target,
           )
 
         { agent: agent, conversation: conversation, deployment: deployment, program: program, recognized_deployment: recognized_deployment }

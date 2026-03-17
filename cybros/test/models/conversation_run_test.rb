@@ -18,7 +18,7 @@ class ConversationRunTest < ActiveSupport::TestCase
 
   test "stores immutable runtime snapshot fields" do
     runtime = create_runtime!
-    conversation = create_conversation!(agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program))
+    conversation = create_conversation!(agent: runtime.fetch(:agent))
     run = build_run(runtime: runtime, conversation: conversation)
 
     assert_predicate run, :valid?
@@ -133,7 +133,7 @@ class ConversationRunTest < ActiveSupport::TestCase
 
   test "latest_for_node falls back to the same-turn agent run for task nodes" do
     runtime = create_runtime!
-    conversation = create_conversation!(agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program))
+    conversation = create_conversation!(agent: runtime.fetch(:agent))
     agent_node =
       conversation.root_graph.nodes.create!(
         node_type: Messages::AgentMessage.node_type_key,
@@ -195,8 +195,6 @@ class ConversationRunTest < ActiveSupport::TestCase
         else
           create_conversation!(
             agent: runtime.fetch(:agent),
-            agent_program: runtime.fetch(:program),
-            default_execution_target: nil,
           )
         end
       recognized_deployment =
@@ -257,7 +255,7 @@ class ConversationRunTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       target = create_execution_target!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment = create_deployment!(program)
       recognized_deployment =
         Cybros::ProgrammableAgent::RecognizedDeploymentResolver.resolve!(
@@ -294,7 +292,7 @@ class ConversationRunTest < ActiveSupport::TestCase
 
     def create_deployment!(program, deployment_fingerprint: "deployment:#{SecureRandom.hex(4)}", status: "active", health_status: "healthy")
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

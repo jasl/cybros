@@ -92,6 +92,7 @@ Old nouns/removal targets for this cleanup:
    - `cybros/test/test_helper.rb:783`
    Action: `delete` / `Rails-shaped simplify`
    Notes: This is the main source of test truth pollution.
+   Batch A (Task 5): `agent_test`, `run_draft_test`, `conversation_run_test`, `recognized_deployment_test`, `lifecycle_caller_test`, `agent_rpc_lost_reply_recovery_test`, `execution_capacity_enforcement_test`, `agent_runtime_binding_cutover_test`, `run_draft_finalization_test`, `run_draft_approval_resume_test`.
 
 3. Tests still build the world through `agent_program:` and `default_execution_target:` even when runtime state is agent-owned now.
    Evidence:
@@ -102,6 +103,7 @@ Old nouns/removal targets for this cleanup:
    - `cybros/test/integration/external_agent_attachment_transfer_test.rb:31`
    Action: `delete`
    Notes: This cluster will need explicit batching because it is broad.
+   Round 5 update: the first helper-contract batch is now clean and verified; remaining hits cluster in automation flows, runtime-governance tests, attachment/invocation integration tests, and a small set of system/live-acceptance files.
 
 4. Runtime governance and automation tests still model capacity through synthetic execution-target profiles.
    Evidence:
@@ -240,6 +242,37 @@ Old nouns/removal targets for this cleanup:
   - `bin/rails test test/integration/agent_upgrade_conversation_binding_test.rb test/integration/agent_rpc_lost_reply_recovery_test.rb test/integration/agent_rpc_activation_drift_test.rb test/integration/programmable_agent_capabilities_refresh_test.rb test/integration/programmable_agent_hooks_test.rb test/integration/programmable_agent_execution_context_test.rb test/integration/agent_rpc_invocation_replay_test.rb test/integration/bootstrap_hook_contract_test.rb`
   - `bin/rails test test/jobs/automations/execute_conversation_job_test.rb test/integration/system_settings_automations_test.rb test/integration/automation_failure_recovery_test.rb test/integration/automation_execution_conversation_test.rb test/integration/automation_execution_run_draft_flow_test.rb test/integration/automation_manual_approval_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb`
   - `bin/rails test test/integration/dashboard_test.rb test/integration/conversation_bootstrap_dispatch_test.rb test/integration/programmable_agent_tool_routing_test.rb test/integration/agent_execution_capacity_test.rb test/integration/programmable_agent_capabilities_handshake_test.rb test/integration/recognized_deployment_drift_test.rb`
+
+### Round 5
+
+- Tightened `cybros/test/test_helper.rb` so the public fixture contract now uses:
+  - `create_conversation!(..., agent:)`
+  - `materialize_agent_runtime!(agent:, execution_profile:)`
+  - `create_agent_runtime!(agent:, execution_profile:)`
+  - `create_runtime_binding_record!(agent:, ...)`
+- Added negative coverage proving the removed helper keywords raise `ArgumentError`:
+  - `agent_program:`
+  - `default_execution_target:`
+  - `program:`
+  - `execution_target:`
+- Verified the first explicit helper-contract batch across:
+  - `agent_test`
+  - `run_draft_test`
+  - `conversation_run_test`
+  - `recognized_deployment_test`
+  - `lifecycle_caller_test`
+  - `agent_rpc_lost_reply_recovery_test`
+  - `execution_capacity_enforcement_test`
+  - `agent_runtime_binding_cutover_test`
+  - `run_draft_finalization_test`
+  - `run_draft_approval_resume_test`
+- Verification command that passed during this round:
+  - `bin/rails test test/models/agent_test.rb test/models/run_draft_test.rb test/models/conversation_run_test.rb test/models/recognized_deployment_test.rb test/services/agent_rpc/lifecycle_caller_test.rb test/integration/agent_rpc_lost_reply_recovery_test.rb test/integration/execution_capacity_enforcement_test.rb test/integration/agent_runtime_binding_cutover_test.rb test/integration/run_draft_finalization_test.rb test/integration/run_draft_approval_resume_test.rb`
+- Remaining helper-contract residue after this batch is now concentrated in:
+  - runtime governance and automation tests
+  - agent RPC / attachment / tool execution integration tests
+  - lib and DAG runtime-surface tests
+  - system and live-acceptance surfaces that were already out of the first verified batch
 
 ## Reusable Strategy Notes
 

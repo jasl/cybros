@@ -575,7 +575,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     original_program = runtime.fetch(:program)
     alternate_program = create_program!
     active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
-    alternate_agent = materialize_agent_runtime!(program: alternate_program, execution_target: runtime.fetch(:target))
+    alternate_agent = materialize_agent_runtime!(agent: alternate_program, execution_profile: runtime.fetch(:target))
     conversation.update!(
       agent_config: {
         original_program.config_namespace => { "mode" => "review" },
@@ -624,7 +624,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
     original_program = runtime.fetch(:program)
     alternate_program = create_program!
     active_deployment!(program: alternate_program, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v2")
-    alternate_agent = materialize_agent_runtime!(program: alternate_program, execution_target: runtime.fetch(:target))
+    alternate_agent = materialize_agent_runtime!(agent: alternate_program, execution_profile: runtime.fetch(:target))
     conversation.update!(
       agent_config: {
         original_program.config_namespace => { "mode" => "review" },
@@ -783,7 +783,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
       program = create_program!
       deployment = active_deployment!(program:, endpoint_url: server.rpc_url, deployment_fingerprint: "fixture-deployment-v1")
       target = create_execution_target!(name: "Primary target")
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       ensure_active_openai_credential!
       conversation =
@@ -791,8 +791,6 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
           user: user,
           title: "Chat",
           agent: agent,
-          agent_program: program,
-          default_execution_target: target,
         )
       conversation.update!(
         permission_mode: permission_mode,
@@ -863,7 +861,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -888,7 +886,7 @@ class RunDraftFinalizationTest < ActiveSupport::TestCase
 
     def inactive_deployment!(program:, endpoint_url:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",

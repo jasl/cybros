@@ -81,7 +81,7 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -99,13 +99,11 @@ class AgentRPCLostReplyRecoveryTest < ActiveSupport::TestCase
           activated_at: Time.current.change(usec: 0),
         )
       target = build_default_execution_profile!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       conversation =
         create_conversation!(
           agent: agent,
-          agent_program: program,
-          default_execution_target: target,
         )
 
       { agent: agent, recognized_deployment: recognized_deployment, conversation: conversation, deployment: deployment }

@@ -29,7 +29,7 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
     user = sign_in_owner!
     previous = create_agent_runtime!(name: "Review Agent", namespace: "fixture.review")
     current = create_agent_runtime!(name: "Builder Agent", namespace: "fixture.builder")
-    conversation = create_conversation!(user: user, title: "Chat", agent: previous.fetch(:agent), agent_program: previous.fetch(:program))
+    conversation = create_conversation!(user: user, title: "Chat", agent: previous.fetch(:agent))
     conversation.update!(
       agent_config: {
         previous.fetch(:agent).config_namespace => { "mode" => "review" },
@@ -89,7 +89,7 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
         )
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: "https://example.test/#{program.id}",
           deployment_bearer_secret_ref: "secret://#{program.id}",
@@ -136,7 +136,7 @@ class AgentRuntimeBindingCutoverTest < ActionDispatch::IntegrationTest
           status: "active",
           sandboxed: true,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
 
       { agent: agent, deployment: deployment, program: program, target: target }
     end

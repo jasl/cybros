@@ -147,8 +147,6 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: nil,
         )
       graph = conversation.dag_graph
       user = graph.nodes.create!(node_type: Messages::UserMessage.node_type_key, state: DAG::Node::FINISHED, metadata: {})
@@ -194,7 +192,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
     def create_runtime!(max_concurrent_tasks:, max_queued_tasks:)
       program = create_program!
       target = create_execution_target!(max_concurrent_tasks: max_concurrent_tasks, max_queued_tasks: max_queued_tasks)
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment = create_deployment!(program)
       recognized_deployment = RecognizedDeployment.recognize!(agent: agent, deployment: deployment)
       credential =
@@ -264,7 +262,7 @@ class ExecutionCapacityEnforcementTest < ActiveSupport::TestCase
 
     def create_deployment!(program)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "websocket",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",

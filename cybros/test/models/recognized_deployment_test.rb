@@ -79,7 +79,7 @@ class RecognizedDeploymentTest < ActiveSupport::TestCase
     run =
       ConversationRun.create!(
         build_conversation_run_attributes(
-          conversation: create_conversation!(agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program), default_execution_target: runtime.fetch(:target)),
+          conversation: create_conversation!(agent: runtime.fetch(:agent)),
           dag_node_id: SecureRandom.uuid,
           agent: runtime.fetch(:agent),
           recognized_deployment: recognized,
@@ -115,10 +115,10 @@ class RecognizedDeploymentTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:v1",
         )
       target = create_execution_target!
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",

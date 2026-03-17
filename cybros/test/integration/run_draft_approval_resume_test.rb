@@ -114,8 +114,8 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
     alternate_agent =
       create_agent_runtime!(
-        program: alternate_program,
-        execution_target: build_default_execution_profile!,
+        agent: alternate_program,
+        execution_profile: build_default_execution_profile!,
       )
 
     Conversations::RuntimeSettingsUpdater.update!(
@@ -162,8 +162,8 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
     alternate_program = create_program!(name: "Alternate Program", config_namespace: "fixture.program.alt", server:)
     alternate_agent =
       create_agent_runtime!(
-        program: alternate_program,
-        execution_target: build_default_execution_profile!,
+        agent: alternate_program,
+        execution_profile: build_default_execution_profile!,
       )
 
     draft.update!(staged_agent_config_patch: { "mode" => "review" })
@@ -477,27 +477,27 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
       )
       deployment =
         create_runtime_binding_record!(
-        agent_program: program,
-        transport_kind: "http_jsonrpc",
-        endpoint_url: server.rpc_url,
-        deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
-        deployment_fingerprint: "fixture-deployment-v1",
-        status: "active",
-        health_status: "healthy",
-        protocol_version: "agent_rpc.v1",
-        agent_sdk_version: "fixture-ruby-sdk/1.0",
-        supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
-        manifest_snapshot: {},
-        schema_snapshot: {},
-        capability_snapshot: {},
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
+          agent: program,
+          transport_kind: "http_jsonrpc",
+          endpoint_url: server.rpc_url,
+          deployment_bearer_secret_ref: "secret://fixture",
+          contract_fingerprint: program.published_contract_fingerprint,
+          deployment_fingerprint: "fixture-deployment-v1",
+          status: "active",
+          health_status: "healthy",
+          protocol_version: "agent_rpc.v1",
+          agent_sdk_version: "fixture-ruby-sdk/1.0",
+          supported_methods: Cybros::ProgrammableAgentFixture.identity.fetch("supported_methods"),
+          manifest_snapshot: {},
+          schema_snapshot: {},
+          capability_snapshot: {},
+          inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
       target = create_execution_target!
       ensure_active_openai_credential!
       conversation = create_conversation!(user: user, title: "Chat")
-      agent = create_agent_runtime!(program: program, execution_target: target, deployment: deployment)
+      agent = create_agent_runtime!(agent: program, execution_profile: target, deployment: deployment)
       conversation.update!(
         agent: agent,
         permission_mode: "default",
@@ -523,7 +523,7 @@ class RunDraftApprovalResumeTest < ActiveSupport::TestCase
           config_schema_fingerprint: "config:#{config_namespace}",
         )
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://#{config_namespace}",

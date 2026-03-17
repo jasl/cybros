@@ -230,7 +230,7 @@ module ActiveSupport
       singleton.send(:define_method, :default_agent_workspace_root, original_method)
     end
 
-    def create_conversation!(user: nil, title: "Chat", metadata: nil, default_execution_target: :__default__, agent: :__default__, agent_program: :__default__)
+    def create_conversation!(user: nil, title: "Chat", metadata: nil, agent: :__default__)
       user ||= create_user!
       metadata ||= { "agent" => { "agent_profile" => "coding" } }
       if agent == :__default__
@@ -417,17 +417,16 @@ module ActiveSupport
       )
     end
 
-    def materialize_agent_runtime!(program:, execution_target: nil, deployment: nil)
-      agent = program
-      raise ArgumentError, "program must be an Agent" unless agent.is_a?(Agent)
+    def materialize_agent_runtime!(agent:, execution_profile: nil, deployment: nil)
+      raise ArgumentError, "agent must be an Agent" unless agent.is_a?(Agent)
 
-      if execution_target.present?
+      if execution_profile.present?
         agent.assign_attributes(
-          max_concurrent_tasks: execution_target.max_concurrent_tasks,
-          max_queued_tasks: execution_target.max_queued_tasks,
-          default_timeout_s: execution_target.default_timeout_s || Agent::DEFAULT_EXECUTION_TIMEOUT_S,
-          cpu_limit_millicores: execution_target.cpu_limit_millicores,
-          memory_limit_mb: execution_target.memory_limit_mb,
+          max_concurrent_tasks: execution_profile.max_concurrent_tasks,
+          max_queued_tasks: execution_profile.max_queued_tasks,
+          default_timeout_s: execution_profile.default_timeout_s || Agent::DEFAULT_EXECUTION_TIMEOUT_S,
+          cpu_limit_millicores: execution_profile.cpu_limit_millicores,
+          memory_limit_mb: execution_profile.memory_limit_mb,
         )
       end
 
@@ -436,9 +435,11 @@ module ActiveSupport
       agent
     end
 
-    def create_runtime_binding_record!(attributes = nil, agent_program: nil, agent: nil, **kwargs)
+    def create_runtime_binding_record!(attributes = nil, agent:, **kwargs)
       attrs = normalize_fixture_attributes(attributes, kwargs)
-      runtime_agent = agent || agent_program || attrs.delete(:agent_program) || attrs.delete(:agent)
+      raise ArgumentError, "unknown keyword: :agent_program" if attrs.key?(:agent_program)
+
+      runtime_agent = attrs.delete(:agent) || agent
       raise ArgumentError, "runtime binding requires an Agent" unless runtime_agent.is_a?(Agent)
 
       sync_agent_runtime_from_binding!(
@@ -543,8 +544,8 @@ module ActiveSupport
       agent
     end
 
-    def create_agent_runtime!(program:, execution_target: nil, deployment: nil)
-      materialize_agent_runtime!(program: program, execution_target: execution_target, deployment: deployment)
+    def create_agent_runtime!(agent:, execution_profile: nil, deployment: nil)
+      materialize_agent_runtime!(agent: agent, execution_profile: execution_profile, deployment: deployment)
     end
 
     def recognize_agent_runtime!(agent:, deployment: nil, capability_snapshot: nil)
@@ -780,7 +781,7 @@ module ActiveSupport
       )
     end
 
-    def runtime_governors_snapshot(provider_credential: nil, selected_model_ref: nil, execution_target: nil, agent: nil)
+    def runtime_governors_snapshot(provider_credential: nil, selected_model_ref: nil, agent: nil)
       {}.tap do |snapshot|
         provider_snapshot = provider_limiter_snapshot(provider_credential: provider_credential, selected_model_ref: selected_model_ref)
         snapshot["provider_limiter"] = provider_snapshot if provider_snapshot.any?
