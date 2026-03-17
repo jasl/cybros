@@ -36,7 +36,7 @@ class Cybros::Subagent::ToolsTest < ActiveSupport::TestCase
     program = create_program!
     parent =
       create_conversation!(
-        agent_program: program,
+        agent: program,
         metadata: {
           "agent" => {
             "agent_profile" => "review",

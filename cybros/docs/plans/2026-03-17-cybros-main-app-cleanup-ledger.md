@@ -464,6 +464,25 @@ Old nouns/removal targets for this cleanup:
   - explicit negative coverage in `agent_test`
   - possible legacy-node fixture semantics in `agent_runtime_resolver_test`
 
+### Round 15
+
+- Cleaned the final high-priority helper-contract residue batch across:
+  - `test/lib/cybros/agent_runtime_resolver_llm_provider_test.rb`
+  - `test/lib/agent_core/dag/task_executor_runtime_surface_test.rb`
+  - `test/lib/cybros/subagent/run_wait_tools_test.rb`
+  - `test/lib/cybros/subagent/tools_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `create_agent_runtime!(program:, execution_target:)`
+  - `create_conversation!(..., agent_program:)`
+- Verification commands for this round:
+  - red check: `bin/rails test test/lib/cybros/agent_runtime_resolver_llm_provider_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb test/lib/cybros/subagent/run_wait_tools_test.rb test/lib/cybros/subagent/tools_test.rb` -> 12 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/lib/cybros/agent_runtime_resolver_llm_provider_test.rb test/lib/agent_core/dag/task_executor_runtime_surface_test.rb test/lib/cybros/subagent/run_wait_tools_test.rb test/lib/cybros/subagent/tools_test.rb`
+- Remaining explicit residue after this round should now be limited to:
+  - deliberate negative coverage in `agent_test`
+  - `agent_runtime_resolver_test`, which still needs a keep-or-delete judgment for legacy pending-node fixture semantics during retrospective re-audit
+  - system/live-acceptance files that were intentionally left out of verified batches in this environment
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

@@ -241,7 +241,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
       )
     deployment =
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -261,7 +261,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation)
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(
@@ -313,7 +313,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
       )
     deployment =
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -333,7 +333,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation)
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     create_conversation_run!(
@@ -382,7 +382,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
         metadata: {
           "agent" => { "key" => "main" },
         },
-        agent_program: program,
+        agent: program,
       )
 
     graph = conversation.dag_graph
@@ -430,7 +430,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
       )
     deployment =
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -452,7 +452,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     agent_node = build_pending_agent_node(conversation: conversation)
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(
@@ -533,7 +533,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
       )
     deployment =
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
@@ -553,7 +553,7 @@ class Cybros::AgentRuntimeResolverLlmProviderTest < ActiveSupport::TestCase
 
     conversation = create_conversation!
     node = build_pending_agent_node(conversation: conversation)
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     ConversationRun.create!(

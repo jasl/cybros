@@ -209,7 +209,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     turn = conversation.append_user_message!(content: "Hello")
     program = create_program!
     deployment = create_deployment!(program: program)
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
@@ -322,7 +322,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
       )
       deployment =
         create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -339,7 +339,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
@@ -494,7 +494,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
       )
       deployment =
         create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -511,7 +511,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
@@ -662,7 +662,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     snapshot = build_capability_snapshot(program_id: program.id)
       deployment =
         create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -679,7 +679,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
@@ -866,7 +866,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
     snapshot = build_capability_snapshot(program_id: program.id)
     deployment =
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: server.rpc_url,
         deployment_bearer_secret_ref: "secret://fixture",
@@ -883,7 +883,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
         inspection_details: {},
         activated_at: Time.current.change(usec: 0),
       )
-    agent = create_agent_runtime!(program: program, execution_target: build_default_execution_profile!, deployment: deployment)
+    agent = create_agent_runtime!(agent: program, execution_profile: build_default_execution_profile!, deployment: deployment)
     conversation.update!(agent: agent, agent_config_schema_fingerprint: program.config_schema_fingerprint)
     recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
     run =
@@ -1050,7 +1050,7 @@ class AgentCore::DAG::TaskExecutorRuntimeSurfaceTest < ActiveSupport::TestCase
 
     def create_deployment!(program:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: "http://127.0.0.1:4319/rpc",
         deployment_bearer_secret_ref: "secret://fixture",
