@@ -2,6 +2,16 @@
 
 This directory contains Cybros architecture/design notes intended for humans and LLM agents.
 
+## Current Truth Sources
+
+- Product/runtime contract index: `docs/product/README.md`
+- Runtime simplification design: `docs/plans/2026-03-13-conversation-agent-runtime-simplification-design.md`
+- Agent-root workspace design: `docs/plans/2026-03-16-agent-root-workspace-design.md`
+- Operation-sequence cutover design: `docs/plans/2026-03-17-operation-sequence-cutover-design.md`
+- Active cleanup process docs: `docs/plans/2026-03-17-cybros-main-app-cleanup-design.md`, `docs/plans/2026-03-17-cybros-main-app-cleanup.md`, `docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md`
+
+Historical executable plans and audits belong under `docs/archive/` once they stop being active truth sources.
+
 ## DAG engine
 
 - Public API boundary: `docs/dag/public_api.md`

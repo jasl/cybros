@@ -37,7 +37,6 @@ When a plan is fully landed or intentionally abandoned, move it to `docs/archive
 - `2026-03-11-turn-bundle-hot-path.md`
 - `2026-03-12-bootstrap-hooks-and-authority-tasks.md`
 - `2026-03-12-append-task-internal-queue.md`
-- `2026-03-13-conversation-agent-runtime-simplification.md`
 - `2026-03-16-agent-root-workspace.md`
 - `2026-03-16-bundled-claw-external-runtime.md`
 - `2026-03-17-conversation-composer-drafts.md`
@@ -52,6 +51,7 @@ When a plan is fully landed or intentionally abandoned, move it to `docs/archive
 - `2026-03-11-lane-state-prompt-buffer-*`
 - `2026-03-11-context-budget-soft-limit-*`
 - `2026-03-11-turn-head-lane-seq-rename-*`
+- `2026-03-13-conversation-agent-runtime-simplification.md`
 - `2026-03-09-agent-deployment-connection*`
 - `2026-03-09-execution-target-discovery-design*`
 - `2026-03-09-programmable-agent-preflight-*`

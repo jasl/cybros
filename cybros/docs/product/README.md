@@ -8,7 +8,8 @@ Current reading order:
 2. `runtime_governance.md`
 3. `agent_rpc.md`
 4. `docs/plans/2026-03-13-conversation-agent-runtime-simplification-design.md`
-5. `docs/plans/2026-03-13-conversation-agent-runtime-simplification.md`
+5. `docs/plans/2026-03-16-agent-root-workspace-design.md`
+6. `docs/plans/2026-03-17-operation-sequence-cutover-design.md`
 
 Historical pre-cutover product docs were intentionally removed. Use git history if that material is still needed for archaeology.
 

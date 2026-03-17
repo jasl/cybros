@@ -302,6 +302,18 @@ Old nouns/removal targets for this cleanup:
   - programmable-agent tool/runtime-surface tests
   - attachment and system/live-acceptance integration surfaces
 
+### Round 7
+
+- Archived `2026-03-13-conversation-agent-runtime-simplification.md` because it now acts as historical implementation choreography, not an active truth source.
+- Updated the doc indexes so active reading order points at current design truth instead of the archived implementation plan:
+  - `docs/README.md`
+  - `docs/product/README.md`
+  - `docs/plans/README.md`
+- Active doc hits that still mention old runtime nouns are now limited to:
+  - current design docs that explicitly describe the removed model as a removal target
+  - current cleanup docs that intentionally inventory legacy nouns during this cleanup
+  - the unrelated untracked audit report, which remains outside the tracked cleanup scope
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.
