@@ -156,33 +156,33 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
           status: "active",
           sandboxed: true,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       fixture_identity = Cybros::ProgrammableAgentFixture.identity
       supported_methods = fixture_identity.fetch("supported_methods")
       deployment =
         create_runtime_binding_record!(
-        agent_program: program,
-        transport_kind: "http_jsonrpc",
-        endpoint_url: server.rpc_url,
-        deployment_bearer_secret_ref: "secret://fixture",
-        contract_fingerprint: program.published_contract_fingerprint,
-        deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
-        status: "active",
-        health_status: "healthy",
-        protocol_version: fixture_identity.fetch("protocol_version"),
-        agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
-        supported_methods: supported_methods,
-        manifest_snapshot: {},
-        schema_snapshot: {},
-        capability_snapshot: {
-          "agent_capabilities_version" => "fixture-agent-capabilities:v1",
-          "observed_runtime_identity" => {
-            "supported_methods" => supported_methods,
+          agent: program,
+          transport_kind: "http_jsonrpc",
+          endpoint_url: server.rpc_url,
+          deployment_bearer_secret_ref: "secret://fixture",
+          contract_fingerprint: program.published_contract_fingerprint,
+          deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
+          status: "active",
+          health_status: "healthy",
+          protocol_version: fixture_identity.fetch("protocol_version"),
+          agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+          supported_methods: supported_methods,
+          manifest_snapshot: {},
+          schema_snapshot: {},
+          capability_snapshot: {
+            "agent_capabilities_version" => "fixture-agent-capabilities:v1",
+            "observed_runtime_identity" => {
+              "supported_methods" => supported_methods,
+            },
           },
-        },
-        inspection_details: {},
-        activated_at: Time.current.change(usec: 0),
-      )
+          inspection_details: {},
+          activated_at: Time.current.change(usec: 0),
+        )
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
 
       conversation =
@@ -192,7 +192,7 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
           agent: agent,
         )
 
-      { conversation: conversation, agent: agent, program: program, target: target }
+      { conversation: conversation, agent: agent, program: program }
     end
 
     def uploaded_fixture(name, content_type)

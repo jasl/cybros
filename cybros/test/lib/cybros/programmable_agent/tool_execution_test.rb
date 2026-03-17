@@ -21,7 +21,7 @@ class Cybros::ProgrammableAgent::ToolExecutionTest < ActiveSupport::TestCase
       target = build_default_execution_profile!
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",
@@ -38,9 +38,9 @@ class Cybros::ProgrammableAgent::ToolExecutionTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target, deployment: deployment)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target, deployment: deployment)
       recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
-      conversation = create_conversation!(title: "Tool execution", agent: agent, agent_program: program, default_execution_target: target)
+      conversation = create_conversation!(title: "Tool execution", agent: agent)
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
       agent_node = nil
 
@@ -202,7 +202,7 @@ class Cybros::ProgrammableAgent::ToolExecutionTest < ActiveSupport::TestCase
       target = build_default_execution_profile!
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: deployment_bearer_secret_ref,
@@ -219,9 +219,9 @@ class Cybros::ProgrammableAgent::ToolExecutionTest < ActiveSupport::TestCase
           inspection_details: {},
           activated_at: Time.current.change(usec: 0),
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target, deployment: deployment)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target, deployment: deployment)
       recognized_deployment = recognize_agent_runtime!(agent: agent, deployment: deployment)
-      conversation = create_conversation!(title: "Tool execution", agent: agent, agent_program: program, default_execution_target: target)
+      conversation = create_conversation!(title: "Tool execution", agent: agent)
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
       agent_node = nil
 

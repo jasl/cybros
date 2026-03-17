@@ -355,6 +355,28 @@ Old nouns/removal targets for this cleanup:
   - system and live-acceptance surfaces
   - a smaller set of dashboard/bootstrap/conversation bootstrap runtime helpers
 
+### Round 10
+
+- Cleaned the attachment and tool-runtime residue batch across:
+  - `test/integration/external_agent_attachment_transfer_test.rb`
+  - `test/integration/conversation_attachment_upload_gate_test.rb`
+  - `test/integration/attachment_prompt_injection_test.rb`
+  - `test/lib/cybros/programmable_agent/tool_execution_test.rb`
+  - `test/integration/programmable_agent_tool_routing_test.rb`
+- Removed the remaining old helper calls in that cluster:
+  - `create_runtime_binding_record!(agent_program:, ...)`
+  - `materialize_agent_runtime!(program:, execution_target:)`
+  - `create_agent_runtime!(program:, execution_target:)`
+  - `create_conversation!(..., agent_program:, default_execution_target:)`
+- Kept the execution-profile builders only where those tests still need workspace/capacity fixture facts; the cleanup here was strictly about cutting out the removed program/target compatibility layer.
+- Verification commands for this round:
+  - red check: `bin/rails test test/integration/external_agent_attachment_transfer_test.rb test/integration/conversation_attachment_upload_gate_test.rb test/integration/attachment_prompt_injection_test.rb test/lib/cybros/programmable_agent/tool_execution_test.rb test/integration/programmable_agent_tool_routing_test.rb` -> 19 errors, all from the removed helper keywords
+  - green check: `bin/rails test test/integration/external_agent_attachment_transfer_test.rb test/integration/conversation_attachment_upload_gate_test.rb test/integration/attachment_prompt_injection_test.rb test/lib/cybros/programmable_agent/tool_execution_test.rb test/integration/programmable_agent_tool_routing_test.rb`
+- Remaining high-priority helper residue is now concentrated in:
+  - dashboard / bootstrap / programmable-agent execution integration helpers
+  - DAG and runtime-surface lib tests
+  - system and live-acceptance surfaces
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

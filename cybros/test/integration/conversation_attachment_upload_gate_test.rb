@@ -13,7 +13,7 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
   test "create rejects attachments when the current agent runtime does not support upload" do
     user = sign_in_owner!
     runtime = create_agent_runtime!(supported_methods: Agents::Protocol::REQUIRED_METHODS)
-    conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program), default_execution_target: runtime.fetch(:target))
+    conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent))
 
     assert_no_difference -> { ConversationAttachment.count } do
       assert_no_difference -> { DAG::Node.count } do
@@ -43,7 +43,7 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
     result = nil
 
     without_bootstrap_hooks do
-      conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent), agent_program: runtime.fetch(:program), default_execution_target: runtime.fetch(:target))
+      conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent))
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
       assert_difference -> { ConversationAttachment.count }, +2 do
@@ -162,10 +162,10 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
           status: "active",
           sandboxed: true,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -188,6 +188,6 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
         )
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
 
-      { agent: agent, deployment: deployment, program: program, target: target }
+      { agent: agent, deployment: deployment }
     end
 end

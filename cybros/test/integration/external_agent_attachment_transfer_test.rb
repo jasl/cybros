@@ -28,8 +28,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -101,8 +99,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -166,8 +162,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -220,8 +214,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -273,8 +265,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -326,8 +316,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -389,8 +377,6 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
       conversation =
         create_conversation!(
           agent: runtime.fetch(:agent),
-          agent_program: runtime.fetch(:program),
-          default_execution_target: runtime.fetch(:target),
         )
       conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
 
@@ -504,10 +490,10 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
           status: "active",
           sandboxed: true,
         )
-      agent = materialize_agent_runtime!(program: program, execution_target: target)
+      agent = materialize_agent_runtime!(agent: program, execution_profile: target)
       deployment =
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "http_jsonrpc",
           endpoint_url: endpoint_url,
           deployment_bearer_secret_ref: "secret://fixture",
@@ -530,12 +516,12 @@ class ExternalAgentAttachmentTransferTest < ActiveSupport::TestCase
         )
       sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
 
-      { agent: agent, deployment: deployment, program: program, target: target }
+      { agent: agent, deployment: deployment, program: program }
     end
 
     def create_additional_deployment!(agent:, program:, endpoint_url:, supported_methods:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: agent,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
