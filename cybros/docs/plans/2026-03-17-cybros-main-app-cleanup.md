@@ -8,6 +8,14 @@
 
 **Tech Stack:** Ruby 4.0.1, Rails 8.2.0.alpha, Minitest, Markdown docs, ripgrep, git
 
+**Execution Root:** `/Users/jasl/Workspaces/Cybros/cybros`
+
+**Execution Preconditions:**
+- run every command from `/Users/jasl/Workspaces/Cybros/cybros`
+- before any `bin/rails test` command, ensure PostgreSQL is available; if needed, start it using the local project workflow before continuing
+- if a search returns more files than can be safely edited in one small batch, record the remaining hits in the cleanup ledger and continue in explicit follow-up batches rather than widening one commit indefinitely
+- only stop for user intervention on real blockers: broken environment, ambiguous destructive choice not covered by the design, or a cleanup candidate whose deletion would change product behavior outside the approved scope
+
 ---
 
 ### Task 1: Create The Cleanup Ledger And Truth-Source Baseline
@@ -128,13 +136,19 @@ git commit -m "docs: archive obsolete runtime planning docs"
 
 **Step 1: Write or update the failing tests**
 
-Update the tests so bundled manifests and runtime identity payloads require `agent_key` and no longer accept `agent_program_key`.
+Update the tests so bundled manifests and runtime identity payloads require `agent_key` and explicitly reject `agent_program_key`-only payloads.
 
 At minimum, cover:
 
 - bundled source creation in `cybros/test/services/agents/creator_test.rb`
 - callback session auth / identity resolution in `cybros/test/integration/agent_rpc_session_auth_test.rb`
 - bundled default bootstrap expectations in `cybros/test/services/agents/bootstrap_bundled_default_service_test.rb`
+
+The failing condition must be explicit:
+
+- a manifest with only `agent_program_key` is rejected
+- an identity payload with only `agent_program_key` is rejected
+- `agent_key` remains accepted
 
 **Step 2: Run the targeted tests to confirm the fallback is still live**
 
@@ -175,7 +189,6 @@ git commit -m "refactor: remove legacy manifest key fallback"
 ### Task 4: Normalize Manifest Fixtures From `agent_program_key` To `agent_key`
 
 **Files:**
-- Modify: every file returned by the search in Step 1
 - Start with:
   - `cybros/test/lib/test_support/bundled_claw_runtime_server_test.rb`
   - `cybros/test/lib/cybros/programmable_agent_fixture_test.rb`
@@ -199,13 +212,13 @@ rg -n "agent_program_key" cybros/test cybros/app
 
 Expected: a repo-wide list of fixture payloads and assertions that still use the old key.
 
-**Step 2: Update the failing assertions and fixture payloads**
+**Step 2: Update the first explicit fixture batch**
 
-Replace `agent_program_key` with `agent_key` in the files returned by Step 1.
+Replace `agent_program_key` with `agent_key` in the files listed in this task.
 
 For runtime-identity tests, make sure both fixture payloads and assertions move together.
 
-**Step 3: Run the focused test set**
+**Step 3: Run the focused test set for the first batch**
 
 Run:
 
@@ -222,7 +235,18 @@ bin/rails test \
 
 Expected: PASS.
 
-**Step 4: Verify no live `agent_program_key` residue remains outside approved historical locations**
+**Step 4: Update any remaining `agent_program_key` hits in small explicit batches**
+
+If Step 1 still returns additional hits outside approved historical locations:
+
+- take at most 5-8 files in the next batch
+- record that batch in the cleanup ledger before editing
+- update the files
+- rerun the most relevant targeted tests for that batch
+
+Repeat until only approved historical locations remain.
+
+**Step 5: Verify no live `agent_program_key` residue remains outside approved historical locations**
 
 Run:
 
@@ -232,7 +256,7 @@ rg -n "agent_program_key" cybros/app cybros/lib cybros/config cybros/test cybros
 
 Expected: no hits, or only findings explicitly recorded for a later round in the ledger.
 
-**Step 5: Commit**
+**Step 6: Commit**
 
 ```bash
 git add cybros/test cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
@@ -243,7 +267,6 @@ git commit -m "test: rename manifest fixtures to agent key"
 
 **Files:**
 - Modify: `cybros/test/test_helper.rb`
-- Modify: every file returned by the Step 1 search
 - Start with:
   - `cybros/test/models/recognized_deployment_test.rb`
   - `cybros/test/models/conversation_run_test.rb`
@@ -267,6 +290,12 @@ Add or update tests so helper call sites no longer pass:
 
 If there is no dedicated helper test file, add the assertions to `cybros/test/models/agent_test.rb` or a nearby helper-focused test file.
 
+The failing condition must be explicit:
+
+- passing `agent_program:` to `create_conversation!` raises an unknown-keyword style failure
+- passing `default_execution_target:` to `create_conversation!` raises an unknown-keyword style failure
+- passing the old runtime materializer keywords fails once the helper signature is tightened
+
 **Step 2: Run a focused test set and confirm the old helper contract is still in use**
 
 Run:
@@ -280,7 +309,7 @@ bin/rails test \
   cybros/test/services/agent_rpc/lifecycle_caller_test.rb
 ```
 
-Expected: FAIL or require updates because the helper API still accepts the old nouns.
+Expected: FAIL because the helper API still accepts the old nouns.
 
 **Step 3: Remove the obsolete helper parameters**
 
@@ -290,9 +319,9 @@ In `cybros/test/test_helper.rb`:
 - replace `program:` naming with `agent:` naming in runtime materializer helpers where that aligns with the real model
 - delete helper behavior that only exists to bridge old target/program concepts into current tests
 
-**Step 4: Update the touched call sites**
+**Step 4: Update the first explicit call-site batch**
 
-Update the files returned by Step 1 so they use the simplified helper API.
+Update the files listed in this task so they use the simplified helper API.
 
 **Step 5: Re-run the focused tests**
 
@@ -300,7 +329,18 @@ Run the same command from Step 2, then add any immediately affected integration 
 
 Expected: PASS.
 
-**Step 6: Commit**
+**Step 6: Update any remaining call sites in small explicit batches**
+
+If the search for `agent_program:` / `default_execution_target:` / `execution_target:` still returns non-historical test hits:
+
+- take at most 5-8 files in the next batch
+- record that batch in the cleanup ledger
+- update those files
+- rerun the closest targeted tests
+
+Repeat until the helper contract is stable and the remaining hits are either intentional or queued for Task 6.
+
+**Step 7: Commit**
 
 ```bash
 git add cybros/test/test_helper.rb cybros/test/models cybros/test/services cybros/test/integration cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
@@ -348,9 +388,9 @@ In `cybros/test/test_helper.rb`:
 - delete or collapse `create_execution_profile!`
 - remove any remaining helper branches that only feed `execution_target` state into `Agent`
 
-**Step 4: Update the selected tests**
+**Step 4: Update the selected tests in explicit batches**
 
-Move the selected runtime governance and automation tests to agent-centric setup.
+Move the selected runtime governance and automation tests to agent-centric setup. If the search returns more files than can be safely edited together, take them in explicit batches and record each batch in the cleanup ledger.
 
 **Step 5: Run the selected tests**
 
@@ -381,7 +421,7 @@ git add cybros/test/test_helper.rb cybros/test/services/runtime_governance cybro
 git commit -m "test: remove execution target fixture scaffolding"
 ```
 
-### Task 7: Re-Audit Active Docs And Archive Or Delete Remaining Misleading Files
+### Task 7: Re-Audit Active Docs, Resolve Remaining Misleading Files, And Publish The Active Truth-Source Set
 
 **Files:**
 - Modify or move: every active doc file recorded in the ledger as `archive` or `delete`
@@ -412,23 +452,27 @@ For each hit recorded in the ledger:
 
 Do not leave the file in place with a `superseded` note.
 
-**Step 3: Re-run the doc search**
+**Step 3: Update the active truth-source index**
+
+Update `cybros/docs/README.md` so it explicitly points to the active truth sources that remain after the archive/delete pass.
+
+**Step 4: Re-run the doc search**
 
 Run the same command from Step 1.
 
 Expected: only intentional current-model references remain in active docs.
 
-**Step 4: Commit**
+**Step 5: Commit**
 
 ```bash
 git add cybros/docs cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
 git commit -m "docs: clear remaining misleading active references"
 ```
 
-### Task 8: Land One High-Confidence Rails-Shaped Simplification After P0/P1 Are Clean
+### Task 8: Execute The Highest-Priority P2 Simplification Batch After P0/P1 Are Clean
 
 **Files:**
-- Re-audit first, then modify the best candidate from the ledger
+- Re-audit first, then modify the highest-priority explicit P2 batch from the ledger
 - Preferred starting candidate:
   - `cybros/app/models/conversation.rb`
   - `cybros/app/services/conversations/workspace_initializer.rb`
@@ -457,7 +501,7 @@ sed -n '1,220p' cybros/test/models/conversation_program_selection_test.rb
 sed -n '1,220p' cybros/test/services/agents/workspace_initializer_test.rb
 ```
 
-Expected: a clear decision on whether `Conversations::WorkspaceInitializer` should stay as a thin wrapper, be collapsed, or be narrowed.
+Expected: a clear decision on whether `Conversations::WorkspaceInitializer` should stay as a thin wrapper, be collapsed, or be narrowed. If a different P2 batch is now clearly higher priority, record that in the ledger and use that batch instead.
 
 **Step 3: Write the failing test for the simplification**
 
@@ -479,7 +523,19 @@ bin/rails test \
 
 Expected: PASS.
 
-**Step 6: Commit**
+**Step 6: Re-audit the remaining P2 findings**
+
+Run:
+
+```bash
+sed -n '1,260p' cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
+```
+
+Expected: the remaining P2 findings are either small enough for another explicit batch or are recorded with a clear keep/defer reason.
+
+If another high-confidence P2 batch remains, repeat Task 8 before moving to Task 9.
+
+**Step 7: Commit**
 
 ```bash
 git add cybros/app/models/conversation.rb cybros/app/services/conversations/workspace_initializer.rb cybros/test/models/conversation_program_selection_test.rb cybros/test/services/agents/workspace_initializer_test.rb cybros/docs/plans/2026-03-17-cybros-main-app-cleanup-ledger.md
@@ -513,6 +569,8 @@ For each candidate:
 - archive if it has historical value and still needs to exist
 - delete if it is just clutter
 - keep only with a written reason in the ledger
+
+Process these in explicit small batches if the candidate set is large.
 
 **Step 3: Verify no accidental active references point at removed files**
 
