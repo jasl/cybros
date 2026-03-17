@@ -368,7 +368,6 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
           "agent" => { "key" => "main" },
         },
         agent: agent,
-        default_execution_target: nil,
       )
 
     runtime = build_runtime_for(node)
@@ -638,13 +637,11 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
       end
     end
 
-    def build_pending_agent_node(metadata:, agent: :__default__, agent_program: :__default__, default_execution_target: :__default__)
+    def build_pending_agent_node(metadata:, agent: :__default__)
       conversation =
         create_conversation!(
           metadata: metadata,
           agent: agent,
-          agent_program: agent_program,
-          default_execution_target: default_execution_target,
         )
       graph = conversation.dag_graph
       turn_id = ActiveRecord::Base.connection.select_value("select uuidv7()")

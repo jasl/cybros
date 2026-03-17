@@ -483,6 +483,30 @@ Old nouns/removal targets for this cleanup:
   - `agent_runtime_resolver_test`, which still needs a keep-or-delete judgment for legacy pending-node fixture semantics during retrospective re-audit
   - system/live-acceptance files that were intentionally left out of verified batches in this environment
 
+### Round 16 (Retrospective Re-Audit)
+
+- Re-audited the full live code/test/doc surface with:
+  - `rg -n "agent_program_key|agent_program:|default_execution_target|execution_target:" cybros/app cybros/lib cybros/test cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/docs/product.old/**' --glob '!cybros/docs/execution.old/**'`
+  - `rg -n "materialize_agent_runtime!\\(program:|create_agent_runtime!\\(program:|create_runtime_binding_record!\\([^\\n]*agent_program:" cybros/test`
+  - `rg -n "ExecutionTarget|ExecutionLocation|AgentDeployment|agent_program|default_execution_target|logical_workspace" cybros/docs --glob '!cybros/docs/archive/**' --glob '!cybros/docs/product.old/**' --glob '!cybros/docs/execution.old/**'`
+- Resolved the last verified code residue by simplifying `test/lib/cybros/agent_runtime_resolver_test.rb` to the current conversation helper contract.
+- Also cleaned the remaining mechanical but unverified helper residue in:
+  - `test/system/system_settings_runtime_governance_test.rb`
+  - `test/system/system_settings_automations_test.rb`
+  - `test/script/live_acceptance/agent_root_workspace_test.rb`
+- Verified:
+  - `bin/rails test test/lib/cybros/agent_runtime_resolver_test.rb`
+- Not verified in this environment:
+  - `test/system/system_settings_runtime_governance_test.rb`
+  - `test/system/system_settings_automations_test.rb`
+  - `test/script/live_acceptance/agent_root_workspace_test.rb`
+  Reason: these require browser/live-harness support that is not available in the current environment.
+- Retrospective conclusion:
+  - live code/test helper residue is now reduced to deliberate negative coverage in `agent_test`
+  - remaining `agent_program_key` hits are explicit rejection/assertion coverage only
+  - active doc hits are limited to current cleanup/design materials and intentional current design docs that still discuss removal targets
+  - the unrelated untracked audit report remains outside tracked cleanup scope
+
 ## Reusable Strategy Notes
 
 - Always separate “search noise” from real cleanup targets before batching work.

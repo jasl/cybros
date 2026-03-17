@@ -86,7 +86,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
 
     def create_execution_wait!
       program = create_program!(name: "Browser execution wait")
-      agent = track_record(materialize_agent_runtime!(program: program))
+      agent = track_record(materialize_agent_runtime!(agent: program))
 
       track_record(
         RuntimeGovernance::RuntimeWaits.park!(
@@ -105,7 +105,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
 
     def create_execution_denial!
       program = create_program!(name: "Browser denial")
-      agent = track_record(materialize_agent_runtime!(program: program))
+      agent = track_record(materialize_agent_runtime!(agent: program))
       deployment = create_deployment!(program: program)
       recognized_deployment = track_record(RecognizedDeployment.recognize!(agent: agent, deployment: deployment))
       conversation =
@@ -155,7 +155,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
 
     def create_deployment_with_backoff!
       program = create_program!(name: "Browser backoff")
-      agent = track_record(materialize_agent_runtime!(program: program))
+      agent = track_record(materialize_agent_runtime!(agent: program))
       deployment = create_deployment!(program: program)
       recognized_deployment = track_record(RecognizedDeployment.recognize!(agent: agent, deployment: deployment))
 
@@ -201,7 +201,7 @@ class SystemSettingsRuntimeGovernanceSystemTest < ApplicationSystemTestCase
     def create_deployment!(program:)
       track_record(
         create_runtime_binding_record!(
-          agent_program: program,
+          agent: program,
           transport_kind: "websocket",
           endpoint_url: "http://127.0.0.1:4319/rpc",
           deployment_bearer_secret_ref: "secret://fixture",

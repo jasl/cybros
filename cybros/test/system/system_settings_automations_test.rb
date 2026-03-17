@@ -91,7 +91,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
     def create_automation_runtime!(user:, endpoint_url:, permission_mode:)
       program = create_program!
       active_deployment!(program: program, endpoint_url: endpoint_url, deployment_fingerprint: "fixture-deployment-v1")
-      agent = materialize_agent_runtime!(program: program)
+      agent = materialize_agent_runtime!(agent: program)
       ensure_active_openai_credential!
       automation =
         Automation.create!(
@@ -148,7 +148,7 @@ class SystemSettingsAutomationsSystemTest < ApplicationSystemTestCase
 
     def active_deployment!(program:, endpoint_url:, deployment_fingerprint:)
       create_runtime_binding_record!(
-        agent_program: program,
+        agent: program,
         transport_kind: "http_jsonrpc",
         endpoint_url: endpoint_url,
         deployment_bearer_secret_ref: "secret://fixture",
