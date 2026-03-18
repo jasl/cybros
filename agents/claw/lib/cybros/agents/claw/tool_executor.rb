@@ -59,11 +59,16 @@ module Cybros
           workspace_config = workspace_config_from(params)
           return NullWorkspaceTools.instance if workspace_config.nil?
 
-          cache_key = [workspace_config.fetch("root_path"), workspace_config.fetch("cwd")].join("\u0000")
+          cache_key = [
+            workspace_config.fetch("root_path"),
+            workspace_config.fetch("cwd"),
+            workspace_config.fetch("lane_path", ""),
+          ].join("\u0000")
           @workspace_tools_by_scope[cache_key] ||=
             Tools::WorkspaceTools.new(
               workspace_root: workspace_config.fetch("root_path"),
               cwd: workspace_config.fetch("cwd"),
+              lane_path: workspace_config.fetch("lane_path", nil),
             )
         end
 
@@ -102,7 +107,12 @@ module Cybros
                 workspace.fetch("conversation_path", "").to_s.strip.presence ||
                 root_path
 
-            return { "root_path" => root_path, "cwd" => cwd }
+            return {
+              "root_path" => root_path,
+              "conversation_path" => workspace.fetch("conversation_path", "").to_s.strip.presence,
+              "lane_path" => workspace.fetch("lane_path", "").to_s.strip.presence,
+              "cwd" => cwd,
+            }
           end
 
           nil

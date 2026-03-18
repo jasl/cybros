@@ -30,9 +30,10 @@ module Cybros
 
           class PatchFormatError < StandardError; end
 
-          def initialize(workspace_root:, cwd: nil)
+          def initialize(workspace_root:, cwd: nil, lane_path: nil)
             @workspace_root = normalize_workspace_root(workspace_root)
             @cwd = normalize_cwd(cwd, workspace_root: @workspace_root)
+            @lane_path = normalize_optional_path(lane_path, workspace_root: @workspace_root)
           end
 
           def call(logical_tool_name:, arguments:)
@@ -58,7 +59,7 @@ module Cybros
 
           private
 
-          attr_reader :workspace_root, :cwd
+          attr_reader :workspace_root, :cwd, :lane_path
 
           def glob(arguments)
             pattern = arguments.fetch("pattern", "").to_s
@@ -222,8 +223,10 @@ module Cybros
             protected_error = protected_exec_error_for(command)
             return error_result(protected_error) if protected_error
 
+            overlay = WorkspaceEnvOverlay.load(process_env: ENV.to_h, root_path: workspace_root, lane_path: lane_path)
             stdout, stderr, status =
               Open3.capture3(
+                overlay.fetch(:env),
                 "/bin/sh",
                 "-lc",
                 command,
@@ -239,6 +242,18 @@ module Cybros
                   "stderr" => normalize_stream_output(stderr),
                 },
               ),
+              metadata: {
+                "env_overlay_applied" => overlay.fetch(:loaded_files).any? || overlay.fetch(:ignored_files).any?,
+                "env_files_loaded" => overlay.fetch(:loaded_files),
+                "env_files_ignored" => overlay.fetch(:ignored_files),
+                "env_parse_warnings" =>
+                  overlay.fetch(:warnings).map do |warning|
+                    {
+                      "file" => warning.fetch(:file),
+                      "message" => warning.fetch(:message),
+                    }
+                  end,
+              },
             )
           rescue StandardError => e
             error_result("exec failed: #{e.class}: #{e.message}")
@@ -264,6 +279,16 @@ module Cybros
             real = path.realpath
             ensure_within_workspace!(real)
             real
+          end
+
+          def normalize_optional_path(value, workspace_root:)
+            raw = value.to_s.strip
+            return nil if raw.empty?
+
+            path = Pathname.new(raw).expand_path
+            normalized = path.exist? ? path.realpath : path
+            ensure_within_workspace!(normalized)
+            normalized
           end
 
           def resolve_existing_path(relative_path)

@@ -637,6 +637,66 @@ class RPCContractTest < ActiveSupport::TestCase
     end
   end
 
+  test "tool.execute exec applies lane env over root env" do
+    with_workspace(
+      ".env" => "CLAW_ENV_SENTINEL=root\n",
+      ".env.agent" => "RBENV_ROOT=/root/.rbenv\n",
+    ) do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+      FileUtils.mkdir_p(lane_path)
+      File.write(File.join(lane_path, ".env"), "CLAW_ENV_SENTINEL=lane\n")
+
+      payload =
+        tool_execute(
+          logical_tool_name: "exec",
+          implementation_ref: "claw:exec",
+          arguments: { "command" => "printf '%s\\n' \"$CLAW_ENV_SENTINEL\" \"$RBENV_ROOT\"" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+
+      parsed = JSON.parse(result.dig("content", 0, "text"))
+      stdout_lines = parsed.fetch("stdout").lines(chomp: true)
+      assert_equal ["lane", "/root/.rbenv"], stdout_lines
+    end
+  end
+
+  test "tool.execute exec returns env overlay metadata without leaking values" do
+    with_workspace(".env" => "PATH=/root/bin\n") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+      FileUtils.mkdir_p(lane_path)
+      File.write(File.join(lane_path, ".env.agent"), "not valid dotenv\n")
+
+      payload =
+        tool_execute(
+          logical_tool_name: "exec",
+          implementation_ref: "claw:exec",
+          arguments: { "command" => "printf '%s' ok" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+
+      metadata = result.fetch("metadata")
+      assert_equal true, metadata.fetch("env_overlay_applied")
+      assert_equal [Pathname.new(workspace_root).realpath.join(".env").to_s], metadata.fetch("env_files_loaded")
+      assert_equal [Pathname.new(lane_path).realpath.join(".env.agent").to_s], metadata.fetch("env_files_ignored")
+      assert_equal 1, metadata.fetch("env_parse_warnings").length
+      refute_includes JSON.generate(metadata), "/root/bin"
+    end
+  end
+
   test "tool.execute memory_store defaults to lane scope and memory_get reads the scoped default target" do
     callback = TestSupport::CallbackHarness.new.start
 
@@ -1215,7 +1275,7 @@ class RPCContractTest < ActiveSupport::TestCase
 
   private
 
-  def tool_execute(logical_tool_name:, implementation_ref:, arguments:, workspace_root: nil, callback_session: nil)
+  def tool_execute(logical_tool_name:, implementation_ref:, arguments:, workspace_root: nil, conversation_path: nil, lane_path: nil, cwd: nil, callback_session: nil)
     params = {
       "tool_call_id" => "call-#{logical_tool_name}",
       "logical_tool_name" => logical_tool_name,
@@ -1227,8 +1287,9 @@ class RPCContractTest < ActiveSupport::TestCase
       workspace_payload = {
         "conversation_id" => "conversation:test-default",
         "root_path" => workspace_root,
-        "conversation_path" => workspace_root,
-        "cwd" => workspace_root,
+        "conversation_path" => conversation_path || workspace_root,
+        "lane_path" => lane_path,
+        "cwd" => cwd || conversation_path || workspace_root,
       }
       params["session_context"] = { "workspace" => workspace_payload }
       params["execution_context"] = { "workspace" => workspace_payload }
