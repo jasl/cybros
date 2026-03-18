@@ -65,7 +65,7 @@ module Cybros
             if stripped.start_with?("unset ")
               key = stripped.delete_prefix("unset ").strip
               validate_key!(key, line_number:)
-              @env.delete(key)
+              @env[key] = nil
               return
             end
 
@@ -96,7 +96,7 @@ module Cybros
 
           def normalize_env(process_env)
             process_env.to_h.each_with_object({}) do |(key, value), memo|
-              memo[key.to_s] = value.to_s
+              memo[key.to_s] = value.nil? ? nil : value.to_s
             end
           end
 

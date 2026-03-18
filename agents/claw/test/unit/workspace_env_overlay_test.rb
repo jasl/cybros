@@ -53,8 +53,8 @@ class WorkspaceEnvOverlayTest < ActiveSupport::TestCase
           lane_path: lane,
         )
 
-      refute result.fetch(:env).key?("RUBYOPT")
-      refute result.fetch(:env).key?("BUNDLE_GEMFILE")
+      assert_nil result.fetch(:env).fetch("RUBYOPT")
+      assert_nil result.fetch(:env).fetch("BUNDLE_GEMFILE")
       assert_equal "/usr/bin", result.fetch(:env).fetch("PATH")
     end
   end

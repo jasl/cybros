@@ -229,7 +229,7 @@ module Cybros
               Open3.capture3(
                 overlay.fetch(:env),
                 "/bin/sh",
-                "-lc",
+                "-c",
                 command,
                 chdir: cwd.to_s,
               )

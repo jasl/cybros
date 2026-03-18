@@ -667,6 +667,64 @@ class RPCContractTest < ActiveSupport::TestCase
     end
   end
 
+  test "tool.execute exec applies overlay PATH to shell command lookup" do
+    with_workspace("conversations/conversation:test-default/.keep" => "") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+      FileUtils.mkdir_p(lane_path)
+      fake_bin = File.join(workspace_root, "overlay-bin")
+      fake_ruby = File.join(fake_bin, "ruby")
+      FileUtils.mkdir_p(fake_bin)
+      File.write(fake_ruby, "#!/bin/sh\nprintf 'overlay-ruby\\n'\n")
+      FileUtils.chmod(0o755, fake_ruby)
+      File.write(File.join(lane_path, ".env.agent"), "PATH=#{fake_bin}\n")
+
+      payload =
+        tool_execute(
+          logical_tool_name: "exec",
+          implementation_ref: "claw:exec",
+          arguments: { "command" => "command -v ruby && ruby" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+
+      parsed = JSON.parse(result.dig("content", 0, "text"))
+      stdout_lines = parsed.fetch("stdout").lines(chomp: true)
+      assert_equal [fake_ruby, "overlay-ruby"], stdout_lines
+    end
+  end
+
+  test "tool.execute exec applies unset directives to subprocess env" do
+    with_env("BUNDLE_GEMFILE" => "/tmp/poisoned/Gemfile", "RUBYOPT" => "-W0") do
+      with_workspace("conversations/conversation:test-default/.lanes/lane:test-default/.env.agent" => "unset BUNDLE_GEMFILE\nunset RUBYOPT\n") do |workspace_root|
+        conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+        lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+
+        payload =
+          tool_execute(
+            logical_tool_name: "exec",
+            implementation_ref: "claw:exec",
+            arguments: { "command" => "printf '%s\\n' \"${BUNDLE_GEMFILE:-}\" \"${RUBYOPT:-}\"" },
+            workspace_root: workspace_root,
+            conversation_path: conversation_path,
+            lane_path: lane_path,
+            cwd: conversation_path,
+          )
+
+        result = payload.fetch("result")
+        refute result.fetch("error")
+
+        parsed = JSON.parse(result.dig("content", 0, "text"))
+        assert_equal ["", ""], parsed.fetch("stdout").lines(chomp: true)
+      end
+    end
+  end
+
   test "tool.execute exec returns env overlay metadata without leaking values" do
     with_workspace(".env" => "PATH=/root/bin\n") do |workspace_root|
       conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
