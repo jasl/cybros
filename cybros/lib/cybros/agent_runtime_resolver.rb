@@ -87,7 +87,7 @@ module Cybros
         confirm = false
 
         Array(paths).each do |path|
-          case protected_path_rule(path, workspace.fetch(:root_path))
+          case protected_path_rule(path, workspace)
           when :deny
             return { action: :deny, reason: PROTECTED_AGENT_ROOT_DENY_REASON }
           when :confirm
@@ -106,7 +106,7 @@ module Cybros
 
         shell_path_candidates(raw).any? do |candidate|
           path = resolve_relative_path(candidate, workspace)
-          path && protected_path_rule(path, workspace.fetch(:root_path)).present?
+          path && protected_path_rule(path, workspace).present?
         end
       end
       private_class_method :protected_exec_mutation?
@@ -179,9 +179,30 @@ module Cybros
         cwd = workspace.fetch("cwd", "").to_s.strip
         return nil if root_path.empty? || cwd.empty?
 
-        { root_path: Pathname.new(root_path).expand_path, cwd: Pathname.new(cwd).expand_path }
+        normalized_root = Pathname.new(root_path).expand_path
+        normalized_cwd = normalize_workspace_path(cwd, root_path: normalized_root)
+        return nil if normalized_cwd.nil?
+
+        {
+          root_path: normalized_root,
+          cwd: normalized_cwd,
+          conversation_path: normalize_workspace_path(workspace.fetch("conversation_path", ""), root_path: normalized_root),
+          lane_path: normalize_workspace_path(workspace.fetch("lane_path", ""), root_path: normalized_root),
+        }
       end
       private_class_method :workspace_payload_for
+
+      def normalize_workspace_path(raw_path, root_path:)
+        path = raw_path.to_s.strip
+        return nil if path.empty?
+
+        expanded = Pathname.new(path).expand_path
+        ensure_within_root!(expanded, root_path)
+        expanded
+      rescue SecurityError
+        nil
+      end
+      private_class_method :normalize_workspace_path
 
       def resolve_relative_path(raw_path, workspace)
         path = raw_path.to_s.strip
@@ -195,14 +216,58 @@ module Cybros
       end
       private_class_method :resolve_relative_path
 
-      def protected_path_rule(path, root_path)
+      def protected_path_rule(path, workspace)
+        root_path = workspace.fetch(:root_path)
         relative = path.relative_path_from(root_path).to_s
         return :deny if relative == "AGENTS.md" || relative.start_with?(".history/")
+        return :confirm if env_overlay_path_for?(relative, root_relative: nil)
+        return :confirm if current_lane_relative_path(workspace) && env_overlay_path_for?(relative, root_relative: current_lane_relative_path(workspace))
+        return :deny if conversation_relative_path(workspace) && env_overlay_path_for?(relative, root_relative: conversation_relative_path(workspace))
+        return :deny if lane_env_overlay_path?(relative)
         return :confirm if relative == "SOUL.md" || relative == "USER.md" || relative.start_with?("skills/")
 
         nil
+      rescue ArgumentError
+        nil
       end
       private_class_method :protected_path_rule
+
+      def env_overlay_path_for?(relative_path, root_relative:)
+        prefix = root_relative.to_s.presence
+        return %w[.env .env.agent].include?(relative_path) if prefix.nil?
+
+        [
+          "#{prefix}/.env",
+          "#{prefix}/.env.agent",
+        ].include?(relative_path)
+      end
+      private_class_method :env_overlay_path_for?
+
+      def lane_env_overlay_path?(relative_path)
+        return false unless relative_path.include?("/.lanes/") || relative_path.start_with?(".lanes/")
+
+        relative_path.end_with?("/.env", "/.env.agent")
+      end
+      private_class_method :lane_env_overlay_path?
+
+      def current_lane_relative_path(workspace)
+        relative_path_from_root(workspace[:lane_path], workspace.fetch(:root_path))
+      end
+      private_class_method :current_lane_relative_path
+
+      def conversation_relative_path(workspace)
+        relative_path_from_root(workspace[:conversation_path] || workspace[:cwd], workspace.fetch(:root_path))
+      end
+      private_class_method :conversation_relative_path
+
+      def relative_path_from_root(path, root_path)
+        return nil if path.nil?
+
+        path.relative_path_from(root_path).to_s
+      rescue ArgumentError
+        nil
+      end
+      private_class_method :relative_path_from_root
 
       def ensure_within_root!(path, root_path)
         normalized = path.expand_path.to_s

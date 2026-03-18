@@ -625,6 +625,89 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal({ action: nil }, result)
   end
 
+  test "protected path classifier confirms writes to current lane env files" do
+    root = Pathname.new("/tmp/agent-root")
+    conversation_path = root.join("conversations", "conversation:test-default")
+    lane_path = conversation_path.join(".lanes", "lane:test-default")
+    context = protected_path_context(root:, conversation_path:, lane_path:)
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "write",
+        arguments: { "path" => ".lanes/lane:test-default/.env.agent" },
+        context: context,
+      )
+
+    assert_equal :confirm, result.fetch(:action)
+  end
+
+  test "protected path classifier confirms writes to agent-root env files" do
+    root = Pathname.new("/tmp/agent-root")
+    conversation_path = root.join("conversations", "conversation:test-default")
+    lane_path = conversation_path.join(".lanes", "lane:test-default")
+    context = protected_path_context(root:, conversation_path:, lane_path:)
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "write",
+        arguments: { "path" => "../../.env.agent" },
+        context: context,
+      )
+
+    assert_equal :confirm, result.fetch(:action)
+  end
+
+  test "protected path classifier denies conversation env shadow files" do
+    root = Pathname.new("/tmp/agent-root")
+    conversation_path = root.join("conversations", "conversation:test-default")
+    lane_path = conversation_path.join(".lanes", "lane:test-default")
+    context = protected_path_context(root:, conversation_path:, lane_path:)
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "write",
+        arguments: { "path" => ".env.agent" },
+        context: context,
+      )
+
+    assert_equal :deny, result.fetch(:action)
+    assert_equal Cybros::AgentRuntimeResolver::PROTECTED_AGENT_ROOT_DENY_REASON, result.fetch(:reason)
+  end
+
+  test "protected path classifier denies non-current lane env files" do
+    root = Pathname.new("/tmp/agent-root")
+    conversation_path = root.join("conversations", "conversation:test-default")
+    lane_path = conversation_path.join(".lanes", "lane:test-default")
+    context = protected_path_context(root:, conversation_path:, lane_path:)
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "write",
+        arguments: { "path" => ".lanes/lane:other/.env.agent" },
+        context: context,
+      )
+
+    assert_equal :deny, result.fetch(:action)
+    assert_equal Cybros::AgentRuntimeResolver::PROTECTED_AGENT_ROOT_DENY_REASON, result.fetch(:reason)
+  end
+
+  test "protected path classifier denies exec redirection into env overlay files" do
+    root = Pathname.new("/tmp/agent-root")
+    conversation_path = root.join("conversations", "conversation:test-default")
+    lane_path = conversation_path.join(".lanes", "lane:test-default")
+    context = protected_path_context(root:, conversation_path:, lane_path:)
+
+    result =
+      Cybros::AgentRuntimeResolver::ProtectedAgentPathClassifier.call(
+        name: "exec",
+        arguments: { "command" => "echo hello > .lanes/lane:test-default/.env.agent" },
+        context: context,
+      )
+
+    assert_equal :deny, result.fetch(:action)
+    assert_equal Cybros::AgentRuntimeResolver::PROTECTED_AGENT_ROOT_EXEC_DENY_REASON, result.fetch(:reason)
+  end
+
   test "channel_for ignores nodes without a conversation-backed graph" do
     graph = Struct.new(:attachable).new(Object.new)
     node = Struct.new(:metadata, :graph).new({ "routing" => {} }, graph)
@@ -663,6 +746,23 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
       yield
     ensure
       singleton.send(:define_method, :env, original_method)
+    end
+
+    def protected_path_context(root:, conversation_path:, lane_path:)
+      Struct.new(:attributes).new(
+        {
+          cybros: {
+            execution_context: {
+              workspace: {
+                root_path: root.to_s,
+                conversation_path: conversation_path.to_s,
+                lane_path: lane_path.to_s,
+                cwd: conversation_path.to_s,
+              },
+            },
+          },
+        },
+      )
     end
 
     def with_catalog_yaml(yaml)
