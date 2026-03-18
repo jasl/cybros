@@ -1,16 +1,16 @@
 # Claw Workspace Env Overlay Proof
 
 - Date: 2026-03-18
-- Started at (UTC): 2026-03-18T02:12:41Z
-- Finished at (UTC): 2026-03-18T02:13:39Z
+- Started at (UTC): 2026-03-18T11:53:55Z
+- Finished at (UTC): 2026-03-18T11:54:59Z
 - Model ref: openrouter/openai-gpt-5.4-live-acceptance
 - Environment: development @ Juns-MacBook-Pro-M4-2419.local
-- Workspace root base: `/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-51436-rvzzvw`
+- Workspace root base: `/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-30729-g119nt`
 - Scenario id: `rbenv_shell_resolution`
-- Lane env path: `.lanes/019cfeb7-783a-77a6-ada8-21221c5357ad/.env.agent`
+- Lane env path: `.lanes/019d00cb-9c81-7d2b-939f-362b625b27c5/.env.agent`
 - Root env path: `../../.env.agent`
 - Approval count: 5
-- Conversation ids: 019cfeb7-782c-7d20-aa16-e0254b12c3f6, 019cfeb8-3445-798c-a0d4-9a3b6240eed2
+- Conversation ids: 019d00cb-9c4a-7ff1-bc95-06f5bceedd8e, 019d00cc-6e04-7f31-b4fb-d1b885e1f5aa
 
 ## Expected interactive zsh target
 
@@ -45,7 +45,7 @@
 | bundle_gemfile | `` |
 | bundle_path | `/Users/jasl/.rbenv/shims/bundle` |
 | bundle_version | `4.0.7` |
-| env_files_loaded | `["/private/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-51436-rvzzvw/bundled/claw/conversations/019cfeb7-782c-7d20-aa16-e0254b12c3f6/.lanes/019cfeb7-783a-77a6-ada8-21221c5357ad/.env.agent"]` |
+| env_files_loaded | `["/private/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-30729-g119nt/bundled/claw/conversations/019d00cb-9c4a-7ff1-bc95-06f5bceedd8e/.lanes/019d00cb-9c81-7d2b-939f-362b625b27c5/.env.agent"]` |
 | exit_code | `0` |
 | rbenv_root | `/Users/jasl/.rbenv` |
 | ruby_path | `/Users/jasl/.rbenv/shims/ruby` |
@@ -59,7 +59,7 @@
 | bundle_gemfile | `` |
 | bundle_path | `/Users/jasl/.rbenv/shims/bundle` |
 | bundle_version | `4.0.7` |
-| env_files_loaded | `["/private/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-51436-rvzzvw/bundled/claw/.env.agent"]` |
+| env_files_loaded | `["/private/var/folders/_6/7vgpkxd14klg0lpvxyh5nk2h0000gn/T/cybros-agent-root-live-20260318-30729-g119nt/bundled/claw/.env.agent"]` |
 | exit_code | `0` |
 | rbenv_root | `/Users/jasl/.rbenv` |
 | ruby_path | `/Users/jasl/.rbenv/shims/ruby` |
