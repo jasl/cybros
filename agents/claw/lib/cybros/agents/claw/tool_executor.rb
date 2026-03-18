@@ -61,12 +61,14 @@ module Cybros
 
           cache_key = [
             workspace_config.fetch("root_path"),
+            workspace_config.fetch("conversation_path", ""),
             workspace_config.fetch("cwd"),
             workspace_config.fetch("lane_path", ""),
           ].join("\u0000")
           @workspace_tools_by_scope[cache_key] ||=
             Tools::WorkspaceTools.new(
               workspace_root: workspace_config.fetch("root_path"),
+              conversation_path: workspace_config.fetch("conversation_path", nil),
               cwd: workspace_config.fetch("cwd"),
               lane_path: workspace_config.fetch("lane_path", nil),
             )

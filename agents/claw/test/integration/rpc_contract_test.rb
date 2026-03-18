@@ -697,6 +697,124 @@ class RPCContractTest < ActiveSupport::TestCase
     end
   end
 
+  test "tool.execute write snapshots agent-root env files before overwrite" do
+    with_workspace(
+      "conversations/conversation:test-default/.keep" => "",
+      ".env.agent" => "RBENV_ROOT=/old/.rbenv\n",
+    ) do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      FileUtils.mkdir_p(File.join(conversation_path, ".lanes", "lane:test-default"))
+      FileUtils.mkdir_p(conversation_path)
+
+      payload =
+        tool_execute(
+          logical_tool_name: "write",
+          implementation_ref: "claw:write",
+          arguments: { "path" => "../../.env.agent", "content" => "RBENV_ROOT=/new/.rbenv\n" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: File.join(conversation_path, ".lanes", "lane:test-default"),
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+      assert_equal "RBENV_ROOT=/new/.rbenv\n", File.read(File.join(workspace_root, ".env.agent"))
+      assert_equal ["RBENV_ROOT=/old/.rbenv\n"], history_snapshots_for(workspace_root, ".env.agent").map { |path| File.read(path) }
+    end
+  end
+
+  test "tool.execute write snapshots current lane env files before overwrite" do
+    with_workspace("conversations/conversation:test-default/.lanes/lane:test-default/.env.agent" => "RBENV_ROOT=/lane-old\n") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+
+      payload =
+        tool_execute(
+          logical_tool_name: "write",
+          implementation_ref: "claw:write",
+          arguments: { "path" => ".lanes/lane:test-default/.env.agent", "content" => "RBENV_ROOT=/lane-new\n" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      refute result.fetch("error")
+      assert_equal "RBENV_ROOT=/lane-new\n", File.read(File.join(lane_path, ".env.agent"))
+      assert_equal ["RBENV_ROOT=/lane-old\n"], history_snapshots_for(workspace_root, "conversations/conversation:test-default/.lanes/lane:test-default/.env.agent").map { |path| File.read(path) }
+    end
+  end
+
+  test "tool.execute write denies conversation-scope env shadow files" do
+    with_workspace("conversations/conversation:test-default/.keep" => "") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      FileUtils.mkdir_p(File.join(conversation_path, ".lanes", "lane:test-default"))
+
+      payload =
+        tool_execute(
+          logical_tool_name: "write",
+          implementation_ref: "claw:write",
+          arguments: { "path" => ".env.agent", "content" => "RBENV_ROOT=/shadow\n" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: File.join(conversation_path, ".lanes", "lane:test-default"),
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      assert_equal true, result.fetch("error")
+      assert_includes result.dig("content", 0, "text"), "cannot be modified"
+    end
+  end
+
+  test "tool.execute write denies non-current lane env files" do
+    with_workspace("conversations/conversation:test-default/.keep" => "") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+      FileUtils.mkdir_p(lane_path)
+
+      payload =
+        tool_execute(
+          logical_tool_name: "write",
+          implementation_ref: "claw:write",
+          arguments: { "path" => ".lanes/lane:other/.env.agent", "content" => "RBENV_ROOT=/other\n" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      assert_equal true, result.fetch("error")
+      assert_includes result.dig("content", 0, "text"), "cannot be modified"
+    end
+  end
+
+  test "tool.execute exec denies shell redirection into env overlay files" do
+    with_workspace("conversations/conversation:test-default/.keep" => "") do |workspace_root|
+      conversation_path = File.join(workspace_root, "conversations", "conversation:test-default")
+      lane_path = File.join(conversation_path, ".lanes", "lane:test-default")
+      FileUtils.mkdir_p(lane_path)
+
+      payload =
+        tool_execute(
+          logical_tool_name: "exec",
+          implementation_ref: "claw:exec",
+          arguments: { "command" => "echo RBENV_ROOT=/tmp > .lanes/lane:test-default/.env.agent" },
+          workspace_root: workspace_root,
+          conversation_path: conversation_path,
+          lane_path: lane_path,
+          cwd: conversation_path,
+        )
+
+      result = payload.fetch("result")
+      assert_equal true, result.fetch("error")
+      assert_includes result.dig("content", 0, "text"), "protected"
+    end
+  end
+
   test "tool.execute memory_store defaults to lane scope and memory_get reads the scoped default target" do
     callback = TestSupport::CallbackHarness.new.start
 
@@ -1389,6 +1507,10 @@ class RPCContractTest < ActiveSupport::TestCase
         # #{name}
       MD
     )
+  end
+
+  def history_snapshots_for(workspace_root, relative_path)
+    Dir.glob(File.join(workspace_root, ".history", "*", relative_path)).sort
   end
 
   def with_skill_catalog_sources(sources)

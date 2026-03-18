@@ -30,8 +30,9 @@ module Cybros
 
           class PatchFormatError < StandardError; end
 
-          def initialize(workspace_root:, cwd: nil, lane_path: nil)
+          def initialize(workspace_root:, conversation_path: nil, cwd: nil, lane_path: nil)
             @workspace_root = normalize_workspace_root(workspace_root)
+            @conversation_path = normalize_optional_path(conversation_path, workspace_root: @workspace_root)
             @cwd = normalize_cwd(cwd, workspace_root: @workspace_root)
             @lane_path = normalize_optional_path(lane_path, workspace_root: @workspace_root)
           end
@@ -59,7 +60,7 @@ module Cybros
 
           private
 
-          attr_reader :workspace_root, :cwd, :lane_path
+          attr_reader :workspace_root, :conversation_path, :cwd, :lane_path
 
           def glob(arguments)
             pattern = arguments.fetch("pattern", "").to_s
@@ -688,6 +689,8 @@ module Cybros
               raise SecurityError, "AGENTS.md is read-only and cannot be modified"
             when :deny_history
               raise SecurityError, ".history is runtime-managed and cannot be modified directly"
+            when :deny_env
+              raise SecurityError, ".env overlay files outside agent root and the current lane cannot be modified"
             end
           end
 
@@ -715,10 +718,46 @@ module Cybros
             relative_path = path.relative_path_from(workspace_root).to_s
             return :deny_agents if PROTECTED_DENY_PATHS.include?(relative_path)
             return :deny_history if relative_path.start_with?(".history/")
+            return :confirm if env_overlay_path_for?(relative_path, root_relative: nil)
+            return :confirm if current_lane_relative_path && env_overlay_path_for?(relative_path, root_relative: current_lane_relative_path)
+            return :deny_env if conversation_relative_path && env_overlay_path_for?(relative_path, root_relative: conversation_relative_path)
+            return :deny_env if lane_env_overlay_path?(relative_path)
             return :confirm if PROTECTED_CONFIRM_PATHS.include?(relative_path)
             return :confirm if relative_path.start_with?("skills/")
 
             nil
+          rescue ArgumentError
+            nil
+          end
+
+          def env_overlay_path_for?(relative_path, root_relative:)
+            prefix = root_relative.to_s.presence
+            return %w[.env .env.agent].include?(relative_path) if prefix.nil?
+
+            [
+              "#{prefix}/.env",
+              "#{prefix}/.env.agent",
+            ].include?(relative_path)
+          end
+
+          def lane_env_overlay_path?(relative_path)
+            return false unless relative_path.include?("/.lanes/") || relative_path.start_with?(".lanes/")
+
+            relative_path.end_with?("/.env", "/.env.agent")
+          end
+
+          def current_lane_relative_path
+            @current_lane_relative_path ||= relative_path_from_workspace(lane_path)
+          end
+
+          def conversation_relative_path
+            @conversation_relative_path ||= relative_path_from_workspace(conversation_path || cwd)
+          end
+
+          def relative_path_from_workspace(path)
+            return nil if path.nil?
+
+            path.relative_path_from(workspace_root).to_s
           rescue ArgumentError
             nil
           end
