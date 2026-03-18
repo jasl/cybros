@@ -25,6 +25,16 @@ module DAG
              class_name: "TurnInternalTask",
              foreign_key: :graph_id,
              inverse_of: :graph
+    has_many :owned_subagent_threads,
+             class_name: "SubagentThread",
+             foreign_key: :owner_graph_id,
+             dependent: :restrict_with_exception,
+             inverse_of: :owner_graph
+    has_one :subagent_thread,
+            class_name: "SubagentThread",
+            foreign_key: :child_graph_id,
+            dependent: :restrict_with_exception,
+            inverse_of: :child_graph
 
     after_create :ensure_main_lane
     before_destroy :purge_graph_records

@@ -192,6 +192,69 @@ class ConversationNodeActionPolicyTest < ActiveSupport::TestCase
     assert_equal true, policy.dig("actions", "stop", "available")
   end
 
+  test "managed subagent child marks execute and mutations unavailable even when the child node shape would otherwise allow them" do
+    parent = create_conversation!(title: "Parent")
+    owner_node = parent.append_user_message!(content: "Delegate this").fetch(:agent_node)
+    owner_turn = DAG::Turn.find(owner_node.turn_id)
+    child =
+      Conversation.create!(
+        user: parent.user,
+        parent_conversation: parent,
+        title: "Child",
+        agent: parent.agent,
+        agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
+        metadata: { "agent" => { "agent_profile" => "subagent" } },
+      )
+
+    SubagentThread.create!(
+      id: ActiveRecord::Base.connection.select_value("select uuidv7()"),
+      owner_conversation: parent,
+      owner_graph: parent.dag_graph,
+      owner_turn: owner_turn,
+      owner_node: owner_node,
+      child_conversation: child,
+      child_graph: child.dag_graph,
+      requested_name: "child",
+      title: "Child",
+      agent_profile: "subagent",
+      context_turns: 50,
+      diagnostic_level: "standard",
+      status: "active",
+      child_status: "pending",
+      depth: 1,
+      last_snapshot: {},
+      final_snapshot: {},
+    )
+
+    agent = nil
+    child.dag_graph.mutate! do |m|
+      user =
+        m.create_node(
+          node_type: Messages::UserMessage.node_type_key,
+          state: DAG::Node::FINISHED,
+          content: "child: hello",
+          metadata: {},
+        )
+      agent =
+        m.create_node(
+          node_type: Messages::AgentMessage.node_type_key,
+          state: DAG::Node::PENDING,
+          lane_id: child.chat_lane.id,
+          metadata: {},
+        )
+      m.create_edge(from_node: user, to_node: agent, edge_type: DAG::Edge::SEQUENCE)
+    end
+
+    policy = policy_for(conversation: child, node: agent)
+
+    assert_equal false, policy.dig("capabilities", "execute", "available")
+    assert_equal "managed_subagent_read_only", policy.dig("capabilities", "execute", "reason")
+    assert_equal false, policy.dig("actions", "start", "available")
+    assert_equal "managed_subagent_read_only", policy.dig("actions", "start", "reason")
+    assert_equal false, policy.dig("actions", "stop", "available")
+    assert_equal "managed_subagent_read_only", policy.dig("actions", "stop", "reason")
+  end
+
   test "tail pending assistant exposes start" do
     conversation =
       create_conversation!(

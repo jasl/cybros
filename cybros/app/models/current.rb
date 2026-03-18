@@ -1,6 +1,7 @@
 class Current < ActiveSupport::CurrentAttributes
   attribute :session, :user, :identity, :account
   attribute :http_method, :request_id, :user_agent, :ip_address, :referrer, :base_url
+  attribute :subagent_owner_proxy_thread_id
 
   def session=(value)
     super(value)

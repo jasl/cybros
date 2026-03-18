@@ -94,6 +94,20 @@
       </div>
 
       <% message_form_id = dom_id(@conversation, :message_form) %>
+      <% managed_subagent_read_only = @conversation.managed_subagent_read_only? %>
+      <% managed_subagent_thread = @conversation.managed_subagent_thread %>
+      <% if managed_subagent_read_only && managed_subagent_thread.present? %>
+        <div
+          role="alert"
+          class="alert alert-info text-sm"
+          data-testid="managed-subagent-banner">
+          <span class="icon-[lucide--workflow] size-4"></span>
+          <span class="flex-1">
+            This subagent is managed by its owner conversation.
+            <%= link_to "Open owner", conversation_path(managed_subagent_thread.owner_conversation), class: "link link-primary", data: { testid: "managed-subagent-owner-link" } %>
+          </span>
+        </div>
+      <% end %>
 	      <%= form_with url: conversation_messages_path(@conversation),
 	        method: :post,
 	        multipart: true,
@@ -182,6 +196,7 @@
 	              type="file"
 	              name="attachments[]"
 	              multiple
+                <%= "disabled" if managed_subagent_read_only %>
 	              class="hidden"
 	              data-message-form-target="attachmentInput"
 	              data-action="click->message-form#prepareAttachmentSelection change->message-form#attachmentInputChanged">
@@ -192,10 +207,11 @@
             class="bg-transparent flex-1 resize-none py-1.5 text-sm placeholder:opacity-40 min-h-6 max-h-48 focus-visible:outline-none"
             placeholder="Message…"
             aria-label="Message"
+            <%= "disabled" if managed_subagent_read_only %>
             data-message-form-target="textarea"
             data-chat-hotkeys-target="textarea"
             data-action="keydown->message-form#keydown input->message-form#draftChanged"><%= @composer_draft_content %></textarea>
-          <button type="submit" class="btn btn-neutral btn-circle btn-sm shrink-0 mb-0.5" aria-label="Send">
+          <button type="submit" class="btn btn-neutral btn-circle btn-sm shrink-0 mb-0.5" aria-label="Send" <%= "disabled" if managed_subagent_read_only %>>
             <span class="icon-[lucide--arrow-up] size-4"></span>
           </button>
         </div>
@@ -215,6 +231,7 @@
                   form="<%= message_form_id %>"
                   data-action="change->message-form#runtimeSettingChanged"
                   <%= needs_model_reselection ? "required" : nil %>
+                  <%= "disabled" if managed_subagent_read_only %>
                   class="select select-bordered select-xs w-full min-w-0">
                   <% if needs_model_reselection %>
                     <option value="" selected>Please reselect a model</option>
@@ -249,6 +266,7 @@
               data-testid="conversation-composer-permission-picker"
               aria-label="Permissions"
               data-action="change->message-form#runtimeSettingChanged"
+              <%= "disabled" if managed_subagent_read_only %>
               class="select select-bordered select-xs w-full">
               <% @permission_mode_options.each do |value, label| %>
                 <option value="<%= value %>" <%= @selected_permission_mode == value ? "selected" : nil %>>

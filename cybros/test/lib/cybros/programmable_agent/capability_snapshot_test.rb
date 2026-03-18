@@ -60,21 +60,53 @@ class Cybros::ProgrammableAgent::CapabilitySnapshotTest < ActiveSupport::TestCas
         kernel_tools: [
           tool(logical_tool_name: "subagent_spawn", implementation_ref: "kernel://subagent_spawn"),
           tool(logical_tool_name: "subagent_run", implementation_ref: "kernel://subagent_run", execution_mode: "parallel_safe"),
+          tool(logical_tool_name: "subagent_wait", implementation_ref: "kernel://subagent_wait"),
+          tool(logical_tool_name: "subagent_poll", implementation_ref: "kernel://subagent_poll"),
+          tool(logical_tool_name: "subagent_send_input", implementation_ref: "kernel://subagent_send_input"),
+          tool(logical_tool_name: "subagent_resume", implementation_ref: "kernel://subagent_resume"),
+          tool(logical_tool_name: "subagent_interrupt", implementation_ref: "kernel://subagent_interrupt"),
+          tool(logical_tool_name: "subagent_approve", implementation_ref: "kernel://subagent_approve"),
+          tool(logical_tool_name: "subagent_deny", implementation_ref: "kernel://subagent_deny"),
+          tool(logical_tool_name: "subagent_close", implementation_ref: "kernel://subagent_close"),
         ],
         agent_tools: [
           tool(logical_tool_name: "subagent_spawn", implementation_ref: "agent://subagent_spawn"),
           tool(logical_tool_name: "subagent_run", implementation_ref: "agent://subagent_run", execution_mode: "serial"),
+          tool(logical_tool_name: "subagent_wait", implementation_ref: "agent://subagent_wait"),
+          tool(logical_tool_name: "subagent_poll", implementation_ref: "agent://subagent_poll"),
+          tool(logical_tool_name: "subagent_send_input", implementation_ref: "agent://subagent_send_input"),
+          tool(logical_tool_name: "subagent_resume", implementation_ref: "agent://subagent_resume"),
+          tool(logical_tool_name: "subagent_interrupt", implementation_ref: "agent://subagent_interrupt"),
+          tool(logical_tool_name: "subagent_approve", implementation_ref: "agent://subagent_approve"),
+          tool(logical_tool_name: "subagent_deny", implementation_ref: "agent://subagent_deny"),
+          tool(logical_tool_name: "subagent_close", implementation_ref: "agent://subagent_close"),
         ],
       )
 
     spawn_route = snapshot.route_for!("subagent_spawn")
     run_route = snapshot.route_for!("subagent_run")
+    wait_route = snapshot.route_for!("subagent_wait")
+    poll_route = snapshot.route_for!("subagent_poll")
+    send_input_route = snapshot.route_for!("subagent_send_input")
+    resume_route = snapshot.route_for!("subagent_resume")
+    interrupt_route = snapshot.route_for!("subagent_interrupt")
+    approve_route = snapshot.route_for!("subagent_approve")
+    deny_route = snapshot.route_for!("subagent_deny")
+    close_route = snapshot.route_for!("subagent_close")
 
     assert_equal "kernel", spawn_route.implementation_source
     assert_equal "kernel://subagent_spawn", spawn_route.implementation_ref
     assert_equal "kernel", run_route.implementation_source
     assert_equal "kernel://subagent_run", run_route.implementation_ref
     assert_equal "parallel_safe", run_route.execution_mode
+    assert_equal "kernel://subagent_wait", wait_route.implementation_ref
+    assert_equal "kernel://subagent_poll", poll_route.implementation_ref
+    assert_equal "kernel://subagent_send_input", send_input_route.implementation_ref
+    assert_equal "kernel://subagent_resume", resume_route.implementation_ref
+    assert_equal "kernel://subagent_interrupt", interrupt_route.implementation_ref
+    assert_equal "kernel://subagent_approve", approve_route.implementation_ref
+    assert_equal "kernel://subagent_deny", deny_route.implementation_ref
+    assert_equal "kernel://subagent_close", close_route.implementation_ref
   end
 
   test "preserves execution_mode and defaults missing execution_mode to serial" do

@@ -14,7 +14,18 @@ module Cybros
 
     class CapabilitySnapshot
       RESERVED_LOGICAL_NAME_PREFIX = "cybros_".freeze
-      KERNEL_OWNED_LOGICAL_NAMES = %w[subagent_spawn subagent_run].freeze
+      KERNEL_OWNED_LOGICAL_NAMES = %w[
+        subagent_spawn
+        subagent_run
+        subagent_wait
+        subagent_poll
+        subagent_send_input
+        subagent_resume
+        subagent_interrupt
+        subagent_approve
+        subagent_deny
+        subagent_close
+      ].freeze
       EFFECTIVE_TOOL_ID_PREFIX = "etool_".freeze
       SNAPSHOT_ID_PREFIX = "csnap_".freeze
       EXECUTION_MODES = %w[serial parallel_safe].freeze

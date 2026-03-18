@@ -36,10 +36,22 @@ module AgentCore
           "subagent.poll" => "subagent_poll",
           "subagent.run" => "subagent_run",
           "subagent.wait" => "subagent_wait",
+          "subagent.send_input" => "subagent_send_input",
+          "subagent.resume" => "subagent_resume",
+          "subagent.interrupt" => "subagent_interrupt",
+          "subagent.approve" => "subagent_approve",
+          "subagent.deny" => "subagent_deny",
+          "subagent.close" => "subagent_close",
           "subagent-spawn" => "subagent_spawn",
           "subagent-poll" => "subagent_poll",
           "subagent-run" => "subagent_run",
           "subagent-wait" => "subagent_wait",
+          "subagent-send-input" => "subagent_send_input",
+          "subagent-resume" => "subagent_resume",
+          "subagent-interrupt" => "subagent_interrupt",
+          "subagent-approve" => "subagent_approve",
+          "subagent-deny" => "subagent_deny",
+          "subagent-close" => "subagent_close",
         }.freeze
 
         module_function

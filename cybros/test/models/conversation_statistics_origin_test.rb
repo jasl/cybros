@@ -14,6 +14,7 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
 
     assert_equal "runtime", child.metadata.dig("statistics", "sample_origin")
     assert_equal "runtime", child.statistics_sample_origin
+    assert_equal parent.id, SubagentThread.find(child.metadata.fetch("subagent_thread_id")).owner_conversation_id
   end
 
   test "subagent backing conversations inherit explicit non-runtime sample_origin" do
@@ -29,6 +30,7 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
 
     assert_equal "debug", child.metadata.dig("statistics", "sample_origin")
     assert_equal "debug", child.statistics_sample_origin
+    assert_equal parent.dag_graph.id, SubagentThread.find(child.metadata.fetch("subagent_thread_id")).owner_graph_id
   end
 
   test "missing sample_origin normalizes to runtime during reads" do
@@ -80,6 +82,10 @@ class ConversationStatisticsOriginTest < ActiveSupport::TestCase
       refute result.error?, result.text
 
       payload = JSON.parse(result.text)
-      Conversation.find_by!("metadata -> 'subagent' ->> 'subagent_id' = ?", payload.fetch("subagent_id"))
+      thread = SubagentThread.find(payload.fetch("subagent_id"))
+      assert_equal parent.id, thread.owner_conversation_id
+      assert_equal parent.dag_graph.id, thread.owner_graph_id
+      assert_equal thread.child_graph_id, thread.child_conversation.dag_graph.id
+      thread.child_conversation
     end
 end

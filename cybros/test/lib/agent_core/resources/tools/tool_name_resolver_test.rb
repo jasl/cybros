@@ -80,7 +80,18 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
   end
 
   def test_resolve_default_aliases_include_subagent_tools
-    tools = ["subagent_spawn", "subagent_poll", "subagent_run", "subagent_wait"]
+    tools = [
+      "subagent_spawn",
+      "subagent_poll",
+      "subagent_run",
+      "subagent_wait",
+      "subagent_send_input",
+      "subagent_resume",
+      "subagent_interrupt",
+      "subagent_approve",
+      "subagent_deny",
+      "subagent_close",
+    ]
     include_check = ->(name) { tools.include?(name) }
 
     res =
@@ -121,6 +132,66 @@ class AgentCore::Resources::Tools::ToolNameResolverTest < Minitest::Test
       )
 
     assert_equal "subagent_wait", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent.send_input",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_send_input", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent-resume",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_resume", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent.interrupt",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_interrupt", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent.approve",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_approve", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent-deny",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_deny", res.resolved_name
+    assert_equal :alias, res.method
+
+    res =
+      AgentCore::Resources::Tools::ToolNameResolver.resolve(
+        "subagent.close",
+        include_check: include_check,
+        aliases: {},
+      )
+
+    assert_equal "subagent_close", res.resolved_name
     assert_equal :alias, res.method
   end
 end

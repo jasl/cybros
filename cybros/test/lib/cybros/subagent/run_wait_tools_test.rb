@@ -62,6 +62,7 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
     refute result.error?, result.text
 
     payload = JSON.parse(result.text)
+    thread = find_subagent_thread!(payload.fetch("subagent_id"))
     child = find_subagent_conversation_by_subagent_id!(payload.fetch("subagent_id"))
     child_graph = child.dag_graph
     child_leaf = child_graph.leaf_nodes.where(lane_id: child_graph.main_lane.id).order(:id).last
@@ -78,6 +79,13 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
     refute payload.key?(["child", "conversation", "id"].join("_"))
     refute payload.key?("child_graph_id")
 
+    assert_equal payload.fetch("subagent_id"), thread.id
+    assert_equal parent.id, thread.owner_conversation_id
+    assert_equal parent.dag_graph.id, thread.owner_graph_id
+    assert_equal ctx.attributes.dig(:dag, :turn_id).to_s, thread.owner_turn_id.to_s
+    assert_equal ctx.attributes.dig(:dag, :node_id).to_s, thread.owner_node_id.to_s
+    assert_equal child.id, thread.child_conversation_id
+    assert_equal child_graph.id, thread.child_graph_id
     assert_equal parent.agent_id, child.agent_id
     assert_nil child[:agent_program_id]
     assert_nil child[:default_execution_target_id]
@@ -86,6 +94,7 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
     assert_equal "subagent", child.metadata.dig("agent", "agent_profile")
     assert_equal 88, child.metadata.dig("agent", "context_turns")
     assert_equal payload.fetch("subagent_id"), child.metadata.dig("subagent", "subagent_id")
+    assert_equal thread.id, child.metadata["subagent_thread_id"]
     assert_equal parent.id.to_s, child.metadata.dig("subagent", "parent_conversation_id")
     assert_equal ctx.attributes.dig(:dag, :turn_id).to_s, child.metadata.dig("subagent", "parent_turn_id")
     assert_equal ctx.attributes.dig(:dag, :node_id).to_s, child.metadata.dig("subagent", "parent_dag_node_id")
@@ -198,19 +207,29 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
     assert_equal true, payload.fetch("timed_out")
     assert_equal({ "pending" => 0, "running" => 1, "awaiting_approval" => 0 }, payload.fetch("counts"))
 
-    other =
-      create_conversation!(
-        metadata: {
-          "subagent" => {
-            "subagent_id" => ActiveRecord::Base.connection.select_value("select uuidv7()"),
-          },
+    other_parent = create_conversation!
+    other_owner_turn = other_parent.append_user_message!(content: "Delegate this")
+    other_owner_node = other_owner_turn.fetch(:agent_node)
+    other_thread =
+      SubagentThreads::ControlPlane.spawn!(
+        parent: other_parent,
+        owner_graph: other_parent.dag_graph,
+        owner_turn: DAG::Turn.find(other_owner_node.turn_id),
+        owner_node: other_owner_node,
+        request: {
+          "name" => "child",
+          "prompt" => "child: hello",
+          "agent_profile" => "subagent",
+          "context_turns" => 50,
+          "title" => "Child",
+          "diagnostic_level" => "standard",
         },
       )
 
     rejected =
       wait_tool.call(
         {
-          "subagent_id" => other.metadata.dig("subagent", "subagent_id"),
+          "subagent_id" => other_thread.id,
           "timeout_ms" => 0,
         },
         context: ctx,
@@ -307,6 +326,10 @@ class Cybros::Subagent::RunWaitToolsTest < ActiveSupport::TestCase
   end
 
   private
+
+    def find_subagent_thread!(subagent_id)
+      SubagentThread.find(subagent_id)
+    end
 
     def find_subagent_conversation_by_subagent_id!(subagent_id)
       Conversation.where("metadata -> 'subagent' ->> 'subagent_id' = ?", subagent_id).sole

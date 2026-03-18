@@ -139,19 +139,55 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       with_default_agent_workspace_root(workspace_root) do
         with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
           agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+          parent = create_conversation!(title: "Prompt Builder Parent", agent: agent)
+          parent_turn = parent.append_user_message!(content: "Delegate this")
+          parent_agent = parent_turn.fetch(:agent_node)
           conversation =
-            create_conversation!(
+            Conversation.create!(
+              user: parent.user,
               title: "Prompt Builder Subagent",
               agent: agent,
+              agent_config_schema_fingerprint: agent.config_schema_fingerprint,
+              parent_conversation: parent,
               metadata: {
                 "agent" => agent.conversation_metadata_fragment.merge("agent_profile" => "subagent"),
-                "subagent" => {
-                  "subagent_id" => SecureRandom.uuid,
-                  "parent_turn_id" => SecureRandom.uuid,
-                  "parent_dag_node_id" => SecureRandom.uuid,
-                },
               },
             )
+          thread =
+            SubagentThread.create!(
+              id: ActiveRecord::Base.connection.select_value("select uuidv7()"),
+              owner_conversation: parent,
+              owner_graph: parent.dag_graph,
+              owner_turn: DAG::Turn.find(parent_agent.turn_id),
+              owner_node: parent_agent,
+              child_conversation: conversation,
+              child_graph: conversation.dag_graph,
+              requested_name: "child",
+              title: "Prompt Builder Subagent",
+              agent_profile: "subagent",
+              context_turns: 50,
+              diagnostic_level: "standard",
+              status: "active",
+              child_status: "pending",
+              depth: 1,
+              last_snapshot: {},
+              final_snapshot: {},
+            )
+          conversation.update!(
+            metadata: conversation.metadata.merge(
+              "subagent" => {
+                "subagent_id" => thread.id,
+                "parent_turn_id" => parent_agent.turn_id,
+                "parent_dag_node_id" => parent_agent.id,
+              },
+              "subagent_thread_id" => thread.id,
+              "owner_conversation_id" => parent.id,
+              "owner_graph_id" => parent.dag_graph.id,
+              "owner_turn_id" => parent_agent.turn_id,
+              "owner_node_id" => parent_agent.id,
+              "depth" => 1,
+            ),
+          )
           AgentRPC::KernelServices::ConversationMemory.put!(
             conversation: conversation,
             lane: conversation.chat_lane,
@@ -159,12 +195,14 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
             body: "Do not inject full memory here",
           )
 
-          run_bundled_claw_turn!(
-            conversation: conversation,
-            user_content: "Handle delegated work",
-            model_ref: "dev/mock-model",
-            llm_payloads: llm_payloads,
-          )
+          Current.set(subagent_owner_proxy_thread_id: thread.id) do
+            run_bundled_claw_turn!(
+              conversation: conversation,
+              user_content: "Handle delegated work",
+              model_ref: "dev/mock-model",
+              llm_payloads: llm_payloads,
+            )
+          end
 
           system_prompt = llm_payloads.last.fetch("messages").find { |message| message["role"] == "system" }.fetch("content")
 

@@ -44,6 +44,11 @@ module DAG
     has_many :node_events,
              class_name: "DAG::NodeEvent",
              inverse_of: :node
+    has_many :owned_subagent_threads,
+             class_name: "SubagentThread",
+             foreign_key: :owner_node_id,
+             dependent: :restrict_with_exception,
+             inverse_of: :owner_node
 
     validates :node_type, presence: true
     validates :state, inclusion: { in: STATES }
@@ -59,6 +64,7 @@ module DAG
     after_create :ensure_turn_record!
     after_commit :project_tool_call_fact_after_commit, on: %i[create update]
     after_commit :refresh_execution_rollup_after_commit, on: %i[create update]
+    after_commit :sync_subagent_threads_after_commit, on: %i[create update]
 
     def terminal?
       TERMINAL_STATES.include?(state)
@@ -1085,6 +1091,10 @@ module DAG
         refresh_execution_rollup_if_needed!
       end
 
+      def sync_subagent_threads_after_commit
+        sync_subagent_threads_if_needed!
+      end
+
       def refresh_execution_rollup_if_needed!
         return if graph.blank? || lane_id.blank? || turn_id.blank?
         return unless graph.attachable.is_a?(Conversation)
@@ -1115,10 +1125,17 @@ module DAG
           reload
           project_tool_call_fact_if_needed
           refresh_execution_rollup_if_needed! if refresh_execution_rollup
+          sync_subagent_threads_if_needed!
           true
         else
           false
         end
+      end
+
+      def sync_subagent_threads_if_needed!
+        SubagentThreads::LifecycleSync.sync_from_node!(node: self)
+      rescue NameError
+        nil
       end
   end
 end

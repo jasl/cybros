@@ -115,7 +115,6 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
       m.create_edge(from_node: user, to_node: parent_agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
-    subagent_id = ActiveRecord::Base.connection.select_value("select uuidv7()")
     child =
       Conversation.create!(
         user: parent.user,
@@ -125,12 +124,6 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
         metadata: {
           "agent" => { "agent_profile" => "coding" },
-          "subagent" => {
-            "subagent_id" => subagent_id,
-            "parent_conversation_id" => parent.id.to_s,
-            "parent_graph_id" => parent.dag_graph.id.to_s,
-            "spawned_from_node_id" => parent_agent.id.to_s,
-          },
         },
       )
 
@@ -156,6 +149,38 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
       m.create_edge(from_node: user, to_node: child_agent, edge_type: DAG::Edge::SEQUENCE)
     end
 
+    thread =
+      SubagentThread.create!(
+        id: ActiveRecord::Base.connection.select_value("select uuidv7()"),
+        owner_conversation: parent,
+        owner_graph: parent.dag_graph,
+        owner_turn: DAG::Turn.find(parent_agent.turn_id),
+        owner_node: parent_agent,
+        child_conversation: child,
+        child_graph: child.dag_graph,
+        requested_name: "child",
+        title: "Delegated",
+        agent_profile: "subagent",
+        context_turns: 50,
+        diagnostic_level: "standard",
+        status: "active",
+        child_status: "pending",
+        depth: 1,
+        last_snapshot: {},
+        final_snapshot: {},
+      )
+
+    child.update!(
+      metadata: child.metadata.merge(
+        "subagent_thread_id" => thread.id,
+        "owner_conversation_id" => parent.id,
+        "owner_graph_id" => parent.dag_graph.id,
+        "owner_turn_id" => parent_agent.turn_id,
+        "owner_node_id" => parent_agent.id,
+        "depth" => 1,
+      ),
+    )
+
     runtime =
       Cybros::AgentRuntimeResolver.runtime_for(
         node: child.dag_graph.nodes.find(child_agent.id),
@@ -178,9 +203,10 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         "dag_node_id" => child_agent.id,
         "execution_scope" => "subagent",
         "subagent" => {
-          "subagent_id" => subagent_id,
+          "subagent_id" => thread.id,
           "parent_turn_id" => parent_agent.turn_id,
           "parent_dag_node_id" => parent_agent.id,
+          "depth" => 1,
         },
         "workspace" => expected_workspace,
       },

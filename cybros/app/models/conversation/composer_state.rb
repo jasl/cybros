@@ -13,8 +13,12 @@ class Conversation::ComposerState
   def to_h
     queue_items = queued_candidates
     queue_anchor = queue_anchor_agent
+    thread = conversation.managed_subagent_thread
 
     {
+      "read_only" => conversation.managed_subagent_read_only?,
+      "read_only_reason" => conversation.managed_subagent_read_only_reason,
+      "owner_conversation_id" => thread&.owner_conversation_id&.to_s,
       "running" => running_agent.present?,
       "running_node_id" => queue_anchor&.id&.to_s,
       "running_turn_id" => queue_anchor&.turn_id&.to_s,
@@ -90,6 +94,7 @@ class Conversation::ComposerState
   end
 
   def steer_available?
+    return false if conversation.managed_subagent_read_only?
     return false unless running_agent.present?
     return false unless steer_policy.fetch("steer_capability")
     return false unless current_user_node&.node_type == Messages::UserMessage.node_type_key
@@ -99,6 +104,7 @@ class Conversation::ComposerState
   end
 
   def steer_reason
+    return "This subagent is managed by its owner conversation." if conversation.managed_subagent_read_only?
     return "A run must be active before you can queue or steer the next input." if running_agent.nil?
     return "Steering is disabled by the current input policy." unless steer_policy.fetch("steer_capability")
     return "The current turn cannot be steered in place." unless current_user_node&.node_type == Messages::UserMessage.node_type_key

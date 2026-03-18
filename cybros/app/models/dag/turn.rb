@@ -9,6 +9,11 @@ module DAG
              class_name: "DAG::Node",
              foreign_key: :turn_id,
              inverse_of: :turn
+    has_many :owned_subagent_threads,
+             class_name: "SubagentThread",
+             foreign_key: :owner_turn_id,
+             dependent: :restrict_with_exception,
+             inverse_of: :owner_turn
 
     validate :lane_must_match_graph
 

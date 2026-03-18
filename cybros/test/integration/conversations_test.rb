@@ -268,6 +268,50 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select "form##{ActionView::RecordIdentifier.dom_id(conversation, :message_form)} input[type='file'][name='attachments[]'][multiple]"
   end
 
+  test "managed subagent child show renders a read-only owner-managed banner and disables composer controls" do
+    user = sign_in_owner!
+    parent = create_conversation!(user: user, title: "Parent")
+    owner_node = parent.append_user_message!(content: "Delegate this").fetch(:agent_node)
+    owner_turn = DAG::Turn.find(owner_node.turn_id)
+    child =
+      Conversation.create!(
+        user: user,
+        parent_conversation: parent,
+        title: "Child",
+        agent: parent.agent,
+        agent_config_schema_fingerprint: parent.agent_config_schema_fingerprint,
+        metadata: { "agent" => { "agent_profile" => "subagent" } },
+      )
+
+    SubagentThread.create!(
+      id: ActiveRecord::Base.connection.select_value("select uuidv7()"),
+      owner_conversation: parent,
+      owner_graph: parent.dag_graph,
+      owner_turn: owner_turn,
+      owner_node: owner_node,
+      child_conversation: child,
+      child_graph: child.dag_graph,
+      requested_name: "child",
+      title: "Child",
+      agent_profile: "subagent",
+      context_turns: 50,
+      diagnostic_level: "standard",
+      status: "active",
+      child_status: "pending",
+      depth: 1,
+      last_snapshot: {},
+      final_snapshot: {},
+    )
+
+    get conversation_path(child)
+    assert_response :success
+
+    assert_select '[data-testid="managed-subagent-banner"]', count: 1
+    assert_select %(a[data-testid="managed-subagent-owner-link"][href="#{conversation_path(parent)}"]), count: 1
+    assert_select "form##{ActionView::RecordIdentifier.dom_id(child, :message_form)} textarea[name='content'][disabled]", count: 1
+    assert_select "form##{ActionView::RecordIdentifier.dom_id(child, :message_form)} button[type='submit'][disabled]", count: 1
+  end
+
   test "show includes a hidden coalescing override so rapid follow-ups become queued turns" do
     user = sign_in_owner!
     ensure_llm_provider!(provider_key: "openai", credential_type: "api_key", api_key: "sk-test")

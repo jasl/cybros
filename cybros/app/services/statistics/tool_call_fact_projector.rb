@@ -109,15 +109,10 @@ module Statistics
       end
 
       def execution_scope
-        subagent = conversation&.metadata
-        subagent = subagent.is_a?(Hash) ? subagent["subagent"] : nil
-        subagent = subagent.is_a?(Hash) ? subagent : {}
+        thread = conversation&.subagent_thread
+        return "subagent" if thread.present? && thread.owner_conversation_id.present? && thread.owner_graph_id.present? && thread.owner_node_id.present?
 
-        if subagent["parent_conversation_id"].present? && subagent["parent_graph_id"].present? && subagent["spawned_from_node_id"].present?
-          "subagent"
-        else
-          "parent"
-        end
+        "parent"
       end
 
       def body_input

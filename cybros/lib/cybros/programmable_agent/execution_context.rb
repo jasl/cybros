@@ -83,40 +83,25 @@ module Cybros
             end
 
             def subagent_payload_for(conversation:)
-              metadata = conversation.metadata.is_a?(Hash) ? conversation.metadata.deep_stringify_keys : {}
-              subagent = metadata["subagent"]
-              return nil unless subagent.is_a?(Hash)
-
-              subagent_id = subagent["subagent_id"].to_s.strip
-              return nil if subagent_id.empty?
-
-              parent_dag_node_id =
-                subagent["parent_dag_node_id"].to_s.strip.presence ||
-                  subagent["spawned_from_node_id"].to_s.strip.presence
-
-              parent_turn_id =
-                subagent["parent_turn_id"].to_s.strip.presence ||
-                  derive_parent_turn_id(conversation: conversation, metadata: subagent, parent_dag_node_id: parent_dag_node_id)
-
-              depth = Integer(subagent["depth"], exception: false)
-
-              {
-                "subagent_id" => subagent_id,
-                "parent_turn_id" => parent_turn_id,
-                "parent_dag_node_id" => parent_dag_node_id,
-                "depth" => depth,
-              }.compact
+              thread = subagent_thread_for(conversation)
+              payload_from_thread(thread) if thread
             end
 
-            def derive_parent_turn_id(conversation:, metadata:, parent_dag_node_id:)
-              return nil if parent_dag_node_id.blank?
+            def subagent_thread_for(conversation)
+              return nil unless conversation.respond_to?(:subagent_thread)
 
-              parent =
-                conversation.parent_conversation ||
-                  Conversation.find_by(id: metadata["parent_conversation_id"].to_s.presence)
-              parent&.turn_id_for_node_id(parent_dag_node_id)
+              conversation.subagent_thread
             rescue StandardError
               nil
+            end
+
+            def payload_from_thread(thread)
+              {
+                "subagent_id" => thread.id,
+                "parent_turn_id" => thread.owner_turn_id,
+                "parent_dag_node_id" => thread.owner_node_id,
+                "depth" => thread.depth,
+              }.compact
             end
 
             def workspace_payload_for(conversation, lane_id:)

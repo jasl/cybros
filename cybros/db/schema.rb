@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_17_120000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_18_121500) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -423,6 +423,7 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_17_120000) do
     t.jsonb "metadata", default: {}, null: false
     t.bigint "next_activity_seq", default: 0, null: false
     t.datetime "updated_at", null: false
+    t.index ["graph_id", "id"], name: "index_dag_turns_graph_id_id_unique", unique: true
     t.index ["graph_id", "id"], name: "index_dag_turns_graph_visible", where: "(head_node_id IS NOT NULL)"
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_id_unique", unique: true
     t.index ["graph_id", "lane_id", "id"], name: "index_dag_turns_graph_lane_visible", where: "(head_node_id IS NOT NULL)"
@@ -712,6 +713,58 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_17_120000) do
     t.check_constraint "tool_outcome::text = ANY (ARRAY['success'::character varying::text, 'failed'::character varying::text, 'not_executed'::character varying::text])", name: "check_statistics_tool_call_facts_tool_outcome_enum"
   end
 
+  create_table "subagent_threads", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.string "agent_profile", null: false
+    t.jsonb "artifacts_summary", default: {}, null: false
+    t.uuid "child_conversation_id", null: false
+    t.uuid "child_graph_id", null: false
+    t.string "child_status", default: "pending", null: false
+    t.datetime "closed_at"
+    t.integer "context_turns", null: false
+    t.datetime "created_at", null: false
+    t.integer "depth", default: 1, null: false
+    t.string "diagnostic_level", default: "standard", null: false
+    t.jsonb "final_snapshot", default: {}, null: false
+    t.string "freeze_reason"
+    t.datetime "frozen_at"
+    t.jsonb "integrity_error", default: {}, null: false
+    t.string "integrity_state"
+    t.jsonb "last_error_snapshot", default: {}, null: false
+    t.jsonb "last_snapshot", default: {}, null: false
+    t.uuid "owner_conversation_id", null: false
+    t.datetime "owner_finalized_at"
+    t.uuid "owner_graph_id", null: false
+    t.uuid "owner_node_id", null: false
+    t.datetime "owner_notified_at"
+    t.uuid "owner_turn_id", null: false
+    t.string "requested_name", null: false
+    t.jsonb "result_summary", default: {}, null: false
+    t.string "status", default: "active", null: false
+    t.datetime "terminal_at"
+    t.string "terminal_origin"
+    t.string "terminal_reason"
+    t.string "title", null: false
+    t.datetime "updated_at", null: false
+    t.index ["child_conversation_id"], name: "index_subagent_threads_on_child_conversation_id", unique: true
+    t.index ["child_graph_id"], name: "index_subagent_threads_on_child_graph_id", unique: true
+    t.index ["owner_conversation_id", "status"], name: "idx_subagent_threads_owner_conversation_status"
+    t.index ["owner_conversation_id"], name: "index_subagent_threads_on_owner_conversation_id"
+    t.index ["owner_graph_id"], name: "index_subagent_threads_on_owner_graph_id"
+    t.index ["owner_node_id", "status"], name: "idx_subagent_threads_owner_node_status"
+    t.index ["owner_node_id"], name: "index_subagent_threads_on_owner_node_id"
+    t.index ["owner_turn_id", "status"], name: "idx_subagent_threads_owner_turn_status"
+    t.index ["owner_turn_id"], name: "index_subagent_threads_on_owner_turn_id"
+    t.check_constraint "btrim(agent_profile::text) <> ''::text", name: "check_subagent_threads_agent_profile_present"
+    t.check_constraint "btrim(requested_name::text) <> ''::text", name: "check_subagent_threads_requested_name_present"
+    t.check_constraint "btrim(title::text) <> ''::text", name: "check_subagent_threads_title_present"
+    t.check_constraint "child_status::text = ANY (ARRAY['pending'::character varying, 'running'::character varying, 'awaiting_approval'::character varying, 'idle'::character varying, 'failed'::character varying, 'stopped'::character varying, 'missing'::character varying]::text[])", name: "check_subagent_threads_child_status"
+    t.check_constraint "context_turns > 0", name: "check_subagent_threads_context_turns_positive"
+    t.check_constraint "depth > 0", name: "check_subagent_threads_depth_positive"
+    t.check_constraint "diagnostic_level::text = ANY (ARRAY['standard'::character varying, 'debug'::character varying]::text[])", name: "check_subagent_threads_diagnostic_level"
+    t.check_constraint "status::text = ANY (ARRAY['active'::character varying, 'frozen'::character varying, 'closed'::character varying, 'killed'::character varying, 'missing'::character varying]::text[])", name: "check_subagent_threads_status"
+    t.check_constraint "terminal_origin IS NULL OR (terminal_origin::text = ANY (ARRAY['owner_action'::character varying, 'child_runtime'::character varying, 'system_reconcile'::character varying, 'integrity_guard'::character varying]::text[]))", name: "check_subagent_threads_terminal_origin"
+  end
+
   create_table "turn_internal_tasks", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.jsonb "authored_metadata", default: {}, null: false
     t.string "canceled_reason"
@@ -819,6 +872,14 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_17_120000) do
   add_foreign_key "run_drafts", "users", column: "initiated_by_user_id"
   add_foreign_key "sessions", "identities"
   add_foreign_key "statistics_tool_call_facts", "recognized_deployments", on_delete: :nullify
+  add_foreign_key "subagent_threads", "conversations", column: "child_conversation_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "conversations", column: "owner_conversation_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_graphs", column: "child_graph_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_graphs", column: "owner_graph_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_nodes", column: "owner_node_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_nodes", column: ["owner_graph_id", "owner_node_id"], primary_key: ["graph_id", "id"], name: "fk_subagent_threads_owner_node_graph_scoped", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_turns", column: "owner_turn_id", on_delete: :restrict
+  add_foreign_key "subagent_threads", "dag_turns", column: ["owner_graph_id", "owner_turn_id"], primary_key: ["graph_id", "id"], name: "fk_subagent_threads_owner_turn_graph_scoped", on_delete: :restrict
   add_foreign_key "turn_internal_tasks", "conversations"
   add_foreign_key "turn_internal_tasks", "dag_graphs", column: "graph_id"
   add_foreign_key "turn_internal_tasks", "dag_lanes", column: "lane_id"

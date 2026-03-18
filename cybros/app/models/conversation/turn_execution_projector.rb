@@ -1,6 +1,16 @@
 class Conversation::TurnExecutionProjector
   PREFLIGHT_TASK_NAMES = %w[compress_input].freeze
-  SUBAGENT_TOOL_NAMES = %w[subagent_run subagent_wait].freeze
+  SUBAGENT_TOOL_NAMES = %w[
+    subagent_approve
+    subagent_close
+    subagent_deny
+    subagent_interrupt
+    subagent_notice
+    subagent_resume
+    subagent_run
+    subagent_send_input
+    subagent_wait
+  ].freeze
   ASSISTANT_BUBBLE = "assistant_bubble"
   COMPOSER_ONLY = "composer_only"
   STANDARD_DIAGNOSTIC_LEVEL = "standard"
@@ -318,6 +328,17 @@ class Conversation::TurnExecutionProjector
     end
 
     def subagent_snapshot_for(task)
+      task_snapshot = task_result_subagent_snapshot(task)
+      thread = subagent_thread_for(task, task_snapshot: task_snapshot)
+      thread_snapshot = thread&.snapshot_payload
+
+      merge_subagent_snapshots(
+        task_snapshot: task_snapshot,
+        thread_snapshot: thread_snapshot,
+      )
+    end
+
+    def task_result_subagent_snapshot(task)
       [task.body_output["raw_result"], task.body_output["result"], task.body_output_preview["result"]].compact.each do |candidate|
         tool_result = AgentCore::Resources::Tools::ToolResult.from_h(candidate)
         snapshot = tool_result.metadata["subagent"]
@@ -327,6 +348,51 @@ class Conversation::TurnExecutionProjector
       end
 
       nil
+    end
+
+    def subagent_thread_for(task, task_snapshot:)
+      subagent_id = subagent_id_for(task, task_snapshot: task_snapshot)
+      return nil if subagent_id.blank?
+
+      SubagentThread.find_by(id: subagent_id)
+    rescue StandardError
+      nil
+    end
+
+    def subagent_id_for(task, task_snapshot:)
+      subagent_id = task_snapshot.is_a?(Hash) ? task_snapshot["subagent_id"].to_s.presence : nil
+      return subagent_id if subagent_id.present?
+
+      input = task.body_input.is_a?(Hash) ? task.body_input : {}
+      arguments = input["arguments"].is_a?(Hash) ? input["arguments"] : {}
+      arguments["subagent_id"].to_s.presence
+    rescue StandardError
+      nil
+    end
+
+    def merge_subagent_snapshots(task_snapshot:, thread_snapshot:)
+      task_snapshot = task_snapshot.is_a?(Hash) ? task_snapshot.deep_stringify_keys : {}
+      thread_snapshot = thread_snapshot.is_a?(Hash) ? thread_snapshot.deep_stringify_keys : {}
+      return task_snapshot if thread_snapshot.empty?
+
+      merged = task_snapshot.deep_dup
+
+      %w[
+        subagent_id
+        status
+        counts
+        leaf
+        transcript_lines
+        result
+        artifacts
+        assistant_output_candidate
+        error
+        diagnostic_level
+      ].each do |key|
+        merged[key] = thread_snapshot[key] if thread_snapshot.key?(key)
+      end
+
+      merged
     end
 
     def subagent_links_for(snapshot)
@@ -375,6 +441,10 @@ class Conversation::TurnExecutionProjector
         "awaiting_approval"
       when "idle"
         "completed"
+      when "failed"
+        "failed"
+      when "stopped"
+        "stopped"
       when "missing"
         "failed"
       else

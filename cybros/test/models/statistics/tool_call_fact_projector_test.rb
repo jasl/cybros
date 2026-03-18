@@ -300,6 +300,8 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
 
   test "real subagent worker conversations are labeled subagent while parent wrapper tasks stay parent" do
     parent = create_conversation!
+    parent_turn = parent.append_user_message!(content: "Delegate this")
+    parent_agent = parent_turn.fetch(:agent_node)
 
     child =
       Conversation.create!(
@@ -314,30 +316,47 @@ class Statistics::ToolCallFactProjectorTest < ActiveSupport::TestCase
             "agent_profile" => "subagent",
             "context_turns" => 50,
           },
-          "subagent" => {
-            "name" => "child",
-            "parent_conversation_id" => parent.id.to_s,
-            "parent_graph_id" => parent.dag_graph.id.to_s,
-            "spawned_from_node_id" => uuidv7,
-          },
           "statistics" => {
             "sample_origin" => "runtime",
           },
         },
       )
 
+    thread =
+      SubagentThread.create!(
+        id: uuidv7,
+        owner_conversation: parent,
+        owner_graph: parent.dag_graph,
+        owner_turn: DAG::Turn.find(parent_agent.turn_id),
+        owner_node: parent_agent,
+        child_conversation: child,
+        child_graph: child.dag_graph,
+        requested_name: "child",
+        title: "Subagent child",
+        agent_profile: "subagent",
+        context_turns: 50,
+        diagnostic_level: "standard",
+        status: "active",
+        child_status: "pending",
+        depth: 1,
+        last_snapshot: {},
+        final_snapshot: {},
+      )
+
+    child.update!(
+      metadata: child.metadata.merge(
+        "subagent_thread_id" => thread.id,
+        "owner_conversation_id" => parent.id,
+        "owner_graph_id" => parent.dag_graph.id,
+        "owner_turn_id" => parent_agent.turn_id,
+        "owner_node_id" => parent_agent.id,
+        "depth" => 1,
+      ),
+    )
+
     parent_graph = parent.dag_graph
     parent_lane_id = parent_graph.main_lane.id
-    parent_turn_id = uuidv7
-
-    parent_agent =
-      create_agent_node!(
-        graph: parent_graph,
-        lane_id: parent_lane_id,
-        turn_id: parent_turn_id,
-        provider_key: "openai",
-        model_ref: "openai/gpt-5.4",
-      )
+    parent_turn_id = parent_agent.turn_id
 
     parent_task =
       create_connected_task!(

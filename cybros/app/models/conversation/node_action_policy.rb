@@ -37,11 +37,17 @@ class Conversation::NodeActionPolicy
 
     def capability_entries
       {
-        "execute" => entry(supported: executable?, available: executable_available?),
+        "execute" =>
+          if conversation.managed_subagent_read_only?
+            entry(supported: executable?, available: false, reason: "managed_subagent_read_only")
+          else
+            entry(supported: executable?, available: executable_available?)
+          end,
       }
     end
 
     def retry_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.retriable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -59,6 +65,7 @@ class Conversation::NodeActionPolicy
     end
 
     def regenerate_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.rerunnable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -73,6 +80,7 @@ class Conversation::NodeActionPolicy
     end
 
     def start_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = executable?
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -88,6 +96,7 @@ class Conversation::NodeActionPolicy
     end
 
     def swipe_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.swipable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -100,6 +109,7 @@ class Conversation::NodeActionPolicy
     end
 
     def branch_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       return unsupported_entry unless branch_supported?
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
@@ -109,6 +119,7 @@ class Conversation::NodeActionPolicy
     end
 
     def delete_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.deletable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -119,6 +130,7 @@ class Conversation::NodeActionPolicy
     end
 
     def restore_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.deletable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -129,6 +141,7 @@ class Conversation::NodeActionPolicy
     end
 
     def exclude_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
       return unavailable_entry(reason: "already_excluded") if node.context_excluded?
@@ -138,6 +151,7 @@ class Conversation::NodeActionPolicy
     end
 
     def include_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
       return unavailable_entry(reason: "not_excluded") unless node.context_excluded?
@@ -147,6 +161,7 @@ class Conversation::NodeActionPolicy
     end
 
     def translate_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
       return unavailable_entry(reason: "deleted") if node.deleted?
 
@@ -154,6 +169,7 @@ class Conversation::NodeActionPolicy
     end
 
     def stop_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = executable?
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?
@@ -163,6 +179,7 @@ class Conversation::NodeActionPolicy
     end
 
     def edit_entry
+      return unavailable_entry(reason: "managed_subagent_read_only") if conversation.managed_subagent_read_only?
       supported = node.body&.editable? == true
       return unsupported_entry unless supported
       return unavailable_entry(reason: "wrong_lane") unless in_chat_lane?

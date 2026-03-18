@@ -38,6 +38,16 @@ class Conversation < ApplicationRecord
   has_many :conversation_runs, dependent: :destroy
   has_many :run_drafts, dependent: :destroy
   has_many :turn_internal_tasks, dependent: :destroy
+  has_many :owned_subagent_threads,
+           class_name: "SubagentThread",
+           foreign_key: :owner_conversation_id,
+           dependent: :restrict_with_exception,
+           inverse_of: :owner_conversation
+  has_one :subagent_thread,
+          class_name: "SubagentThread",
+          foreign_key: :child_conversation_id,
+          dependent: :restrict_with_exception,
+          inverse_of: :child_conversation
 
   after_initialize do
     build_dag_graph if new_record? && dag_graph.nil? && root?
@@ -198,6 +208,27 @@ class Conversation < ApplicationRecord
     Conversation::ComposerState.build(conversation: self, now: now)
   end
 
+  def managed_subagent_thread
+    subagent_thread
+  rescue StandardError
+    nil
+  end
+
+  def managed_subagent_child?
+    managed_subagent_thread.present?
+  end
+
+  def managed_subagent_read_only?
+    thread = managed_subagent_thread
+    return false if thread.nil?
+
+    Current.subagent_owner_proxy_thread_id.to_s != thread.id.to_s
+  end
+
+  def managed_subagent_read_only_reason
+    managed_subagent_read_only? ? "managed_subagent_read_only" : nil
+  end
+
   def selected_agent_config
     selected_agent_config_for(agent)
   end
@@ -233,6 +264,8 @@ class Conversation < ApplicationRecord
     permission_mode: COMPOSER_DRAFT_KEEP,
     updated_at: COMPOSER_DRAFT_KEEP
   )
+    assert_mutation_allowed_for_managed_subagent!
+
     draft = normalized_composer_draft_payload(self[:composer_draft])
     current_updated_at = parse_composer_draft_timestamp(draft["updated_at"])
     requested_updated_at = updated_at == COMPOSER_DRAFT_KEEP ? nil : parse_composer_draft_timestamp(updated_at)
@@ -352,6 +385,7 @@ class Conversation < ApplicationRecord
   def edit_user_message!(node_id:, content:, model_ref: nil, permission_mode: nil, input_policy_override: nil)
     content = content.to_s.strip
     return nil if content.blank?
+    assert_mutation_allowed_for_managed_subagent!
 
     with_dag_errors_wrapped do
       graph = root_graph
@@ -432,6 +466,8 @@ class Conversation < ApplicationRecord
   end
 
   def stop_node!(node_id:, reason: "user_cancelled")
+    assert_mutation_allowed_for_managed_subagent!
+
     with_dag_errors_wrapped do
       node = find_chat_lane_node!(node_id)
       raise Cybros::Error, "node_not_running" unless node_stoppable?(node)
@@ -447,6 +483,8 @@ class Conversation < ApplicationRecord
   end
 
   def start_pending_agent_node!(node_id:, claimed_by:)
+    assert_mutation_allowed_for_managed_subagent!
+
     with_dag_errors_wrapped do
       graph = root_graph
       lane = chat_lane
@@ -475,6 +513,8 @@ class Conversation < ApplicationRecord
   end
 
   def approve_parked_agent_node!(node_id:, approved_by:)
+    assert_mutation_allowed_for_managed_subagent!
+
     with_dag_errors_wrapped do
       node = find_chat_lane_node!(node_id)
       raise Cybros::Error, "state_changed" unless node.state == DAG::Node::AWAITING_APPROVAL
@@ -495,7 +535,32 @@ class Conversation < ApplicationRecord
     end
   end
 
+  def deny_parked_agent_node!(node_id:, denied_by:, reason: "approval_denied")
+    assert_mutation_allowed_for_managed_subagent!
+
+    with_dag_errors_wrapped do
+      node = find_chat_lane_node!(node_id)
+      raise Cybros::Error, "state_changed" unless node.state == DAG::Node::AWAITING_APPROVAL
+
+      draft = parked_run_draft_for_node!(node.id)
+      denied_at = Time.current
+      approval_state =
+        draft.approval_state.merge(
+          "status" => "rejected",
+          "reason" => reason.to_s,
+          "denied_at" => denied_at.iso8601,
+          "denied_by" => denied_by.to_s,
+        )
+
+      RunDrafts::DiscardService.discard!(draft: draft, status: "discarded", approval_state: approval_state)
+      node.deny_approval!(reason: reason.to_s)
+      node
+    end
+  end
+
   def retry_agent_node!(failed_node_id:, interrupted_output_policy_override: nil, diagnostic_level: nil)
+    assert_mutation_allowed_for_managed_subagent!
+
     with_dag_errors_wrapped do
       graph = root_graph
       diagnostic_level = normalize_turn_execution_diagnostic_level(diagnostic_level)
@@ -554,6 +619,7 @@ class Conversation < ApplicationRecord
   def steer_current_turn!(content:, model_ref: nil, input_policy_override: nil, interrupted_output_policy_override: nil)
     content = content.to_s.strip
     return nil if content.blank?
+    assert_mutation_allowed_for_managed_subagent!
 
     with_dag_errors_wrapped do
       graph = root_graph
@@ -800,6 +866,7 @@ class Conversation < ApplicationRecord
     content = content.to_s.strip
     return nil if content.blank? && uploaded_attachments.empty?
     validate_attachment_upload_support!(uploaded_attachments) if uploaded_attachments.any?
+    assert_mutation_allowed_for_managed_subagent!
 
     with_dag_errors_wrapped do
       graph = root_graph
@@ -1766,6 +1833,12 @@ class Conversation < ApplicationRecord
       yield
     rescue DAG::Error => e
       raise Cybros::Error, e.message
+    end
+
+    def assert_mutation_allowed_for_managed_subagent!
+      return unless managed_subagent_read_only?
+
+      raise Cybros::Error, "managed_subagent_read_only"
     end
 
     def root_conversation!
