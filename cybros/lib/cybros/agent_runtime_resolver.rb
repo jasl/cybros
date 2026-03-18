@@ -9,6 +9,7 @@ module Cybros
     require_relative "agent_owned_tools"
     require_relative "context_budget/default_policy"
     require_relative "context_budget/tools"
+    require_relative "lane_processes/tools"
     require_relative "programmable_agent"
     require_relative "programmable_agent_provider"
 
@@ -1101,6 +1102,7 @@ module Cybros
       registry.register_many(Cybros::Attachments::Tools.build)
       registry.register_many(Cybros::AgentOwnedTools.build)
       registry.register_many(Cybros::ContextBudget::Tools.build)
+      registry.register_many(Cybros::LaneProcesses::Tools.build)
       registry.register_many(Cybros::LaneState::Tools.build)
       registry.register_many(Cybros::Subagent::Tools.build)
 

@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_18_121500) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_18_143000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -488,6 +488,33 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_18_121500) do
     t.check_constraint "btrim(key::text) <> ''::text", name: "check_lane_kv_entries_key_present"
   end
 
+  create_table "lane_processes", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.text "command"
+    t.uuid "conversation_id", null: false
+    t.datetime "created_at", null: false
+    t.text "cwd"
+    t.datetime "ended_at"
+    t.integer "exit_code"
+    t.uuid "lane_id", null: false
+    t.datetime "last_seen_at"
+    t.text "log_path"
+    t.uuid "owner_turn_id"
+    t.bigint "pgid"
+    t.bigint "pid"
+    t.jsonb "port_hints", default: [], null: false
+    t.datetime "started_at"
+    t.string "started_by_type", null: false
+    t.string "status", null: false
+    t.jsonb "summary_json", default: {}, null: false
+    t.string "title"
+    t.datetime "updated_at", null: false
+    t.index ["conversation_id", "status"], name: "index_lane_processes_on_conversation_and_status"
+    t.index ["conversation_id"], name: "index_lane_processes_on_conversation_id"
+    t.index ["lane_id", "status"], name: "index_lane_processes_on_lane_and_status"
+    t.index ["lane_id"], name: "index_lane_processes_on_lane_id"
+    t.index ["owner_turn_id"], name: "index_lane_processes_on_owner_turn_id"
+  end
+
   create_table "lane_prompt_buffer_entries", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
     t.string "buffer_name", null: false
     t.text "content", null: false
@@ -861,6 +888,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_18_121500) do
   add_foreign_key "dag_turns", "dag_lanes", column: ["graph_id", "lane_id"], primary_key: ["graph_id", "id"], name: "fk_dag_turns_lane_graph_scoped", on_delete: :cascade
   add_foreign_key "events", "conversations"
   add_foreign_key "lane_kv_entries", "dag_lanes", column: "lane_id"
+  add_foreign_key "lane_processes", "conversations", on_delete: :cascade
+  add_foreign_key "lane_processes", "dag_lanes", column: "lane_id", on_delete: :cascade
+  add_foreign_key "lane_processes", "dag_turns", column: "owner_turn_id", on_delete: :nullify
   add_foreign_key "lane_prompt_buffer_entries", "dag_lanes", column: "lane_id"
   add_foreign_key "provider_budget_reservations", "llm_provider_credentials", column: "provider_credential_id", on_delete: :cascade
   add_foreign_key "recognized_deployments", "agents"

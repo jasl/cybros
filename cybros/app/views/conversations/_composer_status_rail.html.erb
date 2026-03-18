@@ -6,9 +6,14 @@
 <% overflow_count = queue_state.fetch("overflow_count", 0).to_i %>
 <% steer_available = steer_state.fetch("available", false) %>
 <% steer_reason = steer_state.fetch("reason", "").to_s %>
+<% background_process_state = composer_state.fetch("background_processes", {}) %>
+<% background_process_items = Array(background_process_state.fetch("items", [])) %>
+<% background_process_count = background_process_state.fetch("active_count", background_process_items.length).to_i %>
+<% background_process_has_conflicts = background_process_state.fetch("has_conflicts", false) %>
 <% primary_item = queue_items.first %>
 <% overflow_items = queue_items.drop(1) %>
 <% expandable_queue = queued_count > 1 %>
+<% rail_visible = queued_count.positive? || background_process_count.positive? %>
 
 <div
   id="<%= dom_id(conversation, :composer_status_rail) %>"
@@ -20,7 +25,48 @@
   data-steer-available="<%= steer_available %>"
   data-steer-reason="<%= steer_reason %>"
   data-queued-count="<%= queued_count %>"
-  class="<%= queued_count.positive? ? "mb-2" : "hidden" %>">
+  class="<%= rail_visible ? "mb-2 space-y-2" : "hidden" %>">
+  <% if background_process_count.positive? %>
+    <div
+      role="alert"
+      data-testid="conversation-composer-process-alert"
+      class="alert <%= background_process_has_conflicts ? "alert-warning" : "alert-info" %> alert-soft items-start px-3 py-2 text-sm">
+      <div class="min-w-0 w-full space-y-2">
+        <div class="flex items-center gap-3">
+          <div class="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-base-content/55">
+            <span><%= background_process_count == 1 ? "Active background process" : "Active background processes" %></span>
+          </div>
+        </div>
+
+        <div class="space-y-2">
+          <% background_process_items.each do |item| %>
+            <div
+              data-testid="conversation-composer-process-item"
+              class="flex flex-wrap items-center gap-2 rounded-xl bg-base-100/70 px-3 py-2">
+              <div class="min-w-0 flex-1">
+                <div class="font-medium"><%= item.fetch("title") %></div>
+                <div class="text-xs text-base-content/60">
+                  <span><%= item.fetch("status") %></span>
+                  <span> · <%= item.fetch("lane_label") %></span>
+                  <% if item.fetch("port_hints", []).any? %>
+                    <span> · ports <%= item.fetch("port_hints").join(", ") %></span>
+                  <% end %>
+                </div>
+              </div>
+              <%= link_to "Stop",
+                stop_conversation_lane_process_path(conversation, item.fetch("id")),
+                class: "btn btn-ghost btn-xs",
+                data: {
+                  testid: "conversation-composer-process-stop-action",
+                  turbo_method: :post,
+                  turbo_stream: true,
+                } %>
+            </div>
+          <% end %>
+        </div>
+      </div>
+    </div>
+  <% end %>
   <% if queued_count.positive? %>
     <div
       role="alert"

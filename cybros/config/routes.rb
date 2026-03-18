@@ -50,6 +50,9 @@ Rails.application.routes.draw do
     resources :messages, only: %i[index create], controller: "conversation_messages" do
       get :refresh, on: :collection
     end
+    resources :lane_processes, only: [], controller: "conversation_lane_processes" do
+      post :stop, on: :member
+    end
     resources :queue_items, only: %i[destroy], controller: "conversation_queue_items", param: :queued_user_node_id do
       post :edit, on: :member
       post :steer, on: :member

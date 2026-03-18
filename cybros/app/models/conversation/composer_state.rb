@@ -33,6 +33,11 @@ class Conversation::ComposerState
         "available" => steer_available?,
         "reason" => steer_reason,
       },
+      "background_processes" => {
+        "active_count" => active_lane_processes.length,
+        "has_conflicts" => active_lane_processes.any? { |lane_process| lane_process.conflict_for_lane?(lane) },
+        "items" => active_lane_processes.map { |lane_process| background_process_item(lane_process) },
+      },
     }
   end
 
@@ -119,5 +124,22 @@ class Conversation::ComposerState
 
     descendant_ids = current_user_node.causal_descendant_ids - [current_user_node.id]
     graph.nodes.active.where(id: descendant_ids, node_type: Messages::Task.node_type_key).exists?
+  end
+
+  def active_lane_processes
+    @active_lane_processes ||= conversation.active_lane_processes.to_a
+  end
+
+  def background_process_item(lane_process)
+    {
+      "id" => lane_process.id,
+      "lane_id" => lane_process.lane_id,
+      "lane_label" => lane_process.lane&.role.to_s.presence || "lane",
+      "conflict" => lane_process.conflict_for_lane?(lane),
+      "title" => lane_process.display_title,
+      "status" => lane_process.status,
+      "port_hints" => lane_process.port_hints,
+      "command" => lane_process.command.to_s,
+    }
   end
 end

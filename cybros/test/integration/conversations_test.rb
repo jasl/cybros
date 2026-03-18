@@ -219,6 +219,53 @@ class ConversationsTest < ActionDispatch::IntegrationTest
     assert_select '[data-testid="conversation-composer-ignore-action"]', count: 1
   end
 
+  test "show renders a background process alert above the composer when active lane processes exist" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+
+    LaneProcess.create!(
+      conversation: conversation,
+      lane: conversation.chat_lane,
+      status: "running",
+      started_by_type: "agent",
+      title: "Preview server",
+      command: "bin/rails server",
+      port_hints: [3000],
+      started_at: Time.current,
+    )
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_select '[data-testid="conversation-composer-process-alert"]', count: 1
+    assert_select '[data-testid="conversation-composer-process-item"]', count: 1
+    assert_select '[data-testid="conversation-composer-process-stop-action"]', count: 1
+    assert_includes response.body, "Preview server"
+  end
+
+  test "show renders background process conflicts with warning styling and lane labels" do
+    user = sign_in_owner!
+    conversation = create_conversation!(user: user, title: "Chat")
+    branch_lane = conversation.dag_graph.lanes.create!(role: DAG::Lane::BRANCH, parent_lane_id: conversation.chat_lane.id, metadata: {})
+
+    LaneProcess.create!(
+      conversation: conversation,
+      lane: branch_lane,
+      status: LaneProcess::RUNNING,
+      started_by_type: LaneProcess::AGENT,
+      title: "Branch preview",
+      command: "bin/dev",
+      port_hints: [3100],
+      started_at: Time.current,
+    )
+
+    get conversation_path(conversation)
+
+    assert_response :success
+    assert_select '[data-testid="conversation-composer-process-alert"].alert-warning', count: 1
+    assert_includes response.body, "branch"
+  end
+
   test "index no longer renders a generic new conversation form" do
     user = sign_in_owner!
     create_conversation!(user: user, title: "Existing")

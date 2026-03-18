@@ -36,6 +36,7 @@ class Conversation < ApplicationRecord
   has_many :events, dependent: :destroy
   has_many :conversation_attachments, dependent: :destroy
   has_many :conversation_runs, dependent: :destroy
+  has_many :lane_processes, dependent: :destroy
   has_many :run_drafts, dependent: :destroy
   has_many :turn_internal_tasks, dependent: :destroy
   has_many :owned_subagent_threads,
@@ -206,6 +207,11 @@ class Conversation < ApplicationRecord
 
   def composer_state(now: Time.current)
     Conversation::ComposerState.build(conversation: self, now: now)
+  end
+
+  def active_lane_processes
+    LaneProcesses::Reconciler.call!(conversation: self)
+    lane_processes.active.recent_first
   end
 
   def managed_subagent_thread

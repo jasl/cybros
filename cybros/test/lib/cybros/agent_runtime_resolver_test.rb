@@ -572,7 +572,24 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
   test "build_tools_registry includes agent-owned claw coding tool definitions" do
     registry = Cybros::AgentRuntimeResolver.send(:build_tools_registry)
 
-    %w[read write edit apply_patch glob search exec memory_search memory_get memory_store web_search web_fetch].each do |tool_name|
+    %w[
+      read
+      write
+      edit
+      apply_patch
+      glob
+      search
+      exec
+      memory_search
+      memory_get
+      memory_store
+      start_background_process
+      list_lane_processes
+      read_lane_process_log
+      stop_lane_process
+      web_search
+      web_fetch
+    ].each do |tool_name|
       assert registry.include?(tool_name), "expected #{tool_name} to be registered"
     end
 
@@ -581,6 +598,10 @@ class Cybros::AgentRuntimeResolverTest < ActiveSupport::TestCase
     assert_equal "boundary", registry.find("exec").metadata[:permission_class]
     assert_equal "read", registry.find("memory_search").metadata[:permission_class]
     assert_equal "mutate", registry.find("memory_store").metadata[:permission_class]
+    assert_equal "boundary", registry.find("start_background_process").metadata[:permission_class]
+    assert_equal "read", registry.find("list_lane_processes").metadata[:permission_class]
+    assert_equal "read", registry.find("read_lane_process_log").metadata[:permission_class]
+    assert_equal "boundary", registry.find("stop_lane_process").metadata[:permission_class]
     assert_equal "read", registry.find("web_search").metadata[:permission_class]
     assert_equal "read", registry.find("web_fetch").metadata[:permission_class]
   end
