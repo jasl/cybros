@@ -10,7 +10,7 @@
 #
 # It's strongly recommended that you check this file into your version control system.
 
-ActiveRecord::Schema[8.2].define(version: 2026_03_18_143000) do
+ActiveRecord::Schema[8.2].define(version: 2026_03_22_100000) do
   # These are extensions that must be enabled in order to support this database
   enable_extension "pg_catalog.plpgsql"
   enable_extension "pgcrypto"
@@ -182,6 +182,22 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_18_143000) do
     t.uuid "user_id", null: false
     t.index ["agent_id"], name: "index_automations_on_agent_id"
     t.index ["user_id"], name: "index_automations_on_user_id"
+  end
+
+  create_table "conversation_attachment_preparations", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
+    t.uuid "conversation_attachment_id", null: false
+    t.datetime "created_at", null: false
+    t.datetime "prepared_at", null: false
+    t.jsonb "prepared_ref", default: {}, null: false
+    t.uuid "recognized_deployment_id", null: false
+    t.uuid "run_draft_id", null: false
+    t.string "status", null: false
+    t.string "transfer_mode", null: false
+    t.datetime "updated_at", null: false
+    t.index ["conversation_attachment_id", "run_draft_id"], name: "idx_attachment_preparations_attachment_run_draft", unique: true
+    t.index ["conversation_attachment_id"], name: "idx_on_conversation_attachment_id_5cbeef2c0f"
+    t.index ["recognized_deployment_id"], name: "idx_on_recognized_deployment_id_3e26ba0c49"
+    t.index ["run_draft_id"], name: "index_conversation_attachment_preparations_on_run_draft_id"
   end
 
   create_table "conversation_attachments", id: :uuid, default: -> { "uuidv7()" }, force: :cascade do |t|
@@ -854,6 +870,9 @@ ActiveRecord::Schema[8.2].define(version: 2026_03_18_143000) do
   add_foreign_key "agent_rpc_sessions", "recognized_deployments"
   add_foreign_key "automations", "agents"
   add_foreign_key "automations", "users"
+  add_foreign_key "conversation_attachment_preparations", "conversation_attachments"
+  add_foreign_key "conversation_attachment_preparations", "recognized_deployments"
+  add_foreign_key "conversation_attachment_preparations", "run_drafts"
   add_foreign_key "conversation_attachments", "conversations"
   add_foreign_key "conversation_runs", "agents"
   add_foreign_key "conversation_runs", "conversations"

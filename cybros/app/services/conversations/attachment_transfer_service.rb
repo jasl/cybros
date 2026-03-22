@@ -107,7 +107,7 @@ module Conversations
         FileUtils.mkdir_p(attachments_root)
 
         attachments.map do |attachment|
-          relative_path = File.join("attachments", "#{attachment.id}-#{sanitize_filename(attachment.filename)}")
+          relative_path = workspace_relative_path_for(attachment)
           destination = workspace_root.join(relative_path)
           FileUtils.mkdir_p(destination.dirname)
           File.binwrite(destination, attachment.file.download)
@@ -340,6 +340,19 @@ module Conversations
 
       def default_port?(uri)
         (uri.scheme == "http" && uri.port == 80) || (uri.scheme == "https" && uri.port == 443)
+      end
+
+      def workspace_relative_path_for(attachment)
+        extension = File.extname(attachment.filename)
+        basename = File.basename(attachment.filename, extension)
+        slug = sanitize_filename(basename).presence || "attachment"
+        shortid = attachment.id.to_s.gsub(/[^a-zA-Z0-9]+/, "").first(8)
+
+        File.join(
+          "attachments",
+          attachment.source_message_node_id.to_s,
+          format("%02d", attachment.position) + "-#{slug}__#{shortid}#{extension}",
+        )
       end
 
       def sanitize_filename(filename)
