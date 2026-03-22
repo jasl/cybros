@@ -55,14 +55,17 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       run_claimed_nodes_until_idle!(graph: conversation.root_graph)
 
       expected_workspace = conversation.workspace_payload(lane_id: agent_node.lane_id)
-      expected_manifest =
-        Conversations::AttachmentManifestBuilder.build(
-          conversation: conversation,
-          source_message_node_id: user_node.id,
-        )
+      prepare_manifest = Array(captured_params.dig(:prepare, "attachment_manifest"))
+      finalize_manifest = Array(captured_params.dig(:finalize, "attachment_manifest"))
 
-      assert_equal expected_manifest, captured_params.dig(:prepare, "attachment_manifest")
-      assert_equal expected_manifest, captured_params.dig(:finalize, "attachment_manifest")
+      assert_equal 2, prepare_manifest.length
+      assert_equal prepare_manifest, finalize_manifest
+      assert_equal ["attachment-image.png", "attachment-log.csv"], prepare_manifest.map { |entry| entry.fetch("filename") }
+      assert_equal ["attachment_import", "attachment_import"], prepare_manifest.map { |entry| entry.fetch("kind") }
+      assert_equal ["attachment_import", "attachment_import"], prepare_manifest.map { |entry| entry.dig("prepared_ref", "kind") }
+      assert_match %r{/rails/active_storage/representations/proxy/}, prepare_manifest.first.fetch("prompt_image_url")
+      assert_equal "image/png", prepare_manifest.first.fetch("prompt_image_media_type")
+      assert_nil prepare_manifest.second["prompt_image_url"]
       assert_equal expected_workspace, captured_params.dig(:prepare, "session_context", "workspace")
       assert_equal expected_workspace, captured_params.dig(:prepare, "execution_context", "workspace")
       assert_equal expected_workspace, captured_params.dig(:finalize, "session_context", "workspace")

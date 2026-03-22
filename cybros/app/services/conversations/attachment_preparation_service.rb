@@ -68,6 +68,7 @@ module Conversations
             "content_type" => attachment.content_type,
             "byte_size" => attachment.byte_size,
             "digest" => attachment.digest,
+            "kind" => preparation.prepared_ref["kind"].to_s.presence,
             "prepared_ref" => preparation.prepared_ref,
           }
         end

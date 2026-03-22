@@ -254,22 +254,28 @@ module Cybros
       end
 
       def inject_attachment_prompt_context(messages:, node:)
-        attachments = attachment_records_for_node(node)
+        attachment_context = attachment_context_for_node(node)
+        attachments = attachment_context.fetch("attachments")
         return messages if attachments.empty?
 
         user_index = messages.rindex { |message| message.is_a?(Hash) && message["role"].to_s == "user" }
         return messages if user_index.nil?
 
         augmented_messages = messages.map { |message| message.is_a?(Hash) ? message.deep_dup : message }
-        augmented_messages[user_index] = augment_user_message_with_attachments(augmented_messages.fetch(user_index), attachments: attachments)
+        augmented_messages[user_index] =
+          augment_user_message_with_attachments(
+            augmented_messages.fetch(user_index),
+            attachments: attachments,
+            attachment_manifest: attachment_context.fetch("manifest"),
+          )
         augmented_messages
       rescue StandardError
         messages
       end
 
-      def augment_user_message_with_attachments(message, attachments:)
+      def augment_user_message_with_attachments(message, attachments:, attachment_manifest:)
         content_parts = normalize_content_parts(message["content"])
-        prompt_entries = attachment_prompt_entries(attachments)
+        prompt_entries = attachment_prompt_entries(attachments, attachment_manifest: attachment_manifest)
         attachment_text = attachment_prompt_text(prompt_entries)
         content_parts << { "type" => "text", "text" => attachment_text } if attachment_text.present?
 
@@ -305,20 +311,19 @@ module Cybros
         end
       end
 
-      def attachment_prompt_entries(attachments)
+      def attachment_prompt_entries(attachments, attachment_manifest:)
+        manifest_by_attachment_id = Array(attachment_manifest).index_by { |entry| entry.fetch("id").to_s }
+
         attachments.each_with_index.map do |attachment, index|
+          manifest_entry = manifest_by_attachment_id.fetch(attachment.id.to_s, {})
           {
             "index" => index + 1,
             "attachment" => attachment,
-            "prompt_image" =>
-              if model_supports_images? && image_attachment?(attachment)
-                Conversations::AttachmentPromptImageService.build(
-                  attachment: attachment,
-                  url_options: download_url_options,
-                )
-              else
-                { "prompt_image_url" => nil, "media_type" => nil, "prompt_image_error" => nil }
-              end,
+            "prompt_image" => {
+              "prompt_image_url" => manifest_entry["prompt_image_url"],
+              "media_type" => manifest_entry["prompt_image_media_type"],
+              "prompt_image_error" => manifest_entry["prompt_image_error"],
+            },
           }
         end
       end
@@ -351,39 +356,67 @@ module Cybros
       end
 
       def attachment_manifest_for_node(node)
-        attachment_records_for_node(node).map do |attachment|
-          {
-            "id" => attachment.id,
-            "position" => attachment.position,
-            "source_message_node_id" => attachment.source_message_node_id.to_s,
-            "filename" => attachment.filename,
-            "content_type" => attachment.content_type,
-            "byte_size" => attachment.byte_size,
-            "digest" => attachment.digest,
-          }
-        end
+        attachment_context_for_node(node).fetch("manifest")
       rescue StandardError
         []
       end
 
       def attachment_records_for_node(node)
+        attachment_context_for_node(node).fetch("attachments")
+      rescue StandardError
+        []
+      end
+
+      def attachment_context_for_node(node)
+        source_user_node = source_user_node_for_runtime_node(node)
+        return { "attachments" => [], "manifest" => [] } if source_user_node.nil?
+
+        @attachment_contexts ||= {}
+        @attachment_contexts[source_user_node.id.to_s] ||= begin
+          attachments = attachment_records_for_source_message(source_user_node.id)
+          if attachments.empty?
+            { "attachments" => [], "manifest" => [] }
+          else
+            prepared_manifest =
+              Conversations::AttachmentPreparationService.ensure_prepared_for_run!(
+                conversation: conversation_run.conversation,
+                source_message_node_id: source_user_node.id,
+                conversation_run: conversation_run,
+              )
+
+            manifest =
+              Conversations::AttachmentManifestBuilder.build(
+                conversation: conversation_run.conversation,
+                source_message_node_id: source_user_node.id,
+                prepared_manifest: prepared_manifest,
+                include_prompt_images: model_supports_images?,
+                url_options: download_url_options,
+              )
+
+            {
+              "attachments" => attachments,
+              "manifest" => manifest,
+            }
+          end
+        end
+      end
+
+      def source_user_node_for_runtime_node(node)
         turn_id = node&.turn_id.to_s.presence
-        return [] if turn_id.blank?
+        return nil if turn_id.blank?
 
-        user_node =
-          conversation_run.conversation.root_graph.nodes.active
-            .where(turn_id: turn_id, node_type: Messages::UserMessage.node_type_key)
-            .order(:id)
-            .first
-        return [] if user_node.nil?
+        conversation_run.conversation.root_graph.nodes.active
+          .where(turn_id: turn_id, node_type: Messages::UserMessage.node_type_key)
+          .order(:id)
+          .first
+      end
 
+      def attachment_records_for_source_message(source_message_node_id)
         conversation_run.conversation.conversation_attachments
-          .where(source_message_node_id: user_node.id)
+          .where(source_message_node_id: source_message_node_id)
           .includes(file_attachment: :blob)
           .order(:position, :id)
           .to_a
-      rescue StandardError
-        []
       end
 
       def image_attachment?(attachment)

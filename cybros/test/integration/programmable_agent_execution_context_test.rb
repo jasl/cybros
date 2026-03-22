@@ -42,10 +42,7 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
       draft = RunDraft.order(:created_at).last
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
 
-      conversation.root_graph.nodes.find(agent_node.id).update!(claim_after_at: nil)
-      assert_includes DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id), agent_node.id
-
-      DAG::Runner.run_node!(agent_node.id)
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
 
       expected_workspace = conversation.workspace_payload(lane_id: agent_node.lane_id)
       expected_prepare_session_context = {
@@ -85,6 +82,69 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
       assert_equal expected_runtime_execution_context, built_context.attributes.dig(:cybros, :execution_context)
       assert_equal deployment.deployment_fingerprint, run.recognized_deployment.deployment_fingerprint
       assert_equal "finalized", draft.status
+    end
+  ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
+  test "execution reuses prepared attachment refs across planning hooks runtime hooks and the first llm call" do
+    captured_params = {}
+    attachment_import_calls = []
+    llm_server =
+      MockLLMServer.new do |_payload|
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            captured_params[:prepare] = params.deep_dup
+            base_result
+          end,
+          "before_finalize_output" => lambda do |params, base_result, _identity|
+            captured_params[:finalize] = params.deep_dup
+            base_result
+          end,
+          "attachments.import" => lambda do |params, base_result, _identity|
+            attachment_import_calls << params.deep_dup
+            base_result
+          end,
+        },
+      ).start
+
+    program = create_program!
+    agent = create_agent!(program: program)
+    deployment = create_active_deployment!(program: program, endpoint_url: server.rpc_url)
+    sync_agent_runtime_from_binding!(agent: agent, deployment: deployment)
+    conversation = create_conversation!(title: "Programmable attachment execution", agent: agent)
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url)) do
+      result =
+        conversation.append_user_message!(
+          content: "Inspect runtime context",
+          model_ref: "dev/mock-model",
+          attachments: [uploaded_fixture("attachment-note.txt", "text/plain")],
+        )
+      agent_node = result.fetch(:agent_node)
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
+
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
+
+      prepare_manifest = Array(captured_params.dig(:prepare, "attachment_manifest"))
+      finalize_manifest = Array(captured_params.dig(:finalize, "attachment_manifest"))
+
+      assert_equal 1, attachment_import_calls.length
+      assert_equal 1, prepare_manifest.length
+      assert_equal prepare_manifest, finalize_manifest
+      assert_equal "attachment_import", prepare_manifest.dig(0, "kind")
+      assert_equal "attachment_import", prepare_manifest.dig(0, "prepared_ref", "kind")
+      assert_equal "attachment-note.txt", prepare_manifest.dig(0, "filename")
+
+      preparation = ConversationAttachmentPreparation.order(:created_at).last
+      assert_equal run.snapshot.dig("draft", "id"), preparation.run_draft_id
+      assert_equal run.recognized_deployment_id, preparation.recognized_deployment_id
     end
   ensure
     llm_server&.shutdown
@@ -274,5 +334,23 @@ class ProgrammableAgentExecutionContextTest < ActiveSupport::TestCase
         agent: program,
         execution_profile: build_default_execution_profile!,
       )
+    end
+
+    def uploaded_fixture(name, content_type)
+      Rack::Test::UploadedFile.new(Rails.root.join("test/fixtures/files/#{name}"), content_type)
+    end
+
+    def run_claimed_nodes_until_idle!(graph:)
+      10.times do
+        graph.nodes.active.where.not(claim_after_at: nil).update_all(claim_after_at: nil)
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+        return if claimed.empty?
+
+        claimed.each do |node|
+          DAG::Runner.run_node!(node.id)
+        end
+      end
+
+      flunk "expected graph to become idle"
     end
 end

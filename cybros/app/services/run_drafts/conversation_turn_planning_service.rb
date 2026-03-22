@@ -163,7 +163,7 @@ module RunDrafts
           "conversation_id" => conversation.id,
           "session_context" => session_context,
           "execution_context" => execution_context,
-          "attachment_manifest" => attachment_manifest_for_step(node: node),
+          "attachment_manifest" => attachment_manifest_for_step(node: node, draft: draft),
           "step" => {
             "phase" => "planning",
             "run_draft_id" => draft.id,
@@ -184,13 +184,22 @@ module RunDrafts
         value.is_a?(Hash) ? value.deep_stringify_keys : {}
       end
 
-      def attachment_manifest_for_step(node:)
+      def attachment_manifest_for_step(node:, draft:)
         user_node = source_user_node_for_step(node: node)
         return [] if user_node.nil?
+
+        prepared_manifest =
+          Conversations::AttachmentPreparationService.ensure_prepared!(
+            conversation: conversation,
+            source_message_node_id: user_node.id,
+            run_draft: draft,
+          )
 
         Conversations::AttachmentManifestBuilder.build(
           conversation: conversation,
           source_message_node_id: user_node.id,
+          prepared_manifest: prepared_manifest,
+          include_prompt_images: model_supports_images?(draft.selected_model_ref),
         )
       end
 
@@ -206,6 +215,15 @@ module RunDrafts
 
       def draft_node_id
         trigger_snapshot["dag_node_id"].to_s.presence
+      end
+
+      def model_supports_images?(model_ref)
+        provider_key, model_key = model_ref.to_s.split("/", 2).map(&:to_s)
+        return false if provider_key.blank? || model_key.blank?
+
+        Cybros::LLM::Catalog.effective.model(provider_key, model_key).dig("capabilities", "input", "image") == true
+      rescue StandardError
+        false
       end
 
       def normalize_array(value)

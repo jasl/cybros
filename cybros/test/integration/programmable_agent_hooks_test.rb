@@ -30,6 +30,46 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
     server&.shutdown
   end
 
+  test "planning includes prepared attachment refs in the before_agent_step manifest" do
+    observed_payloads = []
+    attachment_import_calls = []
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "before_agent_step" => lambda do |params, base_result, _identity|
+            observed_payloads << params.deep_dup
+            base_result
+          end,
+          "attachments.import" => lambda do |params, base_result, _identity|
+            attachment_import_calls << params.deep_dup
+            base_result
+          end,
+        },
+      ).start
+    runtime = create_programmable_runtime!(server:)
+    conversation = runtime.fetch(:conversation)
+
+    result =
+      conversation.append_user_message!(
+        content: "Plan it with files",
+        model_ref: "openai/gpt-5.4",
+        attachments: [uploaded_fixture("attachment-note.txt", "text/plain")],
+      )
+    draft = RunDraft.order(:created_at).last
+    attachment_manifest = observed_payloads.dig(0, "attachment_manifest")
+
+    assert_equal result.fetch(:agent_node).id, observed_payloads.dig(0, "step", "dag_node_id")
+    assert_equal 1, attachment_import_calls.length
+    assert_equal 1, attachment_manifest.length
+    assert_equal "attachment_import", attachment_manifest.dig(0, "kind")
+    assert_equal "attachment_import", attachment_manifest.dig(0, "prepared_ref", "kind")
+    assert_equal "attachment-note.txt", attachment_manifest.dig(0, "filename")
+    assert_equal draft.id, RunDraft.order(:created_at).last.id
+  ensure
+    server&.shutdown
+  end
+
   test "planning stages prompt-buffer mutations from the typed planning envelope" do
     staged_entry_id = SecureRandom.uuid
     server =
@@ -355,6 +395,8 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
 
     def create_programmable_runtime!(server:)
       user = create_user!
+      fixture_identity = Cybros::ProgrammableAgentFixture.identity
+      supported_methods = fixture_identity.fetch("supported_methods")
       program =
         create_agent_record!(
           name: "Fixture Program",
@@ -376,16 +418,29 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
           endpoint_url: server.rpc_url,
           deployment_bearer_secret_ref: "secret://fixture",
           contract_fingerprint: program.published_contract_fingerprint,
-          deployment_fingerprint: "fixture-deployment-v1",
+          deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
           status: "active",
           health_status: "healthy",
-          protocol_version: "agent_rpc.v1",
-          agent_sdk_version: "fixture-ruby-sdk/1.0",
-          supported_methods: Agents::Protocol::REQUIRED_METHODS,
+          protocol_version: fixture_identity.fetch("protocol_version"),
+          agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+          supported_methods: supported_methods,
           manifest_snapshot: {},
           schema_snapshot: {},
-          capability_snapshot: {},
-          inspection_details: {},
+          capability_snapshot: {
+            "agent_capabilities_version" => "fixture-agent-capabilities:v1",
+            "observed_runtime_identity" => {
+              "supported_methods" => supported_methods,
+            },
+          },
+          inspection_details: {
+            "identity" => {
+              "deployment_fingerprint" => fixture_identity.fetch("deployment_fingerprint"),
+            },
+            "initialize" => {},
+            "describe" => {},
+            "health" => {},
+            "schemas" => {},
+          },
           activated_at: Time.current.change(usec: 0),
         )
       credential = LLMProviderCredential.find_or_initialize_by(provider_key: "openai", status: "active")
@@ -408,5 +463,9 @@ class ProgrammableAgentHooksTest < ActiveSupport::TestCase
       )
 
       { agent: agent, conversation: conversation, deployment: deployment, program: program }
+    end
+
+    def uploaded_fixture(name, content_type)
+      Rack::Test::UploadedFile.new(Rails.root.join("test/fixtures/files/#{name}"), content_type)
     end
 end
