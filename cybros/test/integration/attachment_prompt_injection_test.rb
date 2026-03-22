@@ -42,7 +42,7 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
           content: "Inspect these files",
           model_ref: "dev/vision-model",
           attachments: [
-            uploaded_fixture("attachment-note.txt", "image/png"),
+            uploaded_fixture("attachment-image.png", "image/png"),
             uploaded_fixture("attachment-log.csv", "text/csv"),
           ],
         )
@@ -77,7 +77,7 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       image_blocks = Array(content).select { |block| block.is_a?(Hash) && block["type"].to_s == "image" }
 
       assert_includes text_blocks.join("\n"), "Inspect these files"
-      assert_includes text_blocks.join("\n"), "Attachment 1: attachment-note.txt (image/png)"
+      assert_includes text_blocks.join("\n"), "Attachment 1: attachment-image.png (image/png)"
       assert_includes text_blocks.join("\n"), "Attachment 2: attachment-log.csv (text/csv)"
       refute_includes text_blocks.join("\n"), fixture_content("attachment-log.csv")
       assert_equal 1, image_blocks.length
@@ -98,7 +98,7 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
           .select { |block| block.is_a?(Hash) && block["type"].to_s == "image_url" }
 
       assert_includes llm_text_blocks.join("\n"), "Inspect these files"
-      assert_includes llm_text_blocks.join("\n"), "Attachment 1: attachment-note.txt (image/png)"
+      assert_includes llm_text_blocks.join("\n"), "Attachment 1: attachment-image.png (image/png)"
       assert_includes llm_text_blocks.join("\n"), "Attachment 2: attachment-log.csv (text/csv)"
       refute_includes llm_text_blocks.join("\n"), fixture_content("attachment-log.csv")
       assert_equal 1, llm_image_blocks.length

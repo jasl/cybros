@@ -2,6 +2,9 @@ require "test_helper"
 require "digest"
 
 class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
+  TOO_MANY_ATTACHMENTS_MESSAGE = "A maximum of 10 attachments can be uploaded per message.".freeze
+  ATTACHMENT_TOO_LARGE_MESSAGE = "Attachments must be 25 MB or smaller.".freeze
+
   setup do
     @fixture_servers = []
   end
@@ -71,6 +74,66 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
     assert_equal manifest.map { |entry| entry.fetch("id") }, attachments.pluck(:id)
   end
 
+  test "create rejects more than 10 attachments before creating nodes" do
+    user = sign_in_owner!
+    server =
+      start_fixture_server!(
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + ["attachments.import"],
+        },
+      )
+    runtime = create_agent_runtime!(supported_methods: Agents::Protocol::REQUIRED_METHODS + ["attachments.import"], endpoint_url: server.rpc_url)
+    Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: runtime.fetch(:deployment))
+    RecognizedDeployment.recognize!(agent: runtime.fetch(:agent), deployment: runtime.fetch(:deployment))
+    conversation = nil
+
+    without_bootstrap_hooks do
+      conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent))
+    end
+
+    assert_no_difference -> { ConversationAttachment.count } do
+      assert_no_difference -> { DAG::Node.count } do
+        post conversation_messages_path(conversation), params: {
+          content: "Please inspect these",
+          attachments: Array.new(11) { uploaded_fixture("attachment-note.txt", "text/plain") },
+        }
+      end
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, TOO_MANY_ATTACHMENTS_MESSAGE
+  end
+
+  test "create rejects attachments larger than 25 MB before creating nodes" do
+    user = sign_in_owner!
+    server =
+      start_fixture_server!(
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + ["attachments.import"],
+        },
+      )
+    runtime = create_agent_runtime!(supported_methods: Agents::Protocol::REQUIRED_METHODS + ["attachments.import"], endpoint_url: server.rpc_url)
+    Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: runtime.fetch(:deployment))
+    RecognizedDeployment.recognize!(agent: runtime.fetch(:agent), deployment: runtime.fetch(:deployment))
+    conversation = nil
+
+    without_bootstrap_hooks do
+      conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent))
+    end
+
+    assert_no_difference -> { ConversationAttachment.count } do
+      assert_no_difference -> { DAG::Node.count } do
+        post conversation_messages_path(conversation), params: {
+          content: "Please inspect this",
+          attachments: [oversized_uploaded_fixture(byte_size: 25.megabytes + 1)],
+        }
+      end
+    end
+
+    assert_response :unprocessable_entity
+    assert_includes response.body, ATTACHMENT_TOO_LARGE_MESSAGE
+  end
+
   private
 
     def sign_in_owner!
@@ -93,6 +156,15 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
 
     def fixture_path(name)
       Rails.root.join("test/fixtures/files/#{name}")
+    end
+
+    def oversized_uploaded_fixture(byte_size:)
+      tempfile = Tempfile.new(["oversized-attachment", ".bin"])
+      tempfile.binmode
+      tempfile.write("a" * byte_size)
+      tempfile.rewind
+
+      Rack::Test::UploadedFile.new(tempfile.path, "application/octet-stream", true, original_filename: "oversized-attachment.bin")
     end
 
     def start_fixture_server!(identity_overrides: {})

@@ -6,6 +6,8 @@ class Conversation < ApplicationRecord
   IN_FLIGHT_NODE_STATES = %w[pending awaiting_approval running].freeze
   STATISTICS_SAMPLE_ORIGINS = %w[runtime eval debug replay].freeze
   DEFAULT_STATISTICS_SAMPLE_ORIGIN = "runtime"
+  MAX_ATTACHMENTS_PER_MESSAGE = 10
+  MAX_ATTACHMENT_BYTES = 25.megabytes
   COMPOSER_DRAFT_KEYS = %w[content model_ref permission_mode updated_at].freeze
   COMPOSER_DRAFT_KEEP = Object.new
   PERMISSION_MODES = Cybros::Permissions::MODES
@@ -871,6 +873,7 @@ class Conversation < ApplicationRecord
     uploaded_attachments = normalize_uploaded_attachments(attachments)
     content = content.to_s.strip
     return nil if content.blank? && uploaded_attachments.empty?
+    validate_attachment_constraints!(uploaded_attachments) if uploaded_attachments.any?
     validate_attachment_upload_support!(uploaded_attachments) if uploaded_attachments.any?
     assert_mutation_allowed_for_managed_subagent!
 
@@ -1696,6 +1699,18 @@ class Conversation < ApplicationRecord
       Array(value).flatten.compact.select { |upload| upload.respond_to?(:original_filename) }
     end
 
+    def validate_attachment_constraints!(uploaded_attachments)
+      return if uploaded_attachments.empty?
+
+      if uploaded_attachments.length > MAX_ATTACHMENTS_PER_MESSAGE
+        raise ArgumentError, "A maximum of #{MAX_ATTACHMENTS_PER_MESSAGE} attachments can be uploaded per message."
+      end
+
+      if uploaded_attachments.any? { |upload| uploaded_attachment_byte_size(upload) > MAX_ATTACHMENT_BYTES }
+        raise ArgumentError, "Attachments must be 25 MB or smaller."
+      end
+    end
+
     def validate_attachment_upload_support!(uploaded_attachments)
       return if uploaded_attachments.empty?
       return if agent&.supports_upload?
@@ -1757,6 +1772,19 @@ class Conversation < ApplicationRecord
       digest << io.read
       io.rewind if io.respond_to?(:rewind)
       digest.hexdigest
+    end
+
+    def uploaded_attachment_byte_size(uploaded_attachment)
+      size = uploaded_attachment.size if uploaded_attachment.respond_to?(:size)
+      return size.to_i if size.present?
+
+      io = uploaded_attachment_io(uploaded_attachment)
+      size = io.size if io.respond_to?(:size)
+      return size.to_i if size.present?
+
+      io.read.to_s.bytesize
+    ensure
+      io&.rewind if io&.respond_to?(:rewind)
     end
 
     def normalize_turn_execution_diagnostic_level(value)

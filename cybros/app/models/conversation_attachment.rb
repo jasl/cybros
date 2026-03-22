@@ -24,6 +24,10 @@ class ConversationAttachment < ApplicationRecord
     file.byte_size
   end
 
+  def image?
+    content_type.start_with?("image/")
+  end
+
   def digest
     sha256_digest.presence || compute_sha256_digest
   end
