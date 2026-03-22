@@ -269,11 +269,12 @@ module Cybros
 
       def augment_user_message_with_attachments(message, attachments:)
         content_parts = normalize_content_parts(message["content"])
-        attachment_text = attachment_prompt_text(attachments)
+        prompt_entries = attachment_prompt_entries(attachments)
+        attachment_text = attachment_prompt_text(prompt_entries)
         content_parts << { "type" => "text", "text" => attachment_text } if attachment_text.present?
 
         if model_supports_images?
-          attachment_image_blocks(attachments).each do |block|
+          attachment_image_blocks(prompt_entries).each do |block|
             content_parts << block
           end
         end
@@ -304,27 +305,47 @@ module Cybros
         end
       end
 
-      def attachment_prompt_text(attachments)
-        lines = attachments.each_with_index.map do |attachment, index|
-          "Attachment #{index + 1}: #{attachment.filename} (#{attachment.content_type.presence || "application/octet-stream"})"
+      def attachment_prompt_entries(attachments)
+        attachments.each_with_index.map do |attachment, index|
+          {
+            "index" => index + 1,
+            "attachment" => attachment,
+            "prompt_image" =>
+              if model_supports_images? && image_attachment?(attachment)
+                Conversations::AttachmentPromptImageService.build(
+                  attachment: attachment,
+                  url_options: download_url_options,
+                )
+              else
+                { "prompt_image_url" => nil, "media_type" => nil, "prompt_image_error" => nil }
+              end,
+          }
+        end
+      end
+
+      def attachment_prompt_text(entries)
+        lines = entries.flat_map do |entry|
+          attachment = entry.fetch("attachment")
+          index = entry.fetch("index")
+          base_line = "Attachment #{index}: #{attachment.filename} (#{attachment.content_type.presence || "application/octet-stream"})"
+          error_line = entry.dig("prompt_image", "prompt_image_error").to_s.presence
+          error_line.present? ? [base_line, error_line] : [base_line]
         end
         return nil if lines.empty?
 
         lines.join("\n")
       end
 
-      def attachment_image_blocks(attachments)
-        attachments.filter_map do |attachment|
-          next unless image_attachment?(attachment)
-
-          url = signed_download_url_for(attachment)
+      def attachment_image_blocks(entries)
+        entries.filter_map do |entry|
+          url = entry.dig("prompt_image", "prompt_image_url").to_s.presence
           next if url.blank?
 
           {
             "type" => "image",
             "source_type" => "url",
             "url" => url,
-            "media_type" => attachment.content_type,
+            "media_type" => entry.dig("prompt_image", "media_type").to_s.presence || entry.fetch("attachment").content_type,
           }
         end
       end
@@ -402,12 +423,6 @@ module Cybros
         Cybros::LLM::Catalog.effective.model(provider_key, model_key).dig("capabilities", "input", "image") == true
       rescue StandardError
         false
-      end
-
-      def signed_download_url_for(attachment)
-        Rails.application.routes.url_helpers.rails_blob_url(attachment.file, **download_url_options)
-      rescue StandardError
-        nil
       end
 
       def download_url_options

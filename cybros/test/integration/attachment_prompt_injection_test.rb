@@ -83,7 +83,7 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       assert_equal 1, image_blocks.length
       assert_equal "url", image_blocks.first.fetch("source_type")
       assert_equal "image/png", image_blocks.first.fetch("media_type")
-      assert_match %r{/rails/active_storage/blobs/redirect/}, image_blocks.first.fetch("url")
+      assert_match %r{/rails/active_storage/representations/proxy/}, image_blocks.first.fetch("url")
 
       llm_user_message =
         Array(llm_payloads.last&.dig("messages")).reverse.find do |message|
@@ -102,7 +102,128 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       assert_includes llm_text_blocks.join("\n"), "Attachment 2: attachment-log.csv (text/csv)"
       refute_includes llm_text_blocks.join("\n"), fixture_content("attachment-log.csv")
       assert_equal 1, llm_image_blocks.length
-      assert_match %r{/rails/active_storage/blobs/redirect/}, llm_image_blocks.first.dig("image_url", "url")
+      assert_match %r{/rails/active_storage/representations/proxy/}, llm_image_blocks.first.dig("image_url", "url")
+      assert_equal "succeeded", run.reload.state
+    end
+  ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
+  test "non-multimodal models keep attachment text but emit no image blocks" do
+    captured_params = {}
+    llm_payloads = []
+    llm_server =
+      MockLLMServer.new do |payload|
+        llm_payloads << payload.deep_dup
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "before_finalize_output" => lambda do |params, base_result, _identity|
+            captured_params[:finalize] = params.deep_dup
+            base_result
+          end,
+        },
+      ).start
+
+    with_catalog_yaml(mock_text_only_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_programmable_runtime!(server: server)
+      conversation = runtime.fetch(:conversation)
+
+      result =
+        conversation.append_user_message!(
+          content: "Inspect this image",
+          model_ref: "dev/text-model",
+          attachments: [uploaded_fixture("attachment-image.png", "image/png")],
+        )
+      agent_node = result.fetch(:agent_node)
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
+
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
+
+      latest_user_message =
+        Array(captured_params.dig(:finalize, "provider_input", "messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+
+      content = Array(latest_user_message.fetch("content"))
+      text_blocks = content.select { |block| block.is_a?(Hash) && block["type"].to_s == "text" }.map { |block| block["text"].to_s }
+      image_blocks = content.select { |block| block.is_a?(Hash) && block["type"].to_s == "image" }
+      llm_user_message =
+        Array(llm_payloads.last&.dig("messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+      llm_image_blocks =
+        Array(llm_user_message&.fetch("content", nil))
+          .select { |block| block.is_a?(Hash) && block["type"].to_s == "image_url" }
+
+      assert_includes text_blocks.join("\n"), "Attachment 1: attachment-image.png (image/png)"
+      assert_equal [], image_blocks
+      assert_equal [], llm_image_blocks
+      assert_equal "succeeded", run.reload.state
+    end
+  ensure
+    llm_server&.shutdown
+    server&.shutdown
+  end
+
+  test "invalid image bytes degrade to workspace-only prompt text without image blocks" do
+    captured_params = {}
+    llm_payloads = []
+    llm_server =
+      MockLLMServer.new do |payload|
+        llm_payloads << payload.deep_dup
+        MockLLMServer.chat_response(content: "llm draft answer")
+      end.start
+    server =
+      Cybros::ProgrammableAgentFixture::Server.new(
+        required_bearer: "secret://fixture",
+        rpc_overrides: {
+          "before_finalize_output" => lambda do |params, base_result, _identity|
+            captured_params[:finalize] = params.deep_dup
+            base_result
+          end,
+        },
+      ).start
+
+    with_catalog_yaml(mock_vision_catalog_yaml(base_url: llm_server.base_url)) do
+      runtime = create_programmable_runtime!(server: server)
+      conversation = runtime.fetch(:conversation)
+
+      result =
+        conversation.append_user_message!(
+          content: "Inspect this broken image",
+          model_ref: "dev/vision-model",
+          attachments: [uploaded_fixture("attachment-note.txt", "image/png", filename: "broken-image.png")],
+        )
+      agent_node = result.fetch(:agent_node)
+      run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent_node.id)
+
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
+
+      latest_user_message =
+        Array(captured_params.dig(:finalize, "provider_input", "messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+
+      content = Array(latest_user_message.fetch("content"))
+      text_blocks = content.select { |block| block.is_a?(Hash) && block["type"].to_s == "text" }.map { |block| block["text"].to_s }
+      image_blocks = content.select { |block| block.is_a?(Hash) && block["type"].to_s == "image" }
+      llm_user_message =
+        Array(llm_payloads.last&.dig("messages")).reverse.find do |message|
+          message.is_a?(Hash) && message["role"].to_s == "user"
+        end
+      llm_image_blocks =
+        Array(llm_user_message&.fetch("content", nil))
+          .select { |block| block.is_a?(Hash) && block["type"].to_s == "image_url" }
+
+      assert_includes text_blocks.join("\n"), "Attachment 1: broken-image.png (image/png)"
+      assert_includes text_blocks.join("\n"), "could not be forwarded to the model as an image"
+      assert_equal [], image_blocks
+      assert_equal [], llm_image_blocks
       assert_equal "succeeded", run.reload.state
     end
   ensure
@@ -195,8 +316,8 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
       { conversation: conversation, agent: agent, program: program }
     end
 
-    def uploaded_fixture(name, content_type)
-      Rack::Test::UploadedFile.new(fixture_path(name), content_type)
+    def uploaded_fixture(name, content_type, filename: name)
+      Rack::Test::UploadedFile.new(fixture_path(name), content_type, true, original_filename: filename)
     end
 
     def fixture_path(name)
@@ -228,6 +349,32 @@ class AttachmentPromptInjectionTest < ActiveSupport::TestCase
                 context_window_tokens: 20000
                 capabilities:
                   input: { text: true, image: true }
+                  tools: { tool_calling: true }
+                  protocol: "chat_completions"
+      YAML
+    end
+
+    def mock_text_only_catalog_yaml(base_url:)
+      <<~YAML
+        version: 1
+        default_model_ref: "dev/text-model"
+        providers:
+          dev:
+            display_name: "Dev"
+            enabled: true
+            adapter_key: "dev"
+            base_url: "#{base_url}"
+            headers: {}
+            requires_credential: false
+            wire_api: "chat_completions"
+            transport: "http"
+            models:
+              text-model:
+                display_name: "Text Mock"
+                api_model: "text-model"
+                context_window_tokens: 20000
+                capabilities:
+                  input: { text: true, image: false }
                   tools: { tool_calling: true }
                   protocol: "chat_completions"
       YAML

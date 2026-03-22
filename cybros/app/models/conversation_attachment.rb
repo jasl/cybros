@@ -1,6 +1,8 @@
 require "digest"
 
 class ConversationAttachment < ApplicationRecord
+  PROMPT_IMAGE_RESIZE_TO_LIMIT = [1000, 1000].freeze
+
   belongs_to :conversation
 
   has_one_attached :file
@@ -26,6 +28,12 @@ class ConversationAttachment < ApplicationRecord
 
   def image?
     content_type.start_with?("image/")
+  end
+
+  def prompt_image_representation
+    return unless image?
+
+    file.representation(resize_to_limit: PROMPT_IMAGE_RESIZE_TO_LIMIT)
   end
 
   def digest
