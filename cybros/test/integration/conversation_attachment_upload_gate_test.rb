@@ -1,7 +1,10 @@
 require "test_helper"
 require "digest"
+require_relative "../support/programmable_agent_runtime_test_support"
 
 class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
+  include ProgrammableAgentRuntimeTestSupport
+
   TOO_MANY_ATTACHMENTS_MESSAGE = "A maximum of 10 attachments can be uploaded per message.".freeze
   ATTACHMENT_TOO_LARGE_MESSAGE = "Attachments must be 25 MB or smaller.".freeze
 
@@ -72,6 +75,42 @@ class ConversationAttachmentUploadGateTest < ActionDispatch::IntegrationTest
 
     attachments = conversation.conversation_attachments.where(source_message_node_id: user_node.id).order(:position)
     assert_equal manifest.map { |entry| entry.fetch("id") }, attachments.pluck(:id)
+  end
+
+  test "append_user_message! accepts image attachments for non-multimodal selected models" do
+    user = sign_in_owner!
+    server =
+      start_fixture_server!(
+        identity_overrides: {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS + ["attachments.import"],
+        },
+      )
+    runtime = create_agent_runtime!(supported_methods: Agents::Protocol::REQUIRED_METHODS + ["attachments.import"], endpoint_url: server.rpc_url)
+    Cybros::ProgrammableAgent::CapabilityHandshake.handshake!(deployment: runtime.fetch(:deployment))
+    RecognizedDeployment.recognize!(agent: runtime.fetch(:agent), deployment: runtime.fetch(:deployment))
+    conversation = nil
+    result = nil
+
+    with_catalog_yaml(mock_llm_catalog_yaml(base_url: "http://127.0.0.1:65535/v1")) do
+      without_bootstrap_hooks do
+        conversation = create_conversation!(user: user, title: "Chat", agent: runtime.fetch(:agent))
+        conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
+
+        assert_difference -> { ConversationAttachment.count }, +1 do
+          result =
+            conversation.append_user_message!(
+              content: "",
+              model_ref: "dev/mock-model",
+              attachments: [uploaded_fixture("attachment-image.png", "image/png")],
+            )
+        end
+      end
+    end
+
+    attachment_manifest = result.fetch(:user_node).body_input.fetch("attachments")
+
+    assert_equal "attachment-image.png", attachment_manifest.sole.fetch("filename")
+    assert_equal "image/png", attachment_manifest.sole.fetch("content_type")
   end
 
   test "create rejects more than 10 attachments before creating nodes" do

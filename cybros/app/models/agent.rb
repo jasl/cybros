@@ -166,12 +166,25 @@ class Agent < ApplicationRecord
     }.compact
   end
 
-  def supports_upload?
-    available_methods =
-      Array(capability_snapshot.dig("observed_runtime_identity", "supported_methods")).presence ||
-        supported_methods()
+  def observed_supported_methods
+    Array(capability_snapshot.dig("observed_runtime_identity", "supported_methods")).presence ||
+      supported_methods()
+  end
 
-    Array(available_methods).map(&:to_s).include?("attachments.import")
+  def supports_workspace_attachment_materialization?
+    bundled_source? && bundled_agent_key.to_s == "claw"
+  end
+
+  def supports_remote_attachment_import?
+    Array(observed_supported_methods).map(&:to_s).include?(Agents::Protocol::ATTACHMENT_IMPORT_METHOD)
+  end
+
+  def supports_conversation_attachments?
+    supports_workspace_attachment_materialization? || supports_remote_attachment_import?
+  end
+
+  def supports_upload?
+    supports_remote_attachment_import?
   end
 
   def allocated_port

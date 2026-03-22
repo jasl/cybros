@@ -2,6 +2,32 @@ require "test_helper"
 require "tmpdir"
 
 class DefaultAgentAttachmentTransferTest < ActiveSupport::TestCase
+  test "bundled claw accepts attachments even without attachments.import support" do
+    agent = Agents::BootstrapBundledDefaultService.ensure_agent!
+    conversation = nil
+
+    agent.update!(
+      supported_methods: Agents::Protocol::REQUIRED_METHODS,
+      capability_snapshot: {
+        "observed_runtime_identity" => {
+          "supported_methods" => Agents::Protocol::REQUIRED_METHODS,
+        },
+      },
+    )
+
+    without_bootstrap_hooks do
+      conversation = create_conversation!(agent: agent)
+      conversation.define_singleton_method(:enqueue_conversation_run!) { |**_kwargs| false }
+
+      assert_difference -> { ConversationAttachment.count }, +1 do
+        conversation.append_user_message!(
+          content: "",
+          attachments: [uploaded_fixture("attachment-note.txt", "text/plain")],
+        )
+      end
+    end
+  end
+
   test "transfer_attachments materializes conversation attachments into the conversation directory for the bundled claw agent" do
     workspace_root = Dir.mktmpdir("cybros-default-attachments-")
     agent = Agents::BootstrapBundledDefaultService.ensure_agent!

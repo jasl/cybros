@@ -40,6 +40,23 @@ class RecognizedDeployment < ApplicationRecord
     retired_at.present?
   end
 
+  def observed_supported_methods
+    Array(capability_snapshot.dig("observed_runtime_identity", "supported_methods")).presence ||
+      Array(supported_methods)
+  end
+
+  def supports_workspace_attachment_materialization?
+    agent&.supports_workspace_attachment_materialization? == true
+  end
+
+  def supports_remote_attachment_import?
+    Array(observed_supported_methods).map(&:to_s).include?(Agents::Protocol::ATTACHMENT_IMPORT_METHOD)
+  end
+
+  def supports_conversation_attachments?
+    supports_workspace_attachment_materialization? || supports_remote_attachment_import?
+  end
+
   def self.identity_payload_from(deployment:)
     agent = deployment if deployment.is_a?(Agent)
     agent ||= deployment.agent if deployment.respond_to?(:agent)
@@ -87,6 +104,6 @@ class RecognizedDeployment < ApplicationRecord
     def normalize_payloads
       self.supported_methods = Array(supported_methods).map(&:to_s).reject(&:blank?).uniq
       self.capability_snapshot = self.class.normalize_hash(self[:capability_snapshot])
-      self.supports_upload = supports_upload || supported_methods.include?("attachments.import")
+      self.supports_upload = supports_remote_attachment_import?
     end
 end

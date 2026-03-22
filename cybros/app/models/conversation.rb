@@ -874,7 +874,7 @@ class Conversation < ApplicationRecord
     content = content.to_s.strip
     return nil if content.blank? && uploaded_attachments.empty?
     validate_attachment_constraints!(uploaded_attachments) if uploaded_attachments.any?
-    validate_attachment_upload_support!(uploaded_attachments) if uploaded_attachments.any?
+    validate_attachment_support!(uploaded_attachments) if uploaded_attachments.any?
     assert_mutation_allowed_for_managed_subagent!
 
     with_dag_errors_wrapped do
@@ -1711,9 +1711,9 @@ class Conversation < ApplicationRecord
       end
     end
 
-    def validate_attachment_upload_support!(uploaded_attachments)
+    def validate_attachment_support!(uploaded_attachments)
       return if uploaded_attachments.empty?
-      return if agent&.supports_upload?
+      return if agent&.supports_conversation_attachments?
 
       raise ArgumentError, "Selected agent does not support file attachments."
     end
