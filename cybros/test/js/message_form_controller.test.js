@@ -63,14 +63,128 @@ class FakeFileInput {
 }
 
 class FakeSelectElement {
-  constructor(value = "") {
+  constructor(value = "", options = []) {
     this.value = value
+    this.options = options
+  }
+
+  get selectedOptions() {
+    return this.options.filter((option) => option.value === this.value).slice(0, 1)
   }
 }
 
 class FakeHiddenInput {
   constructor(value = "") {
     this.value = value
+  }
+}
+
+class FakeOptionElement {
+  constructor(value, label, { supportsImages = false } = {}) {
+    this.value = value
+    this.label = label
+    this.textContent = label
+    this.dataset = { supportsImages: String(supportsImages) }
+  }
+}
+
+class FakeClassList {
+  constructor(initial = []) {
+    this.tokens = new Set(initial)
+  }
+
+  add(...tokens) {
+    tokens.forEach((token) => this.tokens.add(token))
+  }
+
+  remove(...tokens) {
+    tokens.forEach((token) => this.tokens.delete(token))
+  }
+
+  toggle(token, force) {
+    if (force === undefined) {
+      if (this.tokens.has(token)) {
+        this.tokens.delete(token)
+        return false
+      }
+
+      this.tokens.add(token)
+      return true
+    }
+
+    if (force) {
+      this.tokens.add(token)
+      return true
+    }
+
+    this.tokens.delete(token)
+    return false
+  }
+
+  contains(token) {
+    return this.tokens.has(token)
+  }
+}
+
+class FakeElement {
+  constructor({ classes = [], dataset = {}, roleChildren = {} } = {}) {
+    this.classList = new FakeClassList(classes)
+    this.dataset = { ...dataset }
+    this.textContent = ""
+    this.children = []
+    this.attributes = {}
+    this.roleChildren = roleChildren
+    this.src = ""
+    this.alt = ""
+  }
+
+  append(child) {
+    this.children.push(child)
+  }
+
+  replaceChildren(...children) {
+    this.children = [...children]
+  }
+
+  querySelector(selector) {
+    const match = selector.match(/\[data-role="([^"]+)"\]/)
+    if (!match) return null
+    return this.roleChildren[match[1]] || null
+  }
+
+  cloneNode() {
+    const roleChildren = Object.fromEntries(
+      Object.entries(this.roleChildren).map(([role, child]) => [role, child.cloneNode(true)]),
+    )
+    const clone = new FakeElement({
+      classes: Array.from(this.classList.tokens),
+      dataset: { ...this.dataset },
+      roleChildren,
+    })
+    clone.textContent = this.textContent
+    clone.src = this.src
+    clone.alt = this.alt
+    clone.attributes = { ...this.attributes }
+    return clone
+  }
+
+  setAttribute(name, value) {
+    this.attributes[name] = String(value)
+  }
+
+  getAttribute(name) {
+    return this.attributes[name] ?? null
+  }
+}
+
+class FakeTemplateElement {
+  constructor(factory) {
+    this._factory = factory
+    this.content = { firstElementChild: factory() }
+  }
+
+  get firstElementChild() {
+    return this.content.firstElementChild
   }
 }
 
@@ -113,6 +227,7 @@ const originalHTMLFormElement = globalThis.HTMLFormElement
 const originalFormData = globalThis.FormData
 const originalDataTransfer = globalThis.DataTransfer
 const originalFetch = globalThis.fetch
+const originalURL = globalThis.URL
 
 describe("MessageFormController", () => {
   beforeEach(() => {
@@ -125,6 +240,12 @@ describe("MessageFormController", () => {
       removeEventListener() {},
       setTimeout,
       clearTimeout,
+    }
+    globalThis.URL = {
+      createObjectURL(file) {
+        return `blob:${file.name}`
+      },
+      revokeObjectURL() {},
     }
     globalThis.document = {
       querySelector() {
@@ -140,6 +261,7 @@ describe("MessageFormController", () => {
     globalThis.FormData = originalFormData
     globalThis.DataTransfer = originalDataTransfer
     globalThis.fetch = originalFetch
+    globalThis.URL = originalURL
   })
 
   test("draftChanged autosaves content and runtime settings to the composer draft endpoint", async () => {
@@ -360,14 +482,96 @@ describe("MessageFormController", () => {
 
     expect(attachmentInput.files).toEqual([submittedFile])
   })
+
+  test("attachmentInputChanged renders visible attachment cards and an image-capability hint", () => {
+    const image = fakeFile("preview.png", 4096, "image/png")
+    const note = fakeFile("note.txt", 512, "text/plain")
+    const { controller, attachmentInput, attachmentPanel, attachmentList, attachmentModelHint } = buildController({
+      textareaValue: "",
+      files: [],
+      modelValue: "dev/vision-model",
+      modelOptions: [
+        ["dev/vision-model", "Vision Mock", true],
+        ["dev/mock-model", "Mock model", false],
+      ],
+    })
+
+    selectFiles(controller, attachmentInput, [image, note])
+
+    expect(attachmentPanel.classList.contains("hidden")).toBe(false)
+    expect(attachmentList.children).toHaveLength(2)
+    expect(attachmentList.children[0].querySelector('[data-role="name"]').textContent).toBe("preview.png")
+    expect(attachmentList.children[0].querySelector('[data-role="preview"]').classList.contains("hidden")).toBe(false)
+    expect(attachmentModelHint.textContent).toContain("sent to the model")
+  })
+
+  test("removeAttachment rebuilds the pending file list without clearing the remaining attachments", () => {
+    const image = fakeFile("preview.png", 4096, "image/png")
+    const note = fakeFile("note.txt", 512, "text/plain")
+    const { controller, attachmentInput, attachmentList } = buildController({
+      textareaValue: "",
+      files: [],
+      modelOptions: [
+        ["dev/vision-model", "Vision Mock", true],
+        ["dev/mock-model", "Mock model", false],
+      ],
+    })
+
+    selectFiles(controller, attachmentInput, [image, note])
+    controller.removeAttachment({
+      preventDefault() {},
+      currentTarget: { dataset: { attachmentIndex: "0" } },
+    })
+
+    expect(attachmentInput.files).toEqual([note])
+    expect(attachmentList.children).toHaveLength(1)
+    expect(attachmentList.children[0].querySelector('[data-role="name"]').textContent).toBe("note.txt")
+  })
+
+  test("runtimeSettingChanged switches the image hint without clearing selected attachments", () => {
+    const image = fakeFile("preview.png", 4096, "image/png")
+    const { controller, attachmentInput, attachmentList, attachmentModelHint, modelSelect } = buildController({
+      textareaValue: "",
+      files: [],
+      modelValue: "dev/vision-model",
+      modelOptions: [
+        ["dev/vision-model", "Vision Mock", true],
+        ["dev/mock-model", "Mock model", false],
+      ],
+    })
+
+    selectFiles(controller, attachmentInput, [image])
+    expect(attachmentModelHint.textContent).toContain("sent to the model")
+
+    modelSelect.value = "dev/mock-model"
+    controller.runtimeSettingChanged()
+
+    expect(attachmentInput.files).toEqual([image])
+    expect(attachmentList.children).toHaveLength(1)
+    expect(attachmentModelHint.textContent).toContain("does not accept image input")
+  })
 })
 
-function buildController({ textareaValue, files, modelValue = "openai/gpt-5.4", permissionValue = "default" }) {
+function buildController({
+  textareaValue,
+  files,
+  modelValue = "openai/gpt-5.4",
+  permissionValue = "default",
+  modelOptions = [["openai/gpt-5.4", "GPT-5.4", false]],
+}) {
   const textarea = new FakeTextAreaElement(textareaValue)
   const attachmentInput = new FakeFileInput(files)
-  const modelSelect = new FakeSelectElement(modelValue)
+  const modelSelect = new FakeSelectElement(
+    modelValue,
+    modelOptions.map(([value, label, supportsImages]) => new FakeOptionElement(value, label, { supportsImages })),
+  )
   const permissionSelect = new FakeSelectElement(permissionValue)
   const composerDraftUpdatedAtInput = new FakeHiddenInput("")
+  const attachmentPanel = new FakeElement({ classes: ["hidden"] })
+  const attachmentCount = new FakeElement()
+  const attachmentList = new FakeElement()
+  const attachmentModelHint = new FakeElement({ classes: ["hidden"] })
+  const attachmentItemTemplate = new FakeTemplateElement(buildAttachmentTemplate)
   const form = new FakeFormElement("/conversations/1/messages", textarea, modelSelect, permissionSelect, composerDraftUpdatedAtInput)
   const controller =
     new MessageFormController({
@@ -391,8 +595,20 @@ function buildController({ textareaValue, files, modelValue = "openai/gpt-5.4", 
   defineValue(controller, "pendingSubmissions", [])
   defineValue(controller, "hasTextareaTarget", true)
   defineValue(controller, "textareaTarget", textarea)
+  defineValue(controller, "hasModelSelectTarget", true)
+  defineValue(controller, "modelSelectTarget", modelSelect)
   defineValue(controller, "hasAttachmentInputTarget", true)
   defineValue(controller, "attachmentInputTarget", attachmentInput)
+  defineValue(controller, "hasAttachmentPanelTarget", true)
+  defineValue(controller, "attachmentPanelTarget", attachmentPanel)
+  defineValue(controller, "hasAttachmentCountTarget", true)
+  defineValue(controller, "attachmentCountTarget", attachmentCount)
+  defineValue(controller, "hasAttachmentListTarget", true)
+  defineValue(controller, "attachmentListTarget", attachmentList)
+  defineValue(controller, "hasAttachmentItemTemplateTarget", true)
+  defineValue(controller, "attachmentItemTemplateTarget", attachmentItemTemplate)
+  defineValue(controller, "hasAttachmentModelHintTarget", true)
+  defineValue(controller, "attachmentModelHintTarget", attachmentModelHint)
   defineValue(controller, "hasComposerDraftUpdatedAtInputTarget", true)
   defineValue(controller, "composerDraftUpdatedAtInputTarget", composerDraftUpdatedAtInput)
   defineValue(controller, "hasStatusRailTarget", false)
@@ -405,15 +621,28 @@ function buildController({ textareaValue, files, modelValue = "openai/gpt-5.4", 
   defineValue(controller, "hasComposerDraftUrlValue", true)
   defineValue(controller, "composerDraftUrlValue", "/conversations/1/composer_draft")
   defineValue(controller, "draftSaveDelayMs", 250)
+  defineValue(controller, "attachmentPreviewUrls", [])
 
-  return { controller, textarea, attachmentInput, form, modelSelect, permissionSelect, composerDraftUpdatedAtInput }
+  return {
+    controller,
+    textarea,
+    attachmentInput,
+    attachmentPanel,
+    attachmentCount,
+    attachmentList,
+    attachmentModelHint,
+    form,
+    modelSelect,
+    permissionSelect,
+    composerDraftUpdatedAtInput,
+  }
 }
 
-function fakeFile(name, size) {
+function fakeFile(name, size, type = "text/plain") {
   return {
     name,
     size,
-    type: "text/plain",
+    type,
     lastModified: 1234,
   }
 }
@@ -428,5 +657,24 @@ function defineValue(target, key, value) {
     value,
     writable: true,
     configurable: true,
+  })
+}
+
+function buildAttachmentTemplate() {
+  const preview = new FakeElement({ classes: ["hidden"] })
+  const image = new FakeElement()
+  const name = new FakeElement()
+  const meta = new FakeElement()
+  const remove = new FakeElement({ dataset: {} })
+  preview.roleChildren = { image }
+
+  return new FakeElement({
+    roleChildren: {
+      preview,
+      image,
+      name,
+      meta,
+      remove,
+    },
   })
 }

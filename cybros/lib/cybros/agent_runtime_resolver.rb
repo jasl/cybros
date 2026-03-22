@@ -435,6 +435,7 @@ module Cybros
               provider_display_name: provider_spec.fetch("display_name").to_s,
               model_key: model_key.to_s,
               api_model: model_spec.fetch("api_model").to_s,
+              supports_images: model_spec.dig("capabilities", "input", "image") == true,
             }
           end.compact
         end

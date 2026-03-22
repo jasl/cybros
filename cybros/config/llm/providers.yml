@@ -206,3 +206,13 @@ providers:
         tokenizer_hint: "gpt-5.4"
         context_window_tokens: 32000
         context_soft_limit_ratio: 0.9
+      vision-model:
+        display_name: "Vision Mock"
+        api_model: "vision-model"
+        capabilities:
+          input: { text: true, image: true }
+          tools: { tool_calling: true }
+          protocol: chat_completions
+        tokenizer_hint: "gpt-5.4"
+        context_window_tokens: 32000
+        context_soft_limit_ratio: 0.9

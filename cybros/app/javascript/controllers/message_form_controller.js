@@ -12,7 +12,13 @@ export default class extends Controller {
 
   static targets = [
     "textarea",
+    "modelSelect",
     "attachmentInput",
+    "attachmentPanel",
+    "attachmentCount",
+    "attachmentList",
+    "attachmentItemTemplate",
+    "attachmentModelHint",
     "composerDraftUpdatedAtInput",
     "statusRail",
     "editMode",
@@ -36,15 +42,18 @@ export default class extends Controller {
     this.submittedAttachmentSelectionToken = null
     this.pendingAttachmentRestoreFiles = null
     this.pendingSubmissions = []
+    this.attachmentPreviewUrls = []
     this.currentComposerDraftUpdatedAt = this.#currentComposerDraftUpdatedAt()
     this.handleMessageEdit = this.handleMessageEdit.bind(this)
     window.addEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.autoResize()
+    this.#renderAttachmentState()
     this.#syncComposerState()
   }
 
   disconnect() {
     this.#clearDraftSaveTimer()
+    this.#revokeAttachmentPreviewUrls()
     window.removeEventListener("conversation:user-message-edit", this.handleMessageEdit)
     this.submittedAttachmentSelectionToken = null
     this.pendingAttachmentRestoreFiles = null
@@ -98,6 +107,7 @@ export default class extends Controller {
   attachmentInputChanged() {
     this.attachmentSelectionToken += 1
     this.pendingAttachmentRestoreFiles = null
+    this.#renderAttachmentState()
   }
 
   draftChanged() {
@@ -106,6 +116,7 @@ export default class extends Controller {
   }
 
   runtimeSettingChanged() {
+    this.#renderAttachmentState()
     this.#scheduleComposerDraftSave()
   }
 
@@ -118,6 +129,26 @@ export default class extends Controller {
 
     this.pendingAttachmentRestoreFiles = Array.from(input.files || [])
     input.value = ""
+    this.#renderAttachmentState()
+  }
+
+  removeAttachment(event) {
+    event.preventDefault()
+    if (!this.hasAttachmentInputTarget) return
+    if (typeof DataTransfer !== "function") return
+
+    const index = Number.parseInt(event?.currentTarget?.dataset?.attachmentIndex || "", 10)
+    if (!Number.isInteger(index) || index < 0) return
+
+    const files = Array.from(this.attachmentInputTarget.files || [])
+    if (index >= files.length) return
+
+    const transfer = new DataTransfer()
+    files.forEach((file, currentIndex) => {
+      if (currentIndex !== index) transfer.items.add(file)
+    })
+    this.attachmentInputTarget.files = transfer.files
+    this.attachmentInputChanged()
   }
 
   keydown(event) {
@@ -342,7 +373,7 @@ export default class extends Controller {
   }
 
   #currentModelRef() {
-    const modelSelect = this.element.querySelector('select[name="model_ref"]')
+    const modelSelect = this.hasModelSelectTarget ? this.modelSelectTarget : this.element.querySelector('select[name="model_ref"]')
     return String(modelSelect?.value || "").trim()
   }
 
@@ -541,6 +572,7 @@ export default class extends Controller {
       this.attachmentInputTarget.files = transfer.files
     } finally {
       this.pendingAttachmentRestoreFiles = null
+      this.#renderAttachmentState()
     }
   }
 
@@ -548,6 +580,7 @@ export default class extends Controller {
     if (!this.hasAttachmentInputTarget) return
 
     this.attachmentInputTarget.value = ""
+    this.#renderAttachmentState()
   }
 
   #clearPendingAttachmentsIfUnchanged(submittedAttachmentSelectionToken) {
@@ -589,5 +622,123 @@ export default class extends Controller {
   #conversationId() {
     const root = this.element.closest?.("[data-conversation-channel-conversation-id-value]")
     return String(root?.getAttribute?.("data-conversation-channel-conversation-id-value") || "")
+  }
+
+  #renderAttachmentState() {
+    if (!this.hasAttachmentPanelTarget || !this.hasAttachmentListTarget || !this.hasAttachmentItemTemplateTarget) return
+
+    const files = Array.from(this.attachmentInputTarget?.files || [])
+    this.#revokeAttachmentPreviewUrls()
+    this.attachmentListTarget.replaceChildren()
+
+    if (files.length === 0) {
+      this.attachmentPanelTarget.classList.add("hidden")
+      if (this.hasAttachmentModelHintTarget) {
+        this.attachmentModelHintTarget.textContent = ""
+        this.attachmentModelHintTarget.classList.add("hidden")
+      }
+      if (this.hasAttachmentCountTarget) {
+        this.attachmentCountTarget.textContent = ""
+      }
+      return
+    }
+
+    this.attachmentPanelTarget.classList.remove("hidden")
+    if (this.hasAttachmentCountTarget) {
+      this.attachmentCountTarget.textContent = `${files.length} selected`
+    }
+
+    files.forEach((file, index) => {
+      this.attachmentListTarget.append(this.#buildAttachmentItem(file, index))
+    })
+
+    this.#renderAttachmentModelHint(files)
+  }
+
+  #buildAttachmentItem(file, index) {
+    const templateRoot = this.attachmentItemTemplateTarget.content?.firstElementChild || this.attachmentItemTemplateTarget.firstElementChild
+    const item = templateRoot?.cloneNode?.(true)
+    if (!item) return { textContent: file.name }
+
+    const name = item.querySelector?.('[data-role="name"]')
+    const meta = item.querySelector?.('[data-role="meta"]')
+    const preview = item.querySelector?.('[data-role="preview"]')
+    const image = item.querySelector?.('[data-role="image"]')
+    const remove = item.querySelector?.('[data-role="remove"]')
+
+    if (name) name.textContent = file.name || "attachment"
+    if (meta) meta.textContent = this.#attachmentMeta(file)
+    if (remove?.dataset) {
+      remove.dataset.attachmentIndex = String(index)
+      remove.setAttribute?.("aria-label", `Remove ${file.name || "attachment"}`)
+    }
+
+    if (this.#isImageFile(file) && preview && image && typeof URL?.createObjectURL === "function") {
+      const previewUrl = URL.createObjectURL(file)
+      this.attachmentPreviewUrls.push(previewUrl)
+      image.src = previewUrl
+      image.alt = file.name || "Attachment preview"
+      preview.classList.remove("hidden")
+    } else if (preview) {
+      preview.classList.add("hidden")
+    }
+
+    return item
+  }
+
+  #renderAttachmentModelHint(files) {
+    if (!this.hasAttachmentModelHintTarget) return
+
+    const imageCount = files.filter((file) => this.#isImageFile(file)).length
+    if (imageCount === 0) {
+      this.attachmentModelHintTarget.textContent = ""
+      this.attachmentModelHintTarget.classList.add("hidden")
+      return
+    }
+
+    const supportsImages = this.#selectedModelSupportsImages()
+    this.attachmentModelHintTarget.textContent = supportsImages
+      ? "Image attachments will be sent to the model and prepared in the workspace."
+      : "This model does not accept image input. Image attachments will still upload and be prepared in the workspace."
+    this.attachmentModelHintTarget.classList.remove("hidden")
+  }
+
+  #attachmentMeta(file) {
+    const type = String(file?.type || "").trim() || "application/octet-stream"
+    const size = this.#formatFileSize(file?.size)
+    return `${type} • ${size}`
+  }
+
+  #formatFileSize(value) {
+    const size = Number(value || 0)
+    if (!Number.isFinite(size) || size <= 0) return "0 B"
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(size >= 10 * 1024 ? 0 : 1)} KB`
+
+    return `${(size / (1024 * 1024)).toFixed(size >= 10 * 1024 * 1024 ? 0 : 1)} MB`
+  }
+
+  #selectedModelSupportsImages() {
+    const modelSelect = this.hasModelSelectTarget ? this.modelSelectTarget : this.element.querySelector('select[name="model_ref"]')
+    const selectedOption =
+      modelSelect?.selectedOptions?.[0] ||
+      (Array.isArray(modelSelect?.options) ? modelSelect.options.find((option) => option?.value === modelSelect.value) : null) ||
+      null
+
+    return String(selectedOption?.dataset?.supportsImages || "").toLowerCase() === "true"
+  }
+
+  #isImageFile(file) {
+    return String(file?.type || "").toLowerCase().startsWith("image/")
+  }
+
+  #revokeAttachmentPreviewUrls() {
+    if (typeof URL?.revokeObjectURL !== "function") {
+      this.attachmentPreviewUrls = []
+      return
+    }
+
+    this.attachmentPreviewUrls.forEach((previewUrl) => URL.revokeObjectURL(previewUrl))
+    this.attachmentPreviewUrls = []
   }
 }

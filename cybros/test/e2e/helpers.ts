@@ -131,23 +131,29 @@ export function activateProgrammableAgentRuntime(agentId: string, endpointUrl = 
 
     agent = Agent.find(${JSON.stringify(agentId)})
     now = Time.current.change(usec: 0)
+    fixture_identity = Cybros::ProgrammableAgentFixture.identity
+    supported_methods = fixture_identity.fetch("supported_methods")
 
     agent.update!(
       transport_kind: "http_jsonrpc",
       endpoint_url: ${JSON.stringify(endpointUrl)},
       deployment_bearer_secret_ref: "secret://fixture",
-      deployment_fingerprint: "fixture-deployment-v1",
+      deployment_fingerprint: fixture_identity.fetch("deployment_fingerprint"),
       status: "active",
       health_status: "healthy",
-      protocol_version: "agent_rpc.v1",
-      agent_sdk_version: "fixture-ruby-sdk/1.0",
-      supported_methods: Agents::Protocol::REQUIRED_METHODS,
+      protocol_version: fixture_identity.fetch("protocol_version"),
+      agent_sdk_version: fixture_identity.fetch("agent_sdk_version"),
+      supported_methods: supported_methods,
       capability_snapshot: {
         "observed_runtime_identity" => {
-          "supported_methods" => Agents::Protocol::REQUIRED_METHODS,
+          "supported_methods" => supported_methods,
         },
       },
-      inspection_details: {},
+      inspection_details: {
+        "identity" => {
+          "deployment_fingerprint" => fixture_identity.fetch("deployment_fingerprint"),
+        },
+      },
       transport_config: {},
       activated_at: now,
       last_health_checked_at: now,
@@ -157,7 +163,7 @@ export function activateProgrammableAgentRuntime(agentId: string, endpointUrl = 
     recognized = RecognizedDeployment.recognize!(
       agent: agent,
       deployment: agent,
-      capability_snapshot: {},
+      capability_snapshot: agent.capability_snapshot,
     )
 
     puts JSON.generate({

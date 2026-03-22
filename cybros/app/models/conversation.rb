@@ -1663,9 +1663,23 @@ class Conversation < ApplicationRecord
     def decorate_messages(messages)
       messages = Array(messages)
       node_ids = messages.filter_map { |message| message.is_a?(Hash) ? message["node_id"].to_s.presence : nil }
-      nodes_by_id = root_graph.nodes.where(id: node_ids).includes(:body).to_a.index_by { |node| node.id.to_s }
+      attachment_ids =
+        messages.flat_map do |message|
+          next [] unless message.is_a?(Hash)
 
-      messages.map { |message| decorate_message(message, nodes_by_id: nodes_by_id) }
+          Array(message.dig("payload", "input", "attachments")).filter_map do |attachment|
+            attachment.is_a?(Hash) ? attachment["id"].to_s.presence : nil
+          end
+        end
+      nodes_by_id = root_graph.nodes.where(id: node_ids).includes(:body).to_a.index_by { |node| node.id.to_s }
+      attachments_by_id =
+        conversation_attachments
+          .where(id: attachment_ids)
+          .includes(file_attachment: :blob)
+          .to_a
+          .index_by { |attachment| attachment.id.to_s }
+
+      messages.map { |message| decorate_message(message, nodes_by_id: nodes_by_id, attachments_by_id: attachments_by_id) }
     end
 
     def filter_queued_turn_messages(messages, now: Time.current)
@@ -1680,7 +1694,7 @@ class Conversation < ApplicationRecord
       end
     end
 
-    def decorate_message(message, nodes_by_id: nil)
+    def decorate_message(message, nodes_by_id: nil, attachments_by_id: {})
       return message unless message.is_a?(Hash)
 
       out = message.deep_dup
@@ -1692,7 +1706,52 @@ class Conversation < ApplicationRecord
 
       out["action_policy"] = action_policy_for(node)
       out["run_state"] = turn_execution_projector.run_state_for_node_id(node.id)
+      decorate_input_attachments!(out, attachments_by_id: attachments_by_id)
       out
+    end
+
+    def decorate_input_attachments!(message, attachments_by_id:)
+      payload = message["payload"]
+      return unless payload.is_a?(Hash)
+
+      input = payload["input"]
+      return unless input.is_a?(Hash)
+
+      attachments = Array(input["attachments"]).select { |entry| entry.is_a?(Hash) }
+      return if attachments.empty?
+
+      input["attachments"] =
+        attachments.map do |entry|
+          decorate_input_attachment(entry, attachments_by_id: attachments_by_id)
+        end
+    end
+
+    def decorate_input_attachment(entry, attachments_by_id:)
+      out = entry.deep_dup
+      attachment = attachments_by_id[out["id"].to_s]
+      return out if attachment.nil? || !attachment.file.attached?
+
+      out["image"] = attachment.image?
+      out["download_path"] = Rails.application.routes.url_helpers.rails_storage_proxy_path(attachment.file, disposition: :attachment)
+      out["byte_size"] = attachment.byte_size
+      out["content_type"] = attachment.content_type
+      out["filename"] = attachment.filename
+
+      if attachment.image?
+        preview_path = attachment_preview_path(attachment)
+        out["preview_path"] = preview_path if preview_path.present?
+      end
+
+      out
+    end
+
+    def attachment_preview_path(attachment)
+      representation = attachment.prompt_image_representation
+      return nil if representation.nil?
+
+      Rails.application.routes.url_helpers.rails_storage_proxy_path(representation.processed)
+    rescue StandardError
+      nil
     end
 
     def normalize_uploaded_attachments(value)

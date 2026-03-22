@@ -56,9 +56,35 @@
           <% if input_attachments.any? %>
             <div class="<%= input.present? ? "mt-3" : "" %> space-y-2" data-role="user-attachments">
               <% input_attachments.each do |attachment| %>
-                <div class="rounded-2xl border border-base-300 bg-base-100/70 px-3 py-2 text-xs">
-                  <div class="font-medium"><%= attachment.fetch("filename", "attachment") %></div>
-                  <div class="opacity-60"><%= attachment.fetch("content_type", "application/octet-stream") %></div>
+                <% filename = attachment.fetch("filename", "attachment") %>
+                <% content_type = attachment.fetch("content_type", "application/octet-stream") %>
+                <% preview_path = attachment["preview_path"].to_s.presence %>
+                <% download_path = attachment["download_path"].to_s.presence %>
+                <% byte_size = attachment["byte_size"] %>
+                <div class="rounded-3xl border border-base-300 bg-base-100/80 px-3 py-3 text-xs" data-role="user-attachment">
+                  <div class="flex items-start gap-3">
+                    <% if preview_path.present? %>
+                      <%= image_tag preview_path, alt: filename, class: "size-16 shrink-0 rounded-2xl border border-base-300 object-cover" %>
+                    <% else %>
+                      <div class="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-base-300 bg-base-200 text-base-content/60">
+                        <span class="icon-[lucide--paperclip] size-4"></span>
+                      </div>
+                    <% end %>
+                    <div class="min-w-0 flex-1">
+                      <div class="truncate text-sm font-medium"><%= filename %></div>
+                      <div class="mt-1 text-xs opacity-60 text-pretty">
+                        <%= content_type %>
+                        <% if byte_size.present? %>
+                          <span>• <%= number_to_human_size(byte_size) %></span>
+                        <% end %>
+                      </div>
+                      <% if download_path.present? %>
+                        <div class="mt-2">
+                          <%= link_to "Open attachment", download_path, class: "link link-primary text-xs", target: "_blank", rel: "noreferrer" %>
+                        </div>
+                      <% end %>
+                    </div>
+                  </div>
                 </div>
               <% end %>
             </div>
