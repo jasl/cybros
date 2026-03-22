@@ -19,24 +19,11 @@ Gem::Specification.new do |spec|
   spec.metadata["homepage_uri"] = spec.homepage
   spec.metadata["rubygems_mfa_required"] = "true"
 
-  gemspec = File.basename(__FILE__)
-  tracked_files = begin
-    IO.popen(%w[git ls-files -z], chdir: __dir__, err: IO::NULL) do |ls|
-      ls.readlines("\x0", chomp: true)
-    end
-  rescue Errno::ENOENT
-    nil
-  end
-
-  tracked_files ||= Dir.glob("**/*", File::FNM_DOTMATCH, base: __dir__).reject do |path|
-    path == "." || File.directory?(File.join(__dir__, path))
-  end
-
-  spec.files = tracked_files.reject do |f|
-    (f == gemspec) ||
-      f.start_with?(".") ||
+  spec.files = Dir.glob("**/*", base: __dir__).reject do |f|
+    File.directory?(File.join(__dir__, f)) ||
+      (f == File.basename(__FILE__)) ||
       f.start_with?(
-        *%w[Gemfile bin/ test/ docs/ tmp/]
+        *%w[Gemfile bin test docs tmp]
       ) ||
       (f.end_with?(".md") &&
         !%w[README.md].include?(f)
