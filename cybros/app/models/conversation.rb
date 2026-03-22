@@ -1732,7 +1732,7 @@ class Conversation < ApplicationRecord
       return out if attachment.nil? || !attachment.file.attached?
 
       out["image"] = attachment.image?
-      out["download_path"] = Rails.application.routes.url_helpers.rails_storage_proxy_path(attachment.file, disposition: :attachment)
+      out["download_path"] = Rails.application.routes.url_helpers.rails_storage_proxy_url(attachment.file, only_path: true, disposition: :attachment)
       out["byte_size"] = attachment.byte_size
       out["content_type"] = attachment.content_type
       out["filename"] = attachment.filename
@@ -1749,7 +1749,7 @@ class Conversation < ApplicationRecord
       representation = attachment.prompt_image_representation
       return nil if representation.nil?
 
-      Rails.application.routes.url_helpers.rails_storage_proxy_path(representation.processed)
+      Rails.application.routes.url_helpers.rails_storage_proxy_url(representation.processed, only_path: true)
     rescue StandardError
       nil
     end

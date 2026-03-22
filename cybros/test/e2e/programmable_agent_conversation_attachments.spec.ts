@@ -42,7 +42,7 @@ test.describe("Programmable agent conversation attachments", () => {
     await page.getByPlaceholder("Message…").fill("Inspect these attachments")
     await page.getByRole("button", { name: "Send" }).click()
 
-    await waitForTailAgentToFinish(page, "llm draft answer")
+    await waitForTailAgentToFinish(page)
 
     const transcriptAttachments = page.locator('[data-role="user-attachments"]').last()
     await expect(transcriptAttachments.locator('[data-role="user-attachment"]')).toHaveCount(2)
@@ -50,6 +50,10 @@ test.describe("Programmable agent conversation attachments", () => {
     await expect(transcriptAttachments).toContainText("attachment-note.txt")
 
     const conversationId = conversationIdFromUrl(page)
+    const firstAgentOutput = programmableConversationState(conversationId).latestAgentNode.outputText || ""
+    expect(firstAgentOutput).toContain("Attachment 1: attachment-image.png (image/png)")
+    expect(firstAgentOutput).toContain("image_url")
+
     const firstTurnState = conversationAttachmentState(conversationId)
     expect(firstTurnState.latestUserAttachments.map((entry) => entry.filename)).toEqual([
       "attachment-image.png",
@@ -70,11 +74,15 @@ test.describe("Programmable agent conversation attachments", () => {
     await page.getByPlaceholder("Message…").fill("Now use the text-only model")
     await page.getByRole("button", { name: "Send" }).click()
 
-    await waitForTailAgentToFinish(page, "llm draft answer")
+    await waitForTailAgentToFinish(page)
 
     const latestTranscriptAttachments = page.locator('[data-role="user-attachments"]').last()
     await expect(latestTranscriptAttachments.locator('[data-role="user-attachment"]')).toHaveCount(1)
     await expect(latestTranscriptAttachments).toContainText("attachment-image.png")
+
+    const secondAgentOutput = programmableConversationState(conversationId).latestAgentNode.outputText || ""
+    expect(secondAgentOutput).toContain("Attachment 1: attachment-image.png (image/png)")
+    expect(secondAgentOutput).not.toContain("image_url")
 
     const secondTurnState = conversationAttachmentState(conversationId)
     expect(secondTurnState.latestUserAttachments.map((entry) => entry.filename)).toEqual(["attachment-image.png"])

@@ -275,7 +275,7 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
       )
 
     with_runtime_token_counter(counter) do
-      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 9_500)) do
+      with_catalog_yaml(mock_llm_catalog_yaml(base_url: llm_server.base_url, context_window_tokens: 11_300)) do
         conversation = create_conversation!(title: "Prompt Budget")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "summaries", kind: "summary", content: "Keep this compact summary.")
         seed_prompt_buffer_entry!(conversation.chat_lane, buffer_name: "handoff", kind: "handoff", content: "Keep this handoff note.")
@@ -309,32 +309,32 @@ class ProgrammableAgentPromptBuilderTest < ActiveSupport::TestCase
     def run_bundled_claw_turn!(conversation:, user_content:, model_ref:, llm_payloads:)
       result = conversation.append_user_message!(content: user_content, model_ref: model_ref)
       agent_node = result.fetch(:agent_node)
-
-      live_agent_node = conversation.root_graph.nodes.find(agent_node.id)
-      live_agent_node.update!(claim_after_at: nil) if live_agent_node.pending?
-
-      claimed = DAG::Scheduler.claim_executable_nodes(graph: conversation.root_graph, limit: 10, claimed_by: "test").map(&:id)
-      unless claimed.include?(agent_node.id)
-        live_agent_node = conversation.root_graph.nodes.find(agent_node.id)
-        if live_agent_node.pending?
-          claimed_node = DAG::Scheduler.claim_pending_node!(graph: conversation.root_graph, node: live_agent_node, claimed_by: "test")
-          claimed << claimed_node.id if claimed_node.present?
-        end
-      end
-
-      assert_includes claimed, agent_node.id
-
-      DAG::Runner.run_node!(agent_node.id)
+      run_claimed_nodes_until_idle!(graph: conversation.root_graph)
 
       agent = conversation.root_graph.nodes.find(agent_node.id)
       run = ConversationRun.find_by!(conversation: conversation, dag_node_id: agent.id)
 
-      assert_predicate llm_payloads, :any?
       assert_equal DAG::Node::FINISHED, agent.reload.state
+      assert_predicate llm_payloads, :any?,
+        "agent_state=#{agent.reload.state} run_state=#{run.reload.state} run_error=#{run.reload.error.inspect}"
       assert run.reload.succeeded?,
         "run_state=#{run.reload.state} run_error=#{run.reload.error.inspect} llm_payloads=#{llm_payloads.inspect}"
 
       [agent, run]
+    end
+
+    def run_claimed_nodes_until_idle!(graph:)
+      10.times do
+        graph.nodes.active.where.not(claim_after_at: nil).update_all(claim_after_at: nil)
+        claimed = DAG::Scheduler.claim_executable_nodes(graph: graph, limit: 10, claimed_by: "test")
+        return if claimed.empty?
+
+        claimed.each do |node|
+          DAG::Runner.run_node!(node.id)
+        end
+      end
+
+      flunk "expected graph to become idle"
     end
 
     def seed_prompt_buffer_entry!(lane, buffer_name:, kind:, content:, seq: 10, priority: 100, estimated_tokens: 64)

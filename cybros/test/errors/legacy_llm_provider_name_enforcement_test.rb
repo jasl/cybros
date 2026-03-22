@@ -11,7 +11,7 @@ class LegacyLlmProviderNameEnforcementTest < Minitest::Test
       Dir.glob(root.join("**/*")).sort.each do |path|
         next unless File.file?(path)
 
-        File.read(path).each_line.with_index(1) do |line, lineno|
+        File.binread(path).scrub.each_line.with_index(1) do |line, lineno|
           next unless line.match?(pattern)
 
           violations << "#{path}:#{lineno}: #{line.strip}"
